@@ -1,5 +1,5 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
-import { ADMINS, getPreset, isRole, memberPermissions, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
+import { ADMINS, getPreset, isRole, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -219,6 +219,35 @@ account.get("/team", requireUser, requireCompany(), async (c) => {
     for (const r of rows) rates.set(r.user_id, r.labor_rate);
   }
   return c.json(members.map((m) => ({ ...m, labor_rate: rates.get(m.user_id) ?? null, profile: byId.get(m.user_id) ?? null })));
+});
+
+/**
+ * The pay rate approved time was costed at, by time entry, for job costs and reports: the time on
+ * some jobs, or the time started between two moments. Like members' rates, the column isn't
+ * readable by members directly; the office reads it here, with the job costs area.
+ */
+account.post("/time/rates", requireUser, requireCompany(OFFICE, "job_costs"), async (c) => {
+  const body = await readJson(
+    c,
+    z.object({
+      job_ids: z.array(uuid).min(1).max(300).optional(),
+      from: z.iso.datetime({ offset: true }).optional(),
+      to: z.iso.datetime({ offset: true }).optional(),
+    }),
+  );
+  if (!body.job_ids && !(body.from && body.to)) throw new HttpError(400, "Choose the jobs or the dates.");
+  const admin = adminClient(c.env);
+  const rates: Record<string, number> = {};
+  // A page at a time (PostgREST returns 1,000 rows at most), up to the 25,000 entries reports read.
+  for (let page = 0; page < 25; page++) {
+    let query = admin.from("time_entries").select("id, labor_rate").eq("company_id", c.var.companyId).not("labor_rate", "is", null);
+    if (body.job_ids) query = query.in("job_id", body.job_ids);
+    if (body.from && body.to) query = query.gte("started_at", body.from).lt("started_at", body.to);
+    const rows = must(await query.order("id").range(page * 1000, page * 1000 + 999));
+    for (const r of rows) rates[r.id] = Number(r.labor_rate);
+    if (rows.length < 1000) break;
+  }
+  return c.json(rates);
 });
 
 account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async (c) => {
