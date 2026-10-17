@@ -16,9 +16,6 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import type { IncomingMessage, Server } from "node:http";
-import { connect } from "node:net";
-import type { Duplex } from "node:stream";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,14 +57,12 @@ server.all("/.well-known/*", (c) => api(c.req.raw));
 
 // ---------------------------------------------------------------------------------------------
 // Gateway to the instance's Supabase services, in place of Supabase's own API gateway: the browser
-// and supabase-js use this server's address as the Supabase URL. (The WebSocket half of Realtime is
-// handled on "upgrade" below.)
+// and supabase-js use this server's address as the Supabase URL.
 // ---------------------------------------------------------------------------------------------
 if (stack) {
   server.all("/auth/v1/*", (c) => forward(c.req.raw, stack.auth, "/auth/v1"));
   server.all("/rest/v1/*", (c) => forward(c.req.raw, stack.rest, "/rest/v1"));
   server.all("/storage/v1/*", (c) => forward(c.req.raw, stack.storage, "/storage/v1", { "x-forwarded-prefix": "/storage/v1" }));
-  server.all("/realtime/v1/api/*", (c) => forward(c.req.raw, stack.realtime, "/realtime/v1", { host: realtimeHost(stack.realtime) }));
 }
 
 async function forward(request: Request, upstream: string, prefix: string, extra: Record<string, string> = {}): Promise<Response> {
@@ -99,24 +94,6 @@ async function forward(request: Request, upstream: string, prefix: string, extra
   }
 }
 
-/** Realtime picks the tenant from the first label of the Host header; self-hosting seeds "realtime-dev". */
-const realtimeHost = (upstream: string) => `realtime-dev.${new URL(upstream).hostname}`;
-
-/** Realtime's WebSocket: /realtime/v1/websocket → the Realtime service's /socket/websocket, piped both ways. */
-function proxyRealtime(req: IncomingMessage, socket: Duplex, head: Buffer) {
-  if (!stack || !req.url?.startsWith("/realtime/v1/")) return socket.destroy();
-  const target = new URL(stack.realtime);
-  const upstream = connect(Number(target.port || 80), target.hostname.replace(/^\[|\]$/g, ""), () => {
-    const lines = [`${req.method} /socket/${req.url!.slice("/realtime/v1/".length)} HTTP/1.1`, `Host: ${realtimeHost(stack.realtime)}`];
-    for (let i = 0; i < req.rawHeaders.length; i += 2) if (req.rawHeaders[i].toLowerCase() !== "host") lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
-    upstream.write(`${lines.join("\r\n")}\r\n\r\n`);
-    if (head.length) upstream.write(head);
-    socket.pipe(upstream).pipe(socket);
-  });
-  upstream.on("error", () => socket.destroy());
-  socket.on("error", () => upstream.destroy());
-}
-
 // The web app: fingerprinted assets cache forever; everything else falls back to index.html.
 const indexPath = join(staticDir, "index.html");
 const indexHtml = existsSync(indexPath) ? readFileSync(indexPath, "utf8") : null;
@@ -135,7 +112,6 @@ server.get("*", (c) => {
 const listener = serve({ fetch: server.fetch, port, hostname: "0.0.0.0" }, () => {
   console.log(`Crewtavo listening on port ${port}${env.APP_URL ? ` (${env.APP_URL})` : ""}`);
 });
-if (stack) (listener as Server).on("upgrade", proxyRealtime);
 
 // ---------------------------------------------------------------------------------------------
 // Migrations, as a separate process (scripts/migrate.mjs, next to this file in the build) so a

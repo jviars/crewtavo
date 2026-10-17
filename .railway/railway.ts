@@ -1,5 +1,5 @@
 /**
- * One Crewtavo instance as Railway Infrastructure as Code: the same six services the Railway
+ * One Crewtavo instance as Railway Infrastructure as Code: the same five services the Railway
  * template creates for each business (deploy/README.md explains the template), and the same as
  * docker-compose.yml locally. Use it to stand up an instance from this repo, then turn that project
  * into the template. From this folder:
@@ -9,11 +9,11 @@
  *   railway config plan       # preview
  *   railway config apply      # create or update the services
  *
- * The four secrets are kept with preserve(): set them once in the dashboard (deploy/README.md lists
+ * The two secrets are kept with preserve(): set them once in the dashboard (deploy/README.md lists
  * them); in the template they're generated with ${{secret(...)}}.
  *
- * Only crewtavo is public. It forwards /auth/v1, /rest/v1, /storage/v1 and /realtime/v1 to the
- * others over the private network (apps/api/src/lib/stack.ts).
+ * Only crewtavo is public. It forwards /auth/v1, /rest/v1 and /storage/v1 to the others over the
+ * private network (apps/api/src/lib/stack.ts).
  */
 import { defineRailway, github, group, image, preserve, project, service, volume } from "railway/iac";
 
@@ -58,7 +58,6 @@ export default defineRailway(() => {
       SUPABASE_AUTH_URL: "http://${{auth.RAILWAY_PRIVATE_DOMAIN}}:9999",
       SUPABASE_REST_URL: "http://${{rest.RAILWAY_PRIVATE_DOMAIN}}:3000",
       SUPABASE_STORAGE_URL: "http://${{storage.RAILWAY_PRIVATE_DOMAIN}}:5000",
-      SUPABASE_REALTIME_URL: "http://${{realtime.RAILWAY_PRIVATE_DOMAIN}}:4000",
       // Optional features (email, texting, payments, maps...): add their variables here.
     },
   });
@@ -126,30 +125,7 @@ export default defineRailway(() => {
     },
   });
 
-  const realtime = service("realtime", {
-    source: image("public.ecr.aws/supabase/realtime:v2.143.4"),
-    env: {
-      PORT: "4000",
-      DB_HOST: dbHost,
-      DB_PORT: "5432",
-      DB_USER: "supabase_admin",
-      DB_PASSWORD: dbPassword,
-      DB_NAME: "postgres",
-      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime",
-      DB_ENC_KEY: preserve(),
-      API_JWT_SECRET: jwtSecret,
-      METRICS_JWT_SECRET: jwtSecret,
-      SECRET_KEY_BASE: preserve(),
-      ERL_AFLAGS: "-proto_dist inet6_tcp",
-      DNS_NODES: "''",
-      RLIMIT_NOFILE: "10000",
-      APP_NAME: "realtime",
-      SEED_SELF_HOST: "true",
-      RUN_JANITOR: "true",
-    },
-  });
-
   return project("crewtavo", {
-    resources: [...group("Supabase services", [db, auth, rest, storage, realtime, dbData, storageData]), app],
+    resources: [...group("Supabase services", [db, auth, rest, storage, dbData, storageData]), app],
   });
 });

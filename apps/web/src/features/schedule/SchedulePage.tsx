@@ -134,21 +134,11 @@ export function SchedulePage() {
   const schedule = useQuery({
     queryKey: key,
     placeholderData: keepPreviousData,
+    // Changes someone else makes (another dispatcher, a crew finishing a visit) show up within 20
+    // seconds while the board is open, and right away when it comes back into view.
+    refetchInterval: 20_000,
     queryFn: () => api.get<ScheduleData>(`/schedule?from=${range.from}&to=${range.to}${crewId ? `&crew_id=${crewId}` : ""}`),
   });
-
-  // Live updates: another dispatcher or a crew changing a visit refreshes this board.
-  useEffect(() => {
-    const channel = supabase()
-      .channel(`visits-${session.company.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "visits", filter: `company_id=eq.${session.company.id}` }, () =>
-        queryClient.invalidateQueries({ queryKey: ["schedule", session.company.id] }),
-      )
-      .subscribe();
-    return () => {
-      supabase().removeChannel(channel);
-    };
-  }, [session.company.id, queryClient]);
 
   const formatTime = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });
   const crews = schedule.data?.crews ?? [];

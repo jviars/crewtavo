@@ -15,8 +15,8 @@ The same instance is described three ways, which should stay in step:
 
 ## What the template contains
 
-Six services, so deploying it needs Railway's Hobby plan or above (the free trial stops at 5
-services per project). Only `crewtavo` gets a public domain. Secrets use Railway's template functions, so
+Five services, which fits Railway's free trial (5 services per project) as well as the paid
+plans. Only `crewtavo` gets a public domain. Secrets use Railway's template functions, so
 every deploy generates its own and the person deploying fills in nothing.
 
 ### crewtavo
@@ -36,7 +36,6 @@ every deploy generates its own and the person deploying fills in nothing.
 | `SUPABASE_AUTH_URL` | `http://${{auth.RAILWAY_PRIVATE_DOMAIN}}:9999` |
 | `SUPABASE_REST_URL` | `http://${{rest.RAILWAY_PRIVATE_DOMAIN}}:3000` |
 | `SUPABASE_STORAGE_URL` | `http://${{storage.RAILWAY_PRIVATE_DOMAIN}}:5000` |
-| `SUPABASE_REALTIME_URL` | `http://${{realtime.RAILWAY_PRIVATE_DOMAIN}}:4000` |
 
 ### db
 
@@ -46,7 +45,7 @@ every deploy generates its own and the person deploying fills in nothing.
 - **Variables:** `POSTGRES_PASSWORD` = `${{secret(32, "abcdef0123456789")}}`, `POSTGRES_HOST` =
   `/var/run/postgresql`, `POSTGRES_PORT` = `5432`, `PGPORT` = `5432`, `POSTGRES_DB` = `postgres`.
 
-### auth, rest, storage, realtime
+### auth, rest, storage
 
 Docker images, with the variables in `.railway/railway.ts` (every `${{...}}` there is a Railway
 reference and works as written):
@@ -56,20 +55,19 @@ reference and works as written):
 | `auth` | `public.ecr.aws/supabase/gotrue:v2.197.0` | |
 | `rest` | `public.ecr.aws/supabase/postgrest:v16.4` | |
 | `storage` | `public.ecr.aws/supabase/storage-api:v1.82.1` | Volume mounted at `/var/lib/storage` |
-| `realtime` | `public.ecr.aws/supabase/realtime:v2.143.4` | `SECRET_KEY_BASE` = `${{secret(64)}}`, `DB_ENC_KEY` = `${{secret(16, "abcdef0123456789")}}` |
 
 Keep these versions in step with `docker-compose.yml`, and test a version change there first.
 
 ## Rebuilding the template
 
 1. Stand up a real instance from this repository and check it end to end. In an empty Railway
-   project: `cd .railway && npm install && railway link && railway config apply`, set the four
+   project: `cd .railway && npm install && railway link && railway config apply`, set the two
    `preserve()` secrets in the dashboard, generate the crewtavo domain, and open it.
 2. In that project, open **Settings → Generate Template from Project**.
-3. In the template composer, replace the four secrets with the template functions above
-   (`JWT_SECRET`, `POSTGRES_PASSWORD`, `SECRET_KEY_BASE`, `DB_ENC_KEY`), so every deploy gets its
-   own. Service names must stay exactly `crewtavo`, `db`, `auth`, `rest`, `storage` and `realtime`,
-   because the variables refer to each other by name.
+3. In the template composer, replace the two secrets with the template functions above
+   (`JWT_SECRET` on crewtavo, `POSTGRES_PASSWORD` on db), so every deploy gets its own. Service
+   names must stay exactly `crewtavo`, `db`, `auth`, `rest` and `storage`, because the variables
+   refer to each other by name.
 4. Deploy the template once into a fresh project and go through the owner setup.
 5. Publish it and copy its URL, `https://railway.com/deploy/<code>`.
 

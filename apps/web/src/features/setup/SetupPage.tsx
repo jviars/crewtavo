@@ -79,7 +79,7 @@ function steps(s: SetupStatus): { title: string; summary: string; steps: ReactNo
   const railway = s.platform === "railway";
   const restart = railway ? <>In your Railway project, open the <strong>crewtavo</strong> service and choose <strong>Redeploy</strong>.</> : <>Restart Crewtavo (<Code>docker compose restart app</Code>).</>;
   const services = railway
-    ? <>Open your Railway project and check that every service (Postgres, auth, rest, storage, realtime) says <strong>Active</strong>. If one has crashed, open it and choose <strong>Redeploy</strong>.</>
+    ? <>Open your Railway project and check that every service (Postgres, auth, rest, storage) says <strong>Active</strong>. If one has crashed, open it and choose <strong>Redeploy</strong>.</>
     : <>Run <Code>docker compose ps</Code> in the Crewtavo folder and check every service is running. Start any that stopped with <Code>docker compose up -d</Code>.</>;
   const fail = (summary: string, list: ReactNode[]) => ({ title: "Finish setting up Crewtavo", summary, steps: list });
 
