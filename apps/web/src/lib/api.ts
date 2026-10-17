@@ -5,8 +5,8 @@
  * The SPA has no build-time settings: it loads /api/config at startup.
  */
 import type { Database } from "@crewtavo/core/database";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { ApiError, friendlyDbError, OFFLINE } from "./errors";
+import { createClient, isAuthRetryableFetchError, type SupabaseClient } from "@supabase/supabase-js";
+import { ApiError, friendlyDbError, OFFLINE, SESSION_EXPIRED } from "./errors";
 import { startMonitoring, type MonitoringConfig } from "./monitoring";
 
 export { ApiError } from "./errors";
@@ -63,10 +63,60 @@ export function loadConfig(): Promise<AppConfig> {
       // A Crewtavo instance serves Supabase from its own address (apps/api/src/lib/stack.ts).
       config.supabaseUrl ||= window.location.origin;
       startMonitoring(config.sentry);
-      client ??= createClient<Database>(config.supabaseUrl, config.supabaseKey);
+      client ??= createClient<Database>(config.supabaseUrl, config.supabaseKey, { global: { fetch: signedInFetch(config) } });
       return config;
     });
   return configPromise;
+}
+
+/**
+ * When someone's access token has expired and refreshing it doesn't get through (a flaky
+ * reconnect), supabase-js sends database requests with the public key instead, as if nobody were
+ * signed in: reads come back empty and saves are refused. Fail those like the network failure they
+ * are, so screens keep what they showed and queued field actions wait instead of being refused.
+ */
+function signedInFetch(config: AppConfig): typeof fetch {
+  // Where supabase-js keeps the sign-in (its default storage key).
+  const storageKey = `sb-${new URL(config.supabaseUrl).hostname.split(".")[0]}-auth-token`;
+  const signInStored = () => {
+    try {
+      return localStorage.getItem(storageKey) !== null;
+    } catch {
+      return false;
+    }
+  };
+  return (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const publicKeyOnly = new Headers(init?.headers).get("Authorization") === `Bearer ${config.supabaseKey}`;
+    // Sign-in requests themselves always go with the public key.
+    if (publicKeyOnly && !url.includes("/auth/v1/") && signInStored()) return Promise.reject(new TypeError("Failed to fetch"));
+    return globalThis.fetch(input, init);
+  };
+}
+
+let refreshing: Promise<"ok" | "offline" | "expired"> | null = null;
+
+/**
+ * Turned away for the sign-in: the access token may only have expired (while the phone was
+ * offline, say). Refresh it once before treating the person as signed out. "offline" means the
+ * refresh didn't get through, which says nothing about the sign-in. Callers at the same moment share one refresh.
+ */
+export function refreshSignIn(): Promise<"ok" | "offline" | "expired"> {
+  const auth = client?.auth;
+  if (!auth) return Promise.resolve("expired");
+  refreshing ??= (async () => {
+    const { data, error } = await auth.refreshSession();
+    if (data.session) return "ok" as const;
+    if (isAuthRetryableFetchError(error)) return "offline" as const;
+    // Another tab may have refreshed it in the meantime.
+    const current = await auth.getSession();
+    return current.data.session ? "ok" : isAuthRetryableFetchError(current.error) ? "offline" : "expired";
+  })()
+    .catch(() => "offline" as const)
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
 }
 
 /** The Supabase client. Available once loadConfig() has resolved (SessionProvider waits for it). */
@@ -80,33 +130,51 @@ export function setActiveCompany(id: string | null) {
 }
 export const activeCompany = () => activeCompanyId;
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  const { data } = client ? await client.auth.getSession() : { data: { session: null } };
-  if (data.session) headers.Authorization = `Bearer ${data.session.access_token}`;
-  if (activeCompanyId) headers["X-Company-Id"] = activeCompanyId;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+export interface RequestOptions {
+  /** Act in this company rather than the one on screen: a queued field action belongs to the company it was made in. */
+  companyId?: string;
+}
 
-  let res: Response;
+async function send(method: string, path: string, body: unknown, options: RequestOptions): Promise<Response> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (client) {
+    const { data, error } = await client.auth.getSession();
+    if (data.session) headers.Authorization = `Bearer ${data.session.access_token}`;
+    // The sign-in needed refreshing and that didn't get through: without it the request would only be turned away.
+    else if (isAuthRetryableFetchError(error)) throw new ApiError(OFFLINE, 0, "network");
+  }
+  const companyId = options.companyId ?? activeCompanyId;
+  if (companyId) headers["X-Company-Id"] = companyId;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
   try {
-    res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    return await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
     throw new ApiError(OFFLINE, 0, "network");
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
+  let res = await send(method, path, body, options);
+  // The API answers 401 before doing anything, so after refreshing the sign-in the request can safely go again.
+  if (res.status === 401 && client) {
+    const signIn = await refreshSignIn();
+    if (signIn === "offline") throw new ApiError(OFFLINE, 0, "network");
+    if (signIn === "ok") res = await send(method, path, body, options);
   }
   const json = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) {
     const fallback = res.status >= 500 ? "Something went wrong on our end. Try again in a moment." : "Something went wrong. Try again.";
-    throw new ApiError(json.error ?? fallback, res.status);
+    throw new ApiError(json.error ?? fallback, res.status, res.status === 401 ? SESSION_EXPIRED : undefined);
   }
   return json as T;
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>("GET", path),
-  post: <T>(path: string, body: unknown = {}) => request<T>("POST", path, body),
-  patch: <T>(path: string, body: unknown) => request<T>("PATCH", path, body),
-  put: <T>(path: string, body: unknown) => request<T>("PUT", path, body),
-  delete: <T>(path: string) => request<T>("DELETE", path),
+  get: <T>(path: string, options?: RequestOptions) => request<T>("GET", path, undefined, options),
+  post: <T>(path: string, body: unknown = {}, options?: RequestOptions) => request<T>("POST", path, body, options),
+  patch: <T>(path: string, body: unknown, options?: RequestOptions) => request<T>("PATCH", path, body, options),
+  put: <T>(path: string, body: unknown, options?: RequestOptions) => request<T>("PUT", path, body, options),
+  delete: <T>(path: string, options?: RequestOptions) => request<T>("DELETE", path, undefined, options),
 };
 
 type DbResult = { data: unknown; error: { message: string; code?: string; details?: string | null; hint?: string | null } | null };

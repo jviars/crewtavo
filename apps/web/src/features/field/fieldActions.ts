@@ -39,7 +39,8 @@ export function showVisitStatus(queryClient: QueryClient, change: VisitStatusCha
 }
 
 export async function setVisitStatus(v: VisitStatusChange) {
-  await api.patch(`/visits/${v.visitId}`, { status: v.status });
+  // As the company it was tapped in, even if the app has switched company since.
+  await api.patch(`/visits/${v.visitId}`, { status: v.status }, { companyId: v.companyId });
   if (v.status === "in_progress") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "start", v.at);
   if (v.status === "completed") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "stop", v.at);
 }
@@ -62,8 +63,9 @@ export async function saveChecklist(v: ChecklistSave) {
   );
 }
 
-export async function saveVisitNotes(v: { visitId: string; notes: string | null }) {
-  await api.patch(`/visits/${v.visitId}`, { notes: v.notes });
+/** `companyId` is where the notes were written; notes queued before it was recorded go to the company on screen. */
+export async function saveVisitNotes(v: { visitId: string; notes: string | null; companyId?: string }) {
+  await api.patch(`/visits/${v.visitId}`, { notes: v.notes }, { companyId: v.companyId });
 }
 
 export function registerFieldActions(queryClient: QueryClient) {

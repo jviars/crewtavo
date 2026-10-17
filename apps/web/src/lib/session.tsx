@@ -7,8 +7,9 @@
 import type { Permission, Role } from "@crewtavo/core/roles";
 import type { Session as AuthSession } from "@supabase/supabase-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
+import { confirm } from "@/components/ui/Confirm";
 import { ShellSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { LoginPage, SetPasswordPage } from "@/features/auth/LoginPage";
@@ -17,8 +18,9 @@ import { FirstRun, SetupGate } from "@/features/setup/SetupPage";
 import { registerFieldActions } from "@/features/field/fieldActions";
 import { TermsPage } from "@/features/legal/License";
 import { api, ApiError, loadConfig, setActiveCompany, supabase, type AppConfig } from "./api";
-import { forgetOfflineCache, startOfflineCache } from "./offline";
+import { forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache } from "./offline";
 import { setSessionExpiredHandler } from "./queryClient";
+import { toast } from "./toast";
 
 export interface Company {
   id: string;
@@ -127,6 +129,8 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   const [companyId, setCompanyId] = useState<string | null>(storedCompany);
   const [settingPassword, setSettingPassword] = useState<"recovery" | "invite" | null>(arrivedVia);
   const [linkProblem, setLinkProblem] = useState<string | null>(null);
+  /** The person chose to sign out (rather than the app signing them out). */
+  const signingOut = useRef(false);
 
   useEffect(() => {
     if (!config.data) return;
@@ -152,8 +156,14 @@ export function SessionProvider({ children, requireCompany = true }: { children:
       // A re-sent invite arrives as a recovery link; keep the "set your password" wording.
       if (event === "PASSWORD_RECOVERY") setSettingPassword((current) => current ?? "recovery");
       if (event === "SIGNED_OUT") {
+        // Signing out on purpose leaves nothing of theirs on the phone (it may be shared). Signed out
+        // by the app (the sign-in expired, or couldn't be refreshed on a flaky connection), their
+        // unsent field actions stay, and go out when they sign back in.
+        if (lastUser && signingOut.current) forgetOfflineCache(lastUser);
+        else if (lastUser) keepQueuedFieldActions(queryClient, lastUser);
+        signingOut.current = false;
+        lastUser = null;
         queryClient.clear();
-        if (lastUser) forgetOfflineCache(lastUser);
       }
     });
     return () => data.subscription.unsubscribe();
@@ -200,6 +210,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   const [cacheFor, setCacheFor] = useState<string | null>(null);
   useEffect(() => {
     if (!userId || !role) return;
+    // In this order: startOfflineCache adds its retry rules to the defaults registered here.
     registerFieldActions(queryClient);
     const stop = startOfflineCache(queryClient, userId, role === "crew_lead" || role === "field_crew");
     setCacheFor(userId);
@@ -223,6 +234,25 @@ export function SessionProvider({ children, requireCompany = true }: { children:
     [queryClient],
   );
 
+  /** Signing out clears everything of theirs from this phone, so first say if field actions are still waiting to send. */
+  const signOut = useCallback(async () => {
+    const waiting = pendingFieldActions(queryClient);
+    const ok =
+      !waiting ||
+      (await confirm({
+        title: waiting === 1 ? "1 update hasn't sent yet" : `${waiting} updates haven't sent yet`,
+        body: "They're saved on this phone and go out when you have signal. Signing out now deletes them.",
+        confirmLabel: "Sign out anyway",
+        danger: true,
+      }));
+    if (!ok) return;
+    signingOut.current = true;
+    await supabase().auth.signOut().catch(() => undefined);
+    // Still set: no SIGNED_OUT came (the sign-in needed refreshing and that didn't get through).
+    if (signingOut.current) toast.error("Couldn't sign out. Try again when you have signal.");
+    signingOut.current = false;
+  }, [queryClient]);
+
   const value = useMemo<Session | null>(() => {
     if (!config.data || !auth || !me.data || !membership || cacheFor !== auth.user.id) return null;
     // The company's own mailbox (Settings → Email) counts as email being on.
@@ -237,13 +267,10 @@ export function SessionProvider({ children, requireCompany = true }: { children:
       roleName: membership.role_name,
       permissions: membership.permissions ?? [],
       switchCompany,
-      signOut: async () => {
-        await supabase().auth.signOut();
-        queryClient.clear();
-      },
+      signOut,
       refresh: () => me.refetch(),
     };
-  }, [config.data, auth, me, membership, switchCompany, queryClient, cacheFor]);
+  }, [config.data, auth, me, membership, switchCompany, signOut, cacheFor]);
 
   // Errors before anyone can use the app are usually unfinished setup: SetupGate shows the steps instead.
   if (config.error) {
@@ -267,7 +294,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
         <Centered>
           <ErrorState title="Couldn't load your account" error={me.error} onRetry={() => me.refetch()} />
           <div style={{ display: "flex", justifyContent: "center", paddingBottom: 24, marginTop: -12 }}>
-            <Button variant="ghost" icon="logout" onClick={() => supabase().auth.signOut()}>Sign out</Button>
+            <Button variant="ghost" icon="logout" onClick={() => signOut()}>Sign out</Button>
           </div>
         </Centered>
       </SetupGate>
