@@ -125,7 +125,9 @@ Actions and the registry are free for public repositories.
   it by changing the image tag under **Settings → Source**, after reading the release notes.
 
 `https://<instance>/api/health` shows the version an instance runs, for example
-`{"ok":true,"version":"0.1.1"}`.
+`{"ok":true,"version":"0.1.1"}`. In the first test, an instance moved from 0.1.0 to 0.1.1 by itself
+4 hours 16 minutes after the release was published; the service's **Deployments** list shows it
+with the reason "autoupdate".
 
 ### Releasing
 
