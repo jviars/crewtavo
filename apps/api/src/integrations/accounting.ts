@@ -32,17 +32,23 @@ async function one<R extends { data: unknown; error: { message: string } | null 
   return data as NonNullable<R["data"]>;
 }
 
+/** A lookup that fails isn't "never sent": carrying on as if it were would send the record twice. */
 async function linked(ctx: Ctx, entity: Entity, localId: string): Promise<string | null> {
-  const { data } = await ctx.admin
+  const { data, error } = await ctx.admin
     .from("sync_links")
     .select("external_id")
     .match({ company_id: ctx.companyId, provider: ctx.provider, entity, local_id: localId })
     .maybeSingle();
+  if (error) throw new IntegrationError(error.message);
   return data?.external_id ?? null;
 }
 
+/**
+ * A link that couldn't be saved fails the job instead of passing quietly, naming the provider's record
+ * so a copy sent by the retry (or by the next payment on it) can be spotted.
+ */
 async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: string, syncToken?: string) {
-  await ctx.admin.from("sync_links").upsert({
+  const { error } = await ctx.admin.from("sync_links").upsert({
     company_id: ctx.companyId,
     provider: ctx.provider,
     entity,
@@ -51,6 +57,7 @@ async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: s
     sync_token: syncToken ?? null,
     synced_at: new Date().toISOString(),
   });
+  if (error) throw new IntegrationError(`Sent ${entity} ${externalId} but couldn't record it: ${error.message}`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -232,7 +239,7 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
 
 /** Run one outbox row. Throws on failure so the caller can schedule a retry. */
 export async function runAccountingJob(env: Env, admin: Db, row: { company_id: string; topic: string; payload: Record<string, string> }) {
-  const { data: integration } = await admin
+  const { data: integration, error } = await admin
     .from("integrations")
     .select("provider, external_account_id, settings")
     .eq("company_id", row.company_id)
@@ -240,7 +247,9 @@ export async function runAccountingJob(env: Env, admin: Db, row: { company_id: s
     .eq("status", "connected")
     .limit(1)
     .maybeSingle();
-  if (!integration) return; // disconnected since it was queued; nothing to do
+  if (error) throw new IntegrationError(error.message);
+  // Disconnected or waiting to be reconnected since it was queued: fail, so it's retried rather than dropped.
+  if (!integration) throw new IntegrationError("The accounting app isn't connected. Reconnect it on the Apps page.");
 
   const ctx: Ctx = {
     env,
