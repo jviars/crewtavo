@@ -45,7 +45,15 @@ its `APP_URL` variable to `https://your-domain` and redeploy `crewtavo` and `aut
 **Backups:** Railway's volume backups (open the `db` or `storage` volume, then **Backups**) need
 Railway's Pro plan.
 
-**Updates:** migrations run by themselves when a new version starts, so updating is a redeploy.
+**Updates:** Crewtavo keeps itself up to date. When a new version comes out, Railway installs it
+within a few hours, with no downtime: the new version starts next to the old one, updates the
+database, and takes over only once it's working; if something goes wrong, the old one keeps
+running. Railway notifies the workspace's admins after each update. The `db` service gets a new
+version only when its setup changes, overnight (02:00–06:00 UTC), and is down for about a minute
+while it restarts. A new major version (one that needs something from you) doesn't install itself:
+Railway shows it on the service, and the release notes say what to do. To see which version you're
+running, open `https://your-address/api/health`. To change when updates install, or to turn them
+off, open the service's **Settings → Source → Configure auto updates**.
 
 **Making the template** (once, by whoever publishes Crewtavo): see [deploy/README.md](../deploy/README.md).
 
