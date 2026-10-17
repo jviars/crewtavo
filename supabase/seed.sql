@@ -1,0 +1,2 @@
+-- Local development seed (runs on `supabase db reset`). Sign up in the app to create your first
+-- company; onboarding loads a trade preset with services, forms and SOP categories.

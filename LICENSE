@@ -1,0 +1,112 @@
+Crewtavo License
+
+Copyright (c) 2026 Joshua Viars
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+4. Branding. As a condition of the rights granted in this license, you may not
+   alter, remove, hide or replace the Crewtavo branding in any deployment or
+   distribution of this software, whatever its number of users, except as
+   allowed in Clause 5. "Crewtavo branding" means the Crewtavo name, logo and
+   mark, and any other visual or written identifier of the software and its
+   interfaces, including the "Powered by Crewtavo" notice shown to your
+   customers. Adding your own business name, logo, colors and contact details
+   where the software provides for them (for example on quotes, invoices,
+   emails and the Client Hub) does not change Crewtavo branding and is always
+   allowed.
+
+5. Clause 4 does not apply where:
+
+   (a) no more than fifty (50) people sign in to the deployment in any rolling
+       thirty (30) day period. People who have no account of their own and
+       only open links sent to them, such as quotes, invoices or the Client
+       Hub, are not counted;
+
+   (b) you have the copyright holder's specific prior written permission; or
+
+   (c) you hold a signed commercial license from the copyright holder that
+       expressly allows it.
+
+   In all other cases, altering, removing, hiding or replacing Crewtavo
+   branding is a material breach of this license.
+
+6. Contributions. By submitting a contribution to this project, you license it
+   under these terms and also grant the copyright holder a perpetual,
+   worldwide, royalty-free, irrevocable right to use, modify, sublicense and
+   relicense it under other terms, including the commercial licenses described
+   in Clause 5(c). You confirm that you have the right to make this grant.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+NO RESPONSIBILITY FOR YOUR DATA OR FOR WHAT YOU DO WITH THE SOFTWARE
+
+Crewtavo is software you install and run yourself, on hosting, database and
+other accounts that you own and control. The copyright holder and contributors
+do not host, operate, monitor or back up your deployment and have no access to
+anything stored in it. To the fullest extent permitted by applicable law:
+
+(a) Your data. You alone are responsible for your deployment and for all data
+    stored in it or passing through it, including information about your
+    business, your staff and your customers. The copyright holder and
+    contributors are not liable for any loss, corruption, theft, exposure,
+    unauthorized access to or disclosure of any data, however it happens,
+    including through defects, security vulnerabilities, misconfiguration,
+    updates, migrations, or failed or missing backups.
+
+(b) Your use. You alone are responsible for everything done with the software
+    and for its results, including quotes, estimates, measurements, prices,
+    invoices, payments, refunds, taxes, timesheets, pay figures, job costing,
+    reports, schedules, routes, automations, and emails or text messages sent
+    from it. Check every figure, document and message before you rely on it
+    or send it.
+
+(c) Generated and measured results. Output from AI features, map and
+    satellite measurements, formulas, and data received from connected
+    services may be wrong or incomplete. You rely on them at your own risk.
+
+(d) Other people's services. The software connects to services run by
+    others, such as hosting and database providers, payment processors, email
+    and texting providers, accounting software and AI providers. Your use of
+    them is governed by your agreements with them. The copyright holder and
+    contributors are not responsible for those services, their availability,
+    their charges or how they handle your data.
+
+(e) Laws that apply to you. You are responsible for following the laws that
+    apply to you and your business, including laws on privacy and data
+    protection, consumer protection, marketing emails and text messages,
+    employment and wages, taxes, payments and record keeping. Nothing in the
+    software or its documentation is legal, tax, accounting, financial or
+    other professional advice.
+
+(f) Claims against us. You agree to defend, indemnify and hold harmless the
+    copyright holder and contributors against any claim, loss, liability,
+    damage, cost or expense, including reasonable legal fees, brought by
+    anyone, including your staff and your customers, that arises from your
+    deployment, your data, your use of the software or your breach of this
+    license.
+
+If applicable law does not allow any part of the disclaimers above, that part
+applies to the fullest extent the law allows. If any provision of this license
+is held unenforceable, the remaining provisions stay in effect.

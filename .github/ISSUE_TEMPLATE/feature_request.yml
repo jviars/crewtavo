@@ -1,0 +1,20 @@
+name: Idea or feature request
+description: Suggest something Crewtavo should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the job your business needs done, and how you handle it today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+  - type: input
+    id: trade
+    attributes:
+      label: Your trade
+      placeholder: Lawn care, paving, roofing, cleaning...

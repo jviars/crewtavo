@@ -1,0 +1,101 @@
+/** Add, rename, reorder and remove knowledge base categories. Changes save as you make them. */
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/Button";
+import { confirm } from "@/components/ui/Confirm";
+import { Dialog } from "@/components/ui/Dialog";
+import { FormError } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { supabase, unwrap } from "@/lib/api";
+import { useSession } from "@/lib/session";
+import { useCategories } from "./kbData";
+
+export function CategoriesDialog({ onClose, counts }: { onClose: () => void; counts: (id: string) => number }) {
+  const { company } = useSession();
+  const queryClient = useQueryClient();
+  const categories = useCategories();
+  const [name, setName] = useState("");
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["kb", company.id] });
+
+  const add = useMutation({
+    meta: { inline: true, success: "Category added" },
+    mutationFn: async (value: string) => {
+      const list = categories.data ?? [];
+      if (list.some((c) => c.name.toLowerCase() === value.toLowerCase())) throw new Error("There's already a category with that name.");
+      unwrap(await supabase().from("sop_categories").insert({ company_id: company.id, name: value, sort: (list.at(-1)?.sort ?? 0) + 1 }));
+    },
+    onSuccess: () => { setName(""); refresh(); },
+  });
+  const rename = useMutation({
+    meta: { success: "Category renamed" },
+    mutationFn: async ({ id, value }: { id: string; value: string }) => unwrap(await supabase().from("sop_categories").update({ name: value }).eq("id", id)),
+    onSettled: refresh,
+  });
+  const move = useMutation({
+    mutationFn: async ({ index, dir }: { index: number; dir: -1 | 1 }) => {
+      const list = [...(categories.data ?? [])];
+      const [item] = list.splice(index, 1);
+      list.splice(index + dir, 0, item!);
+      await Promise.all(list.map((c, i) => supabase().from("sop_categories").update({ sort: i }).eq("id", c.id).then((r) => unwrap(r))));
+    },
+    onSettled: refresh,
+  });
+  const remove = useMutation({
+    meta: { success: "Category removed" },
+    mutationFn: async (id: string) => unwrap(await supabase().from("sop_categories").delete().eq("id", id)),
+    onSettled: refresh,
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (name.trim()) add.mutate(name.trim());
+  };
+
+  return (
+    <Dialog open onClose={onClose} title="Categories" size="sm">
+      <div className="stack">
+        <div className="card" style={{ boxShadow: "none" }}>
+          {categories.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton height={34} radius={8} /></div>)}
+          {categories.data?.length === 0 && <p className="muted small" style={{ margin: 0, padding: 16 }}>No categories yet.</p>}
+          {categories.data?.map((c, i) => (
+            <div key={c.id} className="card-row" style={{ padding: "8px 10px", gap: 6 }}>
+              <input
+                className="input grow"
+                defaultValue={c.name}
+                maxLength={60}
+                aria-label={`Name of ${c.name}`}
+                onBlur={(e) => {
+                  const value = e.target.value.trim();
+                  if (!value) e.target.value = c.name;
+                  else if (value !== c.name) rename.mutate({ id: c.id, value });
+                }}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), e.currentTarget.blur())}
+              />
+              <span className="muted small nowrap" style={{ width: 52, textAlign: "right" }}>{counts(c.id)} {counts(c.id) === 1 ? "guide" : "guides"}</span>
+              <button type="button" className="icon-btn" aria-label={`Move ${c.name} up`} disabled={i === 0 || move.isPending} onClick={() => move.mutate({ index: i, dir: -1 })}><Icon name="chevronUp" size={16} /></button>
+              <button type="button" className="icon-btn" aria-label={`Move ${c.name} down`} disabled={i === categories.data.length - 1 || move.isPending} onClick={() => move.mutate({ index: i, dir: 1 })}><Icon name="chevronDown" size={16} /></button>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label={`Remove ${c.name}`}
+                onClick={async () => {
+                  const n = counts(c.id);
+                  if (await confirm({ title: `Remove “${c.name}”?`, body: n ? `Its ${n} ${n === 1 ? "guide moves" : "guides move"} to Uncategorized. Nothing is deleted.` : "This category is empty.", confirmLabel: "Remove", danger: true })) remove.mutate(c.id);
+                }}
+              >
+                <Icon name="trash" size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <form className="row" style={{ gap: 8 }} onSubmit={submit}>
+          <input className="input grow" value={name} onChange={(e) => { setName(e.target.value); add.reset(); }} placeholder="New category, e.g. Equipment" maxLength={60} aria-label="New category name" />
+          <Button type="submit" icon="plus" loading={add.isPending} disabled={!name.trim()}>Add</Button>
+        </form>
+        <FormError error={add.error} />
+        <div className="form-actions"><Button variant="primary" onClick={onClose}>Done</Button></div>
+      </div>
+    </Dialog>
+  );
+}

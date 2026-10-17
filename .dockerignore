@@ -1,0 +1,13 @@
+**/node_modules
+dist
+**/dist
+.dev.vars
+.env
+.env.*
+.git
+.railway/node_modules
+supabase/.temp
+supabase/.branches
+*.log
+# README screenshots: not needed to build the image
+docs/images

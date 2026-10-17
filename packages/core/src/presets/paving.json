@@ -1,0 +1,199 @@
+{
+  "id": "paving",
+  "name": "Paving & Sitework",
+  "description": "Residential, commercial and municipal paving, sealcoating, striping, grading, stonework, and subcontract work for general contractors.",
+  "services": [
+    {
+      "name": "Remove and haul existing asphalt",
+      "unit": "sq ft",
+      "unit_price": 0.78
+    },
+    {
+      "name": "Grade and compact stone base",
+      "unit": "ton",
+      "unit_price": 46.8,
+      "formula_name": "Stone base tons"
+    },
+    {
+      "name": "Hot-mix asphalt surface",
+      "unit": "ton",
+      "unit_price": 143,
+      "formula_name": "Hot-mix asphalt tons"
+    },
+    {
+      "name": "Asphalt overlay 2 inch",
+      "unit": "sq ft",
+      "unit_price": 3.1
+    },
+    {
+      "name": "Tar and chip surface",
+      "unit": "sq ft",
+      "unit_price": 2.75
+    },
+    {
+      "name": "Sealcoat",
+      "unit": "sq ft",
+      "unit_price": 0.28,
+      "formula_name": "Sealcoat area"
+    },
+    {
+      "name": "Crack seal",
+      "unit": "ft",
+      "unit_price": 2.0,
+      "formula_name": "Crack seal length"
+    },
+    {
+      "name": "Line striping",
+      "unit": "stall",
+      "unit_price": 5.0
+    },
+    {
+      "name": "Mobilization and trucking",
+      "unit": "hr",
+      "unit_price": 132
+    }
+  ],
+  "job_types": [
+    "Driveway replacement",
+    "Overlay",
+    "Sealcoat and striping",
+    "Parking lot",
+    "Municipal work order",
+    "GC subcontract"
+  ],
+  "formulas": [
+    {
+      "name": "Hot-mix asphalt tons",
+      "formula": "area_sqyd * depth_in * 110 / 2000"
+    },
+    {
+      "name": "Stone base tons",
+      "formula": "area_sqyd * depth_in * 100 / 2000"
+    },
+    {
+      "name": "Sealcoat area",
+      "formula": "area_sqft"
+    },
+    {
+      "name": "Crack seal length",
+      "formula": "length_ft"
+    }
+  ],
+  "checklists": [
+    {
+      "name": "Driveway quality check",
+      "job_type": "Driveway replacement",
+      "items": [
+        {
+          "key": "811_ticket_confirmed",
+          "label": "811 ticket confirmed",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "base_proof_rolled_no_movement",
+          "label": "Base proof-rolled, no movement",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "mat_temperature_at_laydown_f",
+          "label": "Mat temperature at laydown (°F)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "slope_away_from_garage_confirmed",
+          "label": "Slope away from garage confirmed",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "tons_placed",
+          "label": "Tons placed",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "after_photos",
+          "label": "After photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "customer_walkthrough_and_care_card",
+          "label": "Customer walkthrough and care card",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Driveway estimate request",
+      "slug": "driveway-estimate-request",
+      "kind": "assessment",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "slot_minutes": 60,
+      "max_per_day": 6,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Property address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "surface",
+          "label": "Current surface",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Asphalt",
+            "Gravel",
+            "Concrete",
+            "Dirt"
+          ]
+        },
+        {
+          "key": "size",
+          "label": "Approximate size",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "drainage",
+          "label": "Drainage problems?",
+          "type": "yes_no",
+          "required": false
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [
+    {
+      "applies_to": "Hot-mix asphalt surface",
+      "min_temp_f": 50,
+      "max_rain_pct": 40
+    },
+    {
+      "applies_to": "Sealcoat",
+      "min_temp_f": 50,
+      "requires_dry_hours": 24
+    }
+  ],
+  "sop_categories": [
+    "Safety",
+    "Paving",
+    "Sealcoating and striping",
+    "Equipment and trucks"
+  ]
+}

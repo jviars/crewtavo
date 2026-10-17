@@ -1,0 +1,24 @@
+{
+  "name": "@crewtavo/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Crewtavo API (Hono), served by apps/api/src/server.ts on Railway and locally.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.135.0",
+    "@crewtavo/core": "*",
+    "@hono/node-server": "2.1.5",
+    "@sentry/core": "11.4.0",
+    "@sentry/node": "11.4.0",
+    "@supabase/supabase-js": "2.118.0",
+    "hono": "4.13.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5"
+  }
+}

@@ -1,0 +1,137 @@
+# One Crewtavo instance on your own computer: the same services the Railway template creates for
+# each business (see deploy/README.md). Start it with
+#
+#   npm run instance          generates .env.instance (secrets) once, then docker compose up
+#
+# and open http://localhost:8080. Only the crewtavo service is reachable from outside; it forwards
+# to the others, the way it does on Railway. Data lives in the db-data and storage-data volumes.
+
+name: crewtavo-instance
+
+x-secrets: &db-password ${POSTGRES_PASSWORD:?run npm run instance, or set POSTGRES_PASSWORD in .env.instance}
+
+services:
+  db:
+    build: deploy/postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: *db-password
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PORT: 5432
+      PGPORT: 5432
+      POSTGRES_DB: postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.197.0
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${APP_URL:-http://localhost:8080}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: ${APP_URL:-http://localhost:8080}
+      GOTRUE_URI_ALLOW_LIST: ${APP_URL:-http://localhost:8080}/**
+      # One business per instance: the owner's account is made on first run, everyone else is invited.
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_MAILER_OTP_EXP: 86400
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      # Claude and ChatGPT connect through this (the Apps page in Crewtavo).
+      GOTRUE_OAUTH_SERVER_ENABLED: "true"
+      GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH: /oauth/consent
+      GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION: "true"
+
+  rest:
+    image: public.ecr.aws/supabase/postgrest:v16.4
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,graphql_public
+      PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: 3600
+      PGRST_SERVER_HOST: "*"
+
+  storage:
+    image: public.ecr.aws/supabase/storage-api:v1.82.1
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      # Signs its own keys with the shared secret.
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      POSTGREST_URL: http://rest:3000
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      FILE_SIZE_LIMIT: 52428800
+      TENANT_ID: crewtavo
+      REGION: local
+      GLOBAL_S3_BUCKET: crewtavo
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      SERVER_HOST: 0.0.0.0
+    volumes:
+      - storage-data:/var/lib/storage
+
+  realtime:
+    image: public.ecr.aws/supabase/realtime:v2.143.4
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+
+  crewtavo:
+    build: .
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    ports:
+      - "${CREWTAVO_PORT:-8080}:8080"
+    # Optional features (email, texting, payments, maps...): add them to .env.instance.
+    env_file:
+      - path: .env.instance
+        required: false
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      CREWTAVO_PLATFORM: compose
+
+volumes:
+  db-data:
+  storage-data:

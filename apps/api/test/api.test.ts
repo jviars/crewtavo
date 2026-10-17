@@ -1,0 +1,350 @@
+import { createHmac } from "node:crypto";
+import { greetingName, LEVEL_PERMISSIONS, memberPermissions, TERMS_VERSION } from "@crewtavo/core";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { app } from "../src/app";
+import type { Env } from "../src/env";
+import { decryptJson, encryptJson, hmacSha256Hex, signToken, verifyToken } from "../src/lib/crypto";
+import { z } from "zod";
+import { isEmail, renderEmail } from "../src/lib/email";
+import { friendlyIssue } from "../src/lib/http";
+import { cronMatches } from "../src/lib/cron";
+import { buildCalendar } from "../src/lib/ics";
+import { allow } from "../src/lib/limit";
+import { clientLink, readClientLink } from "../src/lib/links";
+import { twilioSignature } from "../src/routes/messages";
+import { verifyStripeSignature } from "../src/services/stripe";
+import { CRON_TASKS, TASKS } from "../src/tasks";
+
+const env: Env = {
+  SUPABASE_URL: "https://example.supabase.co",
+  SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+  SUPABASE_SECRET_KEY: "sb_secret_test",
+  ENCRYPTION_KEY: btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i * 7))),
+  CRON_SECRET: "cron-secret-value",
+  APP_URL: "https://ops.example.com",
+  GOOGLE_MAPS_BROWSER_KEY: "maps-browser-key",
+};
+
+const request = (path: string, init?: RequestInit) => app.request(path, init, env);
+
+/** Change one character in the middle of the last segment (the final base64url char can be padding bits). */
+function flipMiddle(token: string): string {
+  const i = token.lastIndexOf(".") + Math.floor((token.length - token.lastIndexOf(".")) / 2);
+  return token.slice(0, i) + (token[i] === "A" ? "B" : "A") + token.slice(i + 1);
+}
+
+describe("crypto", () => {
+  it("round-trips encrypted JSON and rejects tampering", async () => {
+    const sealed = await encryptJson(env, { access_token: "abc", refresh_token: "def" });
+    expect(sealed).toMatch(/^v1\./);
+    expect(sealed).not.toContain("abc");
+    expect(await decryptJson(env, sealed)).toEqual({ access_token: "abc", refresh_token: "def" });
+    await expect(decryptJson(env, flipMiddle(sealed))).rejects.toThrow();
+  });
+
+  it("signs tokens, rejects forgeries and expired ones", async () => {
+    const token = await signToken(env, { id: "x", exp: Date.now() / 1000 + 60 });
+    expect(await verifyToken(env, token)).toMatchObject({ id: "x" });
+    expect(await verifyToken(env, flipMiddle(token))).toBeNull();
+    expect(await verifyToken(env, await signToken(env, { id: "x", exp: Date.now() / 1000 - 1 }))).toBeNull();
+    expect(await verifyToken({ ...env, ENCRYPTION_KEY: btoa("y".repeat(32)) }, token)).toBeNull();
+  });
+
+  it("builds client links that decode to the same record", async () => {
+    const url = await clientLink(env, "https://ops.example.com", { c: "company-1", t: "quote", id: "quote-1" });
+    expect(url.startsWith("https://ops.example.com/hub/")).toBe(true);
+    expect(await readClientLink(env, url.split("/hub/")[1])).toMatchObject({ c: "company-1", t: "quote", id: "quote-1" });
+  });
+});
+
+describe("stripe webhook signatures", () => {
+  it("accepts a valid signature and rejects others", async () => {
+    const payload = JSON.stringify({ type: "checkout.session.completed" });
+    const t = Math.floor(Date.now() / 1000);
+    const sig = await hmacSha256Hex("whsec_test", `${t}.${payload}`);
+    expect(await verifyStripeSignature(payload, `t=${t},v1=${sig}`, "whsec_test")).toBe(true);
+    expect(await verifyStripeSignature(payload, `t=${t},v1=${sig}`, "whsec_other")).toBe(false);
+    expect(await verifyStripeSignature(payload, `t=${t - 3600},v1=${sig}`, "whsec_test")).toBe(false);
+    expect(await verifyStripeSignature(payload, undefined, "whsec_test")).toBe(false);
+  });
+});
+
+describe("routes", () => {
+  it("serves public config without secrets", async () => {
+    const res = await request("/api/config");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ supabaseUrl: env.SUPABASE_URL, supabaseKey: "sb_publishable_test", mapsBrowserKey: "maps-browser-key" });
+    expect(JSON.stringify(body)).not.toContain("sb_secret_test");
+    expect(body.sentry).toBeNull();
+    expect(body.termsVersion).toBe(TERMS_VERSION);
+  });
+
+  it("gives the web app its error reporting DSN only when one is set", async () => {
+    const dsn = "https://public@errors.example.com/2";
+    const both = await (await app.request("/api/config", {}, { ...env, CREWTAVO_SENTRY_DSN: dsn })).json();
+    expect(both.sentry).toEqual({ dsn, environment: "production" });
+    const web = await (await app.request("/api/config", {}, { ...env, CREWTAVO_SENTRY_DSN: dsn, CREWTAVO_SENTRY_WEB_DSN: "https://web@errors.example.com/3" })).json();
+    expect(web.sentry.dsn).toBe("https://web@errors.example.com/3");
+  });
+
+  it("requires a session for user routes", async () => {
+    const res = await request("/api/me");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Sign in to continue." });
+  });
+
+  it("guards cron tasks with the shared secret", async () => {
+    expect((await request("/api/cron/outbox")).status).toBe(401);
+    expect((await request("/api/cron/outbox", { headers: { Authorization: "Bearer wrong" } })).status).toBe(401);
+    expect((await request("/api/cron/nope", { headers: { Authorization: `Bearer ${env.CRON_SECRET}` } })).status).toBe(404);
+  });
+
+  it("maps every scheduled cron to a known task", () => {
+    for (const tasks of Object.values(CRON_TASKS)) for (const task of tasks) expect(TASKS).toContain(task);
+  });
+
+  it("rejects expired client links", async () => {
+    const res = await request("/api/hub/not-a-real-token");
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("MCP discovery", () => {
+  it("publishes protected resource metadata pointing at Supabase Auth", async () => {
+    const res = await request("/.well-known/oauth-protected-resource/mcp");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      resource: "https://ops.example.com/mcp",
+      authorization_servers: ["https://example.supabase.co/auth/v1"],
+    });
+  });
+
+  it("challenges unauthenticated MCP calls with the metadata URL", async () => {
+    const res = await request("/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe(
+      'Bearer resource_metadata="https://ops.example.com/.well-known/oauth-protected-resource/mcp"',
+    );
+  });
+
+  it("answers CORS preflight for browser-based MCP clients", async () => {
+    const res = await request("/mcp", {
+      method: "OPTIONS",
+      headers: { Origin: "https://inspector.example", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization" },
+    });
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+});
+
+describe("client links by kind", () => {
+  it("routes each kind to its page and keeps the preview flag", async () => {
+    const unsub = await clientLink(env, "https://ops.example.com/", { c: "co", t: "unsub", id: "client-1" });
+    expect(unsub.startsWith("https://ops.example.com/u/")).toBe(true);
+    const review = await clientLink(env, "https://ops.example.com", { c: "co", t: "review", id: "rr-1" });
+    expect(review.startsWith("https://ops.example.com/api/public/r/")).toBe(true);
+    const refer = await clientLink(env, "https://ops.example.com", { c: "co", t: "refer", id: "client-1" });
+    expect(refer.startsWith("https://ops.example.com/refer/")).toBe(true);
+    const preview = await clientLink(env, "https://ops.example.com", { c: "co", t: "quote", id: "q-1", pv: 1 });
+    expect(await readClientLink(env, preview.split("/hub/")[1])).toMatchObject({ t: "quote", pv: 1 });
+  });
+
+  it("won't accept one kind of link where another is expected", async () => {
+    const quote = await clientLink(env, "https://ops.example.com", { c: "co", t: "quote", id: "client-1" });
+    const token = quote.split("/hub/")[1];
+    const res = await request(`/api/public/unsubscribe/${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    expect(res.status).toBe(404);
+    expect((await request("/api/public/unsubscribe/garbage", { method: "POST" })).status).toBe(404);
+  });
+});
+
+describe("texting", () => {
+  it("signs webhook requests the way Twilio does", async () => {
+    const url = "https://ops.example.com/api/webhooks/twilio";
+    const params = { To: "+15405550100", From: "+15405550163", Body: "Running late?", MessageSid: "SM123", AccountSid: "AC1" };
+    const data = url + Object.keys(params).sort().map((k) => k + params[k as keyof typeof params]).join("");
+    const expected = createHmac("sha1", "twilio-token").update(data).digest("base64");
+    expect(await twilioSignature("twilio-token", url, params)).toBe(expected);
+    expect(await twilioSignature("other-token", url, params)).not.toBe(expected);
+  });
+
+  it("rejects replies when texting isn't set up or the signature is wrong", async () => {
+    const form = () => new URLSearchParams({ From: "+15405550163", Body: "Yes please" });
+    expect((await request("/api/webhooks/twilio", { method: "POST", body: form() })).status).toBe(501);
+    const withTwilio = { ...env, TWILIO_AUTH_TOKEN: "twilio-token" };
+    const bad = await app.request("/api/webhooks/twilio", { method: "POST", headers: { "x-twilio-signature": "bm9wZQ==" }, body: form() }, withTwilio);
+    expect(bad.status).toBe(403);
+    const missing = await app.request("/api/webhooks/twilio", { method: "POST", body: form() }, withTwilio);
+    expect(missing.status).toBe(403);
+  });
+
+  it("requires sign-in to send messages", async () => {
+    const res = await request("/api/messages/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: crypto.randomUUID(), channel: "sms", body: "hi" }) });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("email rendering", () => {
+  it("escapes content, links URLs and turns a link on its own line into a button", () => {
+    const { html, text } = renderEmail({
+      companyName: "Smith & Sons <LLC>",
+      text: "Hi <b>Ana</b>,\n\nhttps://ops.example.com/hub/abc\n\nDetails at https://example.com/x.",
+      footer: "1 Main St, Radford, VA",
+      unsubscribeUrl: "https://ops.example.com/u/t?a=1&b=2",
+    });
+    expect(html).toContain("Smith &amp; Sons &lt;LLC&gt;");
+    expect(html).not.toContain("<b>Ana</b>");
+    expect(html).toContain(">View online</a>");
+    expect(html).toContain('href="https://example.com/x"');
+    expect(html).toContain('href="https://ops.example.com/u/t?a=1&amp;b=2"');
+    expect(text).toContain("Unsubscribe: https://ops.example.com/u/t?a=1&b=2");
+    expect(text).toContain("1 Main St, Radford, VA");
+  });
+
+  it("greets people by first name and organizations in full", () => {
+    expect(greetingName("Jane Smith")).toBe("Jane");
+    expect(greetingName("  Priya   Shah ")).toBe("Priya");
+    expect(greetingName("Town of Rocky Mount")).toBe("Town of Rocky Mount");
+    expect(greetingName("Summit Ridge Builders")).toBe("Summit Ridge Builders");
+    expect(greetingName("Meadowbrook HOA")).toBe("Meadowbrook HOA");
+    expect(greetingName("")).toBe("there");
+    expect(greetingName(null)).toBe("there");
+  });
+
+  it("recognizes usable email addresses", () => {
+    expect(isEmail("ana@example.com")).toBe(true);
+    expect(isEmail(" ana@example.com ")).toBe(true);
+    expect(isEmail("ana@example")).toBe(false);
+    expect(isEmail("not an email")).toBe(false);
+    expect(isEmail(null)).toBe(false);
+  });
+});
+
+describe("roles", () => {
+  it("gives built-in roles everything their level allows", () => {
+    expect(memberPermissions("admin", null)).toContain("apps");
+    expect(memberPermissions("office", null)).not.toContain("team");
+    expect(memberPermissions("field_crew", null)).toEqual([]);
+  });
+
+  it("limits custom roles to their list, within the level", () => {
+    expect(memberPermissions("office", ["reports", "schedule"])).toEqual(["reports", "schedule"]);
+    // An area the level can't have is ignored even if it's on the list.
+    expect(memberPermissions("crew_lead", ["schedule", "invoices"])).toEqual(["schedule"]);
+    expect(memberPermissions("estimator", [])).toEqual([]);
+  });
+
+  it("never lets a lower level reach more than a higher one", () => {
+    // Estimators (sales) and crew leads (the field) sit side by side under the office.
+    const chains = [
+      ["owner", "admin", "office", "estimator"],
+      ["owner", "admin", "office", "crew_lead", "field_crew"],
+    ] as const;
+    for (const order of chains) for (let i = 1; i < order.length; i++) for (const p of LEVEL_PERMISSIONS[order[i]!]) expect(LEVEL_PERMISSIONS[order[i - 1]!]).toContain(p);
+  });
+});
+
+describe("validation messages", () => {
+  const issue = (schema: z.ZodType, value: unknown) => {
+    const r = schema.safeParse(value);
+    if (r.success) throw new Error("expected a problem");
+    return friendlyIssue(r.error.issues[0]!);
+  };
+  it("names the field in plain words", () => {
+    expect(issue(z.object({ email: z.email() }), { email: "nope" })).toBe("Enter a valid email address.");
+    expect(issue(z.object({ client_id: z.string() }), {})).toBe("Client is required.");
+    expect(issue(z.object({ body: z.string().min(1) }), { body: "" })).toBe("Message is required.");
+    expect(issue(z.object({ subject: z.string().max(3) }), { subject: "toolong" })).toBe("Subject is too long.");
+    expect(issue(z.object({ amount: z.number().min(1) }), { amount: 0 })).toBe("Amount is too low.");
+  });
+  it("never shows code-style paths", () => {
+    expect(issue(z.object({ lines: z.array(z.object({ qty: z.number() })) }), { lines: [{ qty: "x" }] })).toBe("Qty doesn't look right.");
+    expect(issue(z.array(z.string()), [1])).toBe("Something in the form isn't right. Check it and try again.");
+  });
+});
+
+describe("built-in scheduler", () => {
+  const at = (iso: string) => new Date(iso);
+  it("matches the schedules the tasks use", () => {
+    expect(cronMatches("* * * * *", at("2026-10-16T13:07:00Z"))).toBe(true);
+    expect(cronMatches("*/5 * * * *", at("2026-10-16T13:10:00Z"))).toBe(true);
+    expect(cronMatches("*/5 * * * *", at("2026-10-16T13:11:00Z"))).toBe(false);
+    expect(cronMatches("0 * * * *", at("2026-10-16T13:00:00Z"))).toBe(true);
+    expect(cronMatches("0 * * * *", at("2026-10-16T13:01:00Z"))).toBe(false);
+    expect(cronMatches("0 */6 * * *", at("2026-10-16T18:00:00Z"))).toBe(true);
+    expect(cronMatches("0 */6 * * *", at("2026-10-16T19:00:00Z"))).toBe(false);
+    expect(cronMatches("15 6 * * *", at("2026-10-16T06:15:00Z"))).toBe(true);
+    expect(cronMatches("15 6 * * *", at("2026-10-16T07:15:00Z"))).toBe(false);
+  });
+  it("handles lists, ranges and weekdays, and rejects nonsense", () => {
+    expect(cronMatches("0 9-17 * * 1-5", at("2026-10-16T12:00:00Z"))).toBe(true); // a Friday
+    expect(cronMatches("0 9-17 * * 1-5", at("2026-10-17T12:00:00Z"))).toBe(false); // Saturday
+    expect(cronMatches("0 0 * * 7", at("2026-10-18T00:00:00Z"))).toBe(true); // Sunday as 7
+    expect(cronMatches("0,30 * * * *", at("2026-10-16T13:30:00Z"))).toBe(true);
+    expect(cronMatches("not a cron", at("2026-10-16T13:30:00Z"))).toBe(false);
+  });
+  it("covers every task's schedule", () => {
+    for (const expression of Object.keys(CRON_TASKS)) expect(expression.split(" ")).toHaveLength(5);
+  });
+});
+
+describe("calendar feeds", () => {
+  const ics = buildCalendar("Acme Paving, schedule", [
+    { uid: "a@crewtavo", title: "Sealcoat; driveway, front", start: new Date("2026-10-16T13:00:00Z"), end: new Date("2026-10-16T15:30:00Z"), description: "Line one\nLine two", location: "12 Main St, Rocky Mount" },
+    { uid: "b@crewtavo", title: "Anytime visit", date: "2026-10-31" },
+    { uid: "c@crewtavo", title: "x".repeat(200), date: "2026-11-01", cancelled: true },
+  ]);
+  it("writes timed and all-day events", () => {
+    expect(ics).toContain("DTSTART:20261016T130000Z\r\nDTEND:20261016T153000Z");
+    expect(ics).toContain("DTSTART;VALUE=DATE:20261031\r\nDTEND;VALUE=DATE:20261101");
+    expect(ics).toContain("STATUS:CANCELLED");
+  });
+  it("escapes text and folds long lines", () => {
+    expect(ics).toContain("SUMMARY:Sealcoat\\; driveway\\, front");
+    expect(ics).toContain("DESCRIPTION:Line one\\nLine two");
+    expect(ics.split("\r\n").every((line) => new TextEncoder().encode(line).length <= 75)).toBe(true);
+    expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
+  });
+  it("rejects made-up tokens without touching the database", async () => {
+    const res = await app.request("/api/calendar/not-a-token.ics", {}, env);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("rate limits", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Counting is tested in supabase/tests/rate_limit_test.sql; here, what the API does with it.
+  const rpc = (response: () => Response) => {
+    const calls: Array<{ url: string; body: unknown; auth: string | null }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body)), auth: headers.get("apikey") });
+      return response();
+    });
+    return calls;
+  };
+
+  it("counts each try in Postgres with the service key", async () => {
+    const calls = rpc(() => Response.json(true));
+    expect(await allow(env, "promo:203.0.113.9", 10, 600)).toBe(true);
+    expect(calls).toEqual([
+      { url: "https://example.supabase.co/rest/v1/rpc/rate_limit_hit", body: { p_key: "promo:203.0.113.9", p_max: 10, p_window_seconds: 600 }, auth: "sb_secret_test" },
+    ]);
+  });
+
+  it("refuses once Postgres says the limit is reached", async () => {
+    rpc(() => Response.json(false));
+    expect(await allow(env, "promo:203.0.113.9", 10, 600)).toBe(false);
+  });
+
+  it("lets the request through if the check itself fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    rpc(() => Response.json({ message: "connection refused" }, { status: 503 }));
+    expect(await allow(env, "promo:203.0.113.9", 10, 600)).toBe(true);
+  });
+});

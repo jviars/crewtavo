@@ -1,0 +1,234 @@
+{
+  "id": "roofing_exteriors",
+  "name": "Roofing & Exteriors",
+  "description": "Shingle and metal roofing, repairs, gutters, siding, windows and decks, with optional insurance-claim tracking.",
+  "services": [
+    {
+      "name": "Architectural shingle roof",
+      "unit": "square",
+      "unit_price": 560,
+      "formula_name": "Roofing squares"
+    },
+    {
+      "name": "Designer shingle roof",
+      "unit": "square",
+      "unit_price": 735,
+      "formula_name": "Roofing squares"
+    },
+    {
+      "name": "Standing-seam metal roof",
+      "unit": "square",
+      "unit_price": 1285,
+      "formula_name": "Roofing squares"
+    },
+    {
+      "name": "Tear-off and disposal",
+      "unit": "square",
+      "unit_price": 85,
+      "formula_name": "Roof squares without waste"
+    },
+    {
+      "name": "Seamless gutters",
+      "unit": "ft",
+      "unit_price": 12,
+      "formula_name": "Gutter length"
+    },
+    {
+      "name": "Gutter guards",
+      "unit": "ft",
+      "unit_price": 7,
+      "formula_name": "Gutter length"
+    },
+    {
+      "name": "Vinyl siding",
+      "unit": "sq ft",
+      "unit_price": 9,
+      "formula_name": "Siding area"
+    },
+    {
+      "name": "Replacement window",
+      "unit": "ea",
+      "unit_price": 850
+    },
+    {
+      "name": "Composite deck",
+      "unit": "sq ft",
+      "unit_price": 60
+    },
+    {
+      "name": "Roof repair",
+      "unit": "lump sum",
+      "unit_price": 650
+    },
+    {
+      "name": "Dumpster",
+      "unit": "ea",
+      "unit_price": 450
+    }
+  ],
+  "job_types": [
+    "Roof replacement",
+    "Roof repair",
+    "Gutters",
+    "Siding",
+    "Windows",
+    "Deck",
+    "Insurance claim"
+  ],
+  "formulas": [
+    {
+      "name": "Roofing squares",
+      "formula": "area_sqft * pitch_factor * (1 + waste) / 100"
+    },
+    {
+      "name": "Gutter length",
+      "formula": "length_ft"
+    },
+    {
+      "name": "Siding area",
+      "formula": "area_sqft"
+    },
+    {
+      "name": "Roof squares without waste",
+      "formula": "area_sqft * pitch_factor / 100"
+    }
+  ],
+  "checklists": [
+    {
+      "name": "Daily roof safety",
+      "job_type": "Roof replacement",
+      "items": [
+        {
+          "key": "anchors_set",
+          "label": "Anchors set",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "ladders_tied_off",
+          "label": "Ladders tied off",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "harnesses_inspected",
+          "label": "Harnesses inspected",
+          "type": "check",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Roof quality",
+      "job_type": "Roof replacement",
+      "items": [
+        {
+          "key": "drip_edge_installed",
+          "label": "Drip edge installed",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "ice_and_water_shield_at_eaves_and_valleys",
+          "label": "Ice and water shield at eaves and valleys",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "starter_course",
+          "label": "Starter course",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "nailing_pattern",
+          "label": "Nailing pattern",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "4-nail",
+            "6-nail"
+          ]
+        },
+        {
+          "key": "before_and_after_photos",
+          "label": "Before and after photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "homeowner_walkthrough_signature",
+          "label": "Homeowner walkthrough signature",
+          "type": "signature",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Free roof inspection",
+      "slug": "free-roof-inspection",
+      "kind": "assessment",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "slot_minutes": 60,
+      "max_per_day": 5,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Property address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "issue",
+          "label": "What's going on?",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Leak",
+            "Storm or hail damage",
+            "Old roof, want options",
+            "Gutters",
+            "Siding or windows"
+          ]
+        },
+        {
+          "key": "roof_age",
+          "label": "Roof age (years)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "insurance",
+          "label": "Filing an insurance claim?",
+          "type": "yes_no",
+          "required": false
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [
+    {
+      "applies_to": "Architectural shingle roof",
+      "max_rain_pct": 40
+    },
+    {
+      "applies_to": "Standing-seam metal roof",
+      "max_rain_pct": 40
+    }
+  ],
+  "sop_categories": [
+    "Safety and fall protection",
+    "Roofing",
+    "Gutters, siding and windows",
+    "Insurance claims"
+  ]
+}
