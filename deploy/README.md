@@ -15,7 +15,8 @@ The same instance is described three ways, which should stay in step:
 
 ## What the template contains
 
-Six services. Only `crewtavo` gets a public domain. Secrets use Railway's template functions, so
+Six services, so deploying it needs Railway's Hobby plan or above (the free trial stops at 5
+services per project). Only `crewtavo` gets a public domain. Secrets use Railway's template functions, so
 every deploy generates its own and the person deploying fills in nothing.
 
 ### crewtavo

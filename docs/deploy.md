@@ -27,16 +27,17 @@ copy keys or run commands.
 ## On Railway
 
 **For a business:** press **Deploy on Railway** in the [README](../README.md), sign in to Railway
-(or create an account), and press **Deploy** again. After a few minutes, open the address Railway
+(or create an account) on the **Hobby** plan, and press **Deploy** again. Railway's free trial
+allows only 5 services per project, and an instance has 6. After a few minutes, open the address Railway
 shows on the **crewtavo** service and create the owner account. Then set up the business and invite
 the team from **Settings → People and Roles**.
 
 If something isn't right yet, the address shows a **Crewtavo is starting up** or **Finish setting up
 Crewtavo** page that says what to do, instead of an error.
 
-**Cost:** the business pays Railway directly. An idle instance uses about 0.5 GB of memory across
-its six services, which fits within Railway's Hobby plan ($5 a month, including $5 of usage) for a
-small company. Heavy use costs more; check [Railway's pricing](https://railway.com/pricing).
+**Cost:** the business pays Railway directly, on Railway's Hobby plan ($5 a month, including $5 of
+usage). An idle instance uses about 0.5 GB of memory across its six services, which that usage
+covers for a small company. Heavy use costs more; check [Railway's pricing](https://railway.com/pricing).
 
 **Your own domain:** in the crewtavo service, **Settings → Networking → Custom Domain**. Then change
 its `APP_URL` variable to `https://your-domain` and redeploy `crewtavo` and `auth`.

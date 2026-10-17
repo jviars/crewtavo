@@ -39,7 +39,8 @@ account the business owns. Nobody else holds its data, and there's no per-seat s
 
 The quickest way to run Crewtavo, and the one that suits a business without a developer.
 
-1. Press **Deploy on Railway** above. Sign in to Railway, or create an account.
+1. Press **Deploy on Railway** above. Sign in to Railway, or create an account, and choose the
+   **Hobby** plan (Railway's free trial allows only 5 services per project, and an instance has 6).
 2. Press **Deploy**. Railway creates your instance: the Crewtavo app, a Postgres database, and the
    services behind sign-in, file storage and live updates. Every password and key is generated for
    you, so there's nothing to fill in.
@@ -50,8 +51,8 @@ If something isn't ready yet, that address shows a **Finish setting up** page sa
 instead of an error.
 
 > [!NOTE]
-> **Cost.** The business pays Railway directly for what the instance uses. A small company's
-> instance is sized for Railway's Hobby plan ($5 a month, which includes $5 of usage); busy
+> **Cost.** The business pays Railway directly. An instance needs Railway's Hobby plan: $5 a
+> month, which includes $5 of usage, enough for a small company's instance at rest; busy
 > instances use more. Check [Railway's pricing](https://railway.com/pricing) for current numbers.
 
 **Your own domain:** on the **crewtavo** service, open **Settings → Networking → Custom Domain**,
