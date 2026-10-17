@@ -429,6 +429,17 @@ if (vars.STRIPE_WEBHOOK_SECRET) {
   check((await post()).status === 200 && (await post()).status === 200, "Stripe's refund notice is accepted (twice, as Stripe may retry)");
   const after = must(await owner.db.from("invoices").select("status, balance_due").eq("id", invoiceId).single(), "refunded");
   check(Number(after.balance_due) === 100 && after.status !== "paid", "a $100 refund shows on the invoice once, and it's owed again", after);
+  // Then the rest, tip included: Stripe's refunded total counts the $50 tip, which the invoice never had.
+  const online = must(await owner.db.from("payments").select("amount, tip_amount").eq("processor_ref", `pi_test_${stamp}`).single(), "online payment");
+  const fullCents = Math.round((Number(online.amount) + Number(online.tip_amount)) * 100);
+  const full = JSON.stringify({ type: "charge.refunded", data: { object: { id: `ch_test_${stamp}`, payment_intent: `pi_test_${stamp}`, amount_refunded: fullCents } } });
+  const t = Math.floor(Date.now() / 1000);
+  const fullPost = await fetch(`${API}/api/webhooks/stripe`, { method: "POST", headers: { "Content-Type": "application/json", "Stripe-Signature": `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${full}`).digest("hex")}` }, body: full });
+  const refunds = must(await owner.db.from("payments").select("amount, tip_amount").like("processor_ref", `pi_test_${stamp}:refund:%`), "refunds");
+  const net = (key) => Math.round(refunds.reduce((s, p) => s + Number(p[key]), 0) * 100) / 100;
+  const whole = must(await owner.db.from("invoices").select("balance_due").eq("id", invoiceId).single(), "fully refunded");
+  check(fullPost.status === 200 && net("amount") === -Number(online.amount) && net("tip_amount") === -Number(online.tip_amount) && Number(whole.balance_due) === Number(online.amount),
+    "a full refund takes back the tip as tip, and the invoice owes only what the online payment covered", { refunds, whole });
   const del = await owner.db.from("payments").delete().eq("invoice_id", invoiceId).eq("processor", "stripe").select("id");
   check(!del.error && del.data.length === 0, "online payments can't be deleted by hand", del.error?.message);
 }

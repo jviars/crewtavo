@@ -32,7 +32,8 @@ const SERVER_INFO = { name: "crewtavo", title: "Crewtavo", version: "0.1.0" };
 const resourceMetadata = (c: Context<AppEnv>) =>
   c.json({
     resource: `${appUrl(c)}/mcp`,
-    authorization_servers: [`${c.env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`],
+    // In an instance, SUPABASE_URL is this server's own loopback address; sign-in is public at /auth/v1.
+    authorization_servers: [`${c.env.CREWTAVO_GATEWAY ? appUrl(c) : c.env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`],
     bearer_methods_supported: ["header"],
     resource_name: "Crewtavo",
     resource_documentation: `${appUrl(c)}/apps`,
@@ -250,7 +251,7 @@ mcp.post("/mcp", async (c) => {
   } catch {
     return c.json(failure(null, -32700, "Parse error"), 400);
   }
-  if (Array.isArray(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
+  if (!message || typeof message !== "object" || Array.isArray(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
     return c.json(failure(null, -32600, "Invalid request"), 400);
   }
   if (message.id === undefined) return c.body(null, 202); // notifications (e.g. notifications/initialized)
@@ -281,7 +282,7 @@ mcp.post("/mcp", async (c) => {
     }
     case "tools/call": {
       const name = message.params?.name as ToolName;
-      const t = TOOLS[name] as Tool<z.ZodType> | undefined;
+      const t = (typeof name === "string" && Object.hasOwn(TOOLS, name) ? TOOLS[name] : undefined) as Tool<z.ZodType> | undefined;
       if (!t) return c.json(failure(id, -32602, `Unknown tool: ${String(name)}`));
       const parsed = t.input.safeParse(message.params?.arguments ?? {});
       if (!parsed.success) {

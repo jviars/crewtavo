@@ -92,6 +92,7 @@ publicRoutes.get("/hub/:token", async (c) => {
 publicRoutes.post("/hub/:token/approve", async (c) => {
   const l = await link(c);
   if (l.t !== "quote") throw new HttpError(400, "Only quotes can be approved.");
+  if (l.pv) throw new HttpError(400, "A preview can't approve the quote. Only the client's own link can.");
   const body = await readJson(
     c,
     z.object({
@@ -108,17 +109,22 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   // Optional lines follow the client's choices; required lines stay selected.
   const optional = must(await admin.from("quote_line_items").select("id").eq("quote_id", l.id).eq("optional", true));
   for (const line of optional) {
-    await admin.from("quote_line_items").update({ selected: body.selected_line_ids.includes(line.id) }).eq("id", line.id);
+    const { error } = await admin.from("quote_line_items").update({ selected: body.selected_line_ids.includes(line.id) }).eq("id", line.id);
+    if (error) throw dbError(error);
   }
-  const { error } = await admin
+  // Only while it's still waiting for an answer: two approvals at once record one.
+  const { data: approved, error } = await admin
     .from("quotes")
     .update({
       status: "approved",
       approved_at: new Date().toISOString(),
       approval: { name: body.name, selected_line_ids: body.selected_line_ids, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c) },
     })
-    .eq("id", l.id);
+    .eq("id", l.id)
+    .in("status", ["sent", "changes_requested"])
+    .select("id");
   if (error) throw dbError(error);
+  if (!approved?.length) throw new HttpError(409, "This quote can't be approved anymore.");
   kickAutomations(c, l.c);
   return c.json({ status: "approved" });
 });
@@ -126,6 +132,7 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
 publicRoutes.post("/hub/:token/request-changes", async (c) => {
   const l = await link(c);
   if (l.t !== "quote") throw new HttpError(400, "Only quotes can have changes requested.");
+  if (l.pv) throw new HttpError(400, "A preview can't ask for changes. Only the client's own link can.");
   const body = await readJson(c, z.object({ message: z.string().trim().min(3).max(2000) }));
   const admin = adminClient(c.env);
   const quote = must(await admin.from("quotes").select("client_id, status").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
@@ -347,16 +354,24 @@ publicRoutes.post("/webhooks/stripe", async (c) => {
 
   // Refunds made in Stripe show up as negative payments. Each refunded total is recorded once.
   if (event.type === "charge.refunded" && object.payment_intent) {
-    const original = (await admin.from("payments").select("company_id, client_id, invoice_id, method").eq("processor_ref", object.payment_intent).maybeSingle()).data;
-    if (original) {
+    const paid = (await admin.from("payments").select("company_id, client_id, invoice_id, method, amount, tip_amount").eq("processor_ref", object.payment_intent).maybeSingle()).data;
+    if (paid) {
+      const { amount: paidAmount, tip_amount: paidTip, ...original } = paid;
       const prefix = `${object.payment_intent}:refund:`;
-      const { data: earlier } = await admin.from("payments").select("amount").like("processor_ref", `${prefix}%`);
-      const already = -(earlier ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
-      const refunded = Number(object.amount_refunded ?? 0) / 100;
-      const amount = Math.round((refunded - already) * 100) / 100;
+      const cents = (value: unknown) => Math.round(Number(value ?? 0) * 100);
+      const { data: earlier } = await admin.from("payments").select("amount, tip_amount").like("processor_ref", `${prefix}%`);
+      const refundedAmount = -(earlier ?? []).reduce((sum, p) => sum + cents(p.amount), 0);
+      const refundedTip = -(earlier ?? []).reduce((sum, p) => sum + cents(p.tip_amount), 0);
+      // Stripe's total includes the tip, which the payment keeps apart from what the invoice was
+      // paid: a refund comes off the invoice first, then the tip.
+      const newly = Number(object.amount_refunded ?? 0) - refundedAmount - refundedTip;
+      const amount = Math.min(newly, cents(paidAmount) - refundedAmount);
+      const tip = Math.max(0, Math.min(newly - amount, cents(paidTip) - refundedTip));
+      // (A refund of only the tip, once the invoice part was all refunded, has no invoice amount to
+      // record; payments can't be zero.)
       if (amount > 0) {
         const { error } = await admin.from("payments").insert({
-          ...original, amount: -amount, processor: "stripe", processor_ref: `${prefix}${object.amount_refunded}`, notes: "Refunded in Stripe", recorded_by: null,
+          ...original, amount: -amount / 100, tip_amount: -tip / 100, processor: "stripe", processor_ref: `${prefix}${object.amount_refunded}`, notes: "Refunded in Stripe", recorded_by: null,
         });
         if (error && error.code !== "23505") throw dbError(error);
       }
@@ -531,10 +546,11 @@ publicRoutes.get("/public/unsubscribe/:token", async (c) => {
 
 publicRoutes.post("/public/unsubscribe/:token", async (c) => {
   const l = await link(c, ["unsub"]);
-  const body = (await c.req.json().catch(() => ({}))) as { resubscribe?: boolean };
-  const { error } = await adminClient(c.env).from("clients").update({ marketing_opt_out: !body.resubscribe }).eq("company_id", l.c).eq("id", l.id);
+  const body = (await c.req.json().catch(() => null)) as { resubscribe?: unknown } | null;
+  const resubscribe = body?.resubscribe === true;
+  const { error } = await adminClient(c.env).from("clients").update({ marketing_opt_out: !resubscribe }).eq("company_id", l.c).eq("id", l.id);
   if (error) throw dbError(error);
-  return c.json({ unsubscribed: !body.resubscribe });
+  return c.json({ unsubscribed: !resubscribe });
 });
 
 /** Tracked review link: record the click, then send the client to the review page. */

@@ -50,6 +50,16 @@ describe("crypto", () => {
     expect(await verifyToken({ ...env, ENCRYPTION_KEY: btoa("y".repeat(32)) }, token)).toBeNull();
   });
 
+  it("refuses request bodies too large to be real before reading them", async () => {
+    const res = await request("/api/public/forms/acme/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers: { notes: "x".repeat(3 * 1024 * 1024) } }) });
+    expect(res.status).toBe(413);
+  });
+
+  it("treats a mangled link as expired rather than failing", async () => {
+    for (const token of ["a.b", "abc.!!!", "abc.a", "x.%%"]) expect(await verifyToken(env, token)).toBeNull();
+    expect((await request("/api/hub/abc.!!!")).status).toBe(404);
+  });
+
   it("builds client links that decode to the same record", async () => {
     const url = await clientLink(env, "https://ops.example.com", { c: "company-1", t: "quote", id: "quote-1" });
     expect(url.startsWith("https://ops.example.com/hub/")).toBe(true);
@@ -118,6 +128,11 @@ describe("MCP discovery", () => {
       resource: "https://ops.example.com/mcp",
       authorization_servers: ["https://example.supabase.co/auth/v1"],
     });
+  });
+
+  it("points assistants at the instance's public sign-in, not its loopback address", async () => {
+    const res = await app.request("/.well-known/oauth-protected-resource/mcp", undefined, { ...env, SUPABASE_URL: "http://127.0.0.1:8080", CREWTAVO_GATEWAY: "1" });
+    expect(await res.json()).toMatchObject({ authorization_servers: ["https://ops.example.com/auth/v1"] });
   });
 
   it("challenges unauthenticated MCP calls with the metadata URL", async () => {

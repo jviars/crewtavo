@@ -1,5 +1,6 @@
 /** The Hono app. server.ts serves it, with the web app and the background-task scheduler. */
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
@@ -26,6 +27,9 @@ import { runTask, TASKS, type TaskName } from "./tasks";
 export const app = new Hono<AppEnv>();
 
 app.use(secureHeaders({ crossOriginResourcePolicy: false }));
+// Bodies are read into memory, so one huge request could exhaust it. The biggest real one is a
+// quote approval with a drawn signature (a few hundred KB); files go straight to Storage.
+app.use(bodyLimit({ maxSize: 2 * 1024 * 1024, onError: (c) => c.json({ error: "That's too large to send." }, 413) }));
 // MCP clients may run in a browser (for example the MCP Inspector).
 app.use(
   "/mcp",
