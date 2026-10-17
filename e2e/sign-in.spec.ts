@@ -28,8 +28,9 @@ test.describe("sign in", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1, name: /Dana/ })).toBeVisible();
     // prefetchScreens (routes.tsx) warms every screen while the browser is idle.
-    await expect.poll(() => screens.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(20);
-    expect(screens).toEqual(expect.arrayContaining(["SchedulePage", "ClientsPage", "QuotePage", "JobPage", "InvoicePage", "FieldTodayPage", "EquipmentPage"]));
+    // They're requested one after another, so wait for the ones checked here rather than a count.
+    await expect.poll(() => screens, { timeout: 15_000 }).toEqual(expect.arrayContaining(["SchedulePage", "ClientsPage", "QuotePage", "JobPage", "InvoicePage", "FieldTodayPage", "EquipmentPage"]));
+    expect(screens.length).toBeGreaterThanOrEqual(20);
 
     // Opening one afterwards needs no new download.
     const before = screens.length;
