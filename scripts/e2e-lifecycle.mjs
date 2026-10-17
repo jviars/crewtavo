@@ -318,6 +318,9 @@ step("7. The employee does the work");
   check(Boolean(entry.id), "their time on the visit is recorded");
   const done = await api(employee, "PATCH", `/visits/${visit.id}`, { status: "completed" });
   check(done.status === 200 && done.body.status === "completed", "the visit is completed", done.body);
+  // The phone sends an earlier tap again (it closed before hearing back): a crew's tap only goes forward.
+  const replay = await api(employee, "PATCH", `/visits/${visit.id}`, { status: "in_progress", forward_only: true });
+  check(replay.status === 200 && replay.body.skipped === true && replay.body.status === "completed", "a repeated earlier tap doesn't reopen the finished visit", replay.body);
   const activity = must(await owner.db.from("activity").select("verb").eq("subject_id", visit.id).eq("verb", "visit.completed"), "activity");
   check(activity.length === 1, "the office sees it in the activity feed");
 

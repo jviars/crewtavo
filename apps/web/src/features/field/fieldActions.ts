@@ -39,8 +39,10 @@ export function showVisitStatus(queryClient: QueryClient, change: VisitStatusCha
 }
 
 export async function setVisitStatus(v: VisitStatusChange) {
-  // As the company it was tapped in, even if the app has switched company since.
-  await api.patch(`/visits/${v.visitId}`, { status: v.status }, { companyId: v.companyId });
+  // As the company it was tapped in, even if the app has switched company since. Forward only: a
+  // tap sent again after later ones went out (the app closed before it heard back) is skipped.
+  const result = await api.patch<{ skipped?: boolean }>(`/visits/${v.visitId}`, { status: v.status, forward_only: true }, { companyId: v.companyId });
+  if (result.skipped) return; // Already past this step, so there's nothing to clock either.
   if (v.status === "in_progress") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "start", v.at);
   if (v.status === "completed") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "stop", v.at);
 }
