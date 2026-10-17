@@ -15,6 +15,19 @@ export interface DayOutlook {
   rain_chance_pct: number | null;
 }
 
+/**
+ * The rules a job's visits are checked against: the job's own when it has any, otherwise the
+ * company's (settings.weather_rules, from its trade preset) for the services on the job, plus those
+ * without applies_to. Both come from JSON people can edit, so anything that isn't a rule is skipped.
+ */
+export function jobWeatherRules(jobRules: unknown, companyRules: unknown, services: string[]): WeatherRule[] {
+  const list = (rules: unknown) => (Array.isArray(rules) ? (rules.filter((r) => r && typeof r === "object") as WeatherRule[]) : []);
+  const own = list(jobRules);
+  if (own.length) return own;
+  const names = new Set(services.map((s) => s.trim().toLowerCase()));
+  return list(companyRules).filter((r) => !r.applies_to || names.has(String(r.applies_to).trim().toLowerCase()));
+}
+
 /** Reasons a visit on `date` breaks its rules; empty when the weather is fine. */
 export function weatherRisks(rules: WeatherRule[], date: string, outlook: DayOutlook[]): string[] {
   const byDate = new Map(outlook.map((d) => [d.date, d]));
@@ -29,8 +42,9 @@ export function weatherRisks(rules: WeatherRule[], date: string, outlook: DayOut
       reasons.push(`${label}${day.rain_chance_pct}% chance of rain`);
     }
     if (rule.requires_dry_hours) {
+      // The dry time starts on the visit day itself, so rain that day counts too.
       const days = Math.max(1, Math.ceil(rule.requires_dry_hours / 24));
-      for (let i = 1; i <= days; i++) {
+      for (let i = 0; i <= days; i++) {
         const next = byDate.get(addDays(date, i));
         if (next?.rain_chance_pct != null && next.rain_chance_pct >= 50) {
           reasons.push(`${label}rain likely on ${next.date} during the ${rule.requires_dry_hours}-hour dry time`);
