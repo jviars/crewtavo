@@ -172,6 +172,9 @@ schedule.get("/schedule", requireUser, requireCompany(), async (c) => {
   return c.json({ visits: must(scheduled), unscheduled: must(unscheduled), crews: must(crews) });
 });
 
+/** The steps a crew takes a visit through, in order. */
+const CREW_STEPS: Record<string, number> = { unscheduled: 0, scheduled: 0, en_route: 1, in_progress: 2, completed: 3 };
+
 schedule.patch("/visits/:id", requireUser, requireCompany(), async (c) => {
   const id = param(c, "id");
   const body = await readJson(
@@ -188,9 +191,20 @@ schedule.patch("/visits/:id", requireUser, requireCompany(), async (c) => {
       equipment_ids: z.array(uuid).max(30).optional(),
       /** For multi-day work: when this day moves, move the days after it by as much. */
       shift_series: z.boolean().optional(),
+      /** A crew's tap: never moves the visit back a step (see below). */
+      forward_only: z.boolean().optional(),
     }),
   );
-  const { assignee_ids, equipment_ids, shift_series, ...fields } = body;
+  const { assignee_ids, equipment_ids, shift_series, forward_only, ...fields } = body;
+  // A crew only moves a visit forward. A tap sent again later (the phone closed the app before it
+  // heard back, say) can arrive after the taps that followed it, so it's skipped, not applied
+  // backwards: a finished visit isn't reopened, and a cancelled one stays cancelled.
+  if (forward_only && fields.status) {
+    const now = must(await c.var.db.from("visits").select("status").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Visit not found.");
+    if (now.status === "cancelled" || (CREW_STEPS[now.status] ?? 0) > (CREW_STEPS[fields.status] ?? 0)) {
+      return c.json({ ...must(await c.var.db.from("visits").select(VISIT_FIELDS).eq("id", id).maybeSingle()), skipped: true });
+    }
+  }
   const reschedules = assignee_ids !== undefined || equipment_ids !== undefined || ["starts_at", "ends_at", "scheduled_on", "crew_id"].some((k) => k in fields);
   // Which visits and people: the database decides (every crew with the "schedule" area, a crew
   // lead's own crew without it). See private.schedules_crew().
