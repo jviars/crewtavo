@@ -6,6 +6,7 @@
  *   invoice - view and pay (with an optional tip)
  * Add ?print=1 to print or save a PDF.
  */
+import { lineTotal, quoteTotals } from "@crewtavo/core/money";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -15,8 +16,8 @@ import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { ApiError } from "@/lib/api";
-import { formatDate, formatMoneyCents } from "@/lib/format";
-import { ClientPortal, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
+import { dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
 import { SignaturePad } from "../field/SignaturePad";
 
 interface HubLine {
@@ -30,7 +31,7 @@ interface HubLine {
   optional?: boolean;
   selected?: boolean;
 }
-interface Company { name: string; phone: string | null; email: string | null; website: string | null; branding?: { color?: string } | null }
+interface Company { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null }
 interface QuoteView {
   kind: "quote";
   preview?: boolean;
@@ -174,7 +175,9 @@ function Done({ title, children }: { title: string; children?: ReactNode }) {
 
 function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; onChanged: () => void }) {
   const q = data.quote;
-  const expired = Boolean(q.valid_until && q.valid_until < new Date().toISOString().slice(0, 10));
+  const tz = hubZone(data.company);
+  // Valid through the end of that day where the company is, not in UTC.
+  const expired = Boolean(q.valid_until && q.valid_until < todayIn(tz));
   const open = ["sent", "changes_requested"].includes(q.status) && !data.preview;
   const [chosen, setChosen] = useState<string[]>(() => q.lines.filter((l) => l.optional && l.selected).map((l) => l.id!));
   const [name, setName] = useState("");
@@ -186,18 +189,9 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
   const requestChanges = useMutation({ mutationFn: () => hubFetch(`${token}/request-changes`, { message: changes.trim() }), onSuccess: onChanged });
 
   const included = (l: HubLine) => !l.optional || chosen.includes(l.id!);
-  const lineTotal = (l: HubLine) => Math.round(Number(l.quantity) * Number(l.unit_price) * 100) / 100;
-  const subtotal = q.lines.filter(included).reduce((s, l) => s + lineTotal(l), 0);
-  const taxable = q.lines.filter((l) => included(l) && l.taxable !== false).reduce((s, l) => s + lineTotal(l), 0);
-  // Same math as the database: the discount comes off before tax, spread over taxable and untaxed work.
-  const charges = q.lines.filter((l) => included(l) && lineTotal(l) > 0);
-  const base = charges.reduce((s, l) => s + lineTotal(l), 0);
-  const baseTaxable = charges.filter((l) => l.taxable !== false).reduce((s, l) => s + lineTotal(l), 0);
-  // A percent code follows the options the client picks, as it does on the saved quote.
-  const promoDiscount = q.promo ? (q.promo.kind === "percent" ? Math.round(base * Number(q.promo.value)) / 100 : Math.min(Number(q.promo.value), base)) : null;
-  const discount = Math.min(promoDiscount ?? Number(q.discount_amount), Math.max(subtotal, 0));
-  const tax = Math.round(Math.max(taxable - (base > 0 ? (discount * baseTaxable) / base : 0), 0) * Number(q.tax_rate) * 100) / 100;
-  const total = Math.max(subtotal - discount, 0) + tax;
+  // The database's own math (to the cent), so the total the client approves is the one saved. A
+  // percent code follows the options the client picks, as it does on the saved quote.
+  const { subtotal, discount, tax, total } = quoteTotals(q.lines.map((l) => ({ ...l, selected: included(l) })), { taxRate: q.tax_rate, discountAmount: q.discount_amount, promo: q.promo });
 
   return (
     <>
@@ -220,7 +214,7 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
               {l.description && <div className="muted text-sm pre-wrap">{l.description}</div>}
               <div className="muted small">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</div>
             </div>
-            <strong className="tabular">{formatMoneyCents(lineTotal(l))}</strong>
+            <strong className="tabular">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</strong>
           </div>
         ))}
         <div className="card-pad totals" style={{ borderTop: "1px solid var(--divider)" }}>
@@ -234,7 +228,7 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
       </section>
 
       {q.status === "approved" || q.status === "converted" ? (
-        <Done title={`Approved${q.approved_at ? ` on ${formatDate(q.approved_at)}` : ""}`}>Thank you! {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}</Done>
+        <Done title={`Approved${q.approved_at ? ` on ${formatDate(dateIn(q.approved_at, tz))}` : ""}`}>Thank you! {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}</Done>
       ) : requestChanges.isSuccess ? (
         <Done title="Request sent">{data.company.name} will review your notes and follow up with an updated quote.</Done>
       ) : open ? (
@@ -285,7 +279,9 @@ function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceVi
     mutationFn: () => hubFetch<{ url: string }>(`${token}/pay`, { tip }),
     onSuccess: (res) => window.location.assign(res.url),
   });
-  const late = inv.due_on && balance > 0 && inv.due_on < new Date().toISOString().slice(0, 10);
+  const tz = hubZone(data.company);
+  // Late the day after it's due where the company is (the same day the invoice turns overdue).
+  const late = inv.due_on && balance > 0 && inv.due_on < todayIn(tz);
   return (
     <>
       <section className="card card-pad stack-sm">
@@ -302,7 +298,7 @@ function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceVi
               {l.description && <div className="muted text-sm pre-wrap">{l.description}</div>}
               <div className="muted small">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</div>
             </div>
-            <span className="tabular">{formatMoneyCents(Number(l.quantity) * Number(l.unit_price))}</span>
+            <span className="tabular">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</span>
           </div>
         ))}
         <div className="card-pad totals" style={{ borderTop: "1px solid var(--divider)" }}>
@@ -319,9 +315,9 @@ function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceVi
           {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage (billed later)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}
           {inv.payments.map((p, i) =>
             Number(p.amount) > 0 ? (
-              <div key={i} className="line"><span>Paid {formatDate(p.received_at)}</span><span>−{formatMoneyCents(p.amount)}</span></div>
+              <div key={i} className="line"><span>Paid {formatDate(dateIn(p.received_at, tz))}</span><span>−{formatMoneyCents(p.amount)}</span></div>
             ) : (
-              <div key={i} className="line"><span>Refunded {formatDate(p.received_at)}</span><span>+{formatMoneyCents(-Number(p.amount))}</span></div>
+              <div key={i} className="line"><span>Refunded {formatDate(dateIn(p.received_at, tz))}</span><span>+{formatMoneyCents(-Number(p.amount))}</span></div>
             ),
           )}
           <div className="line grand" style={{ fontSize: 20 }}><span>Balance due</span><span>{formatMoneyCents(balance)}</span></div>

@@ -277,11 +277,15 @@ schedule.post("/schedule/shift", requireUser, requireCompany(DISPATCH), async (c
   return c.json({ moved: updates.length });
 });
 
-/** Order a day's anytime visits for one crew to shorten the drive. */
+/** Ordering takes about a quarter second at 100 stops and grows fast (2.6 s at 200), blocking the server. */
+export const MAX_ROUTE_STOPS = 100;
+
+/** Order a day's anytime visits for one crew (or the visits with no crew) to shorten the drive. */
 schedule.post("/schedule/optimize", requireUser, requireCompany(DISPATCH), async (c) => {
   const body = await readJson(
     c,
-    z.object({ date: isoDate, crew_id: uuid.optional(), start: z.object({ lat: z.number(), lng: z.number() }).optional() }),
+    // No crew_id (or null) means the visits with no crew, never every crew's at once.
+    z.object({ date: isoDate, crew_id: uuid.nullish(), start: z.object({ lat: z.number(), lng: z.number() }).optional() }),
   );
   if (!c.var.permissions.includes("schedule")) {
     const mine = body.crew_id ? must(await c.var.db.rpc("my_crew_ids", { p_company: c.var.companyId })) : [];
@@ -294,12 +298,15 @@ schedule.post("/schedule/optimize", requireUser, requireCompany(DISPATCH), async
     .eq("scheduled_on", body.date)
     .is("starts_at", null)
     .not("status", "in", "(completed,cancelled)");
-  if (body.crew_id) query = query.eq("crew_id", body.crew_id);
+  query = body.crew_id ? query.eq("crew_id", body.crew_id) : query.is("crew_id", null);
   const rows = must(await query) as Array<{ id: string; property: { lat: number | null; lng: number | null } | null }>;
   const stops = rows
     .filter((r) => r.property?.lat != null && r.property?.lng != null)
     .map((r) => ({ id: r.id, lat: r.property!.lat!, lng: r.property!.lng! }));
   if (!stops.length) return c.json({ order: [], miles_before: 0, miles_after: 0, skipped: rows.length });
+  if (stops.length > MAX_ROUTE_STOPS) {
+    throw new HttpError(400, `That's ${stops.length} stops. Route ordering handles up to ${MAX_ROUTE_STOPS} at a time, so split them across crews or days first.`);
+  }
 
   const { settings } = await companyZone(c);
   const start = body.start ?? settings.depot ?? stops[0];

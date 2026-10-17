@@ -1,0 +1,134 @@
+/**
+ * Money math that matches Postgres to the cent. The database works out quote and invoice totals
+ * (private.quote_totals and invoice_totals); pages that show a total before it's saved, like the
+ * Client Hub as a client picks options, use these so the number they see is the number stored.
+ * Amounts are whole cents in BigInt, rounded the way numeric round() does: half away from zero.
+ */
+
+export type Amount = number | string | null | undefined;
+
+export interface TotalsLine {
+  quantity: Amount;
+  unit_price: Amount;
+  taxable?: boolean | null;
+  /** Optional lines the client didn't choose are false. */
+  selected?: boolean | null;
+}
+
+export interface TotalsPromo {
+  kind: string; // 'percent' or 'amount'
+  value: Amount;
+}
+
+const abs = (n: bigint) => (n < 0n ? -n : n);
+const max = (a: bigint, b: bigint) => (a > b ? a : b);
+const min = (a: bigint, b: bigint) => (a < b ? a : b);
+const pow10 = (n: number) => 10n ** BigInt(n);
+
+/** n / d rounded half away from zero (d > 0), as Postgres rounds numeric. */
+function divRound(n: bigint, d: bigint): bigint {
+  const q = (2n * abs(n) + d) / (2n * d);
+  return n < 0n ? -q : q;
+}
+
+const DECIMAL = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i;
+
+/**
+ * A decimal as a whole number of 10^-scale units, rounded like a numeric(…, scale) column:
+ * toUnits(1.5, 3) is 1500n. Reads the number as written (297.65, not its binary float).
+ */
+export function toUnits(value: Amount, scale: number): bigint {
+  const m = DECIMAL.exec(String(value ?? "").trim());
+  if (!m || !(m[2] || m[3])) return 0n;
+  const digits = BigInt(`${m[2]}${m[3] ?? ""}` || "0");
+  const shift = Number(m[4] ?? 0) - (m[3]?.length ?? 0) + scale;
+  const units = shift >= 0 ? digits * pow10(shift) : divRound(digits, pow10(-shift));
+  return m[1] === "-" ? -units : units;
+}
+
+const toDollars = (cents: bigint) => Number(cents) / 100;
+
+/** Weight (in base-10000 digits) and first base-10000 digit of n * 10^-scale, as Postgres stores it. */
+function leading(n: bigint, scale: number): [number, bigint] {
+  if (n === 0n) return [0, 0n];
+  const exp = abs(n).toString().length - 1 - scale;
+  const weight = Math.floor(exp / 4);
+  const shift = scale + 4 * weight;
+  return [weight, shift >= 0 ? abs(n) / pow10(shift) : abs(n) * pow10(-shift)];
+}
+
+/**
+ * Postgres numeric division of n1*10^-s1 by n2*10^-s2 (n2 > 0). It keeps at least 16 significant
+ * digits and rounds there, which can decide a half cent later on (select_div_scale in numeric.c).
+ * Returns the quotient as [units, scale].
+ */
+function pgDivide(n1: bigint, s1: number, n2: bigint, s2: number): [bigint, number] {
+  const [w1, d1] = leading(n1, s1);
+  const [w2, d2] = leading(n2, s2);
+  const qweight = w1 - w2 - (d1 <= d2 ? 1 : 0);
+  const scale = Math.min(Math.max(16 - qweight * 4, s1, s2, 0), 1000);
+  const shift = s2 - s1 + scale;
+  return [shift >= 0 ? divRound(n1 * pow10(shift), n2) : divRound(n1, n2 * pow10(-shift)), scale];
+}
+
+/** round(quantity * unit_price, 2) in cents. */
+function lineCents(quantity: Amount, unitPrice: Amount): bigint {
+  return divRound(toUnits(quantity, 3) * toUnits(unitPrice, 2), 1000n);
+}
+
+/** A line's total as the database rounds it: round(quantity * unit_price, 2). */
+export function lineTotal(quantity: Amount, unitPrice: Amount): number {
+  return toDollars(lineCents(quantity, unitPrice));
+}
+
+/** Whole cents in an amount, e.g. 12.5 -> 1250. */
+export function toCents(value: Amount): number {
+  return Number(toUnits(value, 2));
+}
+
+/**
+ * A quote's totals, step for step as private.quote_totals() works them out: each line rounded to
+ * the cent; a promo code's discount figured on the charges (lines with a positive price); the
+ * discount spread over taxable and untaxed charges before tax; tax rounded to the cent.
+ */
+export function quoteTotals(lines: TotalsLine[], opts: { taxRate: Amount; discountAmount?: Amount; promo?: TotalsPromo | null }) {
+  let sub = 0n;
+  let taxable = 0n;
+  let base = 0n;
+  let baseTaxable = 0n;
+  for (const l of lines) {
+    if (l.selected === false) continue;
+    const cents = lineCents(l.quantity, l.unit_price);
+    const taxed = l.taxable !== false;
+    sub += cents;
+    if (taxed) taxable += cents;
+    if (toUnits(l.unit_price, 2) > 0n) {
+      base += cents;
+      if (taxed) baseTaxable += cents;
+    }
+  }
+
+  // private.promo_discount(): a percent of the charges, or a dollar amount up to them.
+  let offered = toUnits(opts.discountAmount, 2);
+  if (opts.promo) {
+    const value = toUnits(opts.promo.value, 2);
+    if (base <= 0n) offered = 0n;
+    else if (opts.promo.kind === "percent") {
+      const [units, scale] = pgDivide(base * value, 4, 100n, 0);
+      offered = divRound(units, pow10(scale - 2));
+    } else offered = min(value, base);
+  }
+  const discount = min(offered, max(sub, 0n));
+
+  // round(greatest(taxable - discount * base_taxable / base, 0) * tax_rate, 2)
+  const rate = toUnits(opts.taxRate, 4);
+  let tax: bigint;
+  if (base > 0n) {
+    const [share, scale] = pgDivide(discount * baseTaxable, 4, base, 2);
+    tax = divRound(max(taxable * pow10(scale - 2) - share, 0n) * rate, pow10(scale + 2));
+  } else {
+    tax = divRound(max(taxable, 0n) * rate, 10000n);
+  }
+  const total = max(sub - discount, 0n) + tax;
+  return { subtotal: toDollars(sub), discount: toDollars(discount), tax: toDollars(tax), total: toDollars(total) };
+}

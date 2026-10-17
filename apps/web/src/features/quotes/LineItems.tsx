@@ -3,6 +3,7 @@
  * it for editing (one at a time). Each field saves when it loses focus (or on Enter); totals are
  * recalculated by Postgres triggers, so the parent just refetches. Removing a line can be undone.
  */
+import { lineTotal } from "@crewtavo/core/money";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -142,7 +143,7 @@ export function LineItems({
 
   const totals = useMemo(() => {
     const included = lines.filter((l) => !(withOptions && l.optional && !l.selected));
-    const price = included.reduce((s, l) => s + Number(l.quantity) * Number(l.unit_price), 0);
+    const price = included.reduce((s, l) => s + lineTotal(l.quantity, l.unit_price), 0);
     const cost = included.reduce((s, l) => s + Number(l.quantity) * Number(l.unit_cost ?? 0), 0);
     const costed = included.some((l) => l.unit_cost != null && Number(l.unit_cost) > 0);
     return { price, cost, costed };
@@ -319,7 +320,8 @@ function NumberField({ value, onCommit, label, step = "any", align = "right", pr
 /** A line as it reads to the office: click anywhere on it to edit. */
 function LineSummary({ line, withOptions, onOpen, actions }: { line: Line; withOptions: boolean; onOpen: () => void; actions: React.ReactNode }) {
   const excluded = withOptions && line.optional && !line.selected;
-  const amount = Number(line.quantity) * Number(line.unit_price);
+  // Rounded to the cent as the database rounds it (1.5 × $0.35 is $0.53).
+  const amount = lineTotal(line.quantity, line.unit_price);
   const qty = formatNumber(Number(line.quantity), Number(line.quantity) % 1 ? 2 : 0);
   return (
     <div className="line-view" role="row" data-excluded={excluded || undefined}>
@@ -366,7 +368,7 @@ function LineRow({ table, line, editable, withOptions, showCosts, onChanged, onD
   };
   const blurOnEnter = (e: KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
   const excluded = withOptions && line.optional && !line.selected;
-  const amount = Number(draft.quantity) * Number(draft.unit_price);
+  const amount = lineTotal(draft.quantity, draft.unit_price);
 
   if (!editable) {
     return (

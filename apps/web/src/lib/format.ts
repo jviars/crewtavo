@@ -11,9 +11,9 @@ export const formatMoneyCompact = (n: number | null | undefined) => (Math.abs(n 
 export const formatDay = (value: string | Date) =>
   new Date(value).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
-/** "7:20 AM" */
-export const formatTime = (value: string | Date) =>
-  new Date(String(value).replace(" ", "T")).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+/** "7:20 AM", in `timeZone` when given (the company's), otherwise the browser's. */
+export const formatTime = (value: string | Date, timeZone?: string) =>
+  new Date(String(value).replace(" ", "T")).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
 
 export const formatNumber = (n: number, digits = 0) =>
   n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -22,9 +22,9 @@ export const formatNumber = (n: number, digits = 0) =>
 export const formatDate = (value: string | Date | null | undefined) =>
   value ? new Date(String(value).length === 10 ? `${value}T12:00:00` : value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
-/** "Thu, Oct 16, 7:00 AM" */
-export const formatDateTime = (value: string | Date) =>
-  new Date(value).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+/** "Thu, Oct 16, 7:00 AM", in `timeZone` when given (the company's), otherwise the browser's. */
+export const formatDateTime = (value: string | Date, timeZone?: string) =>
+  new Date(value).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
 
 /** "3 days ago", "in 2 hours" */
 export function timeAgo(value: string | Date): string {
@@ -37,6 +37,9 @@ export function timeAgo(value: string | Date): string {
 
 /** Today's date (YYYY-MM-DD) in a time zone. */
 export const todayIn = (timeZone: string) => new Date().toLocaleDateString("en-CA", { timeZone });
+
+/** The date (YYYY-MM-DD) a timestamp falls on in a time zone: 8:30 PM Oct 16 in New York is Oct 16, not the UTC Oct 17. */
+export const dateIn = (value: string | Date, timeZone: string) => new Date(value).toLocaleDateString("en-CA", { timeZone });
 
 export const addDaysIso = (date: string, days: number) => {
   const d = new Date(`${date}T12:00:00Z`);

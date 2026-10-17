@@ -1,3 +1,4 @@
+import { lineTotal } from "@crewtavo/core";
 import type { Db } from "../lib/supabase";
 /**
  * Accounting sync: push clients, invoices and payments to QuickBooks Online or Zoho Books.
@@ -159,7 +160,7 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
       Line: [
         ...lines.map((line: any) => ({
           DetailType: "SalesItemLineDetail",
-          Amount: Math.round(Number(line.quantity) * Number(line.unit_price) * 100) / 100,
+          Amount: lineTotal(line.quantity, line.unit_price), // rounded as the invoice's own totals are
           Description: line.description || line.name,
           SalesItemLineDetail: {
             ItemRef: { value: (line.service_id && itemMap[line.service_id]) || defaultItem },
