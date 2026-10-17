@@ -132,6 +132,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"calendar_events": {
+                  Row: {
+                    "all_day": boolean,"busy": boolean,"company_id": string,"description": string | null,"ends_at": string | null,"ends_on": string,"id": string,"key": string,"location": string | null,"source_id": string,"starts_at": string | null,"starts_on": string,"synced_at": string,"title": string,"url": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "all_day"?: boolean,"busy"?: boolean,"company_id": string,"description"?: string | null,"ends_at"?: string | null,"ends_on": string,"id"?: string,"key": string,"location"?: string | null,"source_id": string,"starts_at"?: string | null,"starts_on": string,"synced_at"?: string,"title": string,"url"?: string | null
+                  }
+                  Update: {
+                    "all_day"?: boolean,"busy"?: boolean,"company_id"?: string,"description"?: string | null,"ends_at"?: string | null,"ends_on"?: string,"id"?: string,"key"?: string,"location"?: string | null,"source_id"?: string,"starts_at"?: string | null,"starts_on"?: string,"synced_at"?: string,"title"?: string,"url"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "calendar_events_company_id_source_id_fkey"
+      columns: ["company_id","source_id"]
+isOneToOne: false
+      referencedRelation: "calendar_sources"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"calendar_feeds": {
                   Row: {
                     "company_id": string,"created_at": string,"id": string,"last_used_at": string | null,"scope": string,"token_hash": string,"token_sealed": string,"user_id": string
@@ -146,6 +166,32 @@ isOneToOne: false
                   Relationships: [
                     {
       foreignKeyName: "calendar_feeds_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"calendar_sources": {
+                  Row: {
+                    "app": string,"blocks_time": boolean,"color": string | null,"company_id": string,"created_at": string,"created_by": string | null,"crew_id": string | null,"enabled": boolean,"event_count": number,"external_id": string | null,"host": string | null,"id": string,"kind": string,"last_error": string | null,"last_synced_at": string | null,"name": string,"show_details": boolean,"updated_at": string,"url_sealed": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "app": string,"blocks_time"?: boolean,"color"?: string | null,"company_id": string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"enabled"?: boolean,"event_count"?: number,"external_id"?: string | null,"host"?: string | null,"id"?: string,"kind": string,"last_error"?: string | null,"last_synced_at"?: string | null,"name": string,"show_details"?: boolean,"updated_at"?: string,"url_sealed"?: string | null
+                  }
+                  Update: {
+                    "app"?: string,"blocks_time"?: boolean,"color"?: string | null,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"enabled"?: boolean,"event_count"?: number,"external_id"?: string | null,"host"?: string | null,"id"?: string,"kind"?: string,"last_error"?: string | null,"last_synced_at"?: string | null,"name"?: string,"show_details"?: boolean,"updated_at"?: string,"url_sealed"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "calendar_sources_company_id_crew_id_fkey"
+      columns: ["company_id","crew_id"]
+isOneToOne: false
+      referencedRelation: "crews"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "calendar_sources_company_id_fkey"
       columns: ["company_id"]
 isOneToOne: false
       referencedRelation: "companies"

@@ -3,6 +3,7 @@ export * from "./email";
 export * from "./equipment";
 export * from "./formulas";
 export * from "./geo";
+export * from "./ical";
 export * from "./money";
 export * from "./notifications";
 export * from "./presets";

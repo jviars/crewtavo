@@ -13,6 +13,7 @@
     "./database": "./src/database.types.ts",
     "./time": "./src/time.ts",
     "./recurrence": "./src/recurrence.ts",
+    "./ical": "./src/ical.ts",
     "./automations": "./src/automations.ts",
     "./equipment": "./src/equipment.ts",
     "./privacy": "./src/privacy.ts",
