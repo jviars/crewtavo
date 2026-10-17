@@ -22,7 +22,7 @@ every deploy generates its own and the person deploying fills in nothing.
 ### crewtavo
 
 - **Source:** Docker image `ghcr.io/jviars/crewtavo:<version>`, the latest release (built from the
-  root `Dockerfile`; see [Updates](#updates)). **Auto updates:** minor updates and patches, as soon
+  root `Dockerfile`; see [Updates](#updates)). **Auto updates:** update to the latest tag, as soon
   as ready.
 - **Networking:** public HTTP on port **8080**; a generated `*.up.railway.app` domain.
 - **Deploy:** healthcheck path `/api/health`, healthcheck timeout **600** seconds (a brand-new
@@ -44,7 +44,7 @@ every deploy generates its own and the person deploying fills in nothing.
 
 - **Source:** Docker image `ghcr.io/jviars/crewtavo-db:<version>`, its latest release (built from
   `deploy/postgres/Dockerfile`: Supabase's Postgres image plus the role setup). **Auto updates:**
-  minor updates and patches, overnight.
+  update to the latest tag, overnight.
 - **Volume:** mounted at `/var/lib/postgresql/data`.
 - **Variables:** `POSTGRES_PASSWORD` = `${{secret(32, "abcdef0123456789")}}`, `POSTGRES_HOST` =
   `/var/run/postgresql`, `POSTGRES_PORT` = `5432`, `PGPORT` = `5432`, `POSTGRES_DB` = `postgres`.
@@ -80,7 +80,8 @@ template editor. To do it again:
    `auth`, `rest` and `storage`; the variables refer to services by name. Attach a volume to `db`
    at `/var/lib/postgresql/data` and to `storage` at `/var/lib/storage` (right-click the service →
    **Attach Volume**).
-3. On `crewtavo` and `db`: **Settings → Source → Configure auto updates**, as listed above.
+3. On `crewtavo` and `db`: **Settings → Source → Configure auto updates**, as listed above. (The
+   editor saves "Update to the latest tag" as patch updates; it doesn't offer minor ones.)
 4. Paste each service's variables into its **Variables → Raw Editor**: the tables above, and
    `.railway/railway.ts` for auth, rest and storage, with `${{secret(...)}}` for `JWT_SECRET` and
    `POSTGRES_PASSWORD` so every deploy gets its own.
@@ -106,10 +107,10 @@ Instances update themselves. `crewtavo` and `db` run images that
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) publishes to GitHub's container
 registry when a version tag is pushed, and the template turns on Railway's
 [image auto updates](https://docs.railway.com/deployments/image-auto-updates) for both. Railway
-checks the registry (it caches what it finds for up to a few hours), moves the service to the new
-tag and redeploys it, then notifies the workspace's admins. The business does nothing, and nothing
-is paid for: the images are public, and GitHub Actions and the registry are free for public
-repositories.
+checks the registry (it can take several hours to notice a new tag), moves the service to the next
+patch version (`0.1.1` → `0.1.2`, never `0.2.0`) and redeploys it, then notifies the workspace's
+admins. The business does nothing, and nothing is paid for: the images are public, and GitHub
+Actions and the registry are free for public repositories.
 
 - **crewtavo** updates as soon as Railway sees a release. There's no downtime: the new version
   applies migrations as it starts and only takes traffic once `/api/health` answers, so a failed
@@ -119,8 +120,9 @@ repositories.
   while Postgres restarts.
 - **auth, rest and storage** stay on the versions the template pins: Railway can't watch their
   registry (`public.ecr.aws`). Changing one of them reaches new instances only.
-- A **major version** doesn't install itself. Railway shows it on the service, and the owner moves
-  to it under **Settings → Source** after reading the release notes.
+- A new **minor or major version** (`0.2.0`, `1.0.0`) doesn't install itself: the template only
+  sets up patch updates, and an instance keeps the setting it was deployed with. The owner moves to
+  it by changing the image tag under **Settings → Source**, after reading the release notes.
 
 `https://<instance>/api/health` shows the version an instance runs, for example
 `{"ok":true,"version":"0.1.1"}`.
@@ -135,15 +137,16 @@ git push origin v0.1.1
 ```
 
 The workflow publishes `ghcr.io/jviars/crewtavo:0.1.1` (and `crewtavo-db:0.1.1` when
-`deploy/postgres` changed) in about five minutes. Write release notes on GitHub for anything an
-owner should know. Pick the number by what an instance can take unattended:
+`deploy/postgres` changed) in about five minutes, and instances pick it up over the next several
+hours. Write release notes on GitHub for anything an
+owner should know. Pick the number by whether an instance can take it unattended:
 
-- **Patch** (`0.1.1`): fixes.
-- **Minor** (`0.2.0`): features and migrations. Both install unattended, and the previous version
-  keeps serving while the new one migrates, so a migration has to leave the database usable by the
-  previous version (add first, remove in a later release).
-- **Major** (`1.0.0`): anything the owner has to do by hand, such as a new required variable or a
-  new Postgres major version (which needs its data upgraded). Say what to do in the release notes.
+- **Patch** (`0.1.1`, `0.1.2`...): every release that can, features and migrations included. The
+  previous version keeps serving while the new one migrates, so a migration has to leave the
+  database usable by the previous version (add first, remove in a later release).
+- **Minor or major** (`0.2.0`, `1.0.0`): only for what the owner has to do by hand, such as a new
+  required variable or a new Postgres major version (which needs its data upgraded). Say what to do
+  in the release notes.
 
 ### Why images
 
