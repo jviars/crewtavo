@@ -6,32 +6,50 @@
  *   - the user is dropped (no email, IP address or id)
  *   - emails, phone numbers, sign-in tokens and signed client links (/hub/..., /u/...) are masked
  *     in messages, error values, breadcrumbs, tags, extra data and contexts
- *   - values under keys like "email", "phone", "address" or "token" are replaced entirely
+ *   - values under keys like "email", "phone", "address", "token" or "lockbox_code" are replaced entirely
+ *   - text longer than 10,000 characters is cut there
  *
  * Stack frames (file, function, line) are kept: that's what makes a report useful.
  */
 
-const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,}/gi;
-/** 10 or more digits, optionally with a country code and separators: +1 (540) 555-0199, 540.555.0199. */
-const PHONE = /(?<![\w/.:-])(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?![\w-])/g;
+/** Starts only where an address can start: trying every letter of a long word made this O(n²). */
+const EMAIL = /(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,}/gi;
+/**
+ * 10 or more digits, optionally with a country code and separators: +1 (540) 555-0199, 540.555.0199.
+ * Not inside longer numbers, words or paths, though "Phone:5405550199", "x5405550199" and "5405550199x12" count.
+ */
+const PHONE = /(?<![\w/.-](?<![xX]))(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?![\w-](?<![xX]))/g;
+/** tel: and sms: links are phone numbers, however they're written (and sms: can carry the message). */
+const TEL_LINK = /\b(tel|sms):[^\s"'<>]+/gi;
 /** JWTs (Supabase sessions) and Crewtavo's signed links are base64url JSON: they start with "eyJ". */
 const TOKEN = /\beyJ[\w-]+(?:\.[\w-]+){1,2}/g;
 /** Path segments that are secrets: Client Hub, unsubscribe, referral, review and calendar links. */
 const SECRET_PATH = /\/(hub|u|refer|r|calendar)\/[^/?#\s"'<>]+/gi;
 /** Query strings and fragments carry search terms, filters and auth tokens. */
 const URL_QUERY = /(\b(?:https?|wss?):\/\/[^\s?#"'<>]*)[?#][^\s"'<>]*/gi;
-const SENSITIVE_KEY = /pass|secret|token|auth|cookie|session|email|phone|mobile|address|line1|postal|gate|card|iban|ssn|body/i;
+/** The same in relative URLs and bare fragments: /verify?token_hash=..., #refresh_token=... */
+const QUERY_STRING = /[?#][^\s"'<>=?#]*=[^\s"'<>]*/g;
+const SENSITIVE_KEY = /pass|secret|token|auth|cookie|session|email|phone|mobile|address|line1|postal|gate|lockbox|alarm|card|iban|ssn|body/i;
+/** Door, lockbox and other access codes: any "..._code" key except status, error and other harmless codes. */
+const CODE_KEY = /(?<!^|(?:status|error|err|exit|http|response|reason|country|currency|language|lang|locale)[_-]?)code$/i;
 const URL_KEY = /^(url|from|to|href)$/i;
 const KEEP_HEADERS = /^user-agent$/i;
+/** Longest text scrubbed; the rest is dropped, so one huge string can't stall an error report. */
+const MAX_TEXT = 10_000;
 
 /** Mask personal data and secrets in free text. */
 export function scrubText(text: string): string {
-  return text
+  const long = text.length > MAX_TEXT;
+  // Scrub a little past the cut, so an email or phone number cut in half is still masked.
+  const scrubbed = (long ? text.slice(0, MAX_TEXT + 200) : text)
     .replace(URL_QUERY, "$1")
+    .replace(QUERY_STRING, "")
     .replace(TOKEN, "[token]")
     .replace(SECRET_PATH, "/$1/[token]")
     .replace(EMAIL, "[email]")
+    .replace(TEL_LINK, "$1:[phone]")
     .replace(PHONE, "[phone]");
+  return long ? `${scrubbed.slice(0, MAX_TEXT)} [truncated]` : scrubbed;
 }
 
 /** A URL without its query string or fragment, with secrets in the path masked. */
@@ -46,7 +64,7 @@ function scrubValue(value: unknown, key = "", depth = 0): unknown {
   if (depth > 6) return "[truncated]";
   if (Array.isArray(value)) return value.map((item) => scrubValue(item, "", depth + 1));
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) out[k] = SENSITIVE_KEY.test(k) ? "[redacted]" : scrubValue(v, k, depth + 1);
+  for (const [k, v] of Object.entries(value)) out[k] = SENSITIVE_KEY.test(k) || CODE_KEY.test(k) ? "[redacted]" : scrubValue(v, k, depth + 1);
   return out;
 }
 

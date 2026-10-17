@@ -126,7 +126,8 @@ function parse(source: string): Node {
     if (token.kind === "name") {
       pos++;
       if (isOp("(")) {
-        if (!(token.value in FUNCTIONS)) fail(`Unknown function "${token.value}"`);
+        // Own keys only: every object also has "constructor", "__proto__" and the like.
+        if (!Object.hasOwn(FUNCTIONS, token.value)) fail(`Unknown function "${token.value}"`);
         pos++;
         const args: Node[] = [];
         if (!isOp(")")) {
@@ -160,7 +161,7 @@ function evalNode(node: Node, vars: Record<string, number | null | undefined>): 
     case "num":
       return node.value;
     case "var": {
-      if (!Object.prototype.hasOwnProperty.call(vars, node.name)) fail(`Unknown value "${node.name}"`);
+      if (!Object.hasOwn(vars, node.name)) fail(`Unknown value "${node.name}"`);
       const value = vars[node.name];
       if (value === null || value === undefined || Number.isNaN(Number(value))) fail(`"${node.name}" has no value yet`);
       return Number(value);

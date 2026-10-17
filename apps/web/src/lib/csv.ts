@@ -15,7 +15,7 @@ export function parseCsv(text: string): string[][] {
           i++;
         } else quoted = false;
       } else field += ch;
-    } else if (ch === '"') quoted = true;
+    } else if (ch === '"' && field === "") quoted = true; // later in a field (12" curb) it's just a character
     else if (ch === ",") {
       row.push(field);
       field = "";
