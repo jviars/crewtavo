@@ -122,8 +122,10 @@ export const test = base.extend<Fixtures>({
 
 /** Scan the screen with axe-core and fail on any WCAG 2.1 A or AA violation, listing each one. */
 export async function expectAccessible(page: Page, screen: string) {
-  // Let entrance animations finish so colors are measured at rest.
+  // Let entrance animations finish so colors are measured at rest, including a toast that's still
+  // fading in or out (endless ones, like skeleton shimmer, never finish and don't count).
   await page.waitForTimeout(400);
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getComputedTiming().endTime === Infinity), null, { timeout: 5_000 });
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   const problems = results.violations.map((v) => `${v.id} (${v.impact}): ${v.help}\n    ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join("\n    ")}`);
   expect(problems, `Accessibility problems on ${screen}`).toEqual([]);
