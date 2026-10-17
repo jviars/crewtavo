@@ -51,9 +51,10 @@ If something isn't ready yet, that address shows a **Finish setting up** page sa
 instead of an error.
 
 > [!NOTE]
-> **Cost.** The business pays Railway directly. Railway's free trial (30 days, $5 of credit) is
-> for trying Crewtavo out; to keep it running, a business needs Railway's Hobby plan: $5 a month,
-> which includes $5 of usage. Busy instances use more. Check
+> **Cost.** The business pays Railway directly. A new instance at rest uses about 0.36 GB of
+> memory across its five services, roughly $3.60 a month of Railway usage. That fits Railway's
+> free trial (30 days, $5 of credit) for trying Crewtavo out, and Railway's Hobby plan ($5 a month,
+> including $5 of usage) to keep it running. Busy instances use more; check
 > [Railway's pricing](https://railway.com/pricing) for current numbers.
 
 **Your own domain:** on the **crewtavo** service, open **Settings → Networking → Custom Domain**,

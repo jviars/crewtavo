@@ -32,9 +32,12 @@ the team from **Settings → People and Roles**.
 If something isn't right yet, the address shows a **Crewtavo is starting up** or **Finish setting up
 Crewtavo** page that says what to do, instead of an error.
 
-**Cost:** the business pays Railway directly. Railway's free trial (30 days, $5 of credit) is enough
-to try Crewtavo; to keep running, an instance needs Railway's Hobby plan ($5 a month, including $5 of
-usage). Heavy use costs more; check [Railway's pricing](https://railway.com/pricing).
+**Cost:** the business pays Railway directly. Measured on a new instance at rest: about 0.36 GB of
+memory across the five services (Postgres 136 MB, Storage 124 MB, crewtavo 47 MB, rest 37 MB,
+auth 12 MB), roughly $3.60 a month at Railway's $10 per GB-month. Railway's free trial (30 days, $5
+of credit) is enough to try Crewtavo; to keep running, an instance needs Railway's Hobby plan ($5 a
+month, including $5 of usage). Use grows with data and traffic; check
+[Railway's pricing](https://railway.com/pricing).
 
 **Your own domain:** in the crewtavo service, **Settings → Networking → Custom Domain**. Then change
 its `APP_URL` variable to `https://your-domain` and redeploy `crewtavo` and `auth`.
