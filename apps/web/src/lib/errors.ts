@@ -72,4 +72,8 @@ export function errorMessage(error: unknown): string {
 }
 
 export const isAuthError = (error: unknown) => error instanceof ApiError && error.status === 401;
+/** Code of a 401 that stands after the sign-in was refreshed (or couldn't be): the person really is signed out. */
+export const SESSION_EXPIRED = "session_expired";
+/** The request never got an answer: no signal, or too little to carry it. */
+export const isNetworkError = (error: unknown) => error instanceof ApiError && error.status === 0;
 export const isNotFound = (error: unknown) => error instanceof ApiError && error.status === 404;

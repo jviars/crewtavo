@@ -171,7 +171,7 @@ export function FieldVisitPage() {
         <textarea id="visit-notes" className="textarea" value={notes} maxLength={5000} onChange={(e) => setNotes(e.target.value)} placeholder="Extra work they asked about, damage you noticed, materials used…" />
         <div className="row-between">
           {v.job && <Button size="sm" variant="ghost" icon="receipt" onClick={() => setExpense(true)}>Add a receipt</Button>}
-          <Button size="sm" loading={saveNotes.isPending && !saveNotes.isPaused} disabled={notes === (v.notes ?? "")} onClick={() => saveNotes.mutate({ visitId: id, notes: notes.trim() || null })}>Save notes</Button>
+          <Button size="sm" loading={saveNotes.isPending && !saveNotes.isPaused} disabled={notes === (v.notes ?? "")} onClick={() => saveNotes.mutate({ companyId: session.company.id, visitId: id, notes: notes.trim() || null })}>Save notes</Button>
         </div>
       </section>
 

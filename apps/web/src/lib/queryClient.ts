@@ -3,8 +3,8 @@
  * shows the error inline (meta.inline), and actions can announce success with meta.success.
  */
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
-import { activeCompany, api } from "./api";
-import { ApiError, errorMessage, isAuthError } from "./errors";
+import { activeCompany, api, refreshSignIn } from "./api";
+import { ApiError, errorMessage, isAuthError, OFFLINE, SESSION_EXPIRED } from "./errors";
 import { reportError } from "./monitoring";
 import { toast } from "./toast";
 
@@ -46,17 +46,34 @@ function reportUnexpected(error: unknown, context: Record<string, unknown>) {
   if (!(error instanceof ApiError)) reportError(error, context);
 }
 
-function handleAuth(error: unknown): boolean {
+/**
+ * A 401. The access token may only have expired (say while the phone was offline), so unless the
+ * API already refreshed it and was still turned away, refresh the sign-in once before signing the
+ * person out. When they're still signed in (or the refresh couldn't get through), `stillSignedIn` decides what's next.
+ */
+function handleAuth(error: unknown, stillSignedIn: (outcome: "ok" | "offline") => void): boolean {
   if (!isAuthError(error)) return false;
-  toast.info("Your session expired. Sign in again to continue.");
-  onSessionExpired?.();
+  const signIn = (error as ApiError).code === SESSION_EXPIRED ? Promise.resolve("expired" as const) : refreshSignIn();
+  void signIn.then((outcome) => {
+    if (outcome !== "expired") return stillSignedIn(outcome);
+    toast.info("Your session expired. Sign in again to continue.");
+    onSessionExpired?.();
+  });
   return true;
 }
+
+/** Queries already loaded again after a refreshed sign-in, so one that keeps being turned away doesn't loop. */
+const reloadedAfterRefresh = new WeakSet<object>();
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
-      if (handleAuth(error)) return;
+      const reload = (outcome: "ok" | "offline") => {
+        if (outcome !== "ok" || reloadedAfterRefresh.has(query)) return;
+        reloadedAfterRefresh.add(query);
+        queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
+      };
+      if (handleAuth(error, reload)) return;
       reportUnexpected(error, { query: String(query.queryKey[0]) });
       // A first load that fails shows an error state on the screen. A refresh that fails while
       // data is already showing gets a toast instead, so stale data isn't silently presented as fresh.
@@ -73,7 +90,8 @@ export const queryClient = new QueryClient({
       queryClient.invalidateQueries({ queryKey: ["nav-counts"] });
     },
     onError: (error, _variables, _context, mutation) => {
-      if (handleAuth(error)) return;
+      const tryAgain = (outcome: "ok" | "offline") => !mutation.meta?.inline && toast.error(outcome === "offline" ? OFFLINE : "That didn't go through. Try again.");
+      if (handleAuth(error, tryAgain)) return;
       reportUnexpected(error, { mutation: String(mutation.options.mutationKey?.[0] ?? "") });
       if (!mutation.meta?.inline) toast.error(errorMessage(error));
     },
