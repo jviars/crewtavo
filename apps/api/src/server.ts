@@ -28,6 +28,7 @@ import { readEnv } from "./env";
 import { cronMatches } from "./lib/cron";
 import { reportError } from "./lib/monitoring";
 import { startMonitoring } from "./lib/monitoring-node";
+import { guardSignIn, isGuessable } from "./lib/signInGuard";
 import { stackServices, withStack } from "./lib/stack";
 import { setStartup, startup, type Startup } from "./lib/startup";
 import { CRON_TASKS, runTask, type TaskName } from "./tasks";
@@ -62,7 +63,10 @@ server.all("/.well-known/*", (c) => api(c.req.raw));
 // and supabase-js use this server's address as the Supabase URL.
 // ---------------------------------------------------------------------------------------------
 if (stack) {
-  server.all("/auth/v1/*", (c) => forward(c.req.raw, stack.auth, "/auth/v1"));
+  server.all("/auth/v1/*", (c) => {
+    const send = (request: Request) => forward(request, stack.auth, "/auth/v1");
+    return isGuessable(c.req.method, new URL(c.req.url), "/auth/v1") ? guardSignIn(env, c.req.raw, send) : send(c.req.raw);
+  });
   server.all("/rest/v1/*", (c) => forward(c.req.raw, stack.rest, "/rest/v1"));
   server.all("/storage/v1/*", (c) => forward(c.req.raw, stack.storage, "/storage/v1", { "x-forwarded-prefix": "/storage/v1" }));
 }
@@ -73,7 +77,9 @@ async function forward(request: Request, upstream: string, prefix: string, extra
   target.pathname = target.pathname.replace(/\/$/, "") + (incoming.pathname.slice(prefix.length) || "/");
   target.search = incoming.search;
   const headers = new Headers(request.headers);
-  for (const name of ["host", "connection", "accept-encoding", "content-length"]) headers.delete(name);
+  // Hop-by-hop headers describe the browser's connection to this server, not the next one (fetch
+  // refuses some of them outright, e.g. a chunked upload's transfer-encoding or expect: 100-continue).
+  for (const name of ["host", "connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "expect", "proxy-authorization", "proxy-connection", "accept-encoding", "content-length"]) headers.delete(name);
   headers.set("x-forwarded-host", incoming.host);
   headers.set("x-forwarded-proto", request.headers.get("x-forwarded-proto") ?? incoming.protocol.replace(":", ""));
   for (const [name, value] of Object.entries(extra)) headers.set(name, value);
@@ -148,7 +154,9 @@ async function migrate(): Promise<void> {
   }
   const statusFile = join(tmpdir(), `crewtavo-migrate-${process.pid}.json`);
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [migrateScript], { env: { ...process.env, CREWTAVO_MIGRATE_STATUS: statusFile }, stdio: "inherit" });
+    // CREWTAVO_SINGLE_COMPANY as this server reads it (on by default in an instance), so the
+    // database refuses a second business too, not just this API.
+    const child = spawn(process.execPath, [migrateScript], { env: { ...process.env, CREWTAVO_SINGLE_COMPANY: env.CREWTAVO_SINGLE_COMPANY ?? "", CREWTAVO_MIGRATE_STATUS: statusFile }, stdio: "inherit" });
     child.on("exit", () => {
       let status: { ok?: boolean; firstInstall?: boolean; problem?: Startup["problem"]; detail?: string } = {};
       try {

@@ -61,6 +61,8 @@ setup.post("/setup/owner", async (c) => {
   );
   const ip = clientIp(c);
   if (!(await allow(env, `setup-owner:${ip}`, 10, 3600))) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
+  // The owner's profile is made by the migrations' triggers, so they must have run.
+  if (startup()?.state === "migrating" || (await databaseStatus(env)) !== "ok") throw new HttpError(503, "Crewtavo is still starting. Try again in a moment.");
   if (await anyUser(env)) throw new HttpError(409, "This Crewtavo is already set up. Sign in instead.");
 
   const admin = adminClient(env);
@@ -69,9 +71,11 @@ setup.post("/setup/owner", async (c) => {
     console.error("Owner account failed", error);
     throw new HttpError(400, "Couldn't create the account. Check the email address and try again.");
   }
-  // Two people setting up at the same moment: the first account wins.
-  const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 2 });
-  if ((list?.users.length ?? 0) > 1) {
+  // Two people setting up at the same moment: the first account wins (each sees both, so only the
+  // later one steps back).
+  const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 50 });
+  const first = [...(list?.users ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))[0];
+  if (first && first.id !== data.user.id) {
     await admin.auth.admin.deleteUser(data.user.id);
     throw new HttpError(409, "Someone else just set up this Crewtavo. Sign in instead.");
   }

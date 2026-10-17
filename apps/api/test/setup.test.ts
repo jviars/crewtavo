@@ -143,14 +143,50 @@ describe("POST /api/setup/owner", () => {
     expect((await post(base)).status).toBe(404);
   });
 
-  it("refuses once someone has an account", async () => {
-    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+  type User = { id: string; created_at: string };
+  const ME = "00000000-0000-4000-8000-00000000000a";
+  const THEM = "00000000-0000-4000-8000-00000000000b";
+  /** Supabase with `existing` accounts. Creating ours (at 12:00:00.500) also brings in `concurrent` ones, set up at the same moment. */
+  const supabase = (existing: User[], concurrent: User[] = []) => {
+    const created = { id: ME, created_at: "2026-10-17T12:00:00.500Z" };
+    let users = existing;
+    const deleted: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/rpc/rate_limit_hit")) return Response.json(true);
-      if (url.includes("/auth/v1/admin/users")) return Response.json({ users: [{ id: "u1" }], aud: "authenticated" });
+      if (url.endsWith("/auth/v1/settings")) return Response.json({});
+      if (url.includes("/rest/v1/companies")) return Response.json([]);
+      if (url.includes("/auth/v1/admin/users") && init?.method === "POST") {
+        users = [...users, ...concurrent, created];
+        return Response.json({ ...created, aud: "authenticated", email: "pat@example.com" });
+      }
+      if (url.includes("/auth/v1/admin/users/") && init?.method === "DELETE") {
+        deleted.push(url.split("/").pop()!);
+        return Response.json({});
+      }
+      if (url.includes("/auth/v1/admin/users")) return Response.json({ users, aud: "authenticated" });
       throw new Error(`unexpected ${url}`);
     });
+    return deleted;
+  };
+
+  it("refuses once someone has an account", async () => {
+    supabase([{ id: "u1", created_at: "2026-10-17T12:00:00.000Z" }]);
     const res = await post({ ...base, CREWTAVO_SINGLE_COMPANY: "1" });
     expect(res.status).toBe(409);
+  });
+
+  it("keeps the first of two owners set up at the same moment, and only the first", async () => {
+    // Someone else's account appeared between our check and our own: theirs is older, so we step back.
+    let deleted = supabase([], [{ id: THEM, created_at: "2026-10-17T12:00:00.100Z" }]);
+    const later = await post({ ...base, CREWTAVO_SINGLE_COMPANY: "1", SUPABASE_URL: "https://race-1.supabase.co" });
+    expect(later.status).toBe(409);
+    expect(deleted).toEqual([ME]);
+
+    // The older account keeps going even though it sees the newer one too.
+    deleted = supabase([], [{ id: THEM, created_at: "2026-10-17T12:00:00.900Z" }]);
+    const first = await post({ ...base, CREWTAVO_SINGLE_COMPANY: "1", SUPABASE_URL: "https://race-2.supabase.co" });
+    expect(first.status).toBe(201);
+    expect(deleted).toEqual([]);
   });
 });

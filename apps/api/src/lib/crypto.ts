@@ -87,7 +87,13 @@ export async function verifyToken<T extends { exp: number }>(env: Env, token: st
   const [body, mac] = token.split(".");
   if (!body || !mac) return null;
   const key = await deriveKey(env, "sign");
-  const ok = await crypto.subtle.verify("HMAC", key, fromBase64Url(mac), encoder.encode(body));
+  let signature: Uint8Array;
+  try {
+    signature = fromBase64Url(mac);
+  } catch {
+    return null; // Not base64url: a link cut short or mangled on its way here.
+  }
+  const ok = await crypto.subtle.verify("HMAC", key, signature, encoder.encode(body));
   if (!ok) return null;
   const payload = JSON.parse(decoder.decode(fromBase64Url(body))) as T;
   return payload.exp > Date.now() / 1000 ? payload : null;
