@@ -11,12 +11,13 @@ export async function dailyOutlook(lat: number, lng: number, days = 7): Promise<
     timezone: "auto",
     forecast_days: String(days),
   });
-  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, { signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`);
   const { daily } = (await response.json()) as {
     daily?: { time: string[]; temperature_2m_min: number[]; temperature_2m_max: number[]; precipitation_probability_max: number[] };
   };
-  if (!daily) return [];
+  // No forecast isn't good weather: callers treat this like a failed request.
+  if (!daily?.time) throw new Error("Open-Meteo returned no forecast");
   return daily.time.map((date, i) => ({
     date,
     temp_min_f: daily.temperature_2m_min[i] ?? null,

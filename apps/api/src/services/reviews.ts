@@ -32,7 +32,8 @@ export async function sendReviewRequest(env: Env, admin: Db, args: ReviewArgs): 
 
   if (args.skipIfRecentDays) {
     const since = new Date(Date.now() - args.skipIfRecentDays * 86_400_000).toISOString();
-    const { count } = await admin.from("review_requests").select("id", { count: "exact", head: true }).eq("client_id", args.client.id).gte("sent_at", since);
+    // A request that failed to send doesn't count as asking.
+    const { count } = await admin.from("review_requests").select("id", { count: "exact", head: true }).eq("client_id", args.client.id).gte("sent_at", since).neq("status", "failed");
     if (count) return { sent: false, link: "", detail: `Skipped: already asked within ${args.skipIfRecentDays} days`, id: "" };
   }
 

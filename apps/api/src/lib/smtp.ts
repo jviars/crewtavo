@@ -130,7 +130,28 @@ class Replies {
 function headerValue(value: string): string {
   const clean = value.replace(/[\r\n]+/g, " ").trim();
   if (/^[\x20-\x7e]*$/.test(clean)) return clean;
-  return `=?UTF-8?B?${base64(clean)}?=`;
+  // Each encoded word stays within RFC 2047's 75 characters and holds whole characters.
+  const words: string[] = [];
+  let word = "";
+  for (const ch of clean) {
+    if (word && new TextEncoder().encode(word + ch).length > 45) {
+      words.push(word);
+      word = "";
+    }
+    word += ch;
+  }
+  words.push(word);
+  return words.map((w) => `=?UTF-8?B?${base64(w)}?=`).join(" ");
+}
+
+/**
+ * A From display name (RFC 5322): quoted, so "Acme Lawn Care, LLC" stays one mailbox instead of
+ * two, with \ and " escaped. Non-ASCII names are RFC 2047 words, which can't go inside quotes.
+ */
+export function displayName(name: string): string {
+  const clean = name.replace(/[\r\n]+/g, " ").trim();
+  if (/^[\x20-\x7e]*$/.test(clean)) return `"${clean.replace(/[\\"]/g, "\\$&")}"`;
+  return headerValue(clean);
 }
 
 function base64(text: string): string {
@@ -161,7 +182,7 @@ export function buildMime(message: SmtpMessage, now = new Date(), id = crypto.ra
   const messageId = `<${id}@${domain}>`;
   const boundary = `crewtavo-${id.replace(/-/g, "")}`;
   const headers: string[] = [
-    `From: ${message.from.name ? `${headerValue(message.from.name.replace(/["\\]/g, ""))} <${from}>` : from}`,
+    `From: ${message.from.name?.trim() ? `${displayName(message.from.name)} <${from}>` : from}`,
     `To: ${address(message.to)}`,
     ...(message.replyTo ? [`Reply-To: ${address(message.replyTo)}`] : []),
     `Subject: ${headerValue(message.subject)}`,

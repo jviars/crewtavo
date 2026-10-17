@@ -5,7 +5,9 @@ import type { Db } from "../lib/supabase";
  */
 import type { Env } from "../env";
 import { decryptJson, encryptJson } from "../lib/crypto";
-import { OAUTH, type CallbackContext, type Provider } from "./registry";
+import { IntegrationError, OAUTH, providerTimeout, zohoAccountsServer, zohoApiDomain, type CallbackContext, type Provider } from "./registry";
+
+export { IntegrationError };
 
 export interface StoredSecret {
   access_token?: string;
@@ -14,10 +16,6 @@ export interface StoredSecret {
   api_key?: string;
   /** Provider details needed later, e.g. Zoho's accounts server and API domain. */
   extra?: Record<string, string>;
-}
-
-export class IntegrationError extends Error {
-  override name = "IntegrationError";
 }
 
 interface TokenResponse {
@@ -42,7 +40,7 @@ async function tokenRequest(env: Env, provider: Provider, form: Record<string, s
     body.set("client_id", clientId);
     body.set("client_secret", clientSecret);
   }
-  const response = await fetch(config.tokenUrl(env, ctx, saved), { method: "POST", headers, body });
+  const response = await fetch(config.tokenUrl(env, ctx, saved), { method: "POST", headers, body, signal: providerTimeout() });
   const json = (await response.json().catch(() => ({}))) as TokenResponse;
   if (!response.ok || !json.access_token) {
     throw new IntegrationError(`${provider} token request failed (${response.status}${json.error ? `: ${json.error}` : ""})`);
@@ -53,8 +51,11 @@ async function tokenRequest(env: Env, provider: Provider, form: Record<string, s
 export async function exchangeCode(env: Env, provider: Provider, code: string, redirectUri: string, ctx: CallbackContext): Promise<StoredSecret> {
   const json = await tokenRequest(env, provider, { grant_type: "authorization_code", code, redirect_uri: redirectUri }, ctx);
   const extra: Record<string, string> = {};
-  if (ctx.query["accounts-server"]) extra.accounts_server = ctx.query["accounts-server"];
-  if (json.api_domain) extra.api_domain = json.api_domain;
+  if (provider === "zoho_books") {
+    // Both come from outside (the callback URL and the token response): only Zoho's servers are kept.
+    if (ctx.query["accounts-server"]) extra.accounts_server = zohoAccountsServer(ctx.query["accounts-server"]);
+    extra.api_domain = zohoApiDomain(json.api_domain);
+  }
   return {
     access_token: json.access_token,
     refresh_token: json.refresh_token,
@@ -117,8 +118,8 @@ export async function revoke(env: Env, provider: Provider, secret: StoredSecret)
   const config = OAUTH[provider];
   const token = secret.refresh_token ?? secret.access_token;
   if (!config?.revokeUrl || !token) return;
-  const url = config.revokeUrl(env, secret.extra);
   try {
+    const url = config.revokeUrl(env, secret.extra);
     if (provider === "quickbooks") {
       await fetch(url, {
         method: "POST",
@@ -128,9 +129,10 @@ export async function revoke(env: Env, provider: Provider, secret: StoredSecret)
           Accept: "application/json",
         },
         body: JSON.stringify({ token }),
+        signal: providerTimeout(),
       });
     } else {
-      await fetch(`${url}?${new URLSearchParams({ token })}`, { method: "POST" });
+      await fetch(`${url}?${new URLSearchParams({ token })}`, { method: "POST", signal: providerTimeout() });
     }
   } catch {
     // Revocation is a courtesy; the local tokens are deleted either way.

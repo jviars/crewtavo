@@ -18,7 +18,15 @@ export interface IcsEvent {
   updated?: Date;
 }
 
-const escape = (text: string) => text.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+// Any line break (\r\n, \n or a lone \r, which would end the line) becomes \n; other control
+// characters aren't allowed in text values, so they're dropped.
+const escape = (text: string) =>
+  text
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r\n|\r|\n/g, "\\n")
+    .replace(/[\x00-\x08\x0a-\x1f\x7f]/g, "");
 const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 const day = (iso: string) => iso.replace(/-/g, "");
 const nextDay = (iso: string) => {

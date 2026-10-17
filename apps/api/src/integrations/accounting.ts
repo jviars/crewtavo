@@ -7,7 +7,7 @@ import type { Db } from "../lib/supabase";
  *   { "environment": "production" | "sandbox", "item_map": { "<service uuid>": "<QBO Item Id>" }, "default_item_id": "1" }
  */
 import type { Env } from "../env";
-import type { Provider } from "./registry";
+import { providerTimeout, zohoApiDomain, type Provider } from "./registry";
 import { accessToken, IntegrationError } from "./tokens";
 
 type Accounting = "quickbooks" | "zoho_books";
@@ -66,6 +66,7 @@ async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknow
     method,
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
+    signal: providerTimeout(),
   });
   const json = (await response.json().catch(() => ({}))) as Record<string, any>;
   if (!response.ok) {
@@ -79,11 +80,13 @@ async function zoho(ctx: Ctx, method: "GET" | "POST", path: string, body?: unkno
   const { token, secret } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "zoho_books");
   const org = ctx.integration.external_account_id;
   if (!org) throw new IntegrationError("Zoho Books organization ID is missing; reconnect Zoho Books.");
-  const apiDomain = (secret.extra?.api_domain ?? "https://www.zohoapis.com").replace(/\/$/, "");
+  // Checked here too: tokens saved before only Zoho's servers were accepted may name another.
+  const apiDomain = zohoApiDomain(secret.extra?.api_domain);
   const response = await fetch(`${apiDomain}/books/v3/${path}${path.includes("?") ? "&" : "?"}organization_id=${org}`, {
     method,
     headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
+    signal: providerTimeout(),
   });
   const json = (await response.json().catch(() => ({}))) as Record<string, any>;
   if (!response.ok || (json.code !== undefined && json.code !== 0)) {
@@ -263,13 +266,14 @@ export async function describeAccount(env: Env, provider: Provider, token: strin
     const base = QBO_BASE[env.QUICKBOOKS_ENVIRONMENT ?? "production"];
     const response = await fetch(`${base}/v3/company/${realm}/companyinfo/${realm}?minorversion=${QBO_MINOR_VERSION}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      signal: providerTimeout(),
     });
     const json = (await response.json().catch(() => ({}))) as Record<string, any>;
     return { external_account_id: realm, account_label: json.CompanyInfo?.CompanyName ?? `QuickBooks ${realm}` };
   }
   if (provider === "zoho_books") {
-    const apiDomain = (extra?.api_domain ?? "https://www.zohoapis.com").replace(/\/$/, "");
-    const response = await fetch(`${apiDomain}/books/v3/organizations`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    const apiDomain = zohoApiDomain(extra?.api_domain);
+    const response = await fetch(`${apiDomain}/books/v3/organizations`, { headers: { Authorization: `Zoho-oauthtoken ${token}` }, signal: providerTimeout() });
     const json = (await response.json().catch(() => ({}))) as Record<string, any>;
     const org = json.organizations?.find((o: any) => o.is_default_org) ?? json.organizations?.[0];
     if (!org) throw new IntegrationError("No Zoho Books organization found for that account.");

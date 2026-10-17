@@ -97,8 +97,52 @@ export interface OAuthConfig {
   extraParams?: Record<string, string>;
 }
 
+export class IntegrationError extends Error {
+  override name = "IntegrationError";
+}
+
+/** A provider pointed us at a server that isn't its own. The message is shown on the Apps page. */
+export class UntrustedServerError extends IntegrationError {}
+
+/** Provider calls give up after this long, so a provider that hangs fails like one that's down. */
+export const providerTimeout = () => AbortSignal.timeout(15_000);
+
+// Zoho's data centers: US, EU, India, Australia, Japan, China, Canada, Saudi Arabia, UK.
+const ZOHO_TLDS = ["com", "eu", "in", "com.au", "jp", "com.cn", "ca", "sa", "uk"];
+const ZOHO_ACCOUNTS = new Set([...ZOHO_TLDS.map((tld) => `accounts.zoho.${tld}`), "accounts.zohocloud.ca"]);
+const ZOHO_APIS = new Set(ZOHO_TLDS.flatMap((tld) => [`www.zohoapis.${tld}`, `zohoapis.${tld}`]));
+
+/** The origin of an https URL on one of `hosts` (default port, no user info), or null. */
+function trustedOrigin(value: string, hosts: Set<string>): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.port || url.username || url.password || !hosts.has(url.hostname)) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The accounts server Zoho's callback names (?accounts-server=). It arrives in the browser's URL
+ * and the client secret is sent there, so only Zoho's own accounts servers are accepted.
+ */
+export function zohoAccountsServer(value: string): string {
+  const origin = trustedOrigin(value, ZOHO_ACCOUNTS);
+  if (!origin) throw new UntrustedServerError("That sign-in came back from a server that isn't Zoho's, so Zoho Books wasn't connected. Try connecting again.");
+  return origin;
+}
+
+/** The API domain from Zoho's token response: only Zoho's own API servers (zohoapis.*) are used. */
+export function zohoApiDomain(value: string | undefined): string {
+  if (!value) return "https://www.zohoapis.com";
+  const origin = trustedOrigin(value, ZOHO_APIS);
+  if (!origin) throw new UntrustedServerError("Zoho gave an API address that isn't one of Zoho's servers, so it wasn't used. Connect Zoho Books again.");
+  return origin;
+}
+
 const zohoAccounts = (env: Env, saved?: Record<string, string>) =>
-  (saved?.accounts_server ?? env.ZOHO_ACCOUNTS_URL ?? "https://accounts.zoho.com").replace(/\/$/, "");
+  saved?.accounts_server ? zohoAccountsServer(saved.accounts_server) : (env.ZOHO_ACCOUNTS_URL ?? "https://accounts.zoho.com").replace(/\/$/, "");
 
 export const OAUTH: Partial<Record<Provider, OAuthConfig>> = {
   quickbooks: {
@@ -113,7 +157,7 @@ export const OAUTH: Partial<Record<Provider, OAuthConfig>> = {
   zoho_books: {
     authorizeUrl: (env) => `${zohoAccounts(env)}/oauth/v2/auth`,
     // Zoho's callback says which data center the account is in; tokens must come from there.
-    tokenUrl: (env, ctx, saved) => `${(ctx?.query["accounts-server"] ?? zohoAccounts(env, saved)).replace(/\/$/, "")}/oauth/v2/token`,
+    tokenUrl: (env, ctx, saved) => `${ctx?.query["accounts-server"] ? zohoAccountsServer(ctx.query["accounts-server"]) : zohoAccounts(env, saved)}/oauth/v2/token`,
     revokeUrl: (env, saved) => `${zohoAccounts(env, saved)}/oauth/v2/token/revoke`,
     scope: "ZohoBooks.fullaccess.all",
     clientId: (env) => env.ZOHO_CLIENT_ID,

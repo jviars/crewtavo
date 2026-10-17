@@ -200,20 +200,28 @@ async function weatherHolds(env: Env) {
     .lte("scheduled_on", addDays(from, 2));
   if (error) throw new Error(error.message);
 
-  const outlooks = new Map<string, Awaited<ReturnType<typeof dailyOutlook>>>();
+  // null: the forecast couldn't be fetched (an outage or rate limit), which isn't a clear sky.
+  const outlooks = new Map<string, Awaited<ReturnType<typeof dailyOutlook>> | null>();
   let flagged = 0;
+  let unknown = 0;
   for (const v of visits ?? []) {
     const rules = ((v.job as { weather_rules?: WeatherRule[] } | null)?.weather_rules ?? []) as WeatherRule[];
     const p = v.property as { lat: number | null; lng: number | null } | null;
     if (!rules.length || !v.scheduled_on || p?.lat == null || p?.lng == null) continue;
     const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
-    if (!outlooks.has(key)) outlooks.set(key, await dailyOutlook(p.lat, p.lng, 4).catch(() => []));
-    const reasons = weatherRisks(rules, v.scheduled_on, outlooks.get(key)!);
+    if (!outlooks.has(key)) outlooks.set(key, await dailyOutlook(p.lat, p.lng, 4).catch(() => null));
+    const outlook = outlooks.get(key);
+    // Without a forecast, leave the visit's hold as it is; the next run checks again.
+    if (!outlook) {
+      unknown++;
+      continue;
+    }
+    const reasons = weatherRisks(rules, v.scheduled_on, outlook);
     const holdReason = reasons.length ? reasons.join("; ") : null;
     if (holdReason !== v.hold_reason) {
       await admin.from("visits").update({ hold_reason: holdReason }).eq("id", v.id);
       if (holdReason) flagged++;
     }
   }
-  return { checked: visits?.length ?? 0, flagged };
+  return { checked: visits?.length ?? 0, flagged, unknown };
 }
