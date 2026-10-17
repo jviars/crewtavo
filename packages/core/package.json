@@ -1,0 +1,29 @@
+{
+  "name": "@crewtavo/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform-free logic shared by the web app and API: geometry, formulas, recurrence, presets.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./geo": "./src/geo.ts",
+    "./formulas": "./src/formulas.ts",
+    "./roles": "./src/roles.ts",
+    "./database": "./src/database.types.ts",
+    "./time": "./src/time.ts",
+    "./recurrence": "./src/recurrence.ts",
+    "./automations": "./src/automations.ts",
+    "./equipment": "./src/equipment.ts",
+    "./privacy": "./src/privacy.ts",
+    "./email": "./src/email.ts",
+    "./notifications": "./src/notifications.ts",
+    "./terms": "./src/terms.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "rrule": "2.8.1"
+  }
+}

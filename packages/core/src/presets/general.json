@@ -1,0 +1,96 @@
+{
+  "id": "general",
+  "name": "General",
+  "description": "A blank starting point for any service business.",
+  "services": [
+    {
+      "name": "Labor",
+      "unit": "hr",
+      "unit_price": 75,
+      "formula_name": "Labor hours"
+    },
+    {
+      "name": "Service call",
+      "unit": "visit",
+      "unit_price": 95
+    }
+  ],
+  "job_types": [
+    "One-off",
+    "Recurring",
+    "Estimate"
+  ],
+  "formulas": [
+    {
+      "name": "Labor hours",
+      "formula": "hours"
+    }
+  ],
+  "checklists": [
+    {
+      "name": "Job completion",
+      "job_type": "One-off",
+      "items": [
+        {
+          "key": "work_completed_as_quoted",
+          "label": "Work completed as quoted",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "site_cleaned_up",
+          "label": "Site cleaned up",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "after_photo",
+          "label": "After photo",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "client_signature",
+          "label": "Client signature",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Request a free estimate",
+      "slug": "request-a-free-estimate",
+      "kind": "request",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Service address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "details",
+          "label": "What do you need done?",
+          "type": "long_text",
+          "required": true
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [],
+  "sop_categories": [
+    "Safety",
+    "Customer service",
+    "Equipment"
+  ]
+}

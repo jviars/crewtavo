@@ -1,0 +1,43 @@
+# Local development settings for `npm run dev:api` (copy to .dev.vars). The values for the local
+# Supabase come from `npx supabase start` (or `npx supabase status`).
+#
+# To run a whole Crewtavo instance instead (what each business gets on Railway), use
+# `npm run instance`; it doesn't need this file.
+
+SUPABASE_URL=http://127.0.0.1:56321
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SUPABASE_SECRET_KEY=sb_secret_...
+APP_URL=http://localhost:5173
+
+# Deliver email and texts to the local Mailpit inbox (open http://localhost:56324).
+MAILPIT_URL=http://localhost:56324
+
+# Lets scripts and tests run a background task by hand: POST /api/cron/<task>.
+CRON_SECRET=
+
+# Optional: 32+ random bytes in base64 (openssl rand -base64 32) or any 32+ characters. Without it,
+# a key is derived from SUPABASE_SECRET_KEY.
+# ENCRYPTION_KEY=
+
+# Optional features (see docs/deploy.md)
+# ANTHROPIC_API_KEY=
+# GOOGLE_MAPS_BROWSER_KEY=
+# GOOGLE_MAPS_SERVER_KEY=
+# QUICKBOOKS_CLIENT_ID=
+# QUICKBOOKS_CLIENT_SECRET=
+# ZOHO_CLIENT_ID=
+# ZOHO_CLIENT_SECRET=
+# ZOHO_ACCOUNTS_URL=https://accounts.zoho.com
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+# RESEND_API_KEY=
+# EMAIL_FROM=
+# TWILIO_ACCOUNT_SID=
+# TWILIO_AUTH_TOKEN=
+# TWILIO_FROM_NUMBER=
+# TURNSTILE_SITE_KEY=
+# TURNSTILE_SECRET_KEY=
+# CREWTAVO_SENTRY_DSN=
+# CREWTAVO_SENTRY_ENVIRONMENT=

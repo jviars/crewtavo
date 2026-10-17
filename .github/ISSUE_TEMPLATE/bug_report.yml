@@ -1,0 +1,39 @@
+name: Something isn't working
+description: Report a bug in Crewtavo
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Quotes
+        2. ...
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does your Crewtavo run?
+      options:
+        - Railway (the Deploy button)
+        - Self-hosted with Docker
+        - Local development
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      placeholder: iPhone 15, Safari / Windows, Chrome
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Anything from the crewtavo service's logs around the time it happened. Remove client names and contact details.
+      render: text

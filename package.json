@@ -1,0 +1,39 @@
+{
+  "name": "crewtavo",
+  "private": true,
+  "description": "Open-source operations software for service businesses.",
+  "license": "SEE LICENSE IN LICENSE",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @crewtavo/web",
+    "dev:api": "node scripts/dev-api.mjs",
+    "build": "npm run build -w @crewtavo/web",
+    "build:server": "node scripts/build-server.mjs",
+    "start": "node dist/server/server.mjs",
+    "instance": "node scripts/instance.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e",
+    "test": "npm run test --workspaces --if-present",
+    "test:db": "./scripts/test-db.sh",
+    "test:e2e": "node scripts/e2e-lifecycle.mjs",
+    "test:browser": "playwright test",
+    "db:types": "./scripts/gen-types.sh",
+    "seed:demo": "node scripts/seed-demo.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0",
+    "esbuild": "0.28.2",
+    "playwright-core": "1.63.0",
+    "postgres": "3.4.9",
+    "typescript": "5.6.3",
+    "vitest": "5.0.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

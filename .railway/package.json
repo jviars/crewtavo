@@ -1,0 +1,9 @@
+{
+  "name": "crewtavo-railway",
+  "private": true,
+  "type": "module",
+  "description": "Railway Infrastructure as Code for Crewtavo (railway config plan / railway config apply).",
+  "dependencies": {
+    "railway": "3.12.0"
+  }
+}

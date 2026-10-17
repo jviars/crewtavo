@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # Applies every migration to Postgres in Docker and runs the RLS/workflow tests.
+      - run: npm run test:db
+      - run: npm run build:server
+
+  # A whole Crewtavo instance, as the Railway template creates it (docker-compose.yml): it must
+  # start, apply every migration and reach the "create the owner account" step on its own.
+  instance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run instance
+      - name: Ready for its owner
+        run: |
+          curl -sf http://localhost:8080/api/setup | tee setup.json
+          node -e 'const s = require("./setup.json"); if (!s.ready || !s.needsOwner) process.exit(1)'
+      - if: failure()
+        run: docker compose --env-file .env.instance logs --tail 200
+
+  # The lifecycle script and the Playwright browser tests, against a local Supabase.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.121.0
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      # Postgres, Auth, the REST API, Realtime, Storage and Mailpit; applies supabase/migrations.
+      - run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,postgres-meta
+      - name: Write .dev.vars for the local stack
+        run: |
+          eval "$(supabase status -o env 2>/dev/null)"
+          cat > .dev.vars <<EOF
+          SUPABASE_URL=$API_URL
+          SUPABASE_PUBLISHABLE_KEY=$PUBLISHABLE_KEY
+          SUPABASE_SECRET_KEY=$SECRET_KEY
+          ENCRYPTION_KEY=$(openssl rand -base64 32)
+          APP_URL=http://localhost:4173
+          CRON_SECRET=$(openssl rand -hex 24)
+          STRIPE_WEBHOOK_SECRET=whsec_$(openssl rand -hex 24)
+          MAILPIT_URL=$MAILPIT_URL
+          EOF
+      - name: Start the API
+        run: |
+          npm run dev:api > api.log 2>&1 &
+          for _ in $(seq 1 90); do curl -sf http://localhost:8787/api/health >/dev/null && exit 0; sleep 1; done
+          cat api.log
+          exit 1
+      - run: npm run seed:demo
+      - run: npm run test:e2e
+      - run: npm run test:browser
+      - if: failure()
+        run: cat api.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/.report
+            e2e/.results
+          retention-days: 7

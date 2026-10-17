@@ -1,0 +1,149 @@
+/* Design tokens from the Crewtavo design canvas. Change brand colors here, not in components. */
+
+/* Radix Colors dark scales (they define --sand-1 … --sand-12 and so on under .dark). */
+@import "@radix-ui/colors/sand-dark.css";
+@import "@radix-ui/colors/grass-dark.css";
+@import "@radix-ui/colors/amber-dark.css";
+@import "@radix-ui/colors/ruby-dark.css";
+@import "@radix-ui/colors/blue-dark.css";
+@import "@radix-ui/colors/red-dark.css";
+@import "@radix-ui/colors/yellow-dark.css";
+
+:root {
+  color-scheme: light;
+  --font: "Figtree Variable", "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --ink: #0f2a35;
+  --text-2: #4e6169;
+  --text-3: #5f6f76;
+  --text-4: #8b979c;
+
+  --ground: #f6f5f1;        /* sidebar */
+  --ground-hover: #ecebe6;
+  --ground-border: #e8e7e2;
+  --page: #ffffff;          /* main background */
+  --surface: #ffffff;       /* cards, menus, dialogs, inputs */
+  --raised: #ffffff;        /* the selected control on a filled track (segmented, active nav) */
+  --fill: #fafaf8;
+  --fill-2: #f2f1ed;
+  --fill-3: #e9e8e3;
+  --border: #e3e2dd;
+  --border-strong: #c9c8c1;
+  --divider: #ecebe6;
+  --row-divider: #f1f0ec;
+  --button-border: #d9d8d2;
+  --shine: #f8f7f4;         /* skeleton shimmer highlight */
+  --overlay: rgba(15, 42, 53, 0.4);
+
+  /* A solid ink fill (selected tabs, dark buttons, toasts) and the text on it. Inverts in dark mode. */
+  --solid: #0f2a35;
+  --solid-hover: #1b3d4a;
+  --on-solid: #ffffff;
+  /* Fallback behind white initials (avatars, business tile): stays dark in both modes. */
+  --avatar: #0f2a35;
+  --brand-ink: #182430;
+
+  --green: #3b7d23;
+  --green-dark: #2c611a;
+  --green-tint: #ebf4e5;
+  --green-tint-2: #d9ebcf;
+  --green-solid: #3b7d23;   /* behind white text */
+  --green-solid-hover: #2c611a;
+
+  --req: #c9852a;       --req-text: #94580e;     --req-tint: #fbf1e2;
+  --quote: #d2445c;     --quote-text: #a72940;   --quote-tint: #fbe9ec;
+  --job: #5ba331;       --job-text: #3c7a1f;     --job-tint: #ebf4e5;
+  --invoice: #3474d4;   --invoice-text: #2357a8; --invoice-tint: #e8f0fb;
+
+  --danger: #b42318;    --danger-dark: #912018;  --danger-tint: #fdecea;
+  --danger-solid: #b42318;
+  --danger-solid-hover: #912018;
+  --warning: #8a4a00;   --warning-tint: #fbf1e2;
+  --info: #2357a8;      --info-tint: #e8f0fb;
+  --note: #fff8e6;      --note-border: #f1e2b8;
+
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-pill: 999px;
+
+  --shadow-xs: 0 1px 2px rgba(15, 42, 53, 0.05);
+  --shadow-sm: 0 1px 3px rgba(15, 42, 53, 0.07), 0 1px 2px rgba(15, 42, 53, 0.04);
+  --shadow-md: 0 8px 20px -6px rgba(15, 42, 53, 0.14), 0 2px 6px -2px rgba(15, 42, 53, 0.06);
+  --shadow-lg: 0 28px 56px -16px rgba(15, 42, 53, 0.3), 0 10px 20px -10px rgba(15, 42, 53, 0.12);
+  --ring: 0 0 0 3px rgba(59, 125, 35, 0.22);
+  --ring-danger: 0 0 0 3px rgba(180, 35, 24, 0.18);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+
+  --sidebar-width: 228px;
+  --topbar-height: 60px;
+  --mobile-nav-height: 64px;
+}
+
+/*
+ * Dark mode: the same tokens mapped onto Radix scales, following Radix's step guide (1–2 app and
+ * subtle backgrounds, 3–5 component fills, 6–8 borders, 9–10 solid colors, 11–12 text). The class is
+ * set on <html> from the person's choice in Settings → Profile (lib/theme.ts).
+ */
+:root.dark {
+  color-scheme: dark;
+
+  --ink: var(--sand-12);
+  --text-2: color-mix(in oklab, var(--sand-12) 35%, var(--sand-11));
+  --text-3: var(--sand-11);
+  --text-4: var(--sand-10);
+
+  --ground: var(--sand-2);
+  --ground-hover: var(--sand-4);
+  --ground-border: var(--sand-5);
+  --page: var(--sand-1);
+  --surface: var(--sand-2);
+  --raised: var(--sand-5);
+  --fill: var(--sand-3);
+  --fill-2: var(--sand-4);
+  --fill-3: var(--sand-5);
+  --border: var(--sand-6);
+  --border-strong: var(--sand-8);
+  --divider: var(--sand-5);
+  --row-divider: var(--sand-4);
+  --button-border: var(--sand-7);
+  --shine: var(--sand-5);
+  --overlay: rgba(0, 0, 0, 0.6);
+
+  --solid: var(--sand-12);
+  --solid-hover: var(--sand-11);
+  --on-solid: var(--sand-1);
+  --avatar: var(--sand-8);
+  --brand-ink: var(--sand-12);
+
+  --green: var(--grass-10);
+  --green-dark: var(--grass-11);
+  --green-tint: var(--grass-3);
+  --green-tint-2: var(--grass-5);
+  --green-solid: var(--grass-8);
+  --green-solid-hover: var(--grass-7);
+
+  --req: var(--amber-9);    --req-text: var(--amber-11);   --req-tint: var(--amber-3);
+  --quote: var(--ruby-9);   --quote-text: var(--ruby-11);  --quote-tint: var(--ruby-3);
+  --job: var(--grass-9);    --job-text: var(--grass-11);   --job-tint: var(--grass-3);
+  --invoice: var(--blue-9); --invoice-text: var(--blue-11); --invoice-tint: var(--blue-3);
+
+  --danger: var(--red-10);  --danger-dark: var(--red-11);  --danger-tint: var(--red-3);
+  --danger-solid: var(--red-8);
+  --danger-solid-hover: var(--red-7);
+  --warning: var(--amber-11); --warning-tint: var(--amber-3);
+  --info: var(--blue-11);   --info-tint: var(--blue-3);
+  --note: var(--yellow-3);  --note-border: var(--yellow-6);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 20px -6px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 28px 56px -16px rgba(0, 0, 0, 0.75), 0 10px 20px -10px rgba(0, 0, 0, 0.5);
+  --ring: 0 0 0 3px rgba(70, 167, 88, 0.35);
+  --ring-danger: 0 0 0 3px rgba(229, 72, 77, 0.3);
+}

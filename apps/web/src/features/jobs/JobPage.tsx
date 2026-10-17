@@ -1,0 +1,351 @@
+import { describeRule } from "@crewtavo/core/recurrence";
+import type { TablesUpdate } from "@crewtavo/core/database";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { confirm } from "@/components/ui/Confirm";
+import { Icon } from "@/components/ui/Icon";
+import { Menu } from "@/components/ui/Menu";
+import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
+import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { EmptyState, PageError } from "@/components/ui/States";
+import { EntityStatus, StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
+import { addressLine, formatDate, formatDateTime, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { useRememberRecent } from "@/lib/recent";
+import { can, hasRole, useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
+import { LineItems } from "../quotes/LineItems";
+import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
+import { useSchedulingRights } from "../schedule/myCrews";
+import { ChangeOrders, useStartChangeOrder } from "./ChangeOrders";
+import { ExpensesCard } from "./ExpensesCard";
+import { MaterialsCard } from "./JobMaterials";
+import { InvoiceJobDialog, JobDetailsDialog, type JobRecord } from "./JobDialogs";
+import { ScopeOfWork } from "./ScopeOfWork";
+
+export function JobPage() {
+  const { id = "" } = useParams();
+  const session = useSession();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [visit, setVisit] = useState<VisitInput | null>(null);
+  const [dialog, setDialog] = useState<null | "details" | "invoice">(null);
+  const [showPast, setShowPast] = useState(false);
+  const isOffice = hasRole(session, "admin", "office");
+  const seesInvoices = isOffice && can(session, "invoices");
+  const seesCosts = isOffice && can(session, "job_costs");
+  const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
+  const canDispatch = useSchedulingRights().canDispatch;
+  const today = todayIn(session.company.timezone);
+
+  const job = useQuery({
+    queryKey: ["job", id],
+    queryFn: async () =>
+      unwrapOne(
+        await supabase()
+          .from("jobs")
+          .select("*, financials:job_financials(contract_total), client:clients(id, display_name, phone, email), property:properties(id, line1, city, region, postal_code, lat, lng), quote:quotes!jobs_company_id_quote_id_fkey(id, number, deposit_amount), crew:crews(name), lines:job_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, sort, service_id), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, hold_reason, invoice_id, completed_at, crew:crews(name, color), assignees:visit_assignees(user_id))")
+          .eq("id", id)
+          .order("sort", { referencedTable: "job_line_items" })
+          .order("scheduled_on", { referencedTable: "visits" })
+          .maybeSingle(),
+        "This job",
+      ),
+  });
+  const j = job.data;
+  useDocumentTitle(j ? `Job #${j.number}` : "Job");
+  useRememberRecent(session.company.id, j ? { kind: "job", id: j.id, title: j.title, subtitle: `Job #${j.number} · ${j.client?.display_name ?? ""}`, path: `/jobs/${j.id}` } : null);
+
+  const invoices = useQuery({
+    queryKey: ["job", id, "invoices"],
+    enabled: seesInvoices,
+    queryFn: async () => unwrap(await supabase().from("invoices").select("id, number, kind, status, subtotal, total, balance_due, retainage_amount, pay_app_number").eq("job_id", id).order("number")),
+  });
+  const costs = useQuery({
+    queryKey: ["job", id, "costs"],
+    enabled: seesCosts,
+    queryFn: async () => {
+      const [time, expenses] = await Promise.all([
+        supabase().from("time_entries").select("started_at, ended_at, labor_rate").eq("job_id", id),
+        supabase().from("expenses").select("amount").eq("job_id", id),
+      ]);
+      const entries = unwrap(time);
+      const hours = entries.reduce((s, t) => s + (t.ended_at ? (Date.parse(t.ended_at) - Date.parse(t.started_at)) / 3_600_000 : 0), 0);
+      const labor = entries.reduce((s, t) => s + (t.ended_at ? ((Date.parse(t.ended_at) - Date.parse(t.started_at)) / 3_600_000) * Number(t.labor_rate ?? 0) : 0), 0);
+      return { hours, labor, expenses: unwrap(expenses).reduce((s, e) => s + Number(e.amount), 0) };
+    },
+  });
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["job", id] });
+    queryClient.invalidateQueries({ queryKey: ["jobs", session.company.id] });
+  };
+  const update = useMutation({
+    meta: { success: (_: unknown, p: TablesUpdate<"jobs">) => (p.status === "requires_invoicing" ? "Job marked complete" : p.status === "archived" ? "Job archived" : p.status === "active" ? "Job reopened" : p.status === "completed" ? "Job closed" : "Job saved") },
+    mutationFn: async (patch: TablesUpdate<"jobs">) => unwrap(await supabase().from("jobs").update(patch).eq("id", id)),
+    onSuccess: refresh,
+  });
+  const completeVisit = useMutation({
+    meta: { success: "Visit completed" },
+    mutationFn: (visitId: string) => api.patch(`/visits/${visitId}`, { status: "completed" }),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    meta: { success: "Job deleted" },
+    mutationFn: async () => unwrap(await supabase().from("jobs").delete().eq("id", id)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", session.company.id] });
+      navigate("/jobs", { replace: true });
+    },
+  });
+  const review = useMutation({
+    mutationFn: () => api.post<{ detail: string }>("/reviews/request", { client_id: j!.client!.id, job_id: id, channel: "email" }),
+    onSuccess: (r) => toast.success(r.detail),
+  });
+
+  const changeOrder = useStartChangeOrder({ id, title: j?.title ?? "", client: j?.client ?? null, property: j?.property ?? null });
+
+  if (job.isPending) return <DetailSkeleton />;
+  if (job.error || !j) return <PageError error={job.error} onRetry={() => job.refetch()} back={<BackLink to="/jobs">Jobs</BackLink>} />;
+
+  const contract = Number(j.financials?.contract_total ?? 0);
+  const materials = j.lines.reduce((s, l) => s + Number(l.quantity) * Number(l.unit_cost ?? 0), 0);
+  const labor = costs.data?.labor ?? 0;
+  const expenses = costs.data?.expenses ?? 0;
+  const totalCost = labor + expenses + materials;
+  const profit = contract - totalCost;
+  const margin = contract > 0 ? Math.round((profit / contract) * 100) : null;
+  const visits = j.visits;
+  const upcoming = visits.filter((v) => !["completed", "cancelled"].includes(v.status));
+  const past = visits.filter((v) => ["completed", "cancelled"].includes(v.status));
+  const shownVisits = [...upcoming.slice(0, 12), ...(showPast ? past : [])];
+  const uninvoiced = visits.filter((v) => v.status === "completed" && !v.invoice_id && v.kind === "job").length;
+  const billed = (invoices.data ?? []).filter((i) => ["deposit", "progress"].includes(i.kind) && i.status !== "void").reduce((s, i) => s + Number(i.subtotal), 0);
+  const hasInvoices = Boolean(invoices.data?.length);
+  const live = (invoices.data ?? []).filter((i) => i.status !== "void");
+  const retainageHeld =
+    live.filter((i) => i.kind !== "retainage").reduce((s, i) => s + Number(i.retainage_amount), 0) -
+    live.filter((i) => i.kind === "retainage").reduce((s, i) => s + Number(i.subtotal), 0);
+  const finalInvoice = j.kind !== "recurring" ? live.find((i) => i.kind === "standard")?.number ?? null : null;
+  const newVisit = (): VisitInput => ({ job_id: j.id, property_id: j.property?.id ?? null, title: j.title, crew_id: j.default_crew_id, kind: "job", context: { label: `Job #${j.number} · ${j.client?.display_name ?? ""}`, to: `/jobs/${j.id}` } });
+
+  return (
+    <>
+      <BackLink to="/jobs">Jobs</BackLink>
+      <PageHeader
+        title={j.title}
+        actions={
+          <>
+            {canDispatch && j.status !== "archived" && <Button icon="calendar" onClick={() => setVisit(newVisit())}>Add visit</Button>}
+            {seesInvoices && j.status !== "archived" && <Button icon="invoice" variant={j.status === "requires_invoicing" ? "primary" : "secondary"} onClick={() => setDialog("invoice")}>Create invoice</Button>}
+            {canSell && j.status === "active" && j.kind === "one_off" && <Button variant="primary" icon="check" loading={update.isPending} onClick={() => update.mutate({ status: "requires_invoicing" })}>Work complete</Button>}
+            {canSell && (
+              <Menu
+                items={[
+                  { label: "Edit details and schedule", icon: "edit", onSelect: () => setDialog("details") },
+                  { label: "New change order", icon: "quote", hidden: !["active", "requires_invoicing"].includes(j.status) || !j.client, onSelect: () => changeOrder.mutate() },
+                  { label: "Ask for a review", icon: "star", hidden: !j.client?.email, onSelect: () => review.mutate() },
+                  { separator: true },
+                  { label: "Mark work complete", icon: "check", hidden: j.status !== "active" || j.kind === "one_off", onSelect: () => update.mutate({ status: "requires_invoicing" }) },
+                  { label: "Close job", icon: "check", hidden: !["requires_invoicing"].includes(j.status), onSelect: () => update.mutate({ status: "completed" }) },
+                  { label: "Reopen job", icon: "undo", hidden: j.status === "active", onSelect: () => update.mutate({ status: "active" }) },
+                  { label: "Archive job", icon: "archive", hidden: j.status === "archived", onSelect: () => update.mutate({ status: "archived" }) },
+                  {
+                    label: "Delete job",
+                    icon: "trash",
+                    danger: true,
+                    hidden: !isOffice || hasInvoices,
+                    onSelect: async () => {
+                      if (await confirm({ title: `Delete job #${j.number}?`, body: "Its visits, line items and checklists are deleted too. Logged time and expenses are kept. This can't be undone.", confirmLabel: "Delete job", danger: true, typeToConfirm: visits.length > 5 ? "delete" : undefined })) remove.mutate();
+                    },
+                  },
+                ]}
+              />
+            )}
+          </>
+        }
+      />
+      <div className="page-meta">
+        <span className="muted">Job #{j.number}</span>
+        <EntityStatus kind="job" status={j.status} />
+        {j.kind === "recurring" && <span className="chip chip-blue"><Icon name="refresh" size={12} />{j.recurrence_rule ? describeRule(j.recurrence_rule) : "Recurring"}</span>}
+        {j.client && <Link to={`/clients/${j.client.id}`} className="strong">{j.client.display_name}</Link>}
+        {j.property && <span className="muted">{addressLine(j.property)}</span>}
+      </div>
+
+      {j.status === "requires_invoicing" && seesInvoices && (
+        <div className="callout callout-warning">
+          <Icon name="invoice" size={18} />
+          <div className="grow">Ready to invoice.</div>
+          <Button size="sm" variant="primary" onClick={() => setDialog("invoice")}>Create invoice</Button>
+        </div>
+      )}
+      {uninvoiced > 0 && seesInvoices && j.status === "active" && j.billing_mode === "per_visit" && (
+        <div className="callout callout-info">
+          <Icon name="invoice" size={18} />
+          <div className="grow">{uninvoiced} completed {uninvoiced === 1 ? "visit is" : "visits are"} ready to invoice.</div>
+          <Button size="sm" onClick={() => setDialog("invoice")}>Invoice visits</Button>
+        </div>
+      )}
+
+      <div className="two-col">
+        <div className="wide stack-lg">
+          <section className="stack">
+            <div className="section-head">
+              <h2 className="section-title">Visits</h2>
+              <span className="muted small">{past.filter((v) => v.status === "completed").length} of {visits.length} done</span>
+            </div>
+            <div className="card">
+              {visits.length === 0 && (
+                <EmptyState compact icon="calendar" title="No visits scheduled" action={canDispatch && <Button size="sm" icon="plus" onClick={() => setVisit(newVisit())}>Schedule a visit</Button>}>
+                  {j.kind === "recurring" ? "Set the schedule in “Edit details” and visits are created for the next 60 days." : "Schedule when the crew will do the work."}
+                </EmptyState>
+              )}
+              {shownVisits.map((v) => {
+                const overdue = !["completed", "cancelled"].includes(v.status) && v.scheduled_on && v.scheduled_on < today;
+                return (
+                  <div key={v.id} className="card-row" style={{ cursor: canDispatch ? "pointer" : undefined }} onClick={() => canDispatch && setVisit({ ...v, job_id: j.id, property_id: j.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id), context: { label: `Job #${j.number}`, to: `/jobs/${j.id}` } })}>
+                    <span style={{ width: 4, alignSelf: "stretch", borderRadius: 4, background: (v.crew as { color?: string } | null)?.color || "var(--fill-3)" }} aria-hidden="true" />
+                    <span className="grow">
+                      <strong>{v.title}</strong>
+                      <span className={`small ${overdue ? "text-danger strong" : "muted"}`} style={{ display: "block" }}>
+                        {v.starts_at ? formatDateTime(v.starts_at) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}
+                        {v.crew ? ` · ${(v.crew as { name: string }).name}` : ""}
+                        {overdue ? " · overdue" : ""}
+                        {v.invoice_id ? " · invoiced" : ""}
+                      </span>
+                      {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 700 }}>Weather: {v.hold_reason}</span>}
+                    </span>
+                    <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                    {canDispatch && !["completed", "cancelled"].includes(v.status) && (
+                      <Button size="sm" variant="ghost" icon="check" aria-label={`Complete ${v.title}`} title="Mark complete" loading={completeVisit.isPending && completeVisit.variables === v.id} onClick={(e) => { e.stopPropagation(); completeVisit.mutate(v.id); }} />
+                    )}
+                  </div>
+                );
+              })}
+              {(upcoming.length > 12 || past.length > 0) && (
+                <div className="list-foot">
+                  <span>{upcoming.length > 12 ? `${upcoming.length - 12} more upcoming` : ""}</span>
+                  {past.length > 0 && <Button size="sm" variant="ghost" onClick={() => setShowPast(!showPast)}>{showPast ? "Hide past visits" : `Show ${past.length} past ${past.length === 1 ? "visit" : "visits"}`}</Button>}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {!hasRole(session, "admin", "office", "estimator") && <ScopeOfWork jobId={j.id} />}
+
+          {hasRole(session, "admin", "office", "estimator") && (
+            <section className="stack">
+              <h2 className="section-title">Line items</h2>
+              <LineItems table="job_line_items" parent="job_id" parentId={j.id} lines={j.lines} editable={canSell && ["active", "requires_invoicing"].includes(j.status)} onChanged={refresh} />
+            </section>
+          )}
+
+          {canSell && <ChangeOrders jobId={j.id} onStart={() => changeOrder.mutate()} starting={changeOrder.isPending} />}
+
+          <MaterialsCard jobId={j.id} showCosts={seesCosts} />
+
+          {seesCosts && <ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} />}
+
+          {seesInvoices && (
+            <section className="stack">
+              <h2 className="section-title">Invoices</h2>
+              <div className="card">
+                {invoices.isPending && <div className="card-row"><Skeleton width="50%" /></div>}
+                {invoices.data?.length === 0 && <EmptyState compact icon="invoice" title="Not invoiced yet" action={<Button size="sm" icon="invoice" onClick={() => setDialog("invoice")}>Create invoice</Button>} />}
+                {invoices.data?.map((inv) => (
+                  <Link key={inv.id} to={`/invoices/${inv.id}`} className="card-row">
+                    <strong className="grow">Invoice #{inv.number}{inv.kind === "progress" ? ` · pay app ${inv.pay_app_number}` : inv.kind === "deposit" ? " · deposit" : inv.kind === "visits" ? " · visits" : inv.kind === "retainage" ? " · retainage" : ""}</strong>
+                    <span className="tabular">{formatMoney(inv.total)}</span>
+                    <EntityStatus kind="invoice" status={inv.status} />
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <aside className="narrow stack">
+          {seesCosts && (
+            <div className="card card-pad stack-sm">
+              <strong>Job costing</strong>
+              {costs.isPending ? <Skeleton height={60} /> : (
+                <>
+                  <ProfitBar price={contract} labor={labor} expenses={expenses} materials={materials} />
+                  <div className="totals" style={{ marginTop: 6 }}>
+                    <div className="line"><span>Price</span><span>{formatMoneyCents(contract)}</span></div>
+                    <div className="line"><span>Line item costs</span><span>{formatMoneyCents(materials)}</span></div>
+                    <div className="line"><span>Labor ({(costs.data?.hours ?? 0).toFixed(1)} h)</span><span>{formatMoneyCents(labor)}</span></div>
+                    <div className="line"><span>Expenses</span><span>{formatMoneyCents(expenses)}</span></div>
+                    <div className="line grand" style={{ fontSize: 15 }}>
+                      <span>Profit</span>
+                      <span style={{ color: profit < 0 ? "var(--danger)" : "var(--green-dark)" }}>{formatMoneyCents(profit)}{margin !== null ? ` (${margin}%)` : ""}</span>
+                    </div>
+                  </div>
+                  {labor === 0 && (costs.data?.hours ?? 0) > 0 && <span className="muted small">Set labor rates in Settings → Team to cost tracked hours.</span>}
+                </>
+              )}
+            </div>
+          )}
+          <div className="card card-pad stack-sm">
+            <div className="row-between">
+              <strong>Details</strong>
+              {canSell && <Button size="sm" variant="ghost" icon="edit" onClick={() => setDialog("details")}>Edit</Button>}
+            </div>
+            <dl className="kv">
+              {canSell && <><dt>Contract</dt><dd>{formatMoneyCents(contract)}</dd></>}
+              <dt>Billing</dt><dd>{statusLabel(j.billing_mode)}</dd>
+              {j.kind === "recurring" && <><dt>Repeats</dt><dd>{j.recurrence_rule ? describeRule(j.recurrence_rule) : "—"}{j.starts_on ? `, from ${formatDate(j.starts_on)}` : ""}{j.ends_on ? ` to ${formatDate(j.ends_on)}` : ""}</dd></>}
+              {j.crew && <><dt>Crew</dt><dd>{j.crew.name}</dd></>}
+              {j.po_number && <><dt>PO</dt><dd>{j.po_number}</dd></>}
+              {j.permit_number && <><dt>Permit</dt><dd>{j.permit_number}</dd></>}
+              {Number(j.retainage_pct) > 0 && <><dt>Retainage</dt><dd>{Number(j.retainage_pct)}%</dd></>}
+              {j.warranty_until && <><dt>Warranty</dt><dd>until {formatDate(j.warranty_until)}</dd></>}
+              {j.quote && <><dt>From</dt><dd><Link to={`/quotes/${j.quote.id}`}>Quote #{j.quote.number}</Link></dd></>}
+            </dl>
+            {j.instructions && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: 8, border: "1px solid var(--note-border)" }}>{j.instructions}</p>}
+          </div>
+          {j.client && (
+            <div className="card card-pad stack-sm">
+              <strong>Client</strong>
+              <Link to={`/clients/${j.client.id}`} className="strong">{j.client.display_name}</Link>
+              {j.client.phone && <a href={`tel:${j.client.phone}`} className="small">{j.client.phone}</a>}
+              {j.property && <a className="btn btn-sm" style={{ justifySelf: "start" }} target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(j.property.lat != null ? `${j.property.lat},${j.property.lng}` : addressLine(j.property).replace(/ · /g, ", "))}`}><Icon name="navigation" size={14} />Directions</a>}
+            </div>
+          )}
+        </aside>
+      </div>
+
+      {visit && <VisitDialog visit={visit} onClose={() => setVisit(null)} onSaved={refresh} />}
+      {dialog === "details" && <JobDetailsDialog job={j as unknown as JobRecord} onClose={() => setDialog(null)} onSaved={refresh} />}
+      {dialog === "invoice" && (
+        <InvoiceJobDialog
+          job={{ id: j.id, contract_total: contract, deposit: Number(j.quote?.deposit_amount ?? 0), billed, uninvoicedVisits: uninvoiced, kind: j.kind, retainageHeld, finalInvoice }}
+          onClose={() => setDialog(null)}
+          onCreated={(invoiceId) => {
+            refresh();
+            navigate(`/invoices/${invoiceId}`);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/** Price split into costs and profit, like Jobber's job profit bar. */
+function ProfitBar({ price, labor, expenses, materials }: { price: number; labor: number; expenses: number; materials: number }) {
+  const total = Math.max(price, labor + expenses + materials, 1);
+  const parts = [
+    { label: "Line item costs", value: materials, color: "#c9852a" },
+    { label: "Labor", value: labor, color: "#3474d4" },
+    { label: "Expenses", value: expenses, color: "#8b5cf6" },
+    { label: "Profit", value: Math.max(0, price - labor - expenses - materials), color: "var(--green)" },
+  ];
+  return (
+    <div style={{ display: "flex", height: 12, borderRadius: 999, overflow: "hidden", background: "var(--fill-2)" }} role="img" aria-label={parts.map((p) => `${p.label} ${formatMoney(p.value)}`).join(", ")}>
+      {parts.map((p) => p.value > 0 && <span key={p.label} title={`${p.label}: ${formatMoney(p.value)}`} style={{ width: `${(p.value / total) * 100}%`, background: p.color, transition: "width 400ms" }} />)}
+    </div>
+  );
+}
