@@ -110,6 +110,8 @@ export default defineRailway(() => {
     source: image("public.ecr.aws/supabase/storage-api:v1.82.1"),
     volumeMounts: { "/var/lib/storage": storageData },
     env: {
+      // Railway gives every service a PORT, and Storage listens on it; keep it where crewtavo looks.
+      PORT: "5000",
       AUTH_JWT_SECRET: jwtSecret,
       DATABASE_URL: `postgres://supabase_storage_admin:${dbPassword}@${dbHost}:5432/postgres`,
       POSTGREST_URL: "http://${{rest.RAILWAY_PRIVATE_DOMAIN}}:3000",

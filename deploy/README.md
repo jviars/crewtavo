@@ -54,7 +54,7 @@ reference and works as written):
 | --- | --- | --- |
 | `auth` | `public.ecr.aws/supabase/gotrue:v2.197.0` | |
 | `rest` | `public.ecr.aws/supabase/postgrest:v16.4` | |
-| `storage` | `public.ecr.aws/supabase/storage-api:v1.82.1` | Volume mounted at `/var/lib/storage` |
+| `storage` | `public.ecr.aws/supabase/storage-api:v1.82.1` | Volume mounted at `/var/lib/storage`; `PORT` = `5000` (Railway otherwise sets `PORT` and Storage listens there) |
 
 Keep these versions in step with `docker-compose.yml`, and test a version change there first.
 
