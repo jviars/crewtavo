@@ -10,7 +10,8 @@ import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
-import { CATALOG, catalogEntry, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
+import { deleteVisitsCalendar, describeGoogleAccount } from "../integrations/calendars";
+import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
 import { exchangeCode, loadSecret, revoke, saveSecret } from "../integrations/tokens";
 
 export const apps = new Hono<AppEnv>();
@@ -19,21 +20,26 @@ const STATE_COOKIE = "crewtavo_oauth_nonce";
 const callbackUrl = (base: string, provider: string) => `${base}/api/apps/${provider}/callback`;
 
 apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
-  const rows = must(
-    await c.var.db
-      .from("integrations")
-      .select("provider, status, account_label, connected_at, last_sync_at, last_error")
-      .eq("company_id", c.var.companyId),
-  );
-  const byProvider = new Map(rows.map((r) => [r.provider, r]));
+  const [rows, calendars] = await Promise.all([
+    c.var.db.from("integrations").select("provider, status, account_label, connected_at, last_sync_at, last_error").eq("company_id", c.var.companyId),
+    c.var.db.from("calendar_sources").select("app, last_error").eq("company_id", c.var.companyId),
+  ]);
+  const byProvider = new Map(must(rows).map((r) => [r.provider, r]));
+  const calendarRows = must(calendars);
   return c.json({
     mcp_url: `${appUrl(c)}/mcp`,
-    apps: CATALOG.map(({ available, ...entry }) => ({
-      ...entry,
-      available: available(c.env),
-      redirect_uri: OAUTH[entry.provider] ? callbackUrl(appUrl(c), entry.provider) : null,
-      ...(byProvider.get(entry.provider) ?? { status: "disconnected" }),
-    })),
+    apps: CATALOG.map(({ available, ...entry }) => {
+      const own = calendarRows.filter((s) => s.app === entry.id);
+      const linked = isCalendarApp(entry.id) ? { calendars: own.length, calendar_errors: own.filter((s) => s.last_error).length } : {};
+      const row = byProvider.get(entry.id);
+      return {
+        ...entry,
+        available: available(c.env),
+        redirect_uri: OAUTH[entry.id as Provider] ? callbackUrl(appUrl(c), entry.id) : null,
+        ...(row ?? { status: entry.auth === "link" && own.length ? "connected" : "disconnected" }),
+        ...linked,
+      };
+    }),
   });
 });
 
@@ -42,7 +48,7 @@ apps.post("/apps/:provider/connect", requireUser, requireCompany(ADMINS, "apps")
   const provider = c.req.param("provider") as Provider;
   const entry = catalogEntry(provider);
   const config = OAUTH[provider];
-  if (!entry || !config || !entry.available(c.env)) throw new HttpError(400, "That app isn't available yet.");
+  if (!entry || !config || entry.auth !== "oauth" || !entry.available(c.env)) throw new HttpError(400, "That app isn't available yet.");
 
   const nonce = randomId();
   const state = await signToken(c.env, {
@@ -69,8 +75,9 @@ apps.post("/apps/:provider/connect", requireUser, requireCompany(ADMINS, "apps")
 apps.get("/apps/:provider/callback", async (c) => {
   const provider = c.req.param("provider") as Provider;
   const query = c.req.query();
+  // Back to the app's own page, which says how it went.
   const done = (status: "connected" | "error", message?: string) =>
-    c.redirect(`${appUrl(c)}/apps?${new URLSearchParams({ app: provider, status, ...(message ? { message } : {}) })}`);
+    c.redirect(`${appUrl(c)}/apps/${catalogEntry(provider) ? provider : ""}?${new URLSearchParams({ status, ...(message ? { message } : {}) })}`);
 
   const state = query.state ? await verifyToken<{ company: string; user: string; provider: string; nonce: string; exp: number }>(c.env, query.state) : null;
   const nonce = getCookie(c, STATE_COOKIE);
@@ -81,7 +88,9 @@ apps.get("/apps/:provider/callback", async (c) => {
   const admin = adminClient(c.env);
   try {
     const secret = await exchangeCode(c.env, provider, query.code, callbackUrl(appUrl(c), provider), { query });
-    const account = await describeAccount(c.env, provider, secret.access_token!, query, secret.extra);
+    const account = provider === "google_calendar"
+      ? await describeGoogleAccount(secret.access_token!)
+      : await describeAccount(c.env, provider, secret.access_token!, query, secret.extra);
     // The integrations row must exist before its secret (foreign key).
     const { error } = await admin.from("integrations").upsert({
       company_id: state.company,
@@ -106,12 +115,21 @@ apps.get("/apps/:provider/callback", async (c) => {
 apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const provider = c.req.param("provider") as Provider;
   const admin = adminClient(c.env);
+  if (provider === "google_calendar") {
+    // Take the visits calendar out of the Google account while we still can, and stop showing
+    // its calendars on the schedule. Calendars added by link stay.
+    const { data } = await admin.from("integrations").select("settings").eq("company_id", c.var.companyId).eq("provider", provider).maybeSingle();
+    const pushId = (data?.settings as { push_calendar_id?: string } | null)?.push_calendar_id;
+    if (pushId) await deleteVisitsCalendar(c.env, admin, c.var.companyId, pushId).catch((error) => console.error("Couldn't remove the visits calendar", error));
+    await admin.from("calendar_sources").delete().match({ company_id: c.var.companyId, kind: "google" });
+    await admin.from("outbox").update({ done_at: new Date().toISOString() }).match({ company_id: c.var.companyId, topic: "calendar.visit" }).is("done_at", null);
+  }
   const secret = await loadSecret(c.env, admin, c.var.companyId, provider).catch(() => null);
   if (secret) await revoke(c.env, provider, secret);
   await admin.from("integration_secrets").delete().match({ company_id: c.var.companyId, provider });
   const { error } = await admin
     .from("integrations")
-    .update({ status: "disconnected", account_label: null, last_error: null })
+    .update({ status: "disconnected", account_label: null, last_error: null, ...(provider === "google_calendar" ? { settings: {} } : {}) })
     .match({ company_id: c.var.companyId, provider });
   if (error) throw dbError(error);
   return c.json({ provider, status: "disconnected" });

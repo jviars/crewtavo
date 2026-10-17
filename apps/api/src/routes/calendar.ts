@@ -1,21 +1,49 @@
 /**
- * Calendar feeds: each person can get a private link that Google, Apple or Outlook Calendar
- * subscribes to, showing their visits (or, for people who dispatch, the whole schedule).
+ * Calendars in and out.
+ *
+ * Out: each person can get a private link that Google, Apple or Outlook Calendar subscribes to,
+ * showing their visits (or, for people who dispatch, the whole schedule).
  *
  *   GET    /api/calendar-feed          whether you have a link, and the link
  *   POST   /api/calendar-feed          make a new link (the old one stops working)
  *   DELETE /api/calendar-feed          turn the link off
  *   GET    /api/calendar/<token>.ics   the feed itself (no sign-in; the token is the key)
+ *
+ * In: other calendars shown on the schedule (owners and admins, from the Apps page). See
+ * integrations/calendars.ts for how they're read.
+ *
+ *   GET    /api/calendars                 the company's calendars, and Google Calendar's state
+ *   POST   /api/calendars                 add a calendar by its ICS link
+ *   PATCH  /api/calendars/:id             rename, recolor, assign to a crew, details on/off...
+ *   POST   /api/calendars/:id/refresh     read it again now
+ *   DELETE /api/calendars/:id             stop showing it
+ *   GET    /api/calendars/google          calendars in the connected Google account
+ *   POST   /api/calendars/google          show one of them on the schedule
+ *   PUT    /api/calendars/google/visits   put visits on Google Calendar, or stop
  */
-import { DISPATCH } from "@crewtavo/core";
+import { ADMINS, DISPATCH, looksLikeIcs, parseIcs } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
+import { runInBackground } from "../lib/background";
 import { decryptJson, encryptJson, randomId } from "../lib/crypto";
-import { appUrl, dbError, HttpError, readJson } from "../lib/http";
+import { appUrl, asJson, dbError, HttpError, must, param, readJson, uuid } from "../lib/http";
 import { buildCalendar, type IcsEvent } from "../lib/ics";
 import { adminClient } from "../lib/supabase";
+import {
+  CalendarError,
+  createVisitsCalendar,
+  deleteVisitsCalendar,
+  fetchIcs,
+  listGoogleCalendars,
+  normalizeLink,
+  pushUpcomingVisits,
+  SOURCE_FIELDS,
+  syncSource,
+} from "../integrations/calendars";
+import { CALENDAR_APPS, catalogEntry } from "../integrations/registry";
+import { IntegrationError } from "../integrations/tokens";
 
 export const calendar = new Hono<AppEnv>();
 
@@ -174,3 +202,204 @@ function ics(c: Parameters<typeof appUrl>[0], name: string, events: IcsEvent[]) 
     "Cache-Control": "private, max-age=300",
   });
 }
+
+// ---------------------------------------------------------------------------------------------
+// Other calendars on the schedule
+// ---------------------------------------------------------------------------------------------
+
+const manage = [requireUser, requireCompany(ADMINS, "apps")] as const;
+const LINK_APPS = CALENDAR_APPS as unknown as [string, ...string[]];
+const color = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Pick a color.").nullable();
+type Ctx = { env: AppEnv["Bindings"]; var: AppEnv["Variables"] };
+
+/** Problems reading a calendar become a 400 with words the person can act on. */
+async function readable<T>(work: () => T | Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof CalendarError || error instanceof IntegrationError) throw new HttpError(400, error.message);
+    throw error;
+  }
+}
+
+async function googleState(c: Ctx) {
+  const { data } = await adminClient(c.env)
+    .from("integrations")
+    .select("status, account_label, settings, last_sync_at, last_error")
+    .eq("company_id", c.var.companyId)
+    .eq("provider", "google_calendar")
+    .maybeSingle();
+  const settings = (data?.settings ?? {}) as { push_calendar_id?: string; push_calendar_name?: string };
+  return {
+    connected: data?.status === "connected",
+    status: data?.status ?? "disconnected",
+    account_label: data?.account_label ?? null,
+    last_sync_at: data?.last_sync_at ?? null,
+    last_error: data?.last_error ?? null,
+    visits_calendar: settings.push_calendar_id ? { name: settings.push_calendar_name ?? "Crewtavo visits" } : null,
+    push_calendar_id: settings.push_calendar_id ?? null,
+  };
+}
+
+/** What the Apps page sees: never the visits calendar's ID. */
+const publicGoogle = ({ push_calendar_id: _, ...rest }: Awaited<ReturnType<typeof googleState>>) => rest;
+
+calendar.get("/calendars", ...manage, async (c) => {
+  const sources = must(await adminClient(c.env).from("calendar_sources").select(SOURCE_FIELDS).eq("company_id", c.var.companyId).order("created_at"));
+  return c.json({ calendars: sources, google: publicGoogle(await googleState(c)) });
+});
+
+calendar.post("/calendars", ...manage, async (c) => {
+  const body = await readJson(
+    c,
+    z.object({
+      url: z.string().trim().min(8).max(2000),
+      app: z.enum(LINK_APPS).default("ics_calendar"),
+      name: z.string().trim().max(80).optional(),
+      color: color.optional(),
+      crew_id: uuid.nullable().optional(),
+      show_details: z.boolean().default(true),
+      blocks_time: z.boolean().default(true),
+    }),
+  );
+  const admin = adminClient(c.env);
+  const url = await readable(() => normalizeLink(body.url));
+  // Read it once now, so a wrong link is caught here rather than in 15 minutes.
+  const text = await readable(() => fetchIcs(url));
+  const own = looksLikeIcs(text) ? parseIcs(text, { from: new Date(), to: new Date(), zone: "UTC", limit: 1 }).name : null;
+  const entry = catalogEntry(body.app);
+  const fallback = body.app === "ics_calendar" || !entry ? "Calendar" : `${entry.name} calendar`;
+  const { data: source, error } = await admin
+    .from("calendar_sources")
+    .insert({
+      company_id: c.var.companyId,
+      kind: "ics",
+      app: body.app,
+      name: (body.name || own || fallback).slice(0, 80),
+      color: body.color ?? null,
+      crew_id: body.crew_id ?? null,
+      show_details: body.show_details,
+      blocks_time: body.blocks_time,
+      url_sealed: await encryptJson(c.env, { url: url.toString() }),
+      host: url.hostname,
+      created_by: c.var.userId,
+    })
+    .select("id")
+    .single();
+  if (error) throw dbError(error);
+  await syncSource(c.env, admin, source.id).catch(() => null); // a problem shows on the calendar
+  return c.json(must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", source.id).single()), 201);
+});
+
+calendar.patch("/calendars/:id", ...manage, async (c) => {
+  const id = param(c, "id");
+  const body = await readJson(
+    c,
+    z.object({
+      name: z.string().trim().min(1).max(80).optional(),
+      color: color.optional(),
+      crew_id: uuid.nullable().optional(),
+      show_details: z.boolean().optional(),
+      blocks_time: z.boolean().optional(),
+      enabled: z.boolean().optional(),
+    }),
+  );
+  const admin = adminClient(c.env);
+  const before = must(await admin.from("calendar_sources").select("id, show_details, enabled").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Calendar not found.");
+  const { error } = await admin.from("calendar_sources").update(body.enabled === false ? { ...body, event_count: 0 } : body).eq("id", id);
+  if (error) throw dbError(error);
+  if (body.enabled === false) {
+    await admin.from("calendar_events").delete().eq("source_id", id);
+  } else if ((body.enabled && !before.enabled) || (body.show_details !== undefined && body.show_details !== before.show_details)) {
+    // Names are only kept while details are on, so turning them on (or the calendar back on) reads it again.
+    await syncSource(c.env, admin, id).catch(() => null);
+  }
+  return c.json(must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", id).single()));
+});
+
+calendar.post("/calendars/:id/refresh", ...manage, async (c) => {
+  const id = param(c, "id");
+  const admin = adminClient(c.env);
+  must(await admin.from("calendar_sources").select("id").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Calendar not found.");
+  await readable(() => syncSource(c.env, admin, id));
+  return c.json(must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", id).single()));
+});
+
+calendar.delete("/calendars/:id", ...manage, async (c) => {
+  const id = param(c, "id");
+  const { data, error } = await adminClient(c.env).from("calendar_sources").delete().eq("id", id).eq("company_id", c.var.companyId).select("id");
+  if (error) throw dbError(error);
+  if (!data.length) throw new HttpError(404, "Calendar not found.");
+  return c.json({ ok: true });
+});
+
+// ---- Google Calendar ---------------------------------------------------------------------------
+
+async function requireGoogle(c: Ctx) {
+  const state = await googleState(c);
+  if (!state.connected) throw new HttpError(400, state.status === "error" ? "Google Calendar needs to be reconnected first." : "Connect Google Calendar first.");
+  return state;
+}
+
+calendar.get("/calendars/google", ...manage, async (c) => {
+  const state = await requireGoogle(c);
+  const admin = adminClient(c.env);
+  const [calendars, added] = await Promise.all([
+    readable(() => listGoogleCalendars(c.env, admin, c.var.companyId, state.push_calendar_id)),
+    admin.from("calendar_sources").select("id, external_id").eq("company_id", c.var.companyId).eq("kind", "google"),
+  ]);
+  const shown = new Map((added.data ?? []).map((s) => [s.external_id, s.id]));
+  return c.json({ calendars: calendars.map((cal) => ({ ...cal, source_id: shown.get(cal.id) ?? null })) });
+});
+
+calendar.post("/calendars/google", ...manage, async (c) => {
+  const body = await readJson(c, z.object({ calendar_id: z.string().min(1).max(300), crew_id: uuid.nullable().optional(), show_details: z.boolean().default(true) }));
+  const state = await requireGoogle(c);
+  const admin = adminClient(c.env);
+  const found = (await readable(() => listGoogleCalendars(c.env, admin, c.var.companyId, state.push_calendar_id))).find((cal) => cal.id === body.calendar_id);
+  if (!found) throw new HttpError(404, "That calendar isn't in the connected Google account anymore.");
+  const { data: source, error } = await admin
+    .from("calendar_sources")
+    .insert({
+      company_id: c.var.companyId,
+      kind: "google",
+      app: "google_calendar",
+      name: found.name,
+      color: found.color,
+      crew_id: body.crew_id ?? null,
+      show_details: body.show_details,
+      external_id: found.id,
+      created_by: c.var.userId,
+    })
+    .select("id")
+    .single();
+  if (error) throw error.code === "23505" ? new HttpError(409, "That calendar is already on the schedule.") : dbError(error);
+  await syncSource(c.env, admin, source.id).catch(() => null);
+  return c.json(must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", source.id).single()), 201);
+});
+
+/** Visits onto Google Calendar (a calendar Crewtavo makes and keeps), or off again. */
+calendar.put("/calendars/google/visits", ...manage, async (c) => {
+  const { enabled } = await readJson(c, z.object({ enabled: z.boolean() }));
+  const state = await requireGoogle(c);
+  const admin = adminClient(c.env);
+  const { data: row } = await admin.from("integrations").select("settings").eq("company_id", c.var.companyId).eq("provider", "google_calendar").single();
+  const settings = { ...((row?.settings ?? {}) as Record<string, unknown>) };
+  if (enabled && !state.push_calendar_id) {
+    const created = await readable(() => createVisitsCalendar(c.env, admin, c.var.companyId));
+    settings.push_calendar_id = created.id;
+    settings.push_calendar_name = created.name;
+    const { error } = await admin.from("integrations").update({ settings: asJson(settings) }).eq("company_id", c.var.companyId).eq("provider", "google_calendar");
+    if (error) throw dbError(error);
+    // Upcoming visits go across now; later changes follow through the outbox within a few minutes.
+    runInBackground(c, pushUpcomingVisits(c.env, admin, c.var.companyId));
+  } else if (!enabled && state.push_calendar_id) {
+    await readable(() => deleteVisitsCalendar(c.env, admin, c.var.companyId, state.push_calendar_id!));
+    delete settings.push_calendar_id;
+    delete settings.push_calendar_name;
+    const { error } = await admin.from("integrations").update({ settings: asJson(settings) }).eq("company_id", c.var.companyId).eq("provider", "google_calendar");
+    if (error) throw dbError(error);
+    await admin.from("outbox").update({ done_at: new Date().toISOString() }).match({ company_id: c.var.companyId, topic: "calendar.visit" }).is("done_at", null);
+  }
+  return c.json({ google: publicGoogle(await googleState(c)) });
+});
