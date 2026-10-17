@@ -59,9 +59,11 @@ instead of an error.
 **Your own domain:** on the **crewtavo** service, open **Settings → Networking → Custom Domain**,
 then set its `APP_URL` variable to `https://your-domain` and redeploy `crewtavo` and `auth`.
 
-**Email:** Crewtavo sends quotes, invoices and reminders from the business's own mailbox. Connect
-it under **Settings → Email** (Gmail, Google Workspace, Microsoft 365, Zoho, iCloud or any SMTP
-server). No extra accounts, no DNS changes.
+**Email:** Railway blocks outgoing mail servers (SMTP) on its trial and Hobby plans, so on those
+plans Crewtavo sends email through [Resend](https://resend.com): create a free Resend account,
+then add `RESEND_API_KEY` and `EMAIL_FROM` to the **crewtavo** service's variables. On Railway's Pro
+plan, or when you self-host, you can instead connect the business's own mailbox under
+**Settings → Email** (Gmail, Google Workspace, Microsoft 365, Zoho, iCloud or any SMTP server).
 
 ## Self-host
 
@@ -253,7 +255,7 @@ Everything an instance needs is generated. These optional settings turn on extra
 | `GOOGLE_MAPS_BROWSER_KEY`, `GOOGLE_MAPS_SERVER_KEY` | Measuring on satellite imagery, and roof pitch suggestions (Solar API). |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Online payments by card and US bank account. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages, and two-way texting. |
-| `RESEND_API_KEY`, `EMAIL_FROM` | A default sender for the whole instance, until a company connects its own mailbox. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Email through Resend. Needed on Railway's trial and Hobby plans, which block SMTP; elsewhere, a default sender until the business connects its own mailbox. |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online sync. |
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books sync. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar. |

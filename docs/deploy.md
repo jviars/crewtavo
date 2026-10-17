@@ -99,7 +99,7 @@ lists them all).
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books. Create a server-based client at api-console.zoho.com. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Online invoice payments (card and US bank). Point a webhook at `/api/webhooks/stripe` with these events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `charge.refunded`. |
-| `RESEND_API_KEY`, `EMAIL_FROM` | Optional. Each company sends from its own mailbox, connected in the app under **Settings → Email** (Gmail, Google Workspace, Zoho, Microsoft 365, Yahoo, iCloud or any SMTP server, with an app password), so nothing is needed here. Set these only to give every company a default sender until it connects one. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Email through [Resend](https://resend.com). **Needed on Railway's trial and Hobby plans**, which block outgoing mail servers (SMTP). On Railway Pro or when self-hosting, the business can instead connect its own mailbox under **Settings → Email**, and these only give it a default sender until then. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages. For two-way texting, set the number's **Messaging > A message comes in** webhook to `https://your-domain/api/webhooks/twilio` (HTTP POST). Replies appear in Messages and notify the office. `APP_URL` must match that address exactly, because Twilio signs the full URL. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SCHEDULER` | Set to `off` on extra replicas of `crewtavo`, so background tasks run in one place. |
@@ -133,7 +133,8 @@ the Sentry project's security settings so the server never infers them.
 
 ## After the first sign-in
 
-- **Settings → Email**: connect the business mailbox (Gmail, Google Workspace, Zoho, Microsoft 365, Yahoo,
+- **Settings → Email** (self-hosted, or Railway Pro; Railway's trial and Hobby plans block SMTP, so
+  use `RESEND_API_KEY` there): connect the business mailbox (Gmail, Google Workspace, Zoho, Microsoft 365, Yahoo,
   iCloud or any SMTP server) with an app password; the screen links to where each provider makes one.
   Crewtavo signs in and sends you a test before saving. Quotes, invoices, reminders, team invites,
   password resets and team notifications then go out from that address. No DNS changes, no extra
