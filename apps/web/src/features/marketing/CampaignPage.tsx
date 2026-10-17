@@ -163,7 +163,7 @@ function CampaignPageScreen() {
     <>
       <BackLink to="/marketing">Marketing</BackLink>
       <PageHeader
-        title={editable ? <input className="page-title title-input" value={draft.name} maxLength={120} onChange={(e) => set({ name: e.target.value })} aria-label="Campaign name" /> : c.name}
+        title={editable ? <h1 className="page-title"><input className="title-input" value={draft.name} maxLength={120} onChange={(e) => set({ name: e.target.value })} aria-label="Campaign name" /></h1> : c.name}
         documentTitle={c.name}
         actions={
           <>

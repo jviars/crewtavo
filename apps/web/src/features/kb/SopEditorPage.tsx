@@ -125,17 +125,19 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
     <form className="stack" style={{ gap: 20 }} onSubmit={submit}>
       <BackLink to={pageId ? `/kb/${pageId}` : "/kb"}>{pageId ? "Back to guide" : "Knowledge base"}</BackLink>
       <div className="page-header">
-        <input
-          ref={titleRef}
-          className="title-input page-title"
-          value={draft.title}
-          onChange={(ev) => { set("title", ev.target.value); save.reset(); }}
-          placeholder="Guide title, e.g. Sealcoat application"
-          maxLength={200}
-          aria-label="Title"
-          aria-invalid={touched && !draft.title.trim()}
-          autoFocus={!pageId}
-        />
+        <h1 className="page-title">
+          <input
+            ref={titleRef}
+            className="title-input"
+            value={draft.title}
+            onChange={(ev) => { set("title", ev.target.value); save.reset(); }}
+            placeholder="Guide title, e.g. Sealcoat application"
+            maxLength={200}
+            aria-label="Title"
+            aria-invalid={touched && !draft.title.trim()}
+            autoFocus={!pageId}
+          />
+        </h1>
         <div className="page-actions">
           {dirty && <span className="muted small">Unsaved changes</span>}
           <Button variant="ghost" onClick={() => navigate(pageId ? `/kb/${pageId}` : "/kb")}>Cancel</Button>
