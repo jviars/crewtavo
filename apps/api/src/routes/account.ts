@@ -240,8 +240,9 @@ account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async 
   // Existing account? Add them. Otherwise create the account and a one-time link to set a password.
   // The link goes out from the company's own mailbox (Settings → Email), not Supabase's mailer,
   // which on hosted projects only reaches the project's own team.
-  const { data: existing } = await admin.from("profiles").select("user_id").ilike("email", email).maybeSingle();
-  let userId = existing?.user_id as string | undefined;
+  // By the email they sign in with: profile emails are only a copy, and `ilike` would treat "_" as a wildcard.
+  const { data: existing } = await admin.rpc("user_id_for_email", { p_email: email });
+  let userId = existing ?? undefined;
   let link: string | null = null;
   if (!userId) {
     const { data, error } = await admin.auth.admin.generateLink({ type: "invite", email, options: { data: { full_name: body.full_name ?? "" }, redirectTo: `${base}/` } });
@@ -253,9 +254,11 @@ account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async 
     link = emailAuthLink(base, data.properties.hashed_token, "invite");
   } else {
     // Invited before but never signed in (the first link expired, or never arrived): send a fresh
-    // set-up link instead of "sign in as usual", since they don't have a password yet.
+    // set-up link instead of "sign in as usual", since they don't have a password yet. Not when
+    // another company has them too: the link sets their password, and it can come back to this admin.
     const { data: account } = await admin.auth.admin.getUserById(userId);
-    if (account.user && !account.user.last_sign_in_at) {
+    const { data: elsewhere } = await admin.from("memberships").select("company_id").eq("user_id", userId).eq("active", true).neq("company_id", c.var.companyId).limit(1);
+    if (account.user && !account.user.last_sign_in_at && !elsewhere?.length) {
       const { data } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: `${base}/` } });
       if (data.properties?.hashed_token) link = emailAuthLink(base, data.properties.hashed_token, "recovery", true);
     }
@@ -294,21 +297,20 @@ account.post("/auth/email-link", async (c) => {
   }
   const admin = adminClient(c.env);
   const redirectTo = `${appUrl(c)}/`;
-  const { data: profile } = await admin.from("profiles").select("user_id").ilike("email", email).maybeSingle();
-  if (!profile) return c.json({ sent: true });
+  const { data: userId } = await admin.rpc("user_id_for_email", { p_email: email });
+  if (!userId) return c.json({ sent: true });
 
-  const { data: memberships } = await admin.from("memberships").select("company_id, company:companies(name, email)").eq("user_id", profile.user_id).eq("active", true);
+  const { data: memberships } = await admin.from("memberships").select("company_id, company:companies(name, email)").eq("user_id", userId).eq("active", true);
+  // A company's own mailbox sends the link only when the person belongs to that one company. With
+  // several, any of them could have added this person, and whoever runs a mailbox can read the link.
+  const only = memberships?.length === 1 ? memberships[0]! : null;
+  const onlyCompany = only?.company as unknown as { name: string; email: string | null } | undefined;
   let sender: { id: string | null; name: string; email: string | null } | null = null;
-  for (const m of memberships ?? []) {
-    if (await loadMailbox(c.env, m.company_id).catch(() => null)) {
-      const co = m.company as unknown as { name: string; email: string | null };
-      sender = { id: m.company_id, name: co.name, email: co.email };
-      break;
-    }
+  if (only && onlyCompany && (await loadMailbox(c.env, only.company_id).catch(() => null))) {
+    sender = { id: only.company_id, name: onlyCompany.name, email: onlyCompany.email };
   }
   if (!sender && emailConfigured(c.env)) {
-    const co = memberships?.[0]?.company as unknown as { name: string; email: string | null } | undefined;
-    sender = { id: null, name: co?.name ?? "Crewtavo", email: co?.email ?? null };
+    sender = { id: null, name: onlyCompany?.name ?? "Crewtavo", email: onlyCompany?.email ?? null };
   }
   if (!sender) {
     const fallback = body.kind === "recovery"

@@ -1672,6 +1672,9 @@ isOneToOne: false
 { Args: { "p_company": string,"p_limit"?: number,"p_query": string }; Returns: {
               "acknowledged": boolean,"body_text": string,"category": string,"id": string,"rank": number,"required": boolean,"revision": number,"snippet": string,"title": string
             }[]
+                           },
+"user_id_for_email":
+{ Args: { "p_email": string }; Returns: string
                            }
           }
           Enums: {

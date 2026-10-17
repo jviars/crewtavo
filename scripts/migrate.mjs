@@ -99,6 +99,10 @@ try {
     count++;
   }
   current = null;
+  // One business per instance (CREWTAVO_SINGLE_COMPANY=1, which the server sets in an instance): the
+  // database then refuses a second one too, whoever asks (see the audit_fixes migration).
+  await sql`insert into private.instance (single_company) values (${process.env.CREWTAVO_SINGLE_COMPANY === "1"})
+            on conflict (id) do update set single_company = excluded.single_company`;
   // PostgREST caches the schema; tell it about the new tables and functions.
   if (count) await sql`notify pgrst, 'reload schema'`;
   console.log(count ? `migrate: ${count} migration(s) applied.` : "migrate: database is up to date.");
