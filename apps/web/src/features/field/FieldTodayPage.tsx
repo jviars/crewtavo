@@ -15,7 +15,7 @@ import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
 import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
-import { setVisitStatus, type VisitStatusChange } from "./fieldActions";
+import { pendingVisitStatus, setVisitStatus, showVisitStatus, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl } from "./fieldData";
 import { OfflineNote } from "./OfflineNote";
 import { FIELD_SCOPE } from "@/lib/offline";
@@ -65,13 +65,16 @@ export function FieldTodayPage() {
         supabase().from("crew_members").select("crew_id").eq("user_id", session.userId),
       ]);
       const myCrews = new Set(unwrap(crews).map((c) => c.crew_id));
-      const mine = schedule.visits.filter((v) => v.status !== "cancelled" && (v.assignees.some((a) => a.user_id === session.userId) || (v.crew_id && myCrews.has(v.crew_id))));
+      const mine = schedule.visits
+        .filter((v) => v.status !== "cancelled" && (v.assignees.some((a) => a.user_id === session.userId) || (v.crew_id && myCrews.has(v.crew_id))))
+        .map((v) => ({ ...v, status: pendingVisitStatus(queryClient, v.id) ?? v.status }));
       return { today: mine.filter((v) => v.scheduled_on === today), tomorrow: mine.filter((v) => v.scheduled_on !== today && !["completed", "cancelled"].includes(v.status)) };
     },
   });
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["field"] });
+    queryClient.invalidateQueries({ queryKey: ["field-visit"] });
     queryClient.invalidateQueries({ queryKey: ["schedule"] });
     queryClient.invalidateQueries({ queryKey: ["running-timer"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -85,7 +88,7 @@ export function FieldTodayPage() {
     onMutate: async (change: VisitStatusChange) => {
       if (!onlineManager.isOnline()) toast.info("Saved on this phone. It'll send when you have signal.");
       await queryClient.cancelQueries({ queryKey: key });
-      queryClient.setQueryData<typeof data.data>(key, (old) => old && { ...old, today: old.today.map((v) => (v.id === change.visitId ? { ...v, status: change.status } : v)) });
+      showVisitStatus(queryClient, change);
     },
     onSettled: refresh,
   });

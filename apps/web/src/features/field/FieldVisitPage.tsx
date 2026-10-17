@@ -18,7 +18,7 @@ import { toast } from "@/lib/toast";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
-import { saveChecklist, saveVisitNotes, setVisitStatus, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
+import { pendingVisitStatus, saveChecklist, saveVisitNotes, setVisitStatus, showVisitStatus, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl, formatDuration } from "./fieldData";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { SignaturePad } from "./SignaturePad";
@@ -33,15 +33,17 @@ export function FieldVisitPage() {
 
   const visit = useQuery({
     queryKey: ["field-visit", id],
-    queryFn: async () =>
-      unwrapOne(
+    queryFn: async () => {
+      const row = unwrapOne(
         await supabase()
           .from("visits")
           .select("id, title, kind, status, starts_at, ends_at, scheduled_on, notes, hold_reason, completed_at, series_day, series_total, equipment:visit_equipment(equipment:equipment(id, name, kind)), job:jobs(id, number, title, instructions, client:clients(display_name, phone)), request:requests(id, title, details, client:clients(display_name, phone)), property:properties(id, line1, city, region, postal_code, lat, lng, notes)")
           .eq("id", id)
           .maybeSingle(),
         "This visit",
-      ),
+      );
+      return { ...row, status: pendingVisitStatus(queryClient, id) ?? row.status };
+    },
   });
   const v = visit.data;
   useDocumentTitle(v?.title ?? "Visit");
@@ -67,7 +69,7 @@ export function FieldVisitPage() {
     mutationFn: setVisitStatus,
     onMutate: (change: VisitStatusChange) => {
       queued();
-      queryClient.setQueryData<typeof visit.data>(["field-visit", id], (old) => old && { ...old, status: change.status });
+      showVisitStatus(queryClient, change);
     },
     onSettled: refresh,
   });

@@ -2,9 +2,10 @@
  * The crew on their phones: work a visit from My day, and keep equipment hours and maintenance
  * current from the same screen.
  */
-import { dateIn, expect, expectAccessible, makeJob, must, PHONE, test, unique, zonedIso } from "./support/fixtures";
+import { dateIn, expect, expectAccessible, makeJob, must, PHONE, test, unique, zonedIso, type Company } from "./support/fixtures";
 
-test("a crew member works a visit from My day on a phone", async ({ as, data }) => {
+/** A visit at 4 PM today, assigned to the demo employee. */
+async function employeeVisitToday(data: Company) {
   const job = await makeJob(data, "Field");
   const today = dateIn(data.timezone);
   const visit = must(
@@ -16,6 +17,11 @@ test("a crew member works a visit from My day on a phone", async ({ as, data }) 
     "visit",
   );
   must(await data.db.from("visit_assignees").insert({ company_id: data.id, visit_id: visit.id, user_id: await data.userId("employee") }).select("visit_id"), "assignee");
+  return { job, visit };
+}
+
+test("a crew member works a visit from My day on a phone", async ({ as, data }) => {
+  const { job, visit } = await employeeVisitToday(data);
 
   const page = await as("employee", PHONE);
   await page.goto("/field");
@@ -49,6 +55,55 @@ test("a crew member works a visit from My day on a phone", async ({ as, data }) 
   const time = must(await data.db.from("time_entries").select("started_at, ended_at").eq("visit_id", visit.id).eq("user_id", await data.userId("employee")), "time entries");
   expect(time).toHaveLength(1);
   expect(time[0]!.ended_at).toBeTruthy();
+});
+
+test("a visit started on My day shows as started on its own screen while the tap is still sending", async ({ as, data }) => {
+  const { visit } = await employeeVisitToday(data);
+  const page = await as("employee", PHONE);
+  await page.goto("/field");
+  const card = page.getByRole("article").filter({ hasText: visit.title });
+  await card.getByRole("button", { name: "On my way" }).click();
+  await expect(page.getByText("On your way")).toBeVisible();
+
+  // Hold the start on its way to the server, and open the visit meanwhile.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**/api/visits/${visit.id}`, async (route) => {
+    if (route.request().method() === "PATCH") await held;
+    await route.continue();
+  });
+  await card.getByRole("button", { name: "Start" }).click();
+  await expect(card).toContainText("In progress");
+  await card.getByRole("link", { name: new RegExp(visit.title) }).click();
+  await expect(page.getByRole("heading", { level: 1, name: visit.title })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Complete visit" })).toBeVisible();
+
+  release();
+  await expect(page.getByText("Visit started. Your clock is running.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Complete visit" })).toBeVisible();
+  expect(must(await data.db.from("visits").select("status").eq("id", visit.id).single(), "visit").status).toBe("in_progress");
+});
+
+test("with no signal, My day and the visit's own screen agree, and the visit ends up started", async ({ as, data }) => {
+  const { visit } = await employeeVisitToday(data);
+  const page = await as("employee", PHONE);
+  await page.goto("/field");
+  const card = page.getByRole("article").filter({ hasText: visit.title });
+  // Opened once with signal, so the phone has the visit.
+  await card.getByRole("link", { name: new RegExp(visit.title) }).click();
+  await expect(page.getByRole("button", { name: "On my way" })).toBeVisible();
+  await page.getByRole("link", { name: "My day" }).first().click();
+
+  await page.context().setOffline(true);
+  await card.getByRole("button", { name: "On my way" }).click();
+  await card.getByRole("button", { name: "Start" }).click();
+  await expect(card).toContainText("In progress");
+  await card.getByRole("link", { name: new RegExp(visit.title) }).click();
+  await expect(page.getByRole("button", { name: "Complete visit" })).toBeVisible();
+
+  await page.context().setOffline(false);
+  await expect(page.getByText("Visit started. Your clock is running.")).toBeVisible();
+  await expect.poll(async () => must(await data.db.from("visits").select("status").eq("id", visit.id).single(), "visit").status).toBe("in_progress");
 });
 
 test("the foreman logs hours and marks maintenance done from My day on a phone", async ({ as, data }) => {

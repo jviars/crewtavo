@@ -17,6 +17,27 @@ export interface VisitStatusChange {
   at: string;
 }
 
+/**
+ * The status last tapped for a visit on this phone while that tap is still waiting to send (no
+ * signal, or queued behind an earlier action). What the server says is older than that, so screens
+ * show this instead; otherwise the crew would be offered a step they've already taken, and tapping
+ * it would queue a step backwards.
+ */
+export function pendingVisitStatus(queryClient: QueryClient, visitId: string): string | undefined {
+  const waiting = queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: ["visit-status"], status: "pending" })
+    .map((m) => m.state.variables as VisitStatusChange | undefined)
+    .filter((v) => v?.visitId === visitId);
+  return waiting.at(-1)?.status;
+}
+
+/** Show a tapped status at once, on My day and on the visit's own screen alike. */
+export function showVisitStatus(queryClient: QueryClient, change: VisitStatusChange) {
+  queryClient.setQueriesData<{ today: Array<{ id: string; status: string }> }>({ queryKey: ["field"] }, (old) => old && { ...old, today: old.today.map((v) => (v.id === change.visitId ? { ...v, status: change.status } : v)) });
+  queryClient.setQueryData<{ status: string } | null>(["field-visit", change.visitId], (old) => old && { ...old, status: change.status });
+}
+
 export async function setVisitStatus(v: VisitStatusChange) {
   await api.patch(`/visits/${v.visitId}`, { status: v.status });
   if (v.status === "in_progress") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "start", v.at);
