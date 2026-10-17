@@ -1,3 +1,4 @@
+import { RRule } from "rrule";
 import { describe, expect, it } from "vitest";
 import {
   EQUIPMENT_KINDS,
@@ -16,11 +17,13 @@ import {
   PRESETS,
   evaluateFormula,
   formulaVariables,
+  isIsoDate,
   lineLengthM,
   localDate,
   mToFt,
   occurrenceDates,
   orderStops,
+  parseRule,
   pitchFactor,
   pitchFromDegrees,
   polygonAreaM2,
@@ -107,6 +110,15 @@ describe("formulas", () => {
     }
   });
 
+  it("only calls its own functions, not ones every object has", () => {
+    // "constructor(5) + 1" used to be 6, and these threw TypeErrors instead of FormulaErrors.
+    for (const bad of ["constructor(5) + 1", "__proto__(1)", "__defineGetter__(1, 2)", "toString()", "hasOwnProperty(1)", "valueOf()"]) {
+      expect(() => evaluateFormula(bad, { area: 1 }), bad).toThrow(FormulaError);
+      expect(() => validateFormula(bad), bad).toThrow(/Unknown function/);
+    }
+    expect(() => evaluateFormula("toString * 2", {})).toThrow(/Unknown value "toString"/);
+  });
+
   it("reports unknown and missing values", () => {
     expect(() => evaluateFormula("area_sqft * 2", {})).toThrow(/Unknown value/);
     expect(() => evaluateFormula("depth_in * 2", { depth_in: null })).toThrow(/no value yet/);
@@ -148,6 +160,63 @@ describe("recurrence", () => {
   it("rejects bad rules", () => {
     expect(() => occurrenceDates({ starts_on: "2026-01-01", recurrence_rule: "every tuesday" }, "2026-01-01", "2026-02-01")).toThrow();
   });
+
+  it("rejects rules jobs can't use, with a reason", () => {
+    // Negative intervals used to loop forever; sub-daily rules piled up hundreds of thousands of dates.
+    expect(() => parseRule("FREQ=DAILY;INTERVAL=-1")).toThrow("INTERVAL must be a whole number from 1 to 52");
+    expect(() => parseRule("FREQ=WEEKLY;INTERVAL=-2;BYDAY=TU")).toThrow("INTERVAL must be");
+    for (const interval of ["0", "53", "x", "+2"]) expect(() => parseRule(`FREQ=DAILY;INTERVAL=${interval}`)).toThrow("INTERVAL must be");
+    expect(() => parseRule("FREQ=DAILY;INTERVAL=1.5")).toThrow(RangeError);
+    for (const freq of ["SECONDLY;INTERVAL=10", "MINUTELY", "HOURLY"]) expect(() => parseRule(`FREQ=${freq}`)).toThrow("Jobs repeat daily, weekly, monthly or yearly");
+    expect(() => parseRule("FREQ=DAILY;BYHOUR=9,10")).toThrow("BYHOUR isn't supported");
+    expect(() => parseRule("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1")).toThrow("BYSETPOS isn't supported");
+    expect(() => parseRule("FREQ=DAILY;BYMINUTE=5")).toThrow("BYMINUTE isn't supported");
+    // A second line would be read as another rule.
+    expect(() => parseRule("FREQ=DAILY;BYDAY=MO\nRRULE:FREQ=SECONDLY")).toThrow("isn't a rule part");
+    const job = { starts_on: "2026-01-01", recurrence_rule: "FREQ=DAILY;INTERVAL=-1" };
+    expect(() => occurrenceDates(job, "2026-01-01", "2026-03-01")).toThrow(RangeError);
+    expect(parseRule("rrule:freq=monthly;interval=52;byday=1mo")).toBe("FREQ=MONTHLY;INTERVAL=52;BYDAY=1MO");
+  });
+
+  it("returns quickly for a rule that never happens", () => {
+    const started = Date.now();
+    expect(occurrenceDates({ starts_on: "2026-01-01", recurrence_rule: "FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30" }, "2026-01-01", "2027-02-01")).toEqual([]);
+    expect(occurrenceDates({ starts_on: "2026-01-05", recurrence_rule: "FREQ=DAILY;INTERVAL=7;BYDAY=TU" }, "2026-01-01", "2027-02-01")).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(500); // was 6-9 seconds
+  });
+
+  it("caps how many dates one call returns", () => {
+    const dates = occurrenceDates({ starts_on: "2020-01-01", recurrence_rule: "FREQ=DAILY" }, "2020-01-01", "2029-12-31");
+    expect(dates).toHaveLength(1000);
+    expect(new Set(dates).size).toBe(1000);
+    expect(dates[0]).toBe("2020-01-01");
+  });
+
+  it("counts COUNT from the job's start, before the window", () => {
+    const job = { starts_on: "2026-01-06", recurrence_rule: "FREQ=WEEKLY;COUNT=4;BYDAY=TU" };
+    expect(occurrenceDates(job, "2026-01-20", "2026-12-31")).toEqual(["2026-01-20", "2026-01-27"]);
+  });
+
+  it("lists the same dates as rrule", () => {
+    const rules = [
+      "FREQ=DAILY", "FREQ=DAILY;INTERVAL=3", "FREQ=DAILY;BYDAY=MO,WE,FR", "FREQ=DAILY;INTERVAL=2;BYMONTH=3,4",
+      "FREQ=WEEKLY", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH", "FREQ=WEEKLY;INTERVAL=3;BYDAY=SU;WKST=SU", "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,SU;WKST=WE",
+      "FREQ=WEEKLY;INTERVAL=4;BYDAY=1MO", "FREQ=MONTHLY", "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=15", "FREQ=MONTHLY;BYMONTHDAY=-1", "FREQ=MONTHLY;BYMONTHDAY=31",
+      "FREQ=MONTHLY;BYDAY=1MO", "FREQ=MONTHLY;BYDAY=-1FR", "FREQ=MONTHLY;INTERVAL=3;BYDAY=2TU,4TU", "FREQ=MONTHLY;BYDAY=MO,TU;BYMONTHDAY=1,2,3",
+      "FREQ=MONTHLY;BYDAY=5SA", "FREQ=YEARLY", "FREQ=YEARLY;BYMONTH=3,9;BYDAY=1SA", "FREQ=YEARLY;BYDAY=20MO", "FREQ=YEARLY;BYDAY=-1SU",
+      "FREQ=YEARLY;INTERVAL=2;BYMONTH=6;BYMONTHDAY=1,15", "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29", "FREQ=YEARLY;BYMONTH=4", "FREQ=WEEKLY;COUNT=10;BYDAY=TU,FR",
+      "FREQ=MONTHLY;COUNT=5;BYMONTHDAY=31", "FREQ=DAILY;INTERVAL=5;UNTIL=20261115T000000Z",
+    ];
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    for (const starts_on of ["2024-02-29", "2025-12-31", "2026-01-31", "2026-03-08"]) {
+      for (const recurrence_rule of rules) {
+        const expected = new RRule({ ...RRule.parseString(recurrence_rule), dtstart: new Date(`${starts_on}T00:00:00Z`) })
+          .between(new Date("2026-01-01T00:00:00Z"), new Date("2027-12-31T00:00:00Z"), true)
+          .map(iso);
+        expect(occurrenceDates({ starts_on, recurrence_rule }, "2026-01-01", "2027-12-31"), `${recurrence_rule} from ${starts_on}`).toEqual(expected);
+      }
+    }
+  });
 });
 
 describe("time zones", () => {
@@ -155,6 +224,11 @@ describe("time zones", () => {
     expect(zonedTimeToUtc("2026-07-01", "07:30", "America/New_York").toISOString()).toBe("2026-07-01T11:30:00.000Z");
     expect(zonedTimeToUtc("2026-12-01", "07:30", "America/New_York").toISOString()).toBe("2026-12-01T12:30:00.000Z");
     expect(localDate(new Date("2026-07-02T02:00:00Z"), "America/New_York")).toBe("2026-07-01");
+  });
+
+  it("only takes real calendar dates", () => {
+    for (const date of ["2026-02-30", "2026-02-29", "2026-04-31", "2026-13-01", "2026-00-10", "2026-01-00", "2026-1-05", "20260105"]) expect(isIsoDate(date), date).toBe(false);
+    for (const date of ["2024-02-29", "2026-02-28", "2026-12-31", "2026-01-01"]) expect(isIsoDate(date), date).toBe(true);
   });
 });
 

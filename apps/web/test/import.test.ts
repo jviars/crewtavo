@@ -36,6 +36,13 @@ describe("client import", () => {
     expect(clients[0]!.properties.map((p) => p.line1)).toEqual(["75 Meadowbrook Ln", "75 Meadowbrook Lane", "80 Pool Rd"]);
   });
 
+  it("keeps a stray quote inside a field instead of swallowing the rows after it", () => {
+    expect(parseCsv('Name,Note\nAcme,12" curb\nBeta,two\nGamma,three')).toEqual([["Name", "Note"], ["Acme", '12" curb'], ["Beta", "two"], ["Gamma", "three"]]);
+    expect(parseCsv('Name,Height\nDana,5\'10"\r\nLee,6\'\r\n')).toEqual([["Name", "Height"], ["Dana", "5'10\""], ["Lee", "6'"]]);
+    // Quoted fields still hold commas, line breaks and doubled quotes.
+    expect(parseCsv('Name,Note\n"Acme, Inc.","Line one\nsaid ""hi"""\n"",x')).toEqual([["Name", "Note"], ["Acme, Inc.", 'Line one\nsaid "hi"'], ["", "x"]]);
+  });
+
   it("matches plain spreadsheets too", () => {
     const clients = read(["Name,Email,Phone,Address,City,State,Zip", "Priya Shah,PRIYA@EXAMPLE.COM,540-555-0163,9 Hillcrest Ct,Roanoke,VA,24018"].join("\n"));
     expect(clients[0]).toMatchObject({ display_name: "Priya Shah", email: "priya@example.com", properties: [{ line1: "9 Hillcrest Ct", region: "VA", postal_code: "24018" }] });

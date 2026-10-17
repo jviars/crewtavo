@@ -27,6 +27,32 @@ describe("scrubText", () => {
     const text = "Visit a7000000-0000-0000-0000-000000000001 on 2026-10-16 at 07:00 for $12,500.00 (index-KuLrDpN1.js:1:23456)";
     expect(scrubText(text)).toBe(text);
   });
+
+  it("masks phone numbers after a colon or x, with extensions, and in tel: and sms: links", () => {
+    expect(scrubText("Phone:5405550199")).toBe("Phone:[phone]");
+    expect(scrubText("mobile:+1 540 555 0199 or x5405550199")).toBe("mobile:[phone] or x[phone]");
+    expect(scrubText("Call 540-555-0199x204")).toBe("Call [phone]x204");
+    expect(scrubText('<a href="tel:+15405550199">call</a> or sms:540.555.0199?body=Running%20late')).toBe('<a href="tel:[phone]">call</a> or sms:[phone]');
+    expect(scrubText("tel:%2B1-540-555-0199")).toBe("tel:[phone]");
+  });
+
+  it("drops query strings and fragments from relative URLs too", () => {
+    expect(scrubText("GET /auth/v1/verify?token_hash=4f9a1c&type=recovery failed")).toBe("GET /auth/v1/verify failed");
+    expect(scrubText("Redirected to /login#refresh_token=v1Kq8s&expires_in=3600")).toBe("Redirected to /login");
+    expect(scrubText("POST /auth/v1/token?grant_type=refresh_token (400)")).toBe("POST /auth/v1/token (400)");
+    expect(scrubText("Bad #access_token=eyJa.b.c&refresh_token=v1Kq8s")).toBe("Bad ");
+    expect(scrubText("What? It's #1 in the list.")).toBe("What? It's #1 in the list.");
+  });
+
+  it("stays fast on huge strings and cuts them", () => {
+    const started = Date.now();
+    const scrubbed = scrubText(`${"a".repeat(100_000)} dana@example.com`);
+    expect(Date.now() - started).toBeLessThan(500); // was 8 seconds
+    expect(scrubbed).toBe(`${"a".repeat(10_000)} [truncated]`);
+    expect(scrubText("x".repeat(30_000)).length).toBe(10_000 + " [truncated]".length);
+    // Something cut in half at the limit is still masked.
+    expect(scrubText(`${"a ".repeat(4_997)}call 540-555-0199 now${" b".repeat(500)}`)).not.toMatch(/\d{3}/);
+  });
 });
 
 describe("scrubUrl", () => {
@@ -82,5 +108,18 @@ describe("scrubEvent", () => {
     expect(event.extra).toEqual({ query: "clients", client: { display_name: "Dana", email: "[redacted]", gate_code: "[redacted]", notes: "call [phone]" } });
     expect(event.contexts).toEqual({ os: { name: "iOS" }, response: { status_code: 500 } });
     expect(event.tags).toEqual({ task: "outbox", access_token: "[redacted]" });
+  });
+
+  it("redacts lockbox, alarm and other access codes but keeps status and error codes", () => {
+    const event = scrubEvent({
+      extra: {
+        property: { lockbox_code: "4417", alarm_code: "1234#", door_code: "88", entryCode: "2468", postal_code: "24151", notes: "side gate" },
+        error: { code: "23505", status_code: 409, statusCode: 409, error_code: "PGRST116", country_code: "US" },
+      },
+    });
+    expect(event.extra).toEqual({
+      property: { lockbox_code: "[redacted]", alarm_code: "[redacted]", door_code: "[redacted]", entryCode: "[redacted]", postal_code: "[redacted]", notes: "side gate" },
+      error: { code: "23505", status_code: 409, statusCode: 409, error_code: "PGRST116", country_code: "US" },
+    });
   });
 });

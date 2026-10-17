@@ -1,4 +1,5 @@
 /** Create a job directly, edit a job's details and schedule, and choose what kind of invoice to create. */
+import { parseRule } from "@crewtavo/core/recurrence";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -42,6 +43,7 @@ export function NewJobDialog({ open, onClose, onCreated }: { open: boolean; onCl
   const create = useMutation({
     meta: { inline: true, success: kind === "recurring" ? "Recurring job created and visits scheduled" : "Job created" },
     mutationFn: async () => {
+      if (kind === "recurring") parseRule(recurrence.rule); // says what's wrong before anything is saved
       const job = unwrap(
         await supabase()
           .from("jobs")
@@ -148,6 +150,7 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
     mutationFn: async () => {
       if (!(retainage >= 0 && retainage <= 100)) throw new Error("Retainage must be between 0 and 100%.");
       const recurring = f.kind === "recurring";
+      if (recurring) parseRule(recurrence.rule); // says what's wrong before anything is saved
       unwrap(
         await supabase()
           .from("jobs")

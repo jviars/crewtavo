@@ -2,7 +2,7 @@
  * "Every 2 weeks on Tuesday, April to October" without typing an RRULE. Produces the rule string
  * (RFC 5545, no DTSTART) and season months, and previews the next visit dates.
  */
-import { occurrenceDates } from "@crewtavo/core/recurrence";
+import { occurrenceDates, parseRule } from "@crewtavo/core/recurrence";
 import { useMemo } from "react";
 import { addDaysIso, formatDay, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -55,6 +55,15 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
       return null;
     }
   }, [value, company.timezone]);
+  // A rule saved outside this editor (through the API, say) may be one jobs can't use: say why.
+  const ruleError = useMemo(() => {
+    try {
+      parseRule(value.rule);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : "This schedule can't be used.";
+    }
+  }, [value.rule]);
 
   return (
     <div className="stack" style={{ padding: 14, borderRadius: 10, background: "var(--fill)", border: "1px solid var(--border)" }}>
@@ -134,7 +143,7 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
       </div>
       <div className="small">
         <span className="muted">Next visits: </span>
-        {preview === null ? <span className="text-danger">Check the dates.</span> : preview.length ? preview.map((d) => formatDay(`${d}T12:00:00`)).join(" · ") : <span className="muted">none in the next year</span>}
+        {ruleError ? <span className="text-danger">{ruleError}</span> : preview === null ? <span className="text-danger">Check the dates.</span> : preview.length ? preview.map((d) => formatDay(`${d}T12:00:00`)).join(" · ") : <span className="muted">none in the next year</span>}
       </div>
     </div>
   );

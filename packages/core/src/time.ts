@@ -74,5 +74,9 @@ export function datesBetween(from: string, to: string): string[] {
   return out;
 }
 
-export const isIsoDate = (value: unknown): value is string =>
-  typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+/** A real YYYY-MM-DD date. Date.parse alone reads 2026-02-30 as March 2, so the date must read back the same. */
+export const isIsoDate = (value: unknown): value is string => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const time = Date.parse(value);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value;
+};

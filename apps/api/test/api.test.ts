@@ -14,7 +14,7 @@ import { clientLink, readClientLink } from "../src/lib/links";
 import { buildMime } from "../src/lib/smtp";
 import { twilioSignature } from "../src/routes/messages";
 import { verifyStripeSignature } from "../src/services/stripe";
-import { CRON_TASKS, TASKS } from "../src/tasks";
+import { CRON_TASKS, runTask, TASKS } from "../src/tasks";
 
 const env: Env = {
   SUPABASE_URL: "https://example.supabase.co",
@@ -329,6 +329,34 @@ describe("built-in scheduler", () => {
   });
   it("covers every task's schedule", () => {
     for (const expression of Object.keys(CRON_TASKS)) expect(expression.split(" ")).toHaveLength(5);
+  });
+});
+
+describe("recurring visits", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("skips a job whose rule can't be used and still schedules the others", async () => {
+    const job = (id: string, recurrence_rule: string) => ({
+      id, company_id: "co", title: "Mowing", property_id: null, starts_on: "2026-01-05", ends_on: null, recurrence_rule, active_months: null,
+      visit_start_time: null, visit_duration_min: 60, default_crew_id: null, company: { timezone: "UTC" },
+    });
+    const posted: Array<{ job_id: string; recurrence_key: string }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const { pathname } = new URL(String(input));
+      if (pathname === "/rest/v1/jobs") return Response.json([job("bad", "FREQ=HOURLY"), job("good", "FREQ=WEEKLY;BYDAY=MO")]);
+      if (pathname === "/rest/v1/visits" && init?.method === "POST") {
+        const rows = JSON.parse(String(init.body)) as typeof posted;
+        posted.push(...rows);
+        return Response.json(rows.map((_, i) => ({ id: `visit-${i}` })), { status: 201 });
+      }
+      return Response.json({ message: `unexpected ${pathname}` }, { status: 500 });
+    });
+    const result = await runTask("recurrence", env);
+    expect(result).toMatchObject({ jobs: 2, problems: ["bad: Jobs repeat daily, weekly, monthly or yearly"] });
+    expect(posted.length).toBeGreaterThanOrEqual(8); // Mondays in the next 60 days
+    expect(posted.every((visit) => visit.job_id === "good")).toBe(true);
+    expect(new Set(posted.map((visit) => visit.recurrence_key)).size).toBe(posted.length);
+    expect(result.created).toBe(posted.length);
   });
 });
 
