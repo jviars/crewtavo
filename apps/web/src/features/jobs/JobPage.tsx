@@ -67,13 +67,15 @@ export function JobPage() {
     queryKey: ["job", id, "costs"],
     enabled: seesCosts,
     queryFn: async () => {
-      const [time, expenses] = await Promise.all([
-        supabase().from("time_entries").select("started_at, ended_at, labor_rate").eq("job_id", id),
+      const [time, expenses, rates] = await Promise.all([
+        supabase().from("time_entries").select("id, started_at, ended_at").eq("job_id", id),
         supabase().from("expenses").select("amount").eq("job_id", id),
+        // Pay rates come from the server: nobody reads them on time entries directly.
+        api.post<Record<string, number>>("/time/rates", { job_ids: [id] }),
       ]);
       const entries = unwrap(time);
       const hours = entries.reduce((s, t) => s + (t.ended_at ? (Date.parse(t.ended_at) - Date.parse(t.started_at)) / 3_600_000 : 0), 0);
-      const labor = entries.reduce((s, t) => s + (t.ended_at ? ((Date.parse(t.ended_at) - Date.parse(t.started_at)) / 3_600_000) * Number(t.labor_rate ?? 0) : 0), 0);
+      const labor = entries.reduce((s, t) => s + (t.ended_at ? ((Date.parse(t.ended_at) - Date.parse(t.started_at)) / 3_600_000) * Number(rates[t.id] ?? 0) : 0), 0);
       return { hours, labor, expenses: unwrap(expenses).reduce((s, e) => s + Number(e.amount), 0) };
     },
   });

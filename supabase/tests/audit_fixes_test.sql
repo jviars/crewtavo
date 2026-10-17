@@ -130,9 +130,10 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
 select t16.expect_error(format('insert into public.time_entries (company_id, user_id, started_at, ended_at, approved_at) values (%L, %L, now() - interval ''3 hours'', now(), now())', :'co', 'b1000000-0000-0000-0000-000000000004'), 'an employee can''t add their own time already approved');
 insert into public.time_entries (company_id, user_id, started_at, ended_at, labor_rate) values (:'co', 'b1000000-0000-0000-0000-000000000004', now() - interval '3 hours', now(), 999) returning id as te \gset
-select t16.check((select labor_rate from public.time_entries where id = :'te') is null, 'or choose their own pay rate when adding time');
 update public.time_entries set labor_rate = 150 where id = :'te';
 commit;
+-- Rates are read back as the test runner: nobody reads them on time entries directly.
+select t16.check((select labor_rate from public.time_entries where id = :'te') is null, 'or choose their own pay rate when adding time');
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
@@ -142,8 +143,8 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 update public.time_entries set approved_at = now() where id = :'te';
-select t16.check((select labor_rate from public.time_entries where id = :'te') = 22, 'approved time is paid at the person''s rate, not one they typed');
 commit;
+select t16.check((select labor_rate from public.time_entries where id = :'te') = 22, 'approved time is paid at the person''s rate, not one they typed');
 
 -- ===== What crews and estimators read ===========================================================
 begin;

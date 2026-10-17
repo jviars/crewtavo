@@ -417,8 +417,14 @@ step("12. Who sees the money afterwards");
   check(opsDash.status === 200 && Number(opsDash.body.workflow?.invoices?.awaiting_value ?? 0) === 0 && Number(opsDash.body.month?.collected ?? 0) === 0, "the operations manager's dashboard shows no money figures", opsDash.body.month);
   const empPay = must(await employee.db.from("payments").select("id").eq("invoice_id", invoiceId), "employee payments");
   check(empPay.length === 0, "the employee sees no payments");
-  const costs = must(await ops.db.from("time_entries").select("labor_rate").eq("job_id", jobId), "ops costs");
-  check(costs.length >= 1, "the operations manager sees labor on the job (job costs area on)");
+  const costs = await api(ops, "POST", "/time/rates", { job_ids: [jobId] });
+  check(costs.status === 200 && Object.values(costs.body).some((rate) => Number(rate) > 0), "the operations manager sees labor on the job (job costs area on)", costs.body);
+  for (const [who, name] of [[foreman, "foreman"], [employee, "employee"]]) {
+    const rates = await who.db.from("time_entries").select("labor_rate").eq("job_id", jobId);
+    check(Boolean(rates.error), `the ${name} can't read pay rates on time entries`, rates.error?.message ?? rates.data);
+    const served = await api(who, "POST", "/time/rates", { job_ids: [jobId] });
+    check(served.status === 403, `and the server won't give them to the ${name}`, served.body);
+  }
 }
 
 step("13. A refund made in Stripe");
