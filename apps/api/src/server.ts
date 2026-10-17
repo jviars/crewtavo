@@ -13,6 +13,7 @@
  *   CREWTAVO_LOG_TASKS=1    log every background task run, even when it had nothing to do
  *   APP_URL           public address; defaults to https://$RAILWAY_PUBLIC_DOMAIN on Railway (see readEnv)
  *   CREWTAVO_SENTRY_DSN     report errors to Sentry or GlitchTip (see lib/monitoring.ts)
+ *   CREWTAVO_VERSION        the release, reported by /api/health (the Docker image sets it)
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -34,6 +35,7 @@ import { CRON_TASKS, runTask, type TaskName } from "./tasks";
 const here = dirname(fileURLToPath(import.meta.url));
 const staticDir = process.env.CREWTAVO_STATIC_DIR ?? join(here, "public");
 const port = Number(process.env.PORT ?? 8080);
+const version = process.env.CREWTAVO_VERSION ?? "dev";
 const stack = stackServices(process.env);
 const env = readEnv(withStack(process.env, port));
 startMonitoring(env);
@@ -46,9 +48,9 @@ const api = (request: Request) => app.fetch(request, env);
 // 503, so the previous deployment keeps serving.
 server.get("/api/health", (c) => {
   const s = startup();
-  if (s?.state === "migrating") return c.json({ ok: false, starting: true }, 503);
-  if (s?.state === "failed" && s.firstInstall === false) return c.json({ ok: false, problem: s.problem }, 503);
-  return c.json({ ok: true });
+  if (s?.state === "migrating") return c.json({ ok: false, version, starting: true }, 503);
+  if (s?.state === "failed" && s.firstInstall === false) return c.json({ ok: false, version, problem: s.problem }, 503);
+  return c.json({ ok: true, version });
 });
 server.all("/api/*", (c) => api(c.req.raw));
 server.all("/mcp", (c) => api(c.req.raw));

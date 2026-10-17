@@ -16,7 +16,9 @@ RUN npm run build:server
 
 FROM node:22-alpine
 WORKDIR /app
-ENV NODE_ENV=production PORT=8080
+# The release this image is (set by .github/workflows/release.yml); /api/health reports it.
+ARG CREWTAVO_VERSION=dev
+ENV NODE_ENV=production PORT=8080 CREWTAVO_VERSION=$CREWTAVO_VERSION
 COPY --from=build --chown=node:node /src/dist/server ./
 COPY --from=build --chown=node:node /src/LICENSE ./
 USER node
