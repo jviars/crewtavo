@@ -81,9 +81,11 @@ async function drainOutbox(env: Env) {
           dead_at: giveUp ? new Date().toISOString() : null,
         })
         .eq("id", row.id);
+      // One record that never goes through shows on the Apps page, but the app stays connected so
+      // everything else keeps syncing (a refused sign-in marks it in integrations/tokens.ts).
       if (giveUp) {
         const providers = calendar ? ["google_calendar"] : stripe ? ["stripe"] : ["quickbooks", "zoho_books"];
-        await admin.from("integrations").update({ status: "error", last_error: message.slice(0, 500) }).eq("company_id", row.company_id).in("provider", providers);
+        await admin.from("integrations").update({ last_error: message.slice(0, 500) }).eq("company_id", row.company_id).in("provider", providers).eq("status", "connected");
       }
     }
   }
@@ -134,7 +136,13 @@ export async function materializeJob(admin: Db, job: RecurringJobRow, prune = fa
     }
   }
   if (!dates.length) return { created: 0, removed };
-  const rows = dates.map((date) => {
+  // A date whose visit someone deleted stays deleted (the database remembers it in recurrence_skips).
+  const { data: skips, error: skipError } = await admin.from("recurrence_skips").select("recurrence_key").eq("job_id", job.id).gte("recurrence_key", today);
+  if (skipError) throw new Error(skipError.message);
+  const skipped = new Set((skips ?? []).map((s) => s.recurrence_key));
+  const wanted = dates.filter((date) => !skipped.has(date));
+  if (!wanted.length) return { created: 0, removed };
+  const rows = wanted.map((date) => {
     const start = job.visit_start_time ? zonedTimeToUtc(date, job.visit_start_time, tz) : null;
     return {
       company_id: job.company_id,
@@ -161,25 +169,33 @@ export async function recurringJob(admin: Db, jobId: string) {
 /** Create visits for active recurring jobs, 60 days ahead. recurrence_key prevents duplicates. */
 async function materializeRecurringVisits(env: Env) {
   const admin = adminClient(env);
-  const { data: jobs, error } = await admin
-    .from("jobs")
-    .select(RECURRING_FIELDS)
-    .eq("kind", "recurring")
-    .eq("status", "active")
-    .not("recurrence_rule", "is", null)
-    .not("starts_on", "is", null);
-  if (error) throw new Error(error.message);
+  // Supabase returns at most 1,000 rows per request, so read a page at a time.
+  const jobs: RecurringJobRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await admin
+      .from("jobs")
+      .select(RECURRING_FIELDS)
+      .eq("kind", "recurring")
+      .eq("status", "active")
+      .not("recurrence_rule", "is", null)
+      .not("starts_on", "is", null)
+      .order("id")
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    jobs.push(...(data as RecurringJobRow[]));
+    if (data.length < 1000) break;
+  }
 
   let created = 0;
   const problems: string[] = [];
-  for (const job of (jobs ?? []) as RecurringJobRow[]) {
+  for (const job of jobs) {
     try {
       created += (await materializeJob(admin, job)).created;
     } catch (err) {
       problems.push(`${job.id}: ${err instanceof Error ? err.message : err}`);
     }
   }
-  return { jobs: jobs?.length ?? 0, created, problems };
+  return { jobs: jobs.length, created, problems };
 }
 
 /**

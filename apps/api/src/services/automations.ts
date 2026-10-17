@@ -394,7 +394,17 @@ export async function processAutomations(env: Env, options: { companyId?: string
   const baseUrl = options.baseUrl ?? env.APP_URL ?? null;
   const { data: runs, error } = await admin.rpc("claim_automation_runs", { p_limit: options.limit ?? 25, ...(options.companyId ? { p_company: options.companyId } : {}) });
   if (error) throw new Error(error.message);
-  const tally = { claimed: runs?.length ?? 0, done: 0, skipped: 0, failed: 0 };
-  for (const run of runs ?? []) tally[await executeRun(env, admin, run, baseUrl)]++;
+  const tally = { claimed: runs?.length ?? 0, done: 0, skipped: 0, failed: 0, lost: 0 };
+  for (const run of runs ?? []) {
+    // A batch is claimed for five minutes and a slow one can outlast that, so confirm (and extend)
+    // this run's claim right before doing it. If that fails, another worker has claimed the run
+    // since, or will once the claim runs out.
+    const { data: held } = await admin.rpc("extend_automation_run", { p_id: run.id, p_locked_until: run.locked_until! });
+    if (!held) {
+      tally.lost++;
+      continue;
+    }
+    tally[await executeRun(env, admin, run, baseUrl)]++;
+  }
   return tally;
 }

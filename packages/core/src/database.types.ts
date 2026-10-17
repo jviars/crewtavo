@@ -1196,6 +1196,26 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"recurrence_skips": {
+                  Row: {
+                    "company_id": string,"deleted_at": string,"deleted_by": string | null,"job_id": string,"recurrence_key": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"deleted_at"?: string,"deleted_by"?: string | null,"job_id": string,"recurrence_key": string
+                  }
+                  Update: {
+                    "company_id"?: string,"deleted_at"?: string,"deleted_by"?: string | null,"job_id"?: string,"recurrence_key"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "recurrence_skips_company_id_job_id_fkey"
+      columns: ["company_id","job_id"]
+isOneToOne: false
+      referencedRelation: "jobs"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"referrals": {
                   Row: {
                     "company_id": string,"created_at": string,"id": string,"referred_client_id": string | null,"referred_name": string,"referrer_client_id": string,"request_id": string | null,"reward_amount": number,"reward_issued_at": string | null,"reward_status": string,"status": string,"updated_at": string
@@ -1744,6 +1764,9 @@ isOneToOne: false
 { Args: { "p_company": string,"p_day": string,"p_ends": string,"p_equipment": (string)[],"p_except"?: string,"p_starts": string }; Returns: {
               "ends_at": string,"equipment_id": string,"starts_at": string,"title": string,"visit_id": string
             }[]
+                           },
+"extend_automation_run":
+{ Args: { "p_id": number,"p_locked_until": string }; Returns: boolean
                            },
 "global_search":
 { Args: { "p_company_id": string,"p_limit"?: number,"p_query": string }; Returns: {
