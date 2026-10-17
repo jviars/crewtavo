@@ -136,7 +136,7 @@ export function QuotePage() {
     <>
       <BackLink to="/quotes">Quotes</BackLink>
       <div className="page-header">
-        {editable ? <TitleInput value={q.title} onSave={(title) => update.mutate({ title })} /> : <h1 className="page-title">{q.title}</h1>}
+        <h1 className="page-title">{editable ? <TitleInput value={q.title} onSave={(title) => update.mutate({ title })} /> : q.title}</h1>
         {canSell && (
           <div className="page-actions">
             {EDITABLE.includes(q.status) && <Button icon="send" variant={q.status === "draft" ? "primary" : "secondary"} onClick={() => setDialog("send")} disabled={!q.lines.length} title={!q.lines.length ? "Add a line item first" : undefined}>{q.status === "draft" ? "Send quote" : "Resend"}</Button>}
@@ -321,7 +321,7 @@ function TitleInput({ value, onSave }: { value: string; onSave: (v: string) => v
   useEffect(() => setDraft(value), [value]);
   return (
     <input
-      className="page-title title-input"
+      className="title-input"
       aria-label="Quote title"
       value={draft}
       maxLength={200}
