@@ -5,19 +5,21 @@
 import { addDays, localDate, occurrenceDates, weatherRisks, zonedTimeToUtc, type WeatherRule } from "@crewtavo/core";
 import type { Env } from "./env";
 import { runAccountingJob } from "./integrations/accounting";
+import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
 import { adminClient, type Db } from "./lib/supabase";
 import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
 import { deliverNotifications } from "./services/delivery";
 import { dailyOutlook } from "./services/external";
 
-export const TASKS = ["automations", "campaigns", "notify", "outbox", "recurrence", "followups", "weather"] as const;
+export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather"] as const;
 export type TaskName = (typeof TASKS)[number];
 
 /** Cron expressions -> tasks, run by server.ts's scheduler. */
 export const CRON_TASKS: Record<string, TaskName[]> = {
   "* * * * *": ["automations", "campaigns", "notify"],
   "*/5 * * * *": ["outbox"],
+  "*/15 * * * *": ["calendars"],
   "0 * * * *": ["followups"],
   "0 */6 * * *": ["weather"],
   "15 6 * * *": ["recurrence"],
@@ -33,6 +35,8 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return deliverNotifications(env);
     case "outbox":
       return drainOutbox(env);
+    case "calendars":
+      return syncDueCalendars(env, adminClient(env));
     case "recurrence":
       return materializeRecurringVisits(env);
     case "followups":
@@ -42,16 +46,22 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
   }
 }
 
-/** Push queued accounting changes; failures retry with exponential backoff, up to 8 attempts. */
+/**
+ * Push queued accounting changes and visit changes for Google Calendar; failures retry with
+ * exponential backoff, up to 8 attempts.
+ */
 async function drainOutbox(env: Env) {
   const admin = adminClient(env);
-  const { data: rows, error } = await admin.rpc("claim_outbox", { p_limit: 25 });
+  // A rain day can move dozens of visits at once; they should reach Google in one run.
+  const { data: rows, error } = await admin.rpc("claim_outbox", { p_limit: 100 });
   if (error) throw new Error(error.message);
   let done = 0;
   let failed = 0;
   for (const row of rows ?? []) {
+    const calendar = row.topic.startsWith("calendar.");
     try {
-      await runAccountingJob(env, admin, { ...row, payload: row.payload as Record<string, string> });
+      const job = { ...row, payload: row.payload as Record<string, string> };
+      await (calendar ? runCalendarJob(env, admin, job) : runAccountingJob(env, admin, job));
       await admin.from("outbox").update({ done_at: new Date().toISOString(), locked_until: null, last_error: null }).eq("id", row.id);
       done++;
     } catch (err) {
@@ -68,7 +78,8 @@ async function drainOutbox(env: Env) {
         })
         .eq("id", row.id);
       if (giveUp) {
-        await admin.from("integrations").update({ status: "error", last_error: message.slice(0, 500) }).eq("company_id", row.company_id).in("provider", ["quickbooks", "zoho_books"]);
+        const providers = calendar ? ["google_calendar"] : ["quickbooks", "zoho_books"];
+        await admin.from("integrations").update({ status: "error", last_error: message.slice(0, 500) }).eq("company_id", row.company_id).in("provider", providers);
       }
     }
   }

@@ -154,7 +154,39 @@ schedule.post("/properties/:id/geocode", requireUser, requireCompany(), async (c
   return c.json({ found: true, ...result });
 });
 
-/** Visits between two dates (inclusive), plus the unscheduled queue. */
+type CalendarEventRow = {
+  id: string;
+  title: string;
+  location: string | null;
+  description: string | null;
+  url: string | null;
+  all_day: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  starts_on: string;
+  ends_on: string;
+  busy: boolean;
+  source: { id: string; name: string; color: string | null; crew_id: string | null; blocks_time: boolean } | null;
+};
+
+/**
+ * Events from other calendars (Zoho, Outlook, Google...) on these days. Row-level security shows
+ * them to people who see the whole schedule; for a crew, its own calendars and the whole team's.
+ */
+async function calendarEvents(c: { var: AppEnv["Variables"] }, from: string, to: string, crew?: string) {
+  const { data, error } = await c.var.db
+    .from("calendar_events")
+    .select("id, title, location, description, url, all_day, starts_at, ends_at, starts_on, ends_on, busy, source:calendar_sources(id, name, color, crew_id, blocks_time)")
+    .eq("company_id", c.var.companyId)
+    .lte("starts_on", to)
+    .gte("ends_on", from)
+    .order("starts_on")
+    .limit(3000);
+  if (error) throw dbError(error);
+  return (data as unknown as CalendarEventRow[]).filter((e) => e.source && (!crew || !e.source.crew_id || e.source.crew_id === crew));
+}
+
+/** Visits between two dates (inclusive), plus the unscheduled queue and other calendars' events. */
 schedule.get("/schedule", requireUser, requireCompany(), async (c) => {
   const from = c.req.query("from");
   const to = c.req.query("to") ?? from;
@@ -164,12 +196,13 @@ schedule.get("/schedule", requireUser, requireCompany(), async (c) => {
 
   let visits = c.var.db.from("visits").select(VISIT_FIELDS).eq("company_id", c.var.companyId).gte("scheduled_on", from!).lte("scheduled_on", to!);
   if (crew) visits = visits.eq("crew_id", crew);
-  const [scheduled, unscheduled, crews] = await Promise.all([
+  const [scheduled, unscheduled, crews, events] = await Promise.all([
     visits.order("scheduled_on").order("starts_at", { nullsFirst: false }).order("route_order", { nullsFirst: false }),
     c.var.db.from("visits").select(VISIT_FIELDS).eq("company_id", c.var.companyId).eq("status", "unscheduled").limit(200),
     c.var.db.from("crews").select("id, name, color").eq("company_id", c.var.companyId).eq("active", true).order("name"),
+    calendarEvents(c, from!, to!, crew),
   ]);
-  return c.json({ visits: must(scheduled), unscheduled: must(unscheduled), crews: must(crews) });
+  return c.json({ visits: must(scheduled), unscheduled: must(unscheduled), crews: must(crews), events });
 });
 
 /** The steps a crew takes a visit through, in order. */
@@ -344,6 +377,12 @@ schedule.post("/schedule/find-time", requireUser, requireCompany(), async (c) =>
     .not("status", "eq", "cancelled");
   if (body.crew_id) query = query.eq("crew_id", body.crew_id);
   const busy = must(await query).map((v) => ({ start: new Date(v.starts_at).getTime(), end: new Date(v.ends_at ?? v.starts_at).getTime() }));
+  // Busy time on other calendars counts too (a crew's own calendars, and the whole team's).
+  for (const e of await calendarEvents(c, body.date_from, dateTo, body.crew_id)) {
+    if (!e.busy || !e.source?.blocks_time) continue;
+    if (e.starts_at && e.ends_at) busy.push({ start: Date.parse(e.starts_at), end: Date.parse(e.ends_at) });
+    else busy.push({ start: zonedTimeToUtc(e.starts_on, "00:00", tz).getTime(), end: zonedTimeToUtc(addDays(e.ends_on, 1), "00:00", tz).getTime() });
+  }
 
   const slots: Array<{ starts_at: string; ends_at: string }> = [];
   const need = body.duration_min * 60_000;

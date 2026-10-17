@@ -1,19 +1,26 @@
 /**
  * Apps shown on the Apps page and how each connects.
- *   oauth   - the company signs in to the provider; tokens are stored encrypted (integration_secrets)
- *   api_key - the company pastes a key (or the deployment provides one in env)
- *   inbound - the app connects to us (Claude and ChatGPT via MCP at /mcp)
+ *   oauth     - the company signs in to the provider; tokens are stored encrypted (integration_secrets)
+ *   api_key   - the company pastes a key (or the deployment provides one in env)
+ *   link      - calendars added by their ICS link (calendar_sources; see integrations/calendars.ts)
+ *   connector - the app connects to us (Claude and ChatGPT via MCP at /mcp)
  */
 import type { Env } from "../env";
 
+/** Apps with a row in integrations (and maybe integration_secrets). */
 export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic";
+/** Apps whose calendars are added by link. They're also the calendar_sources.app values (with google_calendar). */
+export type LinkApp = "zoho_calendar" | "outlook_calendar" | "apple_calendar" | "ics_calendar";
+export type AppId = Provider | LinkApp | "chatgpt";
+export type CalendarApp = LinkApp | "google_calendar";
+export const CALENDAR_APPS: readonly CalendarApp[] = ["google_calendar", "zoho_calendar", "outlook_calendar", "apple_calendar", "ics_calendar"];
 
 export interface CatalogEntry {
-  provider: Provider;
+  id: AppId;
   name: string;
-  category: "Accounting" | "Calendar" | "Payments" | "Messaging" | "AI";
+  category: "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging";
   description: string;
-  auth: "oauth" | "api_key";
+  auth: "oauth" | "api_key" | "link" | "connector";
   docs: string;
   /** False when this deployment lacks the OAuth app or platform key the provider needs. */
   available: (env: Env) => boolean;
@@ -21,7 +28,70 @@ export interface CatalogEntry {
 
 export const CATALOG: CatalogEntry[] = [
   {
-    provider: "quickbooks",
+    id: "google_calendar",
+    name: "Google Calendar",
+    category: "Calendar",
+    description: "Show your Google calendars on the schedule, and put visits on a Google calendar that stays up to date.",
+    auth: "oauth",
+    docs: "https://developers.google.com/calendar/api",
+    available: (env) => Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+  },
+  {
+    id: "zoho_calendar",
+    name: "Zoho Calendar",
+    category: "Calendar",
+    description: "Show Zoho calendars on the schedule from their private ICS link.",
+    auth: "link",
+    docs: "https://www.zoho.com/calendar/",
+    available: () => true,
+  },
+  {
+    id: "outlook_calendar",
+    name: "Outlook",
+    category: "Calendar",
+    description: "Show Outlook and Microsoft 365 calendars on the schedule from their published ICS link.",
+    auth: "link",
+    docs: "https://outlook.office.com/calendar/",
+    available: () => true,
+  },
+  {
+    id: "apple_calendar",
+    name: "Apple Calendar",
+    category: "Calendar",
+    description: "Show iCloud calendars on the schedule from their public calendar link.",
+    auth: "link",
+    docs: "https://www.icloud.com/calendar/",
+    available: () => true,
+  },
+  {
+    id: "ics_calendar",
+    name: "Other calendars",
+    category: "Calendar",
+    description: "Any calendar with an ICS or webcal link: Yahoo, Fastmail, Proton, Nextcloud, booking tools and more.",
+    auth: "link",
+    docs: "https://en.wikipedia.org/wiki/ICalendar",
+    available: () => true,
+  },
+  {
+    id: "anthropic",
+    name: "Claude",
+    category: "AI",
+    description: "Use Crewtavo from Claude, and power Crewtavo's writing help and SOP answers with your own Anthropic key.",
+    auth: "api_key",
+    docs: "https://docs.claude.com/",
+    available: () => true,
+  },
+  {
+    id: "chatgpt",
+    name: "ChatGPT",
+    category: "AI",
+    description: "Look up clients, check the schedule and log requests from ChatGPT.",
+    auth: "connector",
+    docs: "https://chatgpt.com/",
+    available: () => true,
+  },
+  {
+    id: "quickbooks",
     name: "QuickBooks Online",
     category: "Accounting",
     description: "Send clients, invoices and payments to QuickBooks when it's your book of record.",
@@ -30,7 +100,7 @@ export const CATALOG: CatalogEntry[] = [
     available: (env) => Boolean(env.QUICKBOOKS_CLIENT_ID && env.QUICKBOOKS_CLIENT_SECRET),
   },
   {
-    provider: "zoho_books",
+    id: "zoho_books",
     name: "Zoho Books",
     category: "Accounting",
     description: "Send clients, invoices and payments to Zoho Books in your data center.",
@@ -39,16 +109,7 @@ export const CATALOG: CatalogEntry[] = [
     available: (env) => Boolean(env.ZOHO_CLIENT_ID && env.ZOHO_CLIENT_SECRET),
   },
   {
-    provider: "google_calendar",
-    name: "Google Calendar",
-    category: "Calendar",
-    description: "Put each crew's visits on a Google Calendar.",
-    auth: "oauth",
-    docs: "https://developers.google.com/calendar/api",
-    available: (env) => Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-  },
-  {
-    provider: "stripe",
+    id: "stripe",
     name: "Stripe",
     category: "Payments",
     description: "Card and bank (ACH) payments from invoices and the client portal.",
@@ -57,7 +118,7 @@ export const CATALOG: CatalogEntry[] = [
     available: (env) => Boolean(env.STRIPE_SECRET_KEY),
   },
   {
-    provider: "twilio",
+    id: "twilio",
     name: "Twilio",
     category: "Messaging",
     description: "Text messages: reminders, on-my-way texts and two-way conversations.",
@@ -65,20 +126,13 @@ export const CATALOG: CatalogEntry[] = [
     docs: "https://www.twilio.com/docs/messaging",
     available: (env) => Boolean(env.TWILIO_ACCOUNT_SID),
   },
-  {
-    provider: "anthropic",
-    name: "Claude (Anthropic)",
-    category: "AI",
-    description: "Draft quotes, rewrite messages and answer questions from your SOPs. Uses your key if you add one.",
-    auth: "api_key",
-    docs: "https://docs.claude.com/",
-    available: () => true,
-  },
 ];
 
-export function catalogEntry(provider: string): CatalogEntry | undefined {
-  return CATALOG.find((entry) => entry.provider === provider);
+export function catalogEntry(id: string): CatalogEntry | undefined {
+  return CATALOG.find((entry) => entry.id === id);
 }
+
+export const isCalendarApp = (id: string): id is CalendarApp => (CALENDAR_APPS as readonly string[]).includes(id);
 
 /** Context passed back on the OAuth callback (Zoho tells us which data center the account lives in). */
 export interface CallbackContext {
@@ -169,7 +223,13 @@ export const OAUTH: Partial<Record<Provider, OAuthConfig>> = {
     authorizeUrl: () => "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: () => "https://oauth2.googleapis.com/token",
     revokeUrl: () => "https://oauth2.googleapis.com/revoke",
-    scope: "https://www.googleapis.com/auth/calendar.events",
+    // As little as the features need: see which calendars there are, read their events, and keep
+    // the one calendar Crewtavo makes for visits. Never change anyone's own events.
+    scope: [
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
+      "https://www.googleapis.com/auth/calendar.app.created",
+    ].join(" "),
     clientId: (env) => env.GOOGLE_CLIENT_ID,
     clientSecret: (env) => env.GOOGLE_CLIENT_SECRET,
     clientAuth: "body",
