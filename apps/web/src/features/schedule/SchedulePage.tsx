@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
-import { addDaysIso, todayIn } from "@/lib/format";
+import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { clock, lengthOf, minutesOf, TimeGrid, type GridColumn } from "./TimeGrid";
@@ -140,7 +140,8 @@ export function SchedulePage() {
     queryFn: () => api.get<ScheduleData>(`/schedule?from=${range.from}&to=${range.to}${crewId ? `&crew_id=${crewId}` : ""}`),
   });
 
-  const formatTime = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });
+  // Card times in the company's zone, like the grid and the visit dialog.
+  const timeOf = (iso: string) => formatTime(iso, tz);
   const crews = schedule.data?.crews ?? [];
   const crewOf = (id: string | null) => crews.find((c) => c.id === id);
   const withColor = (v: Visit): Visit => ({ ...v, crewColor: crewOf(v.crew_id)?.color ?? undefined });
@@ -258,7 +259,7 @@ export function SchedulePage() {
     if (size === "tiny") return <span className="tg-n" style={{ WebkitLineClamp: 1 }}>{v.route_order && !v.starts_at ? `${v.route_order}. ` : ""}{done}{v.title}{day}</span>;
     return (
       <>
-        {v.starts_at && <span className="tg-t">{formatTime(v.starts_at)}{v.ends_at ? ` – ${formatTime(v.ends_at)}` : ""}</span>}
+        {v.starts_at && <span className="tg-t">{timeOf(v.starts_at)}{v.ends_at ? ` – ${timeOf(v.ends_at)}` : ""}</span>}
         <span className="tg-n">{done}{v.title}{day}</span>
         {size === "full" && who && <span className="tg-m">{who}</span>}
         {size === "full" && v.hold_reason && <span className="tg-w" title={v.hold_reason}>⚠ {v.hold_reason.split(";")[0]}</span>}
@@ -415,7 +416,7 @@ export function SchedulePage() {
                           onPointerDown={canDispatch && canMove(v) && !["completed", "cancelled"].includes(v.status) ? startDrag(v, "move") : undefined}
                           onClick={() => !wasDragging() && open(v)}
                         >
-                          {v.starts_at ? `${formatTime(v.starts_at)} ` : ""}{v.title}
+                          {v.starts_at ? `${timeOf(v.starts_at)} ` : ""}{v.title}
                         </button>
                       ))}
                       {visits.length > 3 && <button type="button" className="month-more" onClick={() => { setAnchor(date); setView("day"); }}>+{visits.length - 3} more</button>}
@@ -497,7 +498,8 @@ function OptimizeButton({ date, crewId }: { date: string; crewId: string }) {
   const queryClient = useQueryClient();
   const optimize = useMutation({
     meta: { success: (r: { miles_before: number; miles_after: number; skipped: number }) => `Route ordered: ${r.miles_before} → ${r.miles_after} miles${r.skipped ? ` (${r.skipped} without a map location)` : ""}` },
-    mutationFn: () => api.post<{ miles_before: number; miles_after: number; skipped: number }>("/schedule/optimize", { date, crew_id: crewId || undefined }),
+    // The "No crew" lane sends null: only visits with no crew, not every crew's.
+    mutationFn: () => api.post<{ miles_before: number; miles_after: number; skipped: number }>("/schedule/optimize", { date, crew_id: crewId || null }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["schedule"] }),
   });
   return <Button size="sm" variant="ghost" icon="navigation" loading={optimize.isPending} onClick={() => optimize.mutate()}>Order anytime stops</Button>;

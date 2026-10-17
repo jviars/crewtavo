@@ -2,7 +2,7 @@
  * Create or edit a visit, assessment, task or event: date, time (or anytime), crew, people, status
  * and notes, with "Find a time" for open slots. Used by Schedule, Job, Request and Home.
  */
-import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
+import { isIsoDate, localDate, localTime, parseZonedTime } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -115,10 +115,12 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const series = extra.data?.series_total && extra.data.series_total > 1 ? { day: extra.data.series_day!, total: extra.data.series_total } : null;
   const machines = useEquipmentChoices();
   const picked = equipment ?? [];
-  const start = !anytime && status !== "unscheduled" ? zonedTimeToUtc(date, time, tz) : null;
+  // A cleared date input gives "": no start time (and nothing to save) until it's filled in again.
+  const validDate = isIsoDate(date);
+  const start = !anytime && status !== "unscheduled" ? parseZonedTime(date, time, tz) : null;
   const clashes = useQuery({
     queryKey: ["equipment-clash", picked.join(","), date, start?.toISOString(), duration, visit.id],
-    enabled: picked.length > 0 && status !== "unscheduled",
+    enabled: picked.length > 0 && status !== "unscheduled" && validDate,
     queryFn: async () =>
       unwrap(
         await supabase().rpc("equipment_conflicts", {
@@ -171,7 +173,9 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const save = useMutation({
     meta: { inline: true, success: isNew ? (unscheduled ? "Added to unscheduled" : days > 1 ? `Scheduled ${days} days` : "Scheduled") : "Visit saved" },
     mutationFn: async () => {
-      const start = anytime || unscheduled ? null : zonedTimeToUtc(date, time, tz);
+      if (!unscheduled && !validDate) throw new Error("Pick a date for the visit.");
+      const start = anytime || unscheduled ? null : parseZonedTime(date, time, tz);
+      if (!anytime && !unscheduled && !start) throw new Error("Pick a start time, or choose anytime that day.");
       const fields = {
         title: title.trim(),
         scheduled_on: unscheduled ? null : date,
@@ -237,7 +241,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
         {!unscheduled && (
           <>
             <div className="form-grid">
-              <Field label="Date"><input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setSlots(null); }} required disabled={!canDispatch} /></Field>
+              <Field label="Date" error={validDate ? null : "Pick a date"}><input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setSlots(null); }} required disabled={!canDispatch} /></Field>
               <Field label="Start time"><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={anytime || !canDispatch} required={!anytime} /></Field>
               <Field label="Length">
                 <select className="select" value={duration} onChange={(e) => { setDuration(Number(e.target.value)); setSlots(null); }} disabled={anytime || !canDispatch}>
@@ -271,7 +275,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
             )}
             {isNew && canDispatch && (
               <div className="row wrap" style={{ gap: 12, alignItems: "flex-end" }}>
-                <Field label="How many days" hint={days > 1 ? `${days} linked visits: ${workDays(date, days, skipWeekends).map(shortDay).join(", ")}` : "Multi-day work becomes one visit per day."}>
+                <Field label="How many days" hint={days > 1 && validDate ? `${days} linked visits: ${workDays(date, days, skipWeekends).map(shortDay).join(", ")}` : "Multi-day work becomes one visit per day."}>
                   <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ width: 120 }}>
                     {Array.from({ length: 14 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? "1 day" : `${n} days`}</option>)}
                   </select>
@@ -391,7 +395,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           )}
           <span className="spacer" />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!title.trim() || (pickJob && kind === "job" && !job)}>{isNew ? (unscheduled ? "Add to unscheduled" : "Schedule") : "Save"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={!title.trim() || (pickJob && kind === "job" && !job) || (!unscheduled && !validDate)}>{isNew ? (unscheduled ? "Add to unscheduled" : "Schedule") : "Save"}</Button>
         </div>
       </form>
     </Dialog>

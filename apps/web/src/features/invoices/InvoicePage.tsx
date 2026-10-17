@@ -20,6 +20,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
 import { SendDialog } from "../quotes/SendDialog";
+import { refundable } from "./refunds";
 
 const METHODS: Record<string, string> = { check: "Check", cash: "Cash", card: "Card", ach: "Bank transfer", other: "Other" };
 
@@ -179,7 +180,8 @@ function InvoicePageScreen() {
                       triggerClassName="btn btn-sm btn-ghost btn-icon"
                       label="Payment actions"
                       items={[
-                        { label: "Record a refund", icon: "undo", hidden: Number(p.amount) <= 0, onSelect: () => setRefunding({ id: p.id, amount: Number(p.amount), method: p.method }) },
+                        // Hidden once it's all been refunded.
+                        { label: "Record a refund", icon: "undo", hidden: refundable(p, inv.payments) <= 0, onSelect: () => setRefunding({ id: p.id, amount: Number(p.amount), method: p.method }) },
                         { label: "Remove payment", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Remove this payment?", body: "Use this to fix a mistake. The invoice balance goes back up.", confirmLabel: "Remove", danger: true })) && removePayment.mutate(p.id) },
                       ]}
                     />
@@ -240,7 +242,7 @@ function InvoicePageScreen() {
 
       {dialog === "send" && <SendDialog kind="invoice" id={inv.id} number={inv.number} email={inv.client?.email ?? null} phone={inv.client?.phone ?? null} onClose={() => setDialog(null)} onSent={refresh} />}
       {dialog === "payment" && <PaymentDialog invoice={{ id: inv.id, client_id: inv.client_id, balance, draft }} onClose={() => setDialog(null)} onSaved={refresh} />}
-      {refunding && <RefundDialog invoice={{ id: inv.id, client_id: inv.client_id }} payment={refunding} onClose={() => setRefunding(null)} onSaved={refresh} />}
+      {refunding && <RefundDialog invoice={{ id: inv.id, client_id: inv.client_id }} payment={refunding} left={refundable(refunding, inv.payments)} onClose={() => setRefunding(null)} onSaved={refresh} />}
     </>
   );
 }
@@ -329,18 +331,24 @@ function PaymentDialog({ invoice, onClose, onSaved }: { invoice: { id: string; c
   );
 }
 
-function RefundDialog({ invoice, payment, onClose, onSaved }: { invoice: { id: string; client_id: string }; payment: { id: string; amount: number; method: string }; onClose: () => void; onSaved: () => void }) {
+/** `left` is what hasn't been refunded yet (earlier refunds count against the payment). */
+function RefundDialog({ invoice, payment, left, onClose, onSaved }: { invoice: { id: string; client_id: string }; payment: { id: string; amount: number; method: string }; left: number; onClose: () => void; onSaved: () => void }) {
   const session = useSession();
-  const [amount, setAmount] = useState(payment.amount.toFixed(2));
+  const [amount, setAmount] = useState(left.toFixed(2));
   const [date, setDate] = useState(todayIn(session.company.timezone));
   const [notes, setNotes] = useState("");
   const value = Number(amount);
-  const tooMuch = value > payment.amount + 0.005;
+  const tooMuch = value > left + 0.005;
+  const limit = left < payment.amount ? `the ${formatMoneyCents(left)} left to refund on this payment` : `the ${formatMoneyCents(payment.amount)} payment`;
   const save = useMutation({
     meta: { inline: true, success: "Refund recorded" },
     mutationFn: async () => {
       if (!(value > 0)) throw new Error("Enter an amount greater than zero.");
-      if (tooMuch) throw new Error(`That's more than the ${formatMoneyCents(payment.amount)} payment.`);
+      if (tooMuch) throw new Error(`That's more than ${limit}.`);
+      // Check again against the latest payments, in case a refund was just recorded elsewhere.
+      const latest = unwrap(await supabase().from("payments").select("amount, method, processor").eq("invoice_id", invoice.id));
+      const now = refundable(payment, latest);
+      if (value > now + 0.005) throw new Error(now > 0 ? `Only ${formatMoneyCents(now)} of this payment is left to refund.` : "This payment has already been refunded.");
       unwrap(
         await supabase().from("payments").insert({
           company_id: session.company.id,
@@ -362,7 +370,7 @@ function RefundDialog({ invoice, payment, onClose, onSaved }: { invoice: { id: s
     <Dialog open onClose={onClose} title="Record a refund" description="Record money you gave back to the client. The invoice balance goes back up by this amount.">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
-          <Field label="Amount" error={tooMuch ? `More than the ${formatMoneyCents(payment.amount)} payment` : null}>
+          <Field label="Amount" error={tooMuch ? `More than ${limit}` : null}>
             <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
           </Field>
           <Field label="Refunded on"><input className="input" type="date" value={date} max={todayIn(session.company.timezone)} onChange={(e) => setDate(e.target.value)} required /></Field>

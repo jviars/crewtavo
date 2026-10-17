@@ -49,6 +49,16 @@ export function zonedTimeToUtc(date: string, time: string, timeZone: string): Da
   return new Date(result);
 }
 
+/**
+ * zonedTimeToUtc for what's typed in a form: null while the date or time is empty or partial
+ * (a cleared date input gives ""), instead of an invalid date that throws when formatted.
+ */
+export function parseZonedTime(date: string, time: string, timeZone: string): Date | null {
+  if (!isIsoDate(date) || !/^\d{2}:\d{2}(:\d{2})?$/.test(time)) return null;
+  const instant = zonedTimeToUtc(date, time, timeZone);
+  return Number.isNaN(instant.getTime()) ? null : instant;
+}
+
 /** The calendar date (YYYY-MM-DD) of an instant in a zone. */
 export function localDate(instant: Date, timeZone: string): string {
   const p = zonedParts(instant, timeZone);

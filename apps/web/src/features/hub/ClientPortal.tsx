@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { formatDate, formatMoneyCents } from "@/lib/format";
+import { dateIn, formatDate, formatMoneyCents, formatTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 export interface PortalVisit {
@@ -26,7 +26,7 @@ export interface PortalVisit {
 }
 export interface ClientView {
   kind: "client";
-  company: { name: string; phone: string | null; email: string | null; website: string | null; branding?: { color?: string } | null };
+  company: { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null };
   client: { name: string; first_name: string; properties: Array<{ id: string; line1: string; city: string | null }> };
   quotes: Array<{ id: string; number: number; title: string; status: string; total: number; valid_until: string | null; approved_at: string | null; link: string }>;
   invoices: Array<{ id: string; number: number; subject: string | null; status: string; total: number; balance_due: number; due_on: string | null; issued_on: string; link: string }>;
@@ -40,9 +40,14 @@ export interface ClientView {
 
 type Fetch = <T>(path: string, body?: unknown, method?: "DELETE") => Promise<T>;
 
+/** The company's time zone: times and dates in the Hub read as the company schedules them. */
+export const hubZone = (company: { timezone?: string | null }) => company.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+/** The day a visit was finished, or its scheduled day. */
+const doneOn = (v: PortalVisit, tz: string) => (v.completed_at ? dateIn(v.completed_at, tz) : v.scheduled_on);
+
 const METHOD: Record<string, string> = { card: "card", ach: "bank transfer", cash: "cash", check: "check", other: "payment" };
-const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-const when = (v: PortalVisit) => (v.starts_at && v.ends_at ? `Arriving between ${time(v.starts_at)} and ${time(v.ends_at)}` : v.starts_at ? `Starting at ${time(v.starts_at)}` : "Time to be confirmed");
+const when = (v: PortalVisit, tz: string) =>
+  v.starts_at && v.ends_at ? `Arriving between ${formatTime(v.starts_at, tz)} and ${formatTime(v.ends_at, tz)}` : v.starts_at ? `Starting at ${formatTime(v.starts_at, tz)}` : "Time to be confirmed";
 const names = (crew: string[]) => (crew.length <= 1 ? crew[0] ?? "" : `${crew.slice(0, -1).join(", ")} and ${crew.at(-1)}`);
 
 export function ClientPortal({ token, data, hubFetch, onMessage }: { token: string; data: ClientView; hubFetch: Fetch; onMessage: (visit?: PortalVisit) => void }) {
@@ -90,7 +95,7 @@ function Crew({ crew }: { crew: string[] }) {
   );
 }
 
-function VisitCard({ token, visit, onMessage }: { token: string; visit: PortalVisit; onMessage: (visit: PortalVisit) => void }) {
+function VisitCard({ token, visit, tz, onMessage }: { token: string; visit: PortalVisit; tz: string; onMessage: (visit: PortalVisit) => void }) {
   const live = visit.status === "en_route" ? "On the way" : visit.status === "in_progress" ? "Working now" : null;
   return (
     <article className="hub-card hub-visit">
@@ -99,7 +104,7 @@ function VisitCard({ token, visit, onMessage }: { token: string; visit: PortalVi
         <div className="grow stack-xs">
           {live && <span className="hub-live">{live}</span>}
           <strong className="hub-title">{visit.title}</strong>
-          <span className="hub-meta"><Icon name="clock" size={14} />{when(visit)}</span>
+          <span className="hub-meta"><Icon name="clock" size={14} />{when(visit, tz)}</span>
           {visit.address && <span className="hub-meta"><Icon name="pin" size={14} />{visit.address}</span>}
           <Crew crew={visit.crew} />
         </div>
@@ -116,11 +121,13 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
   const waitingQuotes = data.quotes.filter((q) => q.status === "sent" || q.status === "changes_requested");
   const owed = data.invoices.filter((i) => Number(i.balance_due) > 0 && i.status !== "paid");
   const next = data.visits[0];
+  const tz = hubZone(data.company);
+  // `day` is the date where the company is: a payment at 8:30 PM on Oct 16 in New York is Oct 17 in UTC.
   const recent = [
-    ...data.payments.map((p) => ({ at: p.received_at, icon: "dollar" as IconName, tone: "good", title: p.invoice ? `Payment on invoice #${p.invoice}` : "Payment received", detail: `${formatMoneyCents(p.amount)} by ${METHOD[p.method] ?? "payment"}`, link: p.invoice ? data.invoices.find((i) => i.number === p.invoice)?.link : undefined })),
-    ...data.past_visits.map((v) => ({ at: v.completed_at ?? `${v.scheduled_on}T12:00:00Z`, icon: "check" as IconName, tone: "good", title: `${v.title} done`, detail: v.crew.length ? `by ${names(v.crew)}` : "Visit complete", link: undefined })),
-    ...data.quotes.filter((q) => q.approved_at).map((q) => ({ at: q.approved_at!, icon: "quote" as IconName, tone: "blue", title: `You approved quote #${q.number}`, detail: q.title, link: q.link })),
-    ...data.requests.map((r) => ({ at: r.created_at, icon: "requests" as IconName, tone: "plain", title: `Request #${r.number} received`, detail: r.title, link: undefined })),
+    ...data.payments.map((p) => ({ at: p.received_at, day: dateIn(p.received_at, tz), icon: "dollar" as IconName, tone: "good", title: p.invoice ? `Payment on invoice #${p.invoice}` : "Payment received", detail: `${formatMoneyCents(p.amount)} by ${METHOD[p.method] ?? "payment"}`, link: p.invoice ? data.invoices.find((i) => i.number === p.invoice)?.link : undefined })),
+    ...data.past_visits.map((v) => ({ at: v.completed_at ?? `${v.scheduled_on}T12:00:00Z`, day: doneOn(v, tz), icon: "check" as IconName, tone: "good", title: `${v.title} done`, detail: v.crew.length ? `by ${names(v.crew)}` : "Visit complete", link: undefined })),
+    ...data.quotes.filter((q) => q.approved_at).map((q) => ({ at: q.approved_at!, day: dateIn(q.approved_at!, tz), icon: "quote" as IconName, tone: "blue", title: `You approved quote #${q.number}`, detail: q.title, link: q.link })),
+    ...data.requests.map((r) => ({ at: r.created_at, day: dateIn(r.created_at, tz), icon: "requests" as IconName, tone: "plain", title: `Request #${r.number} received`, detail: r.title, link: undefined })),
   ]
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 5);
@@ -178,7 +185,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
 
       {next && (
         <Section title="Next visit" action={data.visits.length > 1 || data.past_visits.length ? <button type="button" className="hub-link" onClick={() => go("visits")}>All visits</button> : undefined}>
-          <VisitCard token={token} visit={next} onMessage={onMessage} />
+          <VisitCard token={token} visit={next} tz={tz} onMessage={onMessage} />
         </Section>
       )}
 
@@ -197,7 +204,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
                   <span className={`hub-icon-tile small ${r.tone}`}><Icon name={r.icon} size={16} /></span>
                   <span className="grow stack-xs">
                     <strong>{r.title}</strong>
-                    <span className="hub-meta">{formatDate(r.at.slice(0, 10))} · {r.detail}</span>
+                    <span className="hub-meta">{formatDate(r.day)} · {r.detail}</span>
                   </span>
                   {r.link && <Icon name="chevronRight" size={16} />}
                 </>
@@ -220,12 +227,13 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
 }
 
 function Visits({ token, data, back, onMessage }: { token: string; data: ClientView; back: () => void; onMessage: (visit?: PortalVisit) => void }) {
+  const tz = hubZone(data.company);
   return (
     <>
       <button type="button" className="hub-back" onClick={back}><Icon name="chevronLeft" size={16} />Your account</button>
       <h1 className="hub-h1">Visits</h1>
       <Section title="Coming up">
-        {data.visits.length === 0 ? <div className="hub-card hub-calm">Nothing scheduled right now.</div> : data.visits.map((v) => <VisitCard key={v.id} token={token} visit={v} onMessage={onMessage} />)}
+        {data.visits.length === 0 ? <div className="hub-card hub-calm">Nothing scheduled right now.</div> : data.visits.map((v) => <VisitCard key={v.id} token={token} visit={v} tz={tz} onMessage={onMessage} />)}
       </Section>
       {data.past_visits.length > 0 && (
         <Section title="Done">
@@ -235,7 +243,7 @@ function Visits({ token, data, back, onMessage }: { token: string; data: ClientV
                 <span className="hub-icon-tile small good"><Icon name="check" size={16} /></span>
                 <span className="grow stack-xs">
                   <strong>{v.title}</strong>
-                  <span className="hub-meta">{formatDate((v.completed_at ?? v.scheduled_on).slice(0, 10))}{v.crew.length ? ` · ${names(v.crew)}` : ""}</span>
+                  <span className="hub-meta">{formatDate(doneOn(v, tz))}{v.crew.length ? ` · ${names(v.crew)}` : ""}</span>
                 </span>
               </div>
             ))}

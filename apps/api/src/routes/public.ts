@@ -45,7 +45,7 @@ async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | 
   if (!result.success) throw new HttpError(400, "Please complete the verification and try again.");
 }
 
-const BRANDING = "name, phone, email, website, settings->branding, settings->hub_tips";
+const BRANDING = "name, phone, email, website, timezone, settings->branding, settings->hub_tips";
 
 publicRoutes.get("/hub/:token", async (c) => {
   const l = await link(c);

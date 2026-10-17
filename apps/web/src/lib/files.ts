@@ -21,10 +21,21 @@ export async function compressImage(file: File, max = 2000, quality = 0.82): Pro
   }
 }
 
+/**
+ * What gets uploaded: photos are shrunk first, so the 15 MB limit applies to what's actually
+ * sent (a 20 MB phone photo is usually a few MB once shrunk). Other files are checked as they are.
+ */
+export async function uploadBody(file: File, shrink: (file: File) => Promise<Blob> = compressImage): Promise<Blob> {
+  const tooBig = () => new Error(`${file.name} is larger than 15 MB.`);
+  if (!file.type.startsWith("image/") && file.size > MAX_BYTES) throw tooBig();
+  const body = await shrink(file);
+  if (body.size > MAX_BYTES) throw tooBig();
+  return body;
+}
+
 /** Upload a file under <company>/<folder>/ and return its storage path. */
 export async function uploadFile(companyId: string, folder: string, file: File): Promise<string> {
-  if (file.size > MAX_BYTES) throw new Error(`${file.name} is larger than 15 MB.`);
-  const body = await compressImage(file);
+  const body = await uploadBody(file);
   const ext = body === file ? (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") : "jpg";
   const path = `${companyId}/${folder}/${crypto.randomUUID()}.${ext}`;
   const { error } = await supabase().storage.from("files").upload(path, body, { contentType: body.type || file.type || "application/octet-stream", upsert: false });

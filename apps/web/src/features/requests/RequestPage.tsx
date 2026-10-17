@@ -163,7 +163,7 @@ export function RequestPage() {
                   <Icon name="calendar" size={18} />
                   <span className="grow">
                     <strong>{v.title}</strong>
-                    <span className="muted text-sm" style={{ display: "block" }}>{v.starts_at ? formatDateTime(v.starts_at) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}</span>
+                    <span className="muted text-sm" style={{ display: "block" }}>{v.starts_at ? formatDateTime(v.starts_at, session.company.timezone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}</span>
                   </span>
                   <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
                 </button>

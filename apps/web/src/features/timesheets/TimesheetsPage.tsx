@@ -1,5 +1,5 @@
 /** Time for the week: the running clock, hours per person per day, edits, and approval for payroll. */
-import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
+import { isIsoDate, localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -21,6 +21,7 @@ import { ClockCard } from "../field/ClockCard";
 import { CATEGORY_LABELS, type TimerCategory } from "../field/fieldData";
 import { useMyCrews } from "../schedule/myCrews";
 import { useDispatchOptions } from "../schedule/VisitDialog";
+import { entrySpan } from "./entrySpan";
 
 const hours = (start: string, end: string | null) => ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 3_600_000;
 const mondayOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
@@ -221,14 +222,15 @@ function TimeEntryDialog({ entry, team, defaultDate, onClose, onSaved }: { entry
   const [end, setEnd] = useState(entry?.ended_at ? localTime(new Date(entry.ended_at), tz) : "16:30");
   const [category, setCategory] = useState<TimerCategory>(entry?.category ?? "other");
   const [notes, setNotes] = useState(entry?.notes ?? "");
-  const startAt = zonedTimeToUtc(date, start, tz);
-  // Past midnight means the next day (night work).
-  const endAt = end <= start ? zonedTimeToUtc(addDaysIso(date, 1), end, tz) : zonedTimeToUtc(date, end, tz);
-  const length = (endAt.getTime() - startAt.getTime()) / 3_600_000;
-  const future = startAt.getTime() > Date.now();
+  // Null while the date or a time is cleared (past midnight means the next day).
+  const span = entrySpan(date, start, end, tz);
+  const length = span ? (span.endAt.getTime() - span.startAt.getTime()) / 3_600_000 : 0;
+  const future = Boolean(span && span.startAt.getTime() > Date.now());
   const save = useMutation({
     meta: { inline: true, success: entry ? "Time entry saved" : "Time added" },
     mutationFn: async () => {
+      if (!span) throw new Error("Enter the date and the start and end times.");
+      const { startAt, endAt } = span;
       if (!(length > 0) || length > 16) throw new Error("A single entry has to be between a minute and 16 hours.");
       if (future) throw new Error("You can't add time in the future.");
       // A fixed entry is no longer a guess.
@@ -252,7 +254,7 @@ function TimeEntryDialog({ entry, team, defaultDate, onClose, onSaved }: { entry
           </Field>
         )}
         <div className="form-grid">
-          <Field label="Date"><input className="input" type="date" value={date} max={todayIn(tz)} onChange={(e) => setDate(e.target.value)} required /></Field>
+          <Field label="Date" error={isIsoDate(date) ? null : "Pick a date"}><input className="input" type="date" value={date} max={todayIn(tz)} onChange={(e) => setDate(e.target.value)} required /></Field>
           <Field label="Start"><input className="input" type="time" value={start} onChange={(e) => setStart(e.target.value)} required /></Field>
           <Field label="End" hint={length > 0 ? `${length.toFixed(2)} hours${end <= start ? " (ends the next day)" : ""}` : undefined}><input className="input" type="time" value={end} onChange={(e) => setEnd(e.target.value)} required /></Field>
         </div>
@@ -266,7 +268,7 @@ function TimeEntryDialog({ entry, team, defaultDate, onClose, onSaved }: { entry
         <FormError error={save.error} />
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={future}>{entry ? "Save" : "Add time"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={future || !span}>{entry ? "Save" : "Add time"}</Button>
         </div>
       </form>
     </Dialog>

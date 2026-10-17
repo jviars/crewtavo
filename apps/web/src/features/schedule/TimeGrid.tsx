@@ -57,7 +57,7 @@ interface Placed<V> {
 }
 
 /** Side-by-side lanes for overlapping visits, and which ones double-book a crew. */
-function place<V extends GridVisit>(visits: V[], tz: string): Placed<V>[] {
+export function place<V extends GridVisit>(visits: V[], tz: string): Placed<V>[] {
   const timed = visits
     .filter((v) => v.starts_at && v.status !== "cancelled")
     .map((v) => {
@@ -82,8 +82,10 @@ function place<V extends GridVisit>(visits: V[], tz: string): Placed<V>[] {
     clusterEnd = Math.max(clusterEnd, p.end);
   }
   close();
+  // Both visits of a double booking are marked. Work that's done or called off can't clash.
+  const open = (p: (typeof timed)[number]) => p.v.status !== "completed" && p.v.status !== "cancelled";
   for (const a of timed) {
-    a.conflict = Boolean(a.v.crew_id) && timed.some((b) => b !== a && b.v.crew_id === a.v.crew_id && b.start < a.end && a.start < b.end && b.v.status !== "completed");
+    a.conflict = Boolean(a.v.crew_id) && open(a) && timed.some((b) => b !== a && open(b) && b.v.crew_id === a.v.crew_id && b.start < a.end && a.start < b.end);
   }
   return timed;
 }
