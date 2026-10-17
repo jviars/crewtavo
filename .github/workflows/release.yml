@@ -7,8 +7,8 @@ name: Release
 #   ghcr.io/jviars/crewtavo:0.1.1      the crewtavo service (the root Dockerfile)
 #   ghcr.io/jviars/crewtavo-db:0.1.1   the db service (deploy/postgres), only when it changed
 #
-# Instances check for new tags and update themselves to new patch and minor versions; a new major
-# version waits for the owner. See deploy/README.md, "Updates".
+# Instances check for new tags and update themselves to the next patch version (0.1.1 → 0.1.2); a
+# new minor or major version (0.2.0, 1.0.0) waits for the owner. See deploy/README.md, "Updates".
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
