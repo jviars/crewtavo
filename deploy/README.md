@@ -36,6 +36,7 @@ every deploy generates its own and the person deploying fills in nothing.
 | `SUPABASE_AUTH_URL` | `http://${{auth.RAILWAY_PRIVATE_DOMAIN}}:9999` |
 | `SUPABASE_REST_URL` | `http://${{rest.RAILWAY_PRIVATE_DOMAIN}}:3000` |
 | `SUPABASE_STORAGE_URL` | `http://${{storage.RAILWAY_PRIVATE_DOMAIN}}:5000` |
+| `RAILWAY_HEALTHCHECK_TIMEOUT_SEC` | `600` |
 
 ### db
 
@@ -58,25 +59,42 @@ reference and works as written):
 
 Keep these versions in step with `docker-compose.yml`, and test a version change there first.
 
+## The live template
+
+**https://railway.com/deploy/Chzzxj?referralCode=pQ_v0d** (template code `Chzzxj`, in the
+`jviars's Projects` workspace on Railway). Edit it under **Workspace → Templates → Crewtavo**;
+deploys pick up the latest `main` of this repository.
+
 ## Rebuilding the template
 
-1. Stand up a real instance from this repository and check it end to end. In an empty Railway
-   project: `cd .railway && npm install && railway link && railway config apply`, set the two
-   `preserve()` secrets in the dashboard, generate the crewtavo domain, and open it. (Generate the
-   domain before the first deploy, or redeploy `auth` afterwards: it reads the address when it
-   starts. A template creates the domain first, so deploys from it don't need this.)
-2. In that project, open **Settings → Generate Template from Project**.
-3. In the template composer, replace the two secrets with the template functions above
-   (`JWT_SECRET` on crewtavo, `POSTGRES_PASSWORD` on db), so every deploy gets its own. Service
-   names must stay exactly `crewtavo`, `db`, `auth`, `rest` and `storage`, because the variables
-   refer to each other by name.
-4. Deploy the template once into a fresh project and go through the owner setup.
-5. Publish it and copy its URL, `https://railway.com/deploy/<code>`.
+**Generate Template from Project** refused the reference project ("Service crewtavo does not have a
+source that can be used to generate a template"), so the template was built by hand in the
+template editor. To do it again:
+
+1. Railway → **Templates → New**.
+2. **Add New → GitHub Repo** `https://github.com/jviars/crewtavo` twice, and rename the services
+   `crewtavo` and `db`. On `db`, set **Root Directory** to `/deploy/postgres` and attach a volume at
+   `/var/lib/postgresql/data` (right-click the service → **Attach Volume**).
+3. **Add New → Docker Image** for `auth`, `rest` and `storage` (images above), renamed to exactly
+   those names; the variables refer to services by name. Attach a volume to `storage` at
+   `/var/lib/storage`.
+4. Paste each service's variables into its **Variables → Raw Editor**: the tables above, and
+   `.railway/railway.ts` for auth, rest and storage, with `${{secret(...)}}` for `JWT_SECRET` and
+   `POSTGRES_PASSWORD` so every deploy gets its own.
+5. On `crewtavo`: **Settings → Networking → HTTP Proxy** on port `8080`, healthcheck path
+   `/api/health`, and the variable `RAILWAY_HEALTHCHECK_TIMEOUT_SEC` = `600` (the editor has no
+   timeout field).
+6. **Apply** the changes, set the name, icon and description under the template's settings, and
+   copy the URL from **Share**.
+7. Deploy it once into a fresh project and check that `/api/setup` answers `"ready":true`.
+
+A Railway trial account runs one instance at a time: its resource cap counts every project, so
+delete an earlier test project before deploying the template again.
 
 ## The button
 
 ```html
-<a href="https://railway.com/deploy/<code>"><img src="https://railway.com/button.svg" alt="Deploy on Railway"></a>
+<a href="https://railway.com/deploy/Chzzxj?referralCode=pQ_v0d"><img src="https://railway.com/button.svg" alt="Deploy on Railway"></a>
 ```
 
 ## Updates
