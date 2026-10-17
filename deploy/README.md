@@ -62,7 +62,9 @@ Keep these versions in step with `docker-compose.yml`, and test a version change
 
 1. Stand up a real instance from this repository and check it end to end. In an empty Railway
    project: `cd .railway && npm install && railway link && railway config apply`, set the two
-   `preserve()` secrets in the dashboard, generate the crewtavo domain, and open it.
+   `preserve()` secrets in the dashboard, generate the crewtavo domain, and open it. (Generate the
+   domain before the first deploy, or redeploy `auth` afterwards: it reads the address when it
+   starts. A template creates the domain first, so deploys from it don't need this.)
 2. In that project, open **Settings → Generate Template from Project**.
 3. In the template composer, replace the two secrets with the template functions above
    (`JWT_SECRET` on crewtavo, `POSTGRES_PASSWORD` on db), so every deploy gets its own. Service
