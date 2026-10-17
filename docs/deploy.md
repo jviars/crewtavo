@@ -1,12 +1,12 @@
 # Running Crewtavo
 
 Every business gets its **own Crewtavo instance**: the app plus its own database, sign-in, file
-storage and live updates, separate from every other business. There are two ways to run one:
+storage, separate from every other business. There are two ways to run one:
 
 - **On Railway**, with one click. This is how most businesses will run it.
 - **With Docker** on any computer or server (`npm run instance`), to self-host or to try it out.
 
-Both run the same six services (`docker-compose.yml` with Docker, the Railway template on Railway):
+Both run the same five services (`docker-compose.yml` with Docker, the Railway template on Railway):
 
 | Service | What it does | Reachable from |
 | --- | --- | --- |
@@ -15,10 +15,8 @@ Both run the same six services (`docker-compose.yml` with Docker, the Railway te
 | `auth` | Sign-in, invitations, password resets, and the sign-in Claude and ChatGPT use (Supabase Auth) | Inside the instance |
 | `rest` | The data API the web app reads and writes through, with row-level security (PostgREST) | Inside the instance |
 | `storage` | Photos, receipts and documents (Supabase Storage, on a volume) | Inside the instance |
-| `realtime` | Live updates, such as the schedule changing on other screens (Supabase Realtime) | Inside the instance |
 
-Only `crewtavo` is public. It forwards `/auth/v1`, `/rest/v1`, `/storage/v1` and `/realtime/v1` to
-the others (`apps/api/src/lib/stack.ts`), creates their keys from one shared secret, and applies
+Only `crewtavo` is public. It forwards `/auth/v1`, `/rest/v1` and `/storage/v1` to the others (`apps/api/src/lib/stack.ts`), creates their keys from one shared secret, and applies
 database migrations every time it starts (`/api/health` answers once they're done). Nobody has to
 copy keys or run commands.
 
@@ -27,17 +25,16 @@ copy keys or run commands.
 ## On Railway
 
 **For a business:** press **Deploy on Railway** in the [README](../README.md), sign in to Railway
-(or create an account) on the **Hobby** plan, and press **Deploy** again. Railway's free trial
-allows only 5 services per project, and an instance has 6. After a few minutes, open the address Railway
+(or create an account), and press **Deploy** again. After a few minutes, open the address Railway
 shows on the **crewtavo** service and create the owner account. Then set up the business and invite
 the team from **Settings → People and Roles**.
 
 If something isn't right yet, the address shows a **Crewtavo is starting up** or **Finish setting up
 Crewtavo** page that says what to do, instead of an error.
 
-**Cost:** the business pays Railway directly, on Railway's Hobby plan ($5 a month, including $5 of
-usage). An idle instance uses about 0.5 GB of memory across its six services, which that usage
-covers for a small company. Heavy use costs more; check [Railway's pricing](https://railway.com/pricing).
+**Cost:** the business pays Railway directly. Railway's free trial (30 days, $5 of credit) is enough
+to try Crewtavo; to keep running, an instance needs Railway's Hobby plan ($5 a month, including $5 of
+usage). Heavy use costs more; check [Railway's pricing](https://railway.com/pricing).
 
 **Your own domain:** in the crewtavo service, **Settings → Networking → Custom Domain**. Then change
 its `APP_URL` variable to `https://your-domain` and redeploy `crewtavo` and `auth`.
@@ -60,7 +57,7 @@ npm run instance
 ```
 
 The first run writes `.env.instance` with new secrets (keep it: the database is locked with them),
-builds Crewtavo, starts the six services and prints the address, http://localhost:8080. Then:
+builds Crewtavo, starts the five services and prints the address, http://localhost:8080. Then:
 
 ```bash
 npm run instance -- logs    # follow what's happening

@@ -1,9 +1,9 @@
 /**
- * One Crewtavo instance per business: the app plus its own Supabase services (Auth, REST, Storage,
- * Realtime) and database, in one Railway project or one docker compose file (deploy/README.md).
+ * One Crewtavo instance per business: the app plus its own Supabase services (Auth, REST, Storage)
+ * and database, in one Railway project or one docker compose file (deploy/README.md).
  *
- * This container is the only public address. It forwards /auth/v1, /rest/v1, /storage/v1 and
- * /realtime/v1 to the services over the private network, the way Supabase's API gateway does
+ * This container is the only public address. It forwards /auth/v1, /rest/v1 and /storage/v1 to the
+ * services over the private network, the way Supabase's API gateway does
  * (apps/api/src/server.ts), and it mints the anon and service keys from the shared JWT_SECRET, so the
  * template generates every secret and nobody copies keys around.
  *
@@ -16,7 +16,6 @@ export interface Stack {
   auth: string;
   rest: string;
   storage: string;
-  realtime: string;
 }
 
 type Vars = Record<string, string | undefined>;
@@ -28,7 +27,6 @@ export function stackServices(vars: Vars): Stack | null {
     auth: vars.SUPABASE_AUTH_URL || "http://auth:9999",
     rest: vars.SUPABASE_REST_URL || "http://rest:3000",
     storage: vars.SUPABASE_STORAGE_URL || "http://storage:5000",
-    realtime: vars.SUPABASE_REALTIME_URL || "http://realtime:4000",
   };
 }
 

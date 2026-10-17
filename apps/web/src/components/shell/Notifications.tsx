@@ -1,6 +1,7 @@
 /**
  * The bell: notifications for me (from automations such as "a quote was approved") and the
- * company's activity feed. New notifications arrive live and also show as a toast.
+ * company's activity feed. New notifications are checked for every 30 seconds while Crewtavo is open
+ * (and whenever it comes back into view), and show as a toast.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
@@ -33,6 +34,7 @@ export function NotificationsButton() {
   const notifications = useQuery({
     queryKey: key,
     meta: { silent: true },
+    refetchInterval: 30_000,
     queryFn: async () =>
       unwrap(
         await supabase()
@@ -61,22 +63,25 @@ export function NotificationsButton() {
   });
   const unread = notifications.data?.filter((n) => !n.read_at).length ?? 0;
 
-  // Live: new notifications for me appear immediately, with a toast.
+  // New notifications for me that arrive while Crewtavo is open show as a toast. The first load (and
+  // switching company) only marks what's already there as seen.
+  const seen = useRef<Set<string> | null>(null);
   useEffect(() => {
-    const channel = supabase()
-      .channel(`notifications-${session.userId}-${session.company.id}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${session.userId}` }, (payload) => {
-        const row = payload.new as { company_id: string; title: string; body: string | null; link: string | null };
-        if (row.company_id !== session.company.id) return;
-        queryClient.invalidateQueries({ queryKey: key });
-        toast.info(row.title, { description: row.body ?? undefined, action: row.link ? { label: "View", onClick: () => navigate(row.link!) } : undefined });
-      })
-      .subscribe();
-    return () => {
-      supabase().removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    seen.current = null;
   }, [session.userId, session.company.id]);
+  useEffect(() => {
+    const rows = notifications.data;
+    if (!rows) return;
+    if (!seen.current) {
+      seen.current = new Set(rows.map((n) => n.id));
+      return;
+    }
+    const fresh = rows.filter((n) => !seen.current!.has(n.id));
+    fresh.forEach((n) => seen.current!.add(n.id));
+    for (const n of fresh.filter((n) => !n.read_at).slice(0, 3)) {
+      toast.info(n.title, { description: n.body ?? undefined, action: n.link ? { label: "View", onClick: () => navigate(n.link!) } : undefined });
+    }
+  }, [notifications.data, navigate]);
 
   useEffect(() => {
     const p = panel.current;

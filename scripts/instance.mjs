@@ -37,8 +37,6 @@ if (!existsSync(envFile)) {
       "# the database and every sign-in depend on these values.",
       `POSTGRES_PASSWORD=${hex(24)}`,
       `JWT_SECRET=${hex(32)}`,
-      `SECRET_KEY_BASE=${hex(32)}`,
-      `REALTIME_DB_ENC_KEY=${hex(8)}`,
       "",
       "# The address you open Crewtavo at, and the port on this computer.",
       "APP_URL=http://localhost:8080",
@@ -56,7 +54,8 @@ const command = process.argv[2];
 if (command === "stop") process.exit(compose("stop"));
 if (command === "logs") process.exit(compose("logs", "-f", "--tail", "100"));
 
-if (compose("up", "--build", "--detach") !== 0) process.exit(1);
+// --remove-orphans: services an older version had (such as realtime) are stopped and removed.
+if (compose("up", "--build", "--detach", "--remove-orphans") !== 0) process.exit(1);
 
 const url = readFileSync(envFile, "utf8").match(/^APP_URL=(.+)$/m)?.[1]?.trim() || "http://localhost:8080";
 const port = readFileSync(envFile, "utf8").match(/^CREWTAVO_PORT=(\d+)$/m)?.[1] ?? "8080";

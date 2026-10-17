@@ -55,8 +55,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
 
-      # Postgres, Auth, the REST API, Realtime, Storage and Mailpit; applies supabase/migrations.
-      - run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,postgres-meta
+      # Postgres, Auth, the REST API, Storage and Mailpit; applies supabase/migrations.
+      - run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,postgres-meta,realtime
       - name: Write .dev.vars for the local stack
         run: |
           eval "$(supabase status -o env 2>/dev/null)"

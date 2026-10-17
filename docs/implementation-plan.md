@@ -2,10 +2,11 @@
 
 > [!NOTE]
 > This is the original plan, kept for the reasoning behind it. Hosting has changed since: each
-> business now runs its own instance (the app plus its own Postgres, Auth, Storage and Realtime) on
-> Railway or with Docker, as described in the [README](../README.md) and
-> [deployment guide](deploy.md). Where this plan mentions Cloudflare, Vercel or a hosted Supabase
-> project, read it as that per-business instance.
+> business now runs its own instance (the app plus its own Postgres, Auth and Storage) on Railway
+> or with Docker, as described in the [README](../README.md) and [deployment guide](deploy.md).
+> Where this plan mentions Cloudflare, Vercel or a hosted Supabase project, read it as that
+> per-business instance. Supabase Realtime was dropped to keep instances small: the schedule and
+> notifications refresh by polling.
 
 Crewtavo is open-source operations software for service businesses (lawn care, paving, roofing,
 cleaning, HVAC and similar trades). It does what Jobber does, plus an SOP knowledge base, map
