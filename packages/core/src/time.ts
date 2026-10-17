@@ -38,15 +38,38 @@ export function zoneOffsetMs(date: Date, timeZone: string): number {
   return asUtc - Math.floor(date.getTime() / 1000) * 1000;
 }
 
-/** "2026-10-16" + "07:30" in America/New_York -> the UTC instant. */
+/**
+ * "2026-10-16" + "07:30" in America/New_York -> the UTC instant. Around daylight-saving changes, a
+ * time that happens twice (clocks going back) is the first one, and a time that doesn't happen
+ * (clocks going forward) moves forward with the clocks: 02:30 on the spring-forward day is 03:30.
+ */
 export function zonedTimeToUtc(date: string, time: string, timeZone: string): Date {
   const [y, m, d] = date.split("-").map(Number);
   const [hh = 0, mm = 0, ss = 0] = time.split(":").map(Number);
-  const guess = Date.UTC(y, m - 1, d, hh, mm, ss);
-  // Two passes handle the hour around daylight-saving changes.
-  let result = guess - zoneOffsetMs(new Date(guess), timeZone);
-  result = guess - zoneOffsetMs(new Date(result), timeZone);
-  return new Date(result);
+  const wall = Date.UTC(y, m - 1, d, hh, mm, ss);
+  // The zone's offsets a day either side; a change, if any, is between them.
+  const before = zoneOffsetMs(new Date(wall - 86_400_000), timeZone);
+  const after = zoneOffsetMs(new Date(wall + 86_400_000), timeZone);
+  const first = wall - before;
+  if (zoneOffsetMs(new Date(first), timeZone) === before) return new Date(first);
+  const second = wall - after;
+  if (zoneOffsetMs(new Date(second), timeZone) === after) return new Date(second);
+  // In the gap: read it with the offset from before the change, which lands that much later.
+  return new Date(first);
+}
+
+/**
+ * A time zone name Intl knows, like America/New_York. Not an offset like "+05:00": Postgres reads
+ * those as POSIX zones, with the sign the other way round.
+ */
+export function isTimeZoneName(value: string): boolean {
+  if (!/^[A-Za-z][\w+-]*(\/[\w+-]+)*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

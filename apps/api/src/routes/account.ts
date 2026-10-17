@@ -1,5 +1,5 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
-import { ADMINS, getPreset, isRole, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
+import { ADMINS, getPreset, isRole, isTimeZoneName, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -114,10 +114,10 @@ account.post("/companies", requireUser, async (c) => {
   let preset: TradePreset;
   try {
     preset = getPreset(body.trade_preset);
-    new Intl.DateTimeFormat("en-US", { timeZone: body.timezone });
   } catch {
-    throw new HttpError(400, "Unknown trade preset or time zone.");
+    throw new HttpError(400, "Unknown trade preset.");
   }
+  if (!isTimeZoneName(body.timezone)) throw new HttpError(400, "Unknown time zone. Pick one from the list, like America/New_York.");
   const { db } = c.var;
   const { data: companyId, error } = await db.rpc("create_company", {
     p_name: body.name,

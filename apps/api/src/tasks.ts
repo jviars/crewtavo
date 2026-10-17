@@ -2,11 +2,12 @@
  * Background tasks, run by server.ts's built-in scheduler (or by hand: GET/POST /api/cron/:task
  * with CRON_SECRET). Each is safe to run twice.
  */
-import { addDays, localDate, occurrenceDates, weatherRisks, zonedTimeToUtc, type WeatherRule } from "@crewtavo/core";
+import { addDays, jobWeatherRules, localDate, occurrenceDates, weatherRisks, zonedTimeToUtc } from "@crewtavo/core";
 import type { Env } from "./env";
 import { runAccountingJob } from "./integrations/accounting";
 import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
 import { syncStripeInvoice } from "./integrations/stripe";
+import { reportError } from "./lib/monitoring";
 import { adminClient, type Db } from "./lib/supabase";
 import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
@@ -188,38 +189,59 @@ async function materializeRecurringVisits(env: Env) {
  */
 async function hourlyUpkeep(env: Env) {
   const admin = adminClient(env);
+  // Each step runs on its own: one that fails is reported, and the others still run.
+  const problems: string[] = [];
+  const step = async <T>(name: string, run: PromiseLike<{ data: T | null; error: { message: string } | null }>) => {
+    const { data, error } = await run;
+    if (!error) return data;
+    problems.push(`${name}: ${error.message}`);
+    console.error(`Upkeep step ${name} failed`, error.message);
+    reportError(new Error(`${name} failed: ${error.message}`), { task: "followups", step: name });
+    return null;
+  };
   // Due dates are compared with each company's local date.
-  const { data: overdue, error } = await admin.rpc("mark_overdue_invoices");
-  if (error) throw new Error(error.message);
-  const { data: reminders, error: reminderError } = await admin.rpc("emit_visit_reminders");
-  if (reminderError) throw new Error(reminderError.message);
+  const overdue = await step("mark_overdue_invoices", admin.rpc("mark_overdue_invoices"));
+  const reminders = await step("emit_visit_reminders", admin.rpc("emit_visit_reminders"));
   // Maintenance coming due or overdue: one notification per change, to the people who look after it.
-  const { data: equipment, error: equipmentError } = await admin.rpc("emit_equipment_alerts");
-  if (equipmentError) throw new Error(equipmentError.message);
+  const equipment = await step("emit_equipment_alerts", admin.rpc("emit_equipment_alerts"));
   // Clocks left running: remind after 10 hours, stop after 16 (per-company limits in settings.clock).
-  const { data: clocks, error: clockError } = await admin.rpc("clock_upkeep");
-  if (clockError) throw new Error(clockError.message);
-  return { overdue: overdue ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, clocks };
+  const clocks = await step("clock_upkeep", admin.rpc("clock_upkeep"));
+  return { overdue: overdue ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, clocks, problems };
 }
 
-/** Flag tomorrow's visits whose job weather rules fail (rain, cold for asphalt, sealcoat dry time). */
+const WEATHER_FIELDS =
+  "id, scheduled_on, hold_reason, job:jobs(weather_rules, lines:job_line_items(name, service:services(name))), company:companies(weather_rules:settings->weather_rules), property:properties(lat, lng)";
+
+/**
+ * Flag tomorrow's visits whose weather rules fail (rain, cold for asphalt, sealcoat dry time): the
+ * job's own rules, or else the company's rules for the services on the job.
+ */
 async function weatherHolds(env: Env) {
   const admin = adminClient(env);
   const from = new Date().toISOString().slice(0, 10);
-  const { data: visits, error } = await admin
-    .from("visits")
-    .select("id, scheduled_on, hold_reason, job:jobs(weather_rules), property:properties(lat, lng)")
-    .eq("status", "scheduled")
-    .gte("scheduled_on", from)
-    .lte("scheduled_on", addDays(from, 2));
-  if (error) throw new Error(error.message);
+  // A page at a time, in a fixed order: PostgREST answers with at most 1000 rows.
+  const visits = [];
+  for (let start = 0; ; start += 1000) {
+    const { data, error } = await admin
+      .from("visits")
+      .select(WEATHER_FIELDS)
+      .eq("status", "scheduled")
+      .gte("scheduled_on", from)
+      .lte("scheduled_on", addDays(from, 2))
+      .order("id")
+      .range(start, start + 999);
+    if (error) throw new Error(error.message);
+    visits.push(...data);
+    if (data.length < 1000) break;
+  }
 
   // null: the forecast couldn't be fetched (an outage or rate limit), which isn't a clear sky.
   const outlooks = new Map<string, Awaited<ReturnType<typeof dailyOutlook>> | null>();
   let flagged = 0;
   let unknown = 0;
-  for (const v of visits ?? []) {
-    const rules = ((v.job as { weather_rules?: WeatherRule[] } | null)?.weather_rules ?? []) as WeatherRule[];
+  for (const v of visits) {
+    const services = (v.job?.lines ?? []).flatMap((l) => [l.name, l.service?.name ?? ""]);
+    const rules = v.job ? jobWeatherRules(v.job.weather_rules, v.company?.weather_rules, services) : [];
     const p = v.property as { lat: number | null; lng: number | null } | null;
     if (!rules.length || !v.scheduled_on || p?.lat == null || p?.lng == null) continue;
     const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
@@ -237,5 +259,5 @@ async function weatherHolds(env: Env) {
       if (holdReason) flagged++;
     }
   }
-  return { checked: visits?.length ?? 0, flagged, unknown };
+  return { checked: visits.length, flagged, unknown };
 }
