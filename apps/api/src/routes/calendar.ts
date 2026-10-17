@@ -26,6 +26,37 @@ async function sha256(text: string) {
 const feedUrl = (base: string, token: string) => `${base}/api/calendar/${token}.ics`;
 const canSeeAll = (role: string) => (DISPATCH as readonly string[]).includes(role);
 
+const VISIT_FIELDS =
+  "id, title, status, scheduled_on, starts_at, ends_at, notes, updated_at, crew:crews(name), job:jobs(number, client:clients(display_name)), property:properties(line1, city, region)";
+interface VisitRow {
+  id: string;
+  title: string;
+  status: string;
+  scheduled_on: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  notes: string | null;
+  updated_at: string | null;
+  crew: unknown;
+  job: unknown;
+  property: unknown;
+}
+const PAGE = 1000; // PostgREST's row limit per request
+const MAX_EVENTS = 2000;
+
+/** Every row up to MAX_EVENTS, a page at a time (each query must have a fixed order). */
+async function pages<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
+  const rows: T[] = [];
+  while (rows.length < MAX_EVENTS) {
+    const { data, error } = await page(rows.length, rows.length + PAGE - 1);
+    if (error) throw dbError(error);
+    const got = (data ?? []) as T[];
+    rows.push(...got);
+    if (got.length < PAGE) break;
+  }
+  return rows.slice(0, MAX_EVENTS);
+}
+
 calendar.get("/calendar-feed", requireUser, requireCompany(), async (c) => {
   const admin = adminClient(c.env);
   const { data, error } = await admin.from("calendar_feeds").select("scope, token_sealed, created_at, last_used_at").eq("company_id", c.var.companyId).eq("user_id", c.var.userId).maybeSingle();
@@ -74,32 +105,41 @@ calendar.get("/calendar/:file", async (c) => {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: company.timezone });
   const shift = (days: number) => new Date(Date.parse(`${today}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-  let query = admin
-    .from("visits")
-    .select("id, title, status, scheduled_on, starts_at, ends_at, notes, updated_at, crew:crews(name), job:jobs(number, client:clients(display_name)), property:properties(line1, city, region)")
-    .eq("company_id", feed.company_id)
-    .gte("scheduled_on", shift(-30))
-    .lte("scheduled_on", shift(180))
-    .neq("status", "unscheduled")
-    .order("scheduled_on")
-    .limit(2000);
-  if (!everything) {
+  const from = shift(-30);
+  const to = shift(180);
+  const visitsIn = () =>
+    admin.from("visits").select(VISIT_FIELDS).eq("company_id", feed.company_id).gte("scheduled_on", from).lte("scheduled_on", to).neq("status", "unscheduled");
+
+  let visits: VisitRow[];
+  if (everything) {
+    visits = await pages<VisitRow>((a, b) => visitsIn().order("scheduled_on").order("id").range(a, b));
+  } else {
     // Field crew see only the visits they're on (as in the app); crew leads also get their crews' visits.
-    const [assigned, crews] = await Promise.all([
-      admin.from("visit_assignees").select("visit_id").eq("company_id", feed.company_id).eq("user_id", feed.user_id).limit(5000),
-      canSeeAll(member.role) ? admin.from("crew_members").select("crew_id").eq("company_id", feed.company_id).eq("user_id", feed.user_id) : Promise.resolve({ data: [] as Array<{ crew_id: string }> }),
+    // Their visits come through the assignments, filtered to the feed's dates, rather than as a
+    // list of ids in the URL (a long-serving crew member's list outgrows the header size limit).
+    const crews = canSeeAll(member.role) ? (await admin.from("crew_members").select("crew_id").eq("company_id", feed.company_id).eq("user_id", feed.user_id)).data : null;
+    const crewIds = (crews ?? []).map((r) => r.crew_id);
+    const [assigned, crewVisits] = await Promise.all([
+      pages<{ visit: VisitRow }>((a, b) =>
+        admin
+          .from("visit_assignees")
+          .select(`visit:visits!inner(${VISIT_FIELDS})`)
+          .eq("company_id", feed.company_id)
+          .eq("user_id", feed.user_id)
+          .gte("visit.scheduled_on", from)
+          .lte("visit.scheduled_on", to)
+          .neq("visit.status", "unscheduled")
+          .order("visit_id")
+          .range(a, b),
+      ),
+      crewIds.length ? pages<VisitRow>((a, b) => visitsIn().in("crew_id", crewIds).order("scheduled_on").order("id").range(a, b)) : Promise.resolve([]),
     ]);
-    const ids = (assigned.data ?? []).map((r) => r.visit_id);
-    const crewIds = (crews.data ?? []).map((r) => r.crew_id);
-    const parts = [ids.length ? `id.in.(${ids.join(",")})` : null, crewIds.length ? `crew_id.in.(${crewIds.join(",")})` : null].filter(Boolean);
-    if (!parts.length) return ics(c, `${company.name}: my visits`, []);
-    query = query.or(parts.join(","));
+    const byId = new Map([...assigned.map((r) => r.visit), ...crewVisits].map((v) => [v.id, v]));
+    visits = [...byId.values()].sort((x, y) => (x.scheduled_on ?? "").localeCompare(y.scheduled_on ?? "") || x.id.localeCompare(y.id));
   }
-  const { data: visits, error } = await query;
-  if (error) throw dbError(error);
 
   const base = appUrl(c);
-  const events: IcsEvent[] = (visits ?? []).map((v) => {
+  const events: IcsEvent[] = visits.map((v) => {
     const job = v.job as unknown as { number: number; client: { display_name: string } | null } | null;
     const place = v.property as unknown as { line1: string; city: string | null; region: string | null } | null;
     const crew = v.crew as unknown as { name: string } | null;

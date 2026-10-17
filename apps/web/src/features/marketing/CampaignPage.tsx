@@ -217,7 +217,7 @@ function CampaignPageScreen() {
                 {delivered.data?.map((r) => (
                   <div key={r.id} className="card-row" style={{ padding: "10px 20px" }}>
                     <span className="grow"><strong className="text-sm">{r.name ?? r.email}</strong><span className="muted small" style={{ display: "block" }}>{r.email}{r.error ? ` · ${r.error}` : ""}</span></span>
-                    <StatusPill label={{ pending: "Queued", sent: "Sent", failed: "Failed", skipped: "Skipped" }[r.status] ?? r.status} tone={r.status === "sent" ? "good" : r.status === "failed" ? "danger" : "muted"} />
+                    <StatusPill label={{ pending: "Queued", sending: "Sending", sent: "Sent", failed: "Failed", skipped: "Skipped" }[r.status] ?? r.status} tone={r.status === "sent" ? "good" : r.status === "failed" ? "danger" : "muted"} />
                   </div>
                 ))}
               </div>

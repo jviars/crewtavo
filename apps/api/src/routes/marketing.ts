@@ -49,7 +49,7 @@ marketing.post("/campaigns/:id/send", requireUser, requireCompany(OFFICE, "marke
   );
   if (error) throw dbError(error);
   const scheduled = Boolean(body.scheduled_at && Date.parse(body.scheduled_at) > Date.now() + 60_000);
-  const { error: updateError } = await admin
+  const { data: started, error: updateError } = await admin
     .from("campaigns")
     .update({
       status: scheduled ? "scheduled" : "sending",
@@ -58,8 +58,11 @@ marketing.post("/campaigns/:id/send", requireUser, requireCompany(OFFICE, "marke
       recipients_count: audience.length,
     })
     .eq("id", campaign.id)
-    .eq("status", "draft");
+    .eq("status", "draft")
+    .select("id");
   if (updateError) throw dbError(updateError);
+  // Only the request that moved it out of draft starts sending (a double-clicked Send doesn't).
+  if (!started?.length) throw new HttpError(409, "This campaign has already been sent or scheduled.");
   if (!scheduled) kickCampaign(c, campaign.id);
   return c.json({ status: scheduled ? "scheduled" : "sending", recipients: audience.length });
 });
@@ -74,8 +77,9 @@ marketing.post("/campaigns/:id/cancel", requireUser, requireCompany(OFFICE, "mar
     await admin.from("campaigns").update({ status: "draft", scheduled_at: null, recipients_count: 0 }).eq("id", campaign.id);
     return c.json({ status: "draft" });
   }
-  await admin.from("campaign_recipients").update({ status: "skipped", error: "Campaign stopped" }).eq("campaign_id", campaign.id).eq("status", "pending");
+  // Stopped first: a run partway through its batch checks this before each email.
   await admin.from("campaigns").update({ status: "cancelled", finished_at: new Date().toISOString() }).eq("id", campaign.id);
+  await admin.from("campaign_recipients").update({ status: "skipped", error: "Campaign stopped" }).eq("campaign_id", campaign.id).in("status", ["pending", "sending"]);
   return c.json({ status: "cancelled" });
 });
 

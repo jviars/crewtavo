@@ -120,6 +120,8 @@ export async function sendPush(env: Env, sub: PushSubscription, message: PushMes
       Urgency: "high",
     },
     body,
+    // A push service that doesn't answer counts as a failed send, not a stalled delivery run.
+    signal: AbortSignal.timeout(15_000),
   }).catch(() => null);
   if (!response) return { ok: false, gone: false, status: 0 };
   return { ok: response.ok, gone: response.status === 404 || response.status === 410, status: response.status };

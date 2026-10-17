@@ -11,6 +11,7 @@ import { cronMatches } from "../src/lib/cron";
 import { buildCalendar } from "../src/lib/ics";
 import { allow } from "../src/lib/limit";
 import { clientLink, readClientLink } from "../src/lib/links";
+import { buildMime } from "../src/lib/smtp";
 import { twilioSignature } from "../src/routes/messages";
 import { verifyStripeSignature } from "../src/services/stripe";
 import { CRON_TASKS, TASKS } from "../src/tasks";
@@ -239,6 +240,30 @@ describe("email rendering", () => {
   });
 });
 
+describe("email From header", () => {
+  const fromLine = (name: string | null) =>
+    buildMime({ from: { name, email: "office@acme.example" }, to: "ana@example.com", subject: "Hi", text: "Hello" }).mime.split("\r\n").find((l) => l.startsWith("From: "))!;
+  const decode = (words: string) => words.split(" ").map((w) => new TextDecoder().decode(Uint8Array.from(atob(w.slice(10, -2)), (ch) => ch.charCodeAt(0)))).join("");
+
+  it("quotes the company name, so a comma keeps it one sender", () => {
+    expect(fromLine("Acme Lawn Care, LLC")).toBe('From: "Acme Lawn Care, LLC" <office@acme.example>');
+    expect(fromLine('Bob "The Mower" \\ Sons')).toBe('From: "Bob \\"The Mower\\" \\\\ Sons" <office@acme.example>');
+    expect(fromLine(null)).toBe("From: office@acme.example");
+    expect(fromLine("Acme\r\nBcc: someone@example.com")).toBe('From: "Acme Bcc: someone@example.com" <office@acme.example>');
+  });
+
+  it("encodes non-ASCII names (RFC 2047) in words of 75 characters or fewer", () => {
+    const line = fromLine("Jardinería García, S.A.");
+    const words = line.match(/^From: (.+) <office@acme\.example>$/)![1]!;
+    expect(words).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=$/);
+    expect(decode(words)).toBe("Jardinería García, S.A.");
+    const long = "Servicios de Jardinería y Paisajismo García e Hijos, S.A. de C.V.";
+    const longWords = fromLine(long).match(/^From: (.+) <office@acme\.example>$/)![1]!;
+    expect(longWords.split(" ").every((w) => w.length <= 75 && /^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=$/.test(w))).toBe(true);
+    expect(decode(longWords)).toBe(long);
+  });
+});
+
 describe("roles", () => {
   it("gives built-in roles everything their level allows", () => {
     expect(memberPermissions("admin", null)).toContain("apps");
@@ -323,6 +348,17 @@ describe("calendar feeds", () => {
     expect(ics).toContain("DESCRIPTION:Line one\\nLine two");
     expect(ics.split("\r\n").every((line) => new TextEncoder().encode(line).length <= 75)).toBe(true);
     expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
+  });
+  it("never lets typed-in text start a new line or carry control characters", () => {
+    // Addresses come from the public booking form, so a lone \r must not end the line.
+    const out = buildCalendar("Feed", [
+      { uid: "d@crewtavo", title: "Walkthrough\rBEGIN:VEVENT", date: "2026-11-02", location: "12 Main St\r\nApt 4\nRear\rSide", description: "Ring\x07 the bell\x00\tthen wait\x7f" },
+    ]);
+    expect(out).toContain("SUMMARY:Walkthrough\\nBEGIN:VEVENT\r\n");
+    expect(out).toContain("LOCATION:12 Main St\\nApt 4\\nRear\\nSide\r\n");
+    expect(out).toContain("DESCRIPTION:Ring the bell\tthen wait\r\n");
+    expect(out.replace(/\r\n/g, "")).not.toMatch(/[\x00-\x08\x0a-\x1f\x7f]/);
+    expect(out.split("\r\n").filter((line) => line === "BEGIN:VEVENT")).toHaveLength(1);
   });
   it("rejects made-up tokens without touching the database", async () => {
     const res = await app.request("/api/calendar/not-a-token.ics", {}, env);

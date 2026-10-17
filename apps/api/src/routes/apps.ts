@@ -10,7 +10,7 @@ import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
-import { CATALOG, catalogEntry, OAUTH, type Provider } from "../integrations/registry";
+import { CATALOG, catalogEntry, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
 import { exchangeCode, loadSecret, revoke, saveSecret } from "../integrations/tokens";
 
 export const apps = new Hono<AppEnv>();
@@ -98,7 +98,8 @@ apps.get("/apps/:provider/callback", async (c) => {
     return done("connected");
   } catch (error) {
     console.error("OAuth callback failed", provider, error);
-    return done("error", "Couldn't finish connecting. Check the app's settings and try again.");
+    // Refusing a server that isn't the provider's says so; other failures stay general.
+    return done("error", error instanceof UntrustedServerError ? error.message : "Couldn't finish connecting. Check the app's settings and try again.");
   }
 });
 

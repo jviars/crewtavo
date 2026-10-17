@@ -51,6 +51,8 @@ type Mailbox = { settings: MailboxSettings; secret: MailboxSecret; status: strin
 
 const cache = new Map<string, { at: number; value: Mailbox | null }>();
 const CACHE_MS = 60_000;
+/** A provider that doesn't answer in time counts as unreachable, so the send is recorded as failed. */
+const TIMEOUT_MS = 15_000;
 
 /** The company's connected mailbox, if any (cached for a minute; campaigns send many at once). */
 export async function loadMailbox(env: Env, companyId: string): Promise<Mailbox | null> {
@@ -85,11 +87,17 @@ export async function emailReady(env: Env, companyId?: string | null): Promise<b
   return emailConfigured(env);
 }
 
+/** `"Name" <email>`: quoted, so a comma in the name ("Acme Lawn Care, LLC") doesn't split it in two. */
+export function fromAddress(name: string | null | undefined, email: string): string {
+  const clean = (name ?? "").replace(/[\r\n<>]+/g, " ").trim();
+  return clean ? `"${clean.replace(/[\\"]/g, "\\$&")}" <${email}>` : email;
+}
+
 /** Send through a mailbox's settings (also used by Settings → Email to test before saving). */
 export async function sendWithMailbox(settings: MailboxSettings, secret: MailboxSecret, message: EmailMessage): Promise<SendResult> {
   const fromName = settings.from_name || message.fromName || null;
   if (settings.kind === "resend") {
-    return resendSend(secret.api_key ?? "", fromName ? `${fromName.replace(/[<>"]/g, "")} <${settings.from_email}>` : settings.from_email, message);
+    return resendSend(secret.api_key ?? "", fromAddress(fromName, settings.from_email), message);
   }
   const smtp: SmtpSettings = { host: settings.host!, port: settings.port!, security: settings.security ?? "tls", username: settings.username!, password: secret.password ?? "" };
   try {
@@ -141,13 +149,14 @@ async function resendSend(apiKey: string, from: string, message: EmailMessage): 
       reply_to: message.replyTo,
       headers: message.headers,
     }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => null);
   if (!response) return { sent: false, reason: "Couldn't reach the email provider. Try again." };
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as { message?: string };
     return { sent: false, reason: `The email provider refused it (${response.status}${detail.message ? `: ${detail.message}` : ""}).` };
   }
-  const body = (await response.json()) as { id?: string };
+  const body = (await response.json().catch(() => ({}))) as { id?: string };
   return { sent: true, id: body.id };
 }
 
@@ -166,9 +175,10 @@ async function mailpit(env: Env, message: EmailMessage & { from?: string }): Pro
       ReplyTo: message.replyTo ? [{ Email: message.replyTo }] : undefined,
       Headers: message.headers,
     }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => null);
   if (!response?.ok) return { sent: false, reason: "Couldn't reach the local Mailpit inbox." };
-  const body = (await response.json()) as { ID?: string };
+  const body = (await response.json().catch(() => ({}))) as { ID?: string };
   return { sent: true, id: body.ID };
 }
 
@@ -183,12 +193,13 @@ export async function sendSms(env: Env, message: { to: string; body: string }): 
     method: "POST",
     headers: { Authorization: `Basic ${btoa(`${sid}:${token}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ To: message.to, From: from, Body: message.body }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => null);
   if (!response) return { sent: false, reason: "Couldn't reach the text provider. Try again." };
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as { message?: string };
     return { sent: false, reason: `The text provider refused it (${response.status}${detail.message ? `: ${detail.message}` : ""}).` };
   }
-  const body = (await response.json()) as { sid?: string };
+  const body = (await response.json().catch(() => ({}))) as { sid?: string };
   return { sent: true, id: body.sid };
 }

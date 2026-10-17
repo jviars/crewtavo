@@ -154,14 +154,14 @@ isOneToOne: false
                   ]
                 },"campaign_recipients": {
                   Row: {
-                    "campaign_id": string,"client_id": string | null,"company_id": string,"email": string,"error": string | null,"id": number,"name": string | null,"sent_at": string | null,"status": string
+                    "campaign_id": string,"claimed_at": string | null,"client_id": string | null,"company_id": string,"email": string,"error": string | null,"id": number,"name": string | null,"sent_at": string | null,"status": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "campaign_id": string,"client_id"?: string | null,"company_id": string,"email": string,"error"?: string | null,"id"?: never,"name"?: string | null,"sent_at"?: string | null,"status"?: string
+                    "campaign_id": string,"claimed_at"?: string | null,"client_id"?: string | null,"company_id": string,"email": string,"error"?: string | null,"id"?: never,"name"?: string | null,"sent_at"?: string | null,"status"?: string
                   }
                   Update: {
-                    "campaign_id"?: string,"client_id"?: string | null,"company_id"?: string,"email"?: string,"error"?: string | null,"id"?: never,"name"?: string | null,"sent_at"?: string | null,"status"?: string
+                    "campaign_id"?: string,"claimed_at"?: string | null,"client_id"?: string | null,"company_id"?: string,"email"?: string,"error"?: string | null,"id"?: never,"name"?: string | null,"sent_at"?: string | null,"status"?: string
                   }
                   Relationships: [
                     {
@@ -1560,6 +1560,25 @@ isOneToOne: false
                           SetofOptions: {
         from: "*"
         to: "automation_runs"
+        isOneToOne: false
+        isSetofReturn: true
+      } },
+"claim_campaign_recipients":
+{ Args: { "p_campaign": string,"p_limit"?: number,"p_timeout_seconds"?: number }; Returns: {
+              "campaign_id": string,
+"claimed_at": string | null,
+"client_id": string | null,
+"company_id": string,
+"email": string,
+"error": string | null,
+"id": number,
+"name": string | null,
+"sent_at": string | null,
+"status": string
+            }[]
+                          SetofOptions: {
+        from: "*"
+        to: "campaign_recipients"
         isOneToOne: false
         isSetofReturn: true
       } },
