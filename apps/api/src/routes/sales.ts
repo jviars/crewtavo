@@ -361,6 +361,10 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
   } catch {
     throw new HttpError(400, "Roof pitch should look like 7/12.");
   }
+  // As much as the columns hold: under a trillion square feet or feet, a hundred million squares.
+  if (summary.total_area_sqft >= 1e12 || summary.total_length_ft >= 1e12 || (squares ?? 0) >= 1e8) {
+    throw new HttpError(400, "This measurement is too large to save. Check the shapes and measured values.");
+  }
   const { id, ...fields } = body;
   const row = {
     ...fields,

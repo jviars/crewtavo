@@ -99,4 +99,14 @@ end $$;
 create trigger owner_guard before update of user_id, company_id on public.time_entries
   for each row execute function private.time_entry_owner_guard();
 
+-- ---------------------------------------------------------------------------------------------
+-- Formulas: only what a measurement supplies
+-- ---------------------------------------------------------------------------------------------
+
+-- The General preset gave its Labor service the formula `hours`, which no measurement supplies, so
+-- every quote line added from it said 'Unknown value "hours"'. Services that still have it go
+-- without a formula. (Quote lines already made from it are left alone: touching them reworks their
+-- quote's totals.)
+update public.services set formula = null where formula = 'hours';
+
 notify pgrst, 'reload schema';

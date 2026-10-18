@@ -76,8 +76,13 @@ describe("geo", () => {
 
   it("refuses pitches that aren't a roof", () => {
     expect(pitchFactor("30deg")).toBeCloseTo(1.1547, 4);
-    // "abcdeg" used to be NaN, "90deg" 1.6e16 and "1e200" Infinity.
-    for (const bad of ["abcdeg", "90deg", "-90deg", "120deg", "deg30", "1e200", "7/0", "seven"]) {
+    // Up to 80 degrees, about 68/12: steeper than any roof a crew shingles.
+    expect(pitchFactor("24/12")).toBeCloseTo(2.2361, 4);
+    expect(pitchFactor("80deg")).toBeCloseTo(5.7588, 4);
+    expect(pitchFactor("68/12")).toBeCloseTo(5.7542, 4);
+    // "abcdeg" used to be NaN, "90deg" 1.6e16 and "1e200" Infinity; just short of upright was
+    // millions of times the plan area.
+    for (const bad of ["abcdeg", "90deg", "-90deg", "120deg", "deg30", "1e200", "7/0", "seven", "80.5deg", "89.99999deg", "69/12", "1e9/1", "1e150"]) {
       expect(() => pitchFactor(bad), bad).toThrow(RangeError);
     }
     expect(() => roofingSquares(2000, "90deg")).toThrow(RangeError);

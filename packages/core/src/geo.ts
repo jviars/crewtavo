@@ -97,17 +97,21 @@ export function lineLengthM(coords: Position[]): number {
 export const sqmToSqft = (sqm: number) => sqm * SQFT_PER_SQM;
 export const mToFt = (m: number) => m * FT_PER_M;
 
+// The steepest roof counted (about 68/12). Past that is a wall or a typo, and the squares run away:
+// 89.999deg is 57,000 times the plan area.
+const MAX_PITCH_DEGREES = 80;
+const MAX_PITCH_FACTOR = 1 / Math.cos(rad(MAX_PITCH_DEGREES));
+
 /**
  * Slope multiplier for a roof pitch. Accepts "7/12" (rise over run), "7" (rise per 12) or
- * "30deg". Blank or flat returns 1.
+ * "30deg", up to 80 degrees. Blank or flat returns 1.
  */
 export function pitchFactor(pitch: string | number | null | undefined): number {
   if (pitch === null || pitch === undefined || pitch === "" || pitch === 0 || pitch === "0") return 1;
   const text = String(pitch).trim().toLowerCase();
   if (text.endsWith("deg")) {
-    // Short of upright: at 90 degrees the slope never ends.
     const degrees = Number(text.slice(0, -3));
-    if (!(Math.abs(degrees) < 90)) throw new RangeError(`Invalid roof pitch "${pitch}"`);
+    if (!(Math.abs(degrees) <= MAX_PITCH_DEGREES)) throw new RangeError(`Invalid roof pitch "${pitch}"`);
     return 1 / Math.cos(rad(degrees));
   }
   let rise: number;
@@ -121,7 +125,7 @@ export function pitchFactor(pitch: string | number | null | undefined): number {
   }
   if (!Number.isFinite(rise) || !Number.isFinite(run) || run <= 0) throw new RangeError(`Invalid roof pitch "${pitch}"`);
   const factor = Math.sqrt(1 + (rise / run) ** 2);
-  if (!Number.isFinite(factor)) throw new RangeError(`Invalid roof pitch "${pitch}"`); // too steep to count, like "1e200/12"
+  if (!(factor <= MAX_PITCH_FACTOR)) throw new RangeError(`Invalid roof pitch "${pitch}"`); // too steep to count, like "100/12" or "1e200"
   return factor;
 }
 
