@@ -1,0 +1,506 @@
+/**
+ * The measuring map: MapLibre with aerial imagery underneath and Terra Draw on top. The page talks
+ * to it through a handle (tools, undo, fit, capture a picture) and hears back through callbacks.
+ * Every shape gets its own color and a label on the map with its size, so the list beside the map
+ * and the picture sent to clients read the same.
+ */
+import "maplibre-gl/dist/maplibre-gl.css";
+import type { MapKeys } from "@crewtavo/core/imagery";
+import { lineLengthM, mToFt, polygonAreaM2, sqmToSqft, type Feature } from "@crewtavo/core/geo";
+import maplibregl, { type GeoJSONSource, type LayerSpecification, type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  TerraDraw,
+  TerraDrawLineStringMode,
+  TerraDrawModeUndoRedo,
+  TerraDrawPointMode,
+  TerraDrawPolygonMode,
+  TerraDrawSelectMode,
+  TerraDrawSessionUndoRedo,
+  type GeoJSONStoreFeatures,
+  type HexColor,
+} from "terra-draw";
+import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
+import { KeyError, rasterSource, type ImageryId } from "./imagery";
+
+export type Tool = "polygon" | "linestring" | "point" | "select";
+/** The geometry each drawing mode makes; anything else in its layer (closing and snapping points) is a guide. */
+const MODE_GEOMETRY: Record<string, string> = { polygon: "Polygon", linestring: "LineString", point: "Point" };
+
+/** A finished shape as the page sees it. */
+export interface Shape {
+  id: string;
+  kind: "Area" | "Length" | "Count";
+  geometry: Feature["geometry"];
+  color: string;
+  /** Square feet, feet, or 1 for a count. */
+  value: number;
+}
+
+export interface MeasureMapHandle {
+  setTool(tool: Tool): void;
+  /** Takes back the last point while drawing, or the last change. */
+  undo(): void;
+  redo(): void;
+  canUndo(): boolean;
+  /** Stops the shape being drawn without keeping it. */
+  cancel(): void;
+  remove(id: string): void;
+  clear(): void;
+  select(id: string): void;
+  fitShapes(): void;
+  jumpTo(lng: number, lat: number, zoom?: number): void;
+  view(): { center: [number, number]; zoom: number };
+  /** Puts saved shapes back on the map (reopening a measurement). Returns their new ids in order. */
+  load(features: Feature[]): string[];
+  /** A JPEG of the shapes on the imagery, framed to fit them, or null when nothing is drawn. */
+  capture(): Promise<Blob | null>;
+}
+
+export interface MeasureMapProps {
+  start: { lng: number; lat: number; zoom: number };
+  imagery: ImageryId;
+  /** Bump to load the imagery again (after it failed). */
+  imageryRevision?: number;
+  keys: MapKeys;
+  labels: Record<string, string>;
+  showStreetNames: boolean;
+  onReady: () => void;
+  onFailed: (message: string) => void;
+  onShapes: (shapes: Shape[], drawing: Shape | null) => void;
+  onSelect: (id: string | null) => void;
+  onMoved: (center: { lng: number; lat: number }, zoom: number) => void;
+  /** The imagery isn't loading (server down, key refused); the page offers another. */
+  onImageryTrouble: (id: ImageryId, message: string) => void;
+  onHistory?: (canUndo: boolean, canRedo: boolean) => void;
+  onStreetMap?: (available: boolean) => void;
+}
+
+// Bright enough to see on grass, roofs and asphalt alike.
+const PALETTE = ["#22c55e", "#f59e0b", "#38bdf8", "#f472b6", "#a78bfa", "#facc15", "#fb7185", "#2dd4bf", "#f97316", "#60a5fa"];
+const OPENFREEMAP = "https://tiles.openfreemap.org/styles/liberty";
+const GLYPHS = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
+const LABEL_FONT = ["Noto Sans Bold"];
+
+const kindOf = (type: string): Shape["kind"] => (type === "Polygon" ? "Area" : type === "LineString" ? "Length" : "Count");
+
+export function shapeValue(geometry: Feature["geometry"]): number {
+  if (!geometry) return 0;
+  if (geometry.type === "Polygon") return sqmToSqft(polygonAreaM2(geometry.coordinates as number[][][]));
+  if (geometry.type === "LineString") return mToFt(lineLengthM(geometry.coordinates as number[][]));
+  return 1;
+}
+
+/** Names for unnamed shapes, numbered within their kind: Area 1, Area 2, Line 1, Count 1. */
+export function defaultNames(shapes: Array<Pick<Shape, "id" | "kind">>): Record<string, string> {
+  const seen: Record<string, number> = {};
+  return Object.fromEntries(shapes.map((s) => {
+    const word = s.kind === "Length" ? "Line" : s.kind;
+    seen[word] = (seen[word] ?? 0) + 1;
+    return [s.id, `${word} ${seen[word]}`];
+  }));
+}
+/** A name we made up rather than one someone typed (so reopening a drawing renumbers it). */
+export const isDefaultName = (name: string) => /^(Area|Line|Length|Count) \d+$/.test(name.trim());
+
+export function formatShapeValue(kind: Shape["kind"], value: number): string {
+  const n = (v: number, d = 0) => v.toLocaleString(undefined, { maximumFractionDigits: d });
+  if (kind === "Area") return value >= 43_560 ? `${n(value)} sq ft · ${n(value / 43_560, 2)} ac` : `${n(value)} sq ft`;
+  if (kind === "Length") return `${n(value, value < 100 ? 1 : 0)} ft`;
+  return "";
+}
+
+/** Where a shape's label sits: the middle of an area, halfway along a line, above a point. */
+function labelPoint(geometry: Feature["geometry"]): [number, number] | null {
+  if (!geometry) return null;
+  if (geometry.type === "Point") return geometry.coordinates as [number, number];
+  if (geometry.type === "LineString") {
+    const line = geometry.coordinates as number[][];
+    const half = lineLengthM(line) / 2;
+    let walked = 0;
+    for (let i = 1; i < line.length; i++) {
+      const step = lineLengthM([line[i - 1], line[i]]);
+      if (walked + step >= half && step > 0) {
+        const t = (half - walked) / step;
+        return [line[i - 1][0] + (line[i][0] - line[i - 1][0]) * t, line[i - 1][1] + (line[i][1] - line[i - 1][1]) * t];
+      }
+      walked += step;
+    }
+    return line[0] as [number, number];
+  }
+  if (geometry.type === "Polygon") {
+    // Measured from the first corner: with whole longitudes and latitudes the products cancel out
+    // and the middle lands meters off.
+    const ring = (geometry.coordinates as number[][][])[0];
+    const [ox, oy] = ring[0];
+    let a = 0, x = 0, y = 0;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [x0, y0, x1, y1] = [ring[i][0] - ox, ring[i][1] - oy, ring[i + 1][0] - ox, ring[i + 1][1] - oy];
+      const f = x0 * y1 - x1 * y0;
+      a += f;
+      x += (x0 + x1) * f;
+      y += (y0 + y1) * f;
+    }
+    if (Math.abs(a) < 1e-18) return ring[0] as [number, number];
+    return [ox + x / (3 * a), oy + y / (3 * a)];
+  }
+  return null;
+}
+
+function boundsOf(shapes: Array<{ geometry: Feature["geometry"] }>): [[number, number], [number, number]] | null {
+  let w = 180, s = 90, e = -180, n = -90;
+  const visit = (c: unknown): void => {
+    if (Array.isArray(c) && typeof c[0] === "number") {
+      w = Math.min(w, c[0]); e = Math.max(e, c[0]); s = Math.min(s, c[1] as number); n = Math.max(n, c[1] as number);
+    } else if (Array.isArray(c)) c.forEach(visit);
+  };
+  shapes.forEach((f) => f.geometry && visit(f.geometry.coordinates));
+  return w <= e ? [[w, s], [e, n]] : null;
+}
+
+/** OpenFreeMap's street map, its ids prefixed so they never meet ours or Terra Draw's. */
+async function streetMap(): Promise<{ sources: StyleSpecification["sources"]; layers: LayerSpecification[]; sprite?: string } | null> {
+  try {
+    const style = (await (await fetch(OPENFREEMAP, { signal: AbortSignal.timeout(5000) })).json()) as StyleSpecification;
+    const sources = Object.fromEntries(Object.entries(style.sources).map(([id, s]) => [`street-${id}`, s]));
+    const layers = style.layers
+      .filter((l) => l.type !== "background")
+      .map((l) => ({ ...l, id: `street-${l.id}`, ...("source" in l && l.source ? { source: `street-${l.source}` } : {}) }) as LayerSpecification);
+    return { sources, layers, sprite: typeof style.sprite === "string" ? style.sprite : undefined };
+  } catch {
+    return null;
+  }
+}
+const isStreetName = (l: LayerSpecification) =>
+  l.type === "symbol" && /^street-(highway-name|label_(town|village|other|city)|water_name|waterway_line_label)/.test(l.id) && !(l.layout && "icon-image" in l.layout);
+
+export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function MeasureMap(props, ref) {
+  const el = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const drawRef = useRef<TerraDraw | null>(null);
+  const toolRef = useRef<Tool>("polygon");
+  const colors = useRef(new Map<string, string>());
+  const shapesRef = useRef<Shape[]>([]);
+  const streetLayers = useRef<string[]>([]);
+  const nameLayers = useRef<string[]>([]);
+  const imageryToken = useRef(0);
+  const trouble = useRef({ errors: 0, loaded: 0, since: 0 });
+  // Callbacks change every render; the map's listeners read the latest through this.
+  const live = useRef(props);
+  live.current = props;
+
+  const colorOf = (id: string) => {
+    let c = colors.current.get(id);
+    if (!c) {
+      c = PALETTE[colors.current.size % PALETTE.length];
+      colors.current.set(id, c);
+    }
+    return c;
+  };
+  const styleColor = (feature: GeoJSONStoreFeatures) => colorOf(String(feature.id)) as HexColor;
+
+  // ----- Map and drawing, once ---------------------------------------------------------------
+  useEffect(() => {
+    let cancelled = false;
+    let map: MapLibreMap | null = null;
+    (async () => {
+      const streets = await streetMap();
+      if (cancelled || !el.current) return;
+      const style: StyleSpecification = {
+        version: 8,
+        glyphs: GLYPHS,
+        ...(streets?.sprite ? { sprite: streets.sprite } : {}),
+        sources: { ...(streets?.sources ?? {}), "measure-labels": { type: "geojson", data: { type: "FeatureCollection", features: [] } } },
+        layers: [
+          { id: "background", type: "background", paint: { "background-color": "#d9ded9" } },
+          ...(streets?.layers ?? []).map((l) => ({ ...l, layout: { ...(l.layout ?? {}), visibility: "none" } }) as LayerSpecification),
+        ],
+      };
+      streetLayers.current = (streets?.layers ?? []).filter((l) => !isStreetName(l)).map((l) => l.id);
+      nameLayers.current = (streets?.layers ?? []).filter(isStreetName).map((l) => l.id);
+      live.current.onStreetMap?.(Boolean(streets));
+      try {
+        map = new maplibregl.Map({
+          container: el.current,
+          style,
+          center: [props.start.lng, props.start.lat],
+          zoom: props.start.zoom,
+          maxZoom: 21.5,
+          attributionControl: { compact: true },
+          // Keeps the last frame readable so the drawing can be saved as a picture.
+          canvasContextAttributes: { preserveDrawingBuffer: true },
+          dragRotate: false,
+          pitchWithRotate: false,
+        });
+      } catch {
+        live.current.onFailed("This browser can't show the map (WebGL is turned off or not supported). Try an up-to-date Chrome, Edge, Safari or Firefox, or turn on hardware acceleration.");
+        return;
+      }
+      mapRef.current = map;
+      map.touchZoomRotate.disableRotation();
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+      map.addControl(new maplibregl.ScaleControl({ unit: "imperial", maxWidth: 120 }), "bottom-left");
+
+      map.on("error", (e: { sourceId?: string; error?: Error }) => {
+        if (e.sourceId !== "imagery") return;
+        const t = trouble.current;
+        t.errors += 1;
+        // Many failed tiles and none loaded since the imagery or the view changed: it's down.
+        if (t.errors >= 6 && t.loaded === 0 && Date.now() - t.since < 30_000) {
+          t.since = 0;
+          live.current.onImageryTrouble(live.current.imagery, "isn't loading right now");
+        }
+      });
+      map.on("data", (e: { sourceId?: string; tile?: unknown }) => {
+        if (e.sourceId === "imagery" && e.tile) trouble.current.loaded += 1;
+      });
+      map.on("moveend", () => {
+        const c = map!.getCenter();
+        trouble.current = { errors: 0, loaded: 0, since: Date.now() };
+        live.current.onMoved({ lng: c.lng, lat: c.lat }, map!.getZoom());
+      });
+
+      map.once("load", () => {
+        if (cancelled) return;
+        // The tools don't wait for the imagery server.
+        void applyImagery(live.current.imagery).then(() => applyStreetNames(live.current.showStreetNames));
+        const editable = { feature: { draggable: true, coordinates: { midpoints: true, draggable: true, deletable: true } } };
+        const draw = new TerraDraw({
+          adapter: new TerraDrawMapLibreGLAdapter({ map: map!, coordinatePrecision: 9 }),
+          modes: [
+            new TerraDrawPolygonMode({
+              snapping: { toCoordinate: true },
+              styles: { fillColor: styleColor, fillOpacity: 0.28, outlineColor: styleColor, outlineWidth: 3, closingPointColor: "#ffffff", closingPointWidth: 6, closingPointOutlineColor: "#0f2a35", closingPointOutlineWidth: 2 },
+            }),
+            new TerraDrawLineStringMode({ snapping: { toCoordinate: true }, styles: { lineStringColor: styleColor, lineStringWidth: 4, closingPointColor: "#ffffff", closingPointWidth: 6 } }),
+            new TerraDrawPointMode({ styles: { pointColor: styleColor, pointWidth: 7, pointOutlineColor: "#ffffff", pointOutlineWidth: 2 } }),
+            new TerraDrawSelectMode({
+              flags: { polygon: editable, linestring: editable, point: { feature: { draggable: true } } },
+              styles: { selectionPointColor: "#ffffff", selectionPointOutlineColor: "#0f2a35", selectionPointWidth: 6, selectionPointOutlineWidth: 2, midPointColor: "#0f2a35", midPointOutlineColor: "#ffffff", midPointWidth: 4 },
+            }),
+          ],
+          undoRedo: { modeLevel: new TerraDrawModeUndoRedo(), sessionLevel: new TerraDrawSessionUndoRedo() },
+        });
+        draw.start();
+        draw.setMode(toolRef.current);
+        drawRef.current = draw;
+        map!.addLayer({
+          id: "measure-labels",
+          type: "symbol",
+          source: "measure-labels",
+          layout: {
+            "text-field": ["get", "text"],
+            "text-font": LABEL_FONT,
+            "text-size": 13,
+            "text-line-height": 1.25,
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+            "text-offset": ["case", ["==", ["get", "kind"], "Count"], ["literal", [0, -1.3]], ["literal", [0, 0]]],
+          },
+          paint: { "text-color": "#ffffff", "text-halo-color": "rgba(15, 42, 53, 0.92)", "text-halo-width": 1.8 },
+        });
+        let frame = 0;
+        draw.on("change", () => {
+          cancelAnimationFrame(frame);
+          frame = requestAnimationFrame(report);
+        });
+        draw.on("select", (id) => live.current.onSelect(String(id)));
+        draw.on("deselect", () => live.current.onSelect(null));
+        draw.on("history", () => live.current.onHistory?.(draw.canUndo(), draw.canRedo()));
+        trouble.current = { errors: 0, loaded: 0, since: Date.now() };
+        live.current.onReady();
+        // Where the map starts counts as a move, so the page checks the imagery there straight away.
+        const c = map!.getCenter();
+        live.current.onMoved({ lng: c.lng, lat: c.lat }, map!.getZoom());
+      });
+    })();
+    return () => {
+      cancelled = true;
+      try {
+        drawRef.current?.stop();
+      } catch {
+        /* map already gone */
+      }
+      drawRef.current = null;
+      map?.remove();
+      mapRef.current = null;
+    };
+    // The map is made once; later changes go through the effects below and the handle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Tell the page what's drawn, and redraw the size labels. */
+  function report() {
+    const draw = drawRef.current;
+    const map = mapRef.current;
+    if (!draw || !map) return;
+    const shapes: Shape[] = [];
+    let drawing: Shape | null = null;
+    for (const f of draw.getSnapshot()) {
+      if (!f.geometry || MODE_GEOMETRY[String(f.properties.mode)] !== f.geometry.type) continue;
+      const geometry = f.geometry as Feature["geometry"];
+      const shape: Shape = { id: String(f.id), kind: kindOf(f.geometry.type), geometry, color: colorOf(String(f.id)), value: shapeValue(geometry) };
+      if (f.properties.currentlyDrawing) drawing = shape;
+      else shapes.push(shape);
+    }
+    shapesRef.current = shapes;
+    live.current.onShapes(shapes, drawing);
+    paintLabels();
+  }
+
+  function paintLabels() {
+    const source = mapRef.current?.getSource("measure-labels") as GeoJSONSource | undefined;
+    if (!source) return;
+    let count = 0;
+    const names = defaultNames(shapesRef.current);
+    const features = shapesRef.current.flatMap((s) => {
+      const at = labelPoint(s.geometry);
+      if (!at) return [];
+      const name = live.current.labels[s.id]?.trim() || names[s.id];
+      const text = s.kind === "Count" ? String(++count) : `${name}\n${formatShapeValue(s.kind, s.value)}`;
+      return [{ type: "Feature" as const, geometry: { type: "Point" as const, coordinates: at }, properties: { text, kind: s.kind } }];
+    });
+    source.setData({ type: "FeatureCollection", features });
+  }
+
+  async function applyImagery(id: ImageryId) {
+    const map = mapRef.current;
+    if (!map) return;
+    const token = ++imageryToken.current;
+    let source;
+    try {
+      source = await rasterSource(id, live.current.keys);
+    } catch (error) {
+      if (token === imageryToken.current) live.current.onImageryTrouble(id, error instanceof KeyError ? error.message : "couldn't be set up");
+      return;
+    }
+    if (token !== imageryToken.current || !mapRef.current) return;
+    if (map.getLayer("imagery")) map.removeLayer("imagery");
+    if (map.getSource("imagery")) map.removeSource("imagery");
+    if (source) {
+      map.addSource("imagery", source);
+      // Just above the background, under the street map, labels and drawing.
+      map.addLayer({ id: "imagery", type: "raster", source: "imagery", paint: { "raster-fade-duration": 120 } }, map.getStyle().layers[1]?.id);
+    }
+    for (const layer of streetLayers.current) map.setLayoutProperty(layer, "visibility", id === "street" ? "visible" : "none");
+    trouble.current = { errors: 0, loaded: 0, since: Date.now() };
+  }
+
+  function applyStreetNames(show: boolean) {
+    const map = mapRef.current;
+    if (!map) return;
+    for (const layer of nameLayers.current) if (map.getLayer(layer)) map.setLayoutProperty(layer, "visibility", show || live.current.imagery === "street" ? "visible" : "none");
+  }
+
+  useEffect(() => {
+    // Before the map is ready, its load handler puts the imagery on.
+    if (mapRef.current?.getLayer("measure-labels")) void applyImagery(props.imagery).then(() => applyStreetNames(live.current.showStreetNames));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.imagery, props.imageryRevision, props.keys.esri_key, props.keys.google_key]);
+  useEffect(() => applyStreetNames(props.showStreetNames), [props.showStreetNames]);
+  useEffect(paintLabels, [props.labels]);
+
+  useImperativeHandle(ref, () => ({
+    setTool(tool) {
+      toolRef.current = tool;
+      drawRef.current?.setMode(tool);
+    },
+    undo() {
+      const draw = drawRef.current;
+      if (draw?.canUndo()) draw.undo();
+    },
+    redo() {
+      const draw = drawRef.current;
+      if (draw?.canRedo()) draw.redo();
+    },
+    canUndo: () => Boolean(drawRef.current?.canUndo()),
+    cancel() {
+      const draw = drawRef.current;
+      if (!draw) return;
+      // Switching modes drops the unfinished shape.
+      draw.setMode("static");
+      draw.setMode(toolRef.current);
+    },
+    remove(id) {
+      const draw = drawRef.current;
+      if (!draw?.hasFeature(id)) return;
+      if (draw.getMode() === "select") draw.deselectFeature(id);
+      draw.removeFeatures([id]);
+      live.current.onSelect(null);
+    },
+    clear() {
+      drawRef.current?.clear();
+      colors.current.clear();
+      live.current.onSelect(null);
+      report();
+    },
+    select(id) {
+      const draw = drawRef.current;
+      if (!draw?.hasFeature(id)) return;
+      toolRef.current = "select";
+      draw.selectFeature(id);
+      const b = boundsOf(shapesRef.current.filter((s) => s.id === id));
+      const map = mapRef.current;
+      // Bring it into view if it's off the edge.
+      if (b && map && !(map.getBounds().contains(b[0]) && map.getBounds().contains(b[1]))) map.fitBounds(b, { padding: 80, maxZoom: Math.max(map.getZoom(), 18), duration: 400 });
+    },
+    fitShapes() {
+      const b = boundsOf(shapesRef.current);
+      if (b) mapRef.current?.fitBounds(b, { padding: 70, maxZoom: 20, duration: 500 });
+    },
+    jumpTo(lng, lat, zoom = 19) {
+      mapRef.current?.jumpTo({ center: [lng, lat], zoom });
+    },
+    view() {
+      const map = mapRef.current;
+      const c = map?.getCenter();
+      return { center: [c?.lng ?? props.start.lng, c?.lat ?? props.start.lat], zoom: map?.getZoom() ?? props.start.zoom };
+    },
+    load(features) {
+      const draw = drawRef.current;
+      if (!draw) return [];
+      const ids: string[] = [];
+      const rows = features.flatMap((f) => {
+        if (!f.geometry || !["Polygon", "LineString", "Point"].includes(f.geometry.type)) return [];
+        const id = String(draw.getFeatureId());
+        ids.push(id);
+        const mode = f.geometry.type === "Polygon" ? "polygon" : f.geometry.type === "LineString" ? "linestring" : "point";
+        return [{ type: "Feature", id, geometry: f.geometry, properties: { mode } } as GeoJSONStoreFeatures];
+      });
+      const results = draw.addFeatures(rows);
+      report();
+      return ids.filter((_, i) => results[i]?.valid !== false);
+    },
+    async capture() {
+      const map = mapRef.current;
+      const draw = drawRef.current;
+      const b = boundsOf(shapesRef.current);
+      if (!map || !draw || !b) return null;
+      const before = { center: map.getCenter(), zoom: map.getZoom() };
+      const mode = draw.getMode();
+      // No handles or half-drawn shapes in the picture.
+      draw.setMode("static");
+      map.fitBounds(b, { padding: 60, maxZoom: 20, animate: false });
+      await new Promise<void>((resolve) => {
+        const done = setTimeout(resolve, 8000); // a slow tile shouldn't hold up saving
+        map.once("idle", () => {
+          clearTimeout(done);
+          resolve();
+        });
+        map.triggerRepaint();
+      });
+      const blob = await new Promise<Blob | null>((resolve) => {
+        try {
+          map.getCanvas().toBlob(resolve, "image/jpeg", 0.86);
+        } catch {
+          resolve(null);
+        }
+      });
+      map.jumpTo(before);
+      draw.setMode(mode === "static" ? toolRef.current : mode);
+      return blob;
+    },
+  }));
+
+  return <div ref={el} className="measure-map" role="application" aria-label="Map for drawing measurements" />;
+});

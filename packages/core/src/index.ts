@@ -6,6 +6,7 @@ export * from "./formulas";
 export * from "./geo";
 export * from "./dns";
 export * from "./ical";
+export * from "./imagery";
 export * from "./money";
 export * from "./notifications";
 export * from "./presets";

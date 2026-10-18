@@ -145,7 +145,7 @@ lists them all).
 | `APP_URL` | Your own domain (see above; **Settings → Web address** sets it on Railway). Defaults to the instance's address. |
 | `ENCRYPTION_KEY` | A separate key for encrypting app tokens and signing client links: 32+ random bytes in base64, or any 32+ characters. Without it, one is derived from the instance's secret. **Keep it stable once set**: changing it disconnects every app and invalidates links already sent to clients. |
 | `ANTHROPIC_API_KEY` (optional `AI_MODEL`) | AI rewrite and SOP answers. Companies can also add their own key on the Apps page. |
-| `GOOGLE_MAPS_BROWSER_KEY` | Measuring on satellite imagery. Restrict it to your domain and the Maps JavaScript API. |
+| `GOOGLE_MAPS_BROWSER_KEY` | Optional. Measure works without any key (free US and state imagery); this adds Google satellite as a choice for every company. Enable the Map Tiles API and restrict the key to it and your domain. Companies can instead add Esri or Google keys themselves in **Settings → Maps**. |
 | `GOOGLE_MAPS_SERVER_KEY` | Roof pitch suggestions (Solar API). Restrict it to the Solar API. |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_ENVIRONMENT` | QuickBooks Online. Create an app at developer.intuit.com; the redirect URI is shown on the Apps page. |
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books. Create a server-based client at api-console.zoho.com. |

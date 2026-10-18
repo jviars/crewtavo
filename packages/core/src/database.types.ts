@@ -820,14 +820,14 @@ isOneToOne: false
                   ]
                 },"measurements": {
                   Row: {
-                    "company_id": string,"created_at": string,"created_by": string | null,"geojson": NonNullable<Json>,"id": string,"property_id": string | null,"provider": string,"quote_id": string | null,"request_id": string | null,"roof_pitch": string | null,"roofing_squares": number | null,"sections": NonNullable<Json>,"title": string,"total_area_sqft": number,"total_area_sqyd": number,"total_length_ft": number,"updated_at": string,"waste_pct": number
+                    "company_id": string,"created_at": string,"created_by": string | null,"geojson": NonNullable<Json>,"id": string,"invoice_id": string | null,"property_id": string | null,"provider": string,"quote_id": string | null,"request_id": string | null,"roof_pitch": string | null,"roofing_squares": number | null,"sections": NonNullable<Json>,"show_on_invoice": boolean,"show_on_quote": boolean,"snapshot_path": string | null,"title": string,"total_area_sqft": number,"total_area_sqyd": number,"total_length_ft": number,"updated_at": string,"view": Json | null,"waste_pct": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"created_at"?: string,"created_by"?: string | null,"geojson": NonNullable<Json>,"id"?: string,"property_id"?: string | null,"provider"?: string,"quote_id"?: string | null,"request_id"?: string | null,"roof_pitch"?: string | null,"roofing_squares"?: number | null,"sections"?: NonNullable<Json>,"title"?: string,"total_area_sqft"?: number,"total_area_sqyd"?: number,"total_length_ft"?: number,"updated_at"?: string,"waste_pct"?: number
+                    "company_id": string,"created_at"?: string,"created_by"?: string | null,"geojson": NonNullable<Json>,"id"?: string,"invoice_id"?: string | null,"property_id"?: string | null,"provider"?: string,"quote_id"?: string | null,"request_id"?: string | null,"roof_pitch"?: string | null,"roofing_squares"?: number | null,"sections"?: NonNullable<Json>,"show_on_invoice"?: boolean,"show_on_quote"?: boolean,"snapshot_path"?: string | null,"title"?: string,"total_area_sqft"?: number,"total_area_sqyd"?: number,"total_length_ft"?: number,"updated_at"?: string,"view"?: Json | null,"waste_pct"?: number
                   }
                   Update: {
-                    "company_id"?: string,"created_at"?: string,"created_by"?: string | null,"geojson"?: NonNullable<Json>,"id"?: string,"property_id"?: string | null,"provider"?: string,"quote_id"?: string | null,"request_id"?: string | null,"roof_pitch"?: string | null,"roofing_squares"?: number | null,"sections"?: NonNullable<Json>,"title"?: string,"total_area_sqft"?: number,"total_area_sqyd"?: number,"total_length_ft"?: number,"updated_at"?: string,"waste_pct"?: number
+                    "company_id"?: string,"created_at"?: string,"created_by"?: string | null,"geojson"?: NonNullable<Json>,"id"?: string,"invoice_id"?: string | null,"property_id"?: string | null,"provider"?: string,"quote_id"?: string | null,"request_id"?: string | null,"roof_pitch"?: string | null,"roofing_squares"?: number | null,"sections"?: NonNullable<Json>,"show_on_invoice"?: boolean,"show_on_quote"?: boolean,"snapshot_path"?: string | null,"title"?: string,"total_area_sqft"?: number,"total_area_sqyd"?: number,"total_length_ft"?: number,"updated_at"?: string,"view"?: Json | null,"waste_pct"?: number
                   }
                   Relationships: [
                     {
@@ -836,6 +836,12 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "companies"
       referencedColumns: ["id"]
+    },{
+      foreignKeyName: "measurements_invoice_fk"
+      columns: ["company_id","invoice_id"]
+isOneToOne: false
+      referencedRelation: "invoices"
+      referencedColumns: ["company_id","id"]
     },{
       foreignKeyName: "measurements_company_id_property_id_fkey"
       columns: ["company_id","property_id"]

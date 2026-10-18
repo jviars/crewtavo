@@ -332,6 +332,14 @@ const featureCollection = z.object({
     .max(500),
 });
 
+/** Where the map was when the drawing was saved, so reopening it starts there. */
+const mapView = z.object({
+  center: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]),
+  zoom: z.number().min(0).max(24),
+  imagery: z.string().max(40).optional(),
+  attribution: z.string().max(300).optional(),
+});
+
 sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"]), async (c) => {
   const body = await readJson(
     c,
@@ -341,12 +349,19 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
       property_id: uuid.nullable().optional(),
       request_id: uuid.nullable().optional(),
       quote_id: uuid.nullable().optional(),
-      provider: z.string().max(40).default("google"),
+      invoice_id: uuid.nullable().optional(),
+      provider: z.string().max(40).default("naip"),
       geojson: featureCollection,
       roof_pitch: z.string().max(20).nullable().optional(),
       waste_pct: z.number().min(0).max(100).default(0),
+      view: mapView.optional(),
+      // The picture of the drawing the browser just uploaded. Left out, the saved one stays.
+      snapshot_path: z.string().max(200).optional(),
     }),
   );
+  if (body.snapshot_path && !new RegExp(`^${c.var.companyId}/measurements/[0-9a-f-]{36}\\.(jpg|png)$`).test(body.snapshot_path)) {
+    throw new HttpError(400, "That map picture isn't one of this company's.");
+  }
   // Totals always come from the shapes, recomputed here; nothing the browser computed is trusted.
   let summary: MeasurementSummary;
   try {
@@ -365,9 +380,10 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
   if (summary.total_area_sqft >= 1e12 || summary.total_length_ft >= 1e12 || (squares ?? 0) >= 1e8) {
     throw new HttpError(400, "This measurement is too large to save. Check the shapes and measured values.");
   }
-  const { id, ...fields } = body;
+  const { id, view, ...fields } = body;
   const row = {
     ...fields,
+    ...(view ? { view: asJson(view) } : {}),
     geojson: asJson(fields.geojson),
     company_id: c.var.companyId,
     sections: asJson(summary.sections),

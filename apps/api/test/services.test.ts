@@ -437,6 +437,44 @@ describe("public submissions", () => {
   });
 });
 
+describe("drawings in the Client Hub", () => {
+  const DRAWING = "5d0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
+  const picture = async (drawing: Record<string, unknown> | null, link: { t: "quote" | "invoice"; id: string } = { t: "quote", id: "quote-1" }) => {
+    const calls = serve((call) => {
+      if (call.method === "GET" && call.path === "measurements") return drawing ? [drawing] : [];
+      if (call.url.pathname.startsWith("/storage/v1/object/files/")) return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), { headers: { "Content-Type": "image/jpeg" } });
+      return [];
+    });
+    const token = (await clientLink(env, "https://ops.example.com", { c: "co-1", ...link })).split("/hub/")[1];
+    const res = await app.request(`/api/hub/${token}/drawings/${DRAWING}.jpg`, {}, env);
+    return { res, calls };
+  };
+  const shown = { snapshot_path: `co-1/measurements/${DRAWING}.jpg`, show_on_quote: true, show_on_invoice: false, quote_id: "quote-1", invoice_id: "invoice-1" };
+
+  it("serves the picture of a drawing shown on the quote", async () => {
+    const { res, calls } = await picture(shown);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/jpeg");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]));
+    expect(calls.find((c) => c.path === "measurements")?.url.searchParams.get("company_id")).toBe("eq.co-1");
+    expect(calls.some((c) => c.url.pathname === `/storage/v1/object/files/co-1/measurements/${DRAWING}.jpg`)).toBe(true);
+  });
+
+  it("shows nothing the office didn't choose to show on that quote or invoice", async () => {
+    for (const [drawing, link] of [
+      [{ ...shown, show_on_quote: false, show_on_invoice: true }, undefined],
+      [{ ...shown, snapshot_path: null }, undefined],
+      [{ ...shown, quote_id: "quote-2" }, undefined],
+      [shown, { t: "invoice" as const, id: "invoice-1" }],
+      [null, undefined],
+    ] as const) {
+      const { res, calls } = await picture(drawing, link);
+      expect(res.status, JSON.stringify([drawing, link])).toBe(404);
+      expect(calls.some((c) => c.url.pathname.startsWith("/storage/"))).toBe(false);
+    }
+  });
+});
+
 describe("quote approval", () => {
   // The database claims the quote, then picks the options and records the approval with the amounts
   // they came to, in one step (approve_hub_quote; supabase/tests/hub_approval_test.sql).

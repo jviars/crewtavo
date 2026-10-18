@@ -11,13 +11,14 @@ import { CompanySettings } from "./CompanySettings";
 import { CrewSettings } from "./CrewSettings";
 import { EmailSettings } from "./EmailSettings";
 import { LicenseSettings } from "./LicenseSettings";
+import { MapsSettings } from "./MapsSettings";
 import { PriceList } from "./PriceList";
 import { ProfileSettings } from "./ProfileSettings";
 import { RolesSettings } from "./RolesSettings";
 import { TeamSettings } from "./TeamSettings";
 import { WebAddressSettings } from "./WebAddressSettings";
 
-type Tab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "license";
+type Tab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "maps" | "license";
 type Item = { label: string; icon: IconName; hint?: string } & ({ tab: Tab } | { to: string });
 
 export function SettingsPage() {
@@ -38,6 +39,7 @@ export function SettingsPage() {
         ...(isAdmin ? [{ tab: "company", label: "Company", icon: "home" } as Item] : []),
         ...(isAdmin && session.config.singleCompany ? [{ tab: "address", label: "Web address", icon: "globe" } as Item] : []),
         ...(canSell ? [{ tab: "prices", label: "Price list", icon: "list" } as Item] : []),
+        ...(isAdmin ? [{ tab: "maps", label: "Maps", icon: "map" } as Item] : []),
         ...(managesSettings ? [{ to: "/booking", label: "Online booking", icon: "globe" } as Item] : []),
       ],
     },
@@ -98,6 +100,7 @@ export function SettingsPage() {
           {tab === "prices" && <PriceList />}
           {tab === "checklists" && <ChecklistSettings />}
           {tab === "email" && <EmailSettings />}
+          {tab === "maps" && <MapsSettings />}
           {tab === "license" && <LicenseSettings />}
         </div>
       </div>

@@ -19,6 +19,7 @@ import { copyText } from "@/lib/clipboard";
 import { addDaysIso, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
+import { InvoiceDrawings } from "../measure/drawings";
 import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
 import { SendDialog } from "../quotes/SendDialog";
@@ -261,6 +262,7 @@ function InvoicePageScreen() {
             {inv.job?.po_number && <span className="muted small">PO {inv.job.po_number}</span>}
           </div>
           {stripe?.stripe_id && <StripeCard stripe={stripe} />}
+          <InvoiceDrawings invoiceId={inv.id} clientId={inv.client_id} jobId={inv.job?.id ?? null} editable={!isVoid} />
         </aside>
       </div>
 

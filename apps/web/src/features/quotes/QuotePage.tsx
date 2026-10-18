@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
@@ -15,9 +15,10 @@ import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, formatMoneyCents, formatNumber, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
+import { addressLine, formatDate, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
+import { DrawingsCard } from "../measure/drawings";
 import { LineItems } from "./LineItems";
 import { DiscountRows } from "./PromoRow";
 import { SendDialog } from "./SendDialog";
@@ -363,14 +364,6 @@ function MessageCard({ value, editable, onSave }: { value: string | null; editab
 
 function MeasurementsCard({ quoteId, propertyId, lat, lng, editable, onApplied }: { quoteId: string; propertyId: string | null; lat: number | null; lng: number | null; editable: boolean; onApplied: () => void }) {
   const [depth, setDepth] = useState("");
-  const measurements = useQuery({
-    queryKey: ["measurements", quoteId, propertyId],
-    queryFn: async () => {
-      let q = supabase().from("measurements").select("id, title, total_area_sqft, total_length_ft, roofing_squares, created_at").order("created_at", { ascending: false }).limit(10);
-      q = propertyId ? q.or(`quote_id.eq.${quoteId},property_id.eq.${propertyId}`) : q.eq("quote_id", quoteId);
-      return unwrap(await q);
-    },
-  });
   const apply = useMutation({
     meta: { success: (r: { lines: unknown[] }) => (r.lines.length ? "Quantities filled from the measurement" : null) },
     mutationFn: (measurementId: string) =>
@@ -382,22 +375,20 @@ function MeasurementsCard({ quoteId, propertyId, lat, lng, editable, onApplied }
   });
   const measureUrl = `/measure?quote=${quoteId}${propertyId ? `&property=${propertyId}` : ""}${lat != null ? `&lat=${lat}&lng=${lng}` : ""}`;
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>Measurements</strong>
-        <Link className="btn btn-sm" to={measureUrl}><Icon name="area" size={14} />Measure</Link>
-      </div>
-      {measurements.data?.map((m) => (
-        <div key={m.id} className="stack-sm" style={{ borderTop: "1px solid var(--row-divider)", paddingTop: 8 }}>
-          <strong className="text-sm">{m.title}</strong>
-          <span className="muted small">
-            {formatNumber(Number(m.total_area_sqft))} sq ft · {formatNumber(Number(m.total_length_ft))} ft{m.roofing_squares ? ` · ${m.roofing_squares} squares` : ""}
-          </span>
-          {editable && <Button size="sm" style={{ justifySelf: "start" }} loading={apply.isPending && apply.variables === m.id} onClick={() => apply.mutate(m.id)}>Fill quantities from this</Button>}
-        </div>
-      ))}
-      {editable && !!measurements.data?.length && (
-        <Field label="Depth (inches)">
+    <DrawingsCard
+      kind="quote"
+      parentId={quoteId}
+      candidates={propertyId ? `property_id.eq.${propertyId}` : null}
+      measureUrl={measureUrl}
+      editable
+      rowExtra={(m) =>
+        editable && (
+          <Button size="sm" style={{ justifySelf: "start" }} loading={apply.isPending && apply.variables === m.id} onClick={() => apply.mutate(m.id)}>Fill quantities from this</Button>
+        )
+      }
+    >
+      {editable && (
+        <Field label="Depth (inches)" hint="Used by formulas that need a depth, like mulch or asphalt.">
           <input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" />
         </Field>
       )}
@@ -407,7 +398,6 @@ function MeasurementsCard({ quoteId, propertyId, lat, lng, editable, onApplied }
           {apply.data.lines.length === 0 && <li className="muted">No lines on this quote use a formula.</li>}
         </ul>
       )}
-      <FormError error={null} />
-    </div>
+    </DrawingsCard>
   );
 }
