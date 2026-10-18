@@ -14,7 +14,7 @@ import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { pipeline, type Readable } from "node:stream";
-import { createBrotliDecompress, createGunzip } from "node:zlib";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import { addDays, eventDays, localDate, looksLikeIcs, parseIcs, plainText, type IcsItem } from "@crewtavo/core";
 import type { Env } from "../env";
 import { decryptJson } from "../lib/crypto";
@@ -142,7 +142,9 @@ function get(url: URL, headers: Record<string, string>, signal: AbortSignal): Pr
 
 async function readLimited(response: IncomingMessage): Promise<string> {
   const encoding = String(response.headers["content-encoding"] ?? "").trim().toLowerCase();
-  const unzip = encoding === "gzip" || encoding === "x-gzip" ? createGunzip() : encoding === "br" ? createBrotliDecompress() : null;
+  // deflate isn't asked for, but some servers send it anyway (fetch used to unpack it).
+  const unzip =
+    encoding === "gzip" || encoding === "x-gzip" ? createGunzip() : encoding === "br" ? createBrotliDecompress() : encoding === "deflate" ? createInflate() : null;
   const body: Readable = unzip ? pipeline(response, unzip, () => undefined) : response;
   const chunks: Buffer[] = [];
   let size = 0;
@@ -566,8 +568,25 @@ export async function runCalendarJob(env: Env, admin: Db, row: { id?: number; co
   const job = row.payload as VisitJob;
   if (job.recheck) return recheckVisits(env, admin, row.company_id, calendarId);
   if (job.visit_ids) return pushBatch(env, admin, row.company_id, calendarId, job.visit_ids, row.id);
-  await pushVisit(env, admin, row.company_id, calendarId, job.visit_id!);
-  await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: row.company_id, provider: "google_calendar" });
+  try {
+    await pushed(admin, row.company_id, (await pushVisit(env, admin, row.company_id, calendarId, job.visit_id!)) === "saved");
+  } catch (error) {
+    // Say so once, rather than trying the visit again for hours.
+    if (calendarRefused(error)) return refused(admin, row.company_id);
+    throw error;
+  }
+}
+
+/**
+ * Pushes went through: note when, and clear the last problem, unless it still holds. Taking visits
+ * off doesn't show the visits calendar is back (Google says they're not there either way), and
+ * pushing visits doesn't answer a look at the calendar that couldn't be done.
+ */
+async function pushed(admin: Db, companyId: string, saved: boolean) {
+  const match = { company_id: companyId, provider: "google_calendar" };
+  const { data } = await admin.from("integrations").select("last_error").match(match).maybeSingle();
+  const holds = data?.last_error === UNCHECKED || (data?.last_error === REFUSED && !saved);
+  await admin.from("integrations").update(holds ? { last_sync_at: new Date().toISOString() } : { last_sync_at: new Date().toISOString(), last_error: null }).match(match);
 }
 
 const VISIT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -591,13 +610,16 @@ async function upcoming(admin: Db, companyId: string) {
   return { from, to, visits: (visits ?? []).map((v) => v.id) };
 }
 
-/** The visits that have an event on the visits calendar over those days (events people added there themselves aren't). */
-async function visitsOnGoogle(env: Env, admin: Db, companyId: string, calendarId: string, days: { from: string; to: string }): Promise<string[]> {
+/**
+ * The visits that have an event on the visits calendar from the first of those days on (events
+ * people added there themselves aren't). Later ones too: a visit gets there whatever its date.
+ */
+async function visitsOnGoogle(env: Env, admin: Db, companyId: string, calendarId: string, days: { from: string }): Promise<string[]> {
   const ids: string[] = [];
   let page: string | undefined;
   do {
-    // A day either side covers every time zone.
-    const params = new URLSearchParams({ timeMin: `${addDays(days.from, -1)}T00:00:00Z`, timeMax: `${addDays(days.to, 2)}T00:00:00Z`, maxResults: "2500", fields: "items(id,extendedProperties),nextPageToken" });
+    // A day before covers every time zone.
+    const params = new URLSearchParams({ timeMin: `${addDays(days.from, -1)}T00:00:00Z`, maxResults: "2500", fields: "items(id,extendedProperties),nextPageToken" });
     if (page) params.set("pageToken", page);
     const json = (await gcal(env, admin, companyId, "GET", `/calendars/${encodeURIComponent(calendarId)}/events?${params}`))!;
     for (const e of json.items ?? []) {
@@ -651,9 +673,10 @@ async function refused(admin: Db, companyId: string) {
 async function pushBatch(env: Env, admin: Db, companyId: string, calendarId: string, ids: string[], jobId?: number) {
   const failed: string[] = [];
   let failedInARow = 0;
+  let saved = false;
   for (const id of ids.slice(0, BATCH)) {
     try {
-      await pushVisit(env, admin, companyId, calendarId, id);
+      if ((await pushVisit(env, admin, companyId, calendarId, id)) === "saved") saved = true;
       failedInARow = 0;
     } catch (err) {
       // Google refused the sign-in, or visits were turned off: nothing more to send.
@@ -666,7 +689,7 @@ async function pushBatch(env: Env, admin: Db, companyId: string, calendarId: str
   }
   await queueVisits(admin, companyId, failed, { except: jobId });
   await queueVisits(admin, companyId, ids.slice(BATCH), { together: true, except: jobId });
-  await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: companyId, provider: "google_calendar" });
+  await pushed(admin, companyId, saved);
 }
 
 const UNCHECKED = "Couldn't check what's on Google Calendar, so visits cancelled or deleted lately may still show there. Turn visits off and on again to rebuild it.";
@@ -691,7 +714,7 @@ async function recheckVisits(env: Env, admin: Db, companyId: string, calendarId:
  * Bring the visits calendar in line with the schedule from last week through the next six months:
  * when visits start going to Google, and after it's reconnected (changes made while it needed
  * reconnecting weren't queued). Events for visits cancelled, deleted, unscheduled or moved away
- * meanwhile are found on Google and brought in line too. What Google doesn't take now is left to
+ * meanwhile, whatever their date, are found on Google and brought in line too. What Google doesn't take now is left to
  * the outbox and the rest still go; if the calendar can't be read now, the outbox looks again later.
  */
 export async function pushUpcomingVisits(env: Env, admin: Db, companyId: string) {
