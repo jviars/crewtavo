@@ -230,15 +230,81 @@ a.field-card:active { transform: scale(0.99); }
 @media print { .sop-body { box-shadow: none; border: 0; padding: 0 !important; } }
 
 /* ---------- Apps ---------- */
-.app-mark { width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--fill-2); color: var(--ink); font-weight: 800; font-size: 15px; }
-.app-card[data-status="connected"] .app-mark { background: var(--green-tint); color: var(--green-dark); }
-.app-card[data-status="error"] { border-color: var(--danger-tint); }
-/* Real logos sit on a white tile in both themes, like app icons. */
-.app-mark.app-logo, .app-card[data-status] .app-mark.app-logo { background: #fff; border: 1px solid var(--border); }
-.app-logo img { width: 22px; height: 22px; object-fit: contain; display: block; }
-.app-logo[data-wide] img { width: 30px; } /* wordmark-shaped logos (Zoho) */
-.app-logos { display: flex; flex: none; }
-.app-logos .app-mark + .app-mark { margin-left: -8px; box-shadow: 0 0 0 2px var(--surface); }
+/* App icons: real logos sit on a white tile in both themes, like a phone's home screen. */
+.app-icon { --size: 60px; position: relative; width: var(--size); height: var(--size); flex: none; border-radius: calc(var(--size) * 0.24); display: grid; place-items: center; background: #fff; border: 1px solid rgba(0, 0, 0, 0.08); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 6px 16px -6px rgba(0, 0, 0, 0.18); overflow: hidden; }
+.app-icon[data-size="sm"] { --size: 36px; box-shadow: none; }
+.app-icon[data-size="lg"] { --size: 112px; }
+.app-icon img { width: 56%; height: 56%; object-fit: contain; display: block; }
+.app-icon[data-wide] img { width: 84%; height: 84%; } /* wordmark-shaped logos (Zoho) */
+.app-icon-letter { font-weight: 800; font-size: calc(var(--size) * 0.42); color: #1f2421; }
+.app-icon-generic { color: #fff; background: linear-gradient(160deg, #3b82f6, #1d4ed8); border-color: transparent; }
+.app-icon-date { align-content: center; gap: 0; line-height: 1; color: #111; }
+.app-icon-date span { font-size: calc(var(--size) * 0.17); font-weight: 600; color: #e5352b; text-transform: uppercase; letter-spacing: 0.02em; }
+.app-icon-date strong { font-size: calc(var(--size) * 0.5); font-weight: 400; letter-spacing: -0.03em; margin-top: calc(var(--size) * 0.02); }
+
+.app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px 8px; }
+.app-tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 4px 10px; border-radius: 16px; color: var(--ink); text-align: center; text-decoration: none; transition: background var(--dur-fast); -webkit-tap-highlight-color: transparent; }
+.app-tile:hover { background: var(--fill); color: var(--ink); }
+.app-tile:focus-visible { outline: none; box-shadow: var(--ring); }
+.app-tile:active .app-icon { transform: scale(0.96); }
+.app-tile .app-icon { transition: transform var(--dur-fast) var(--ease-out); }
+.app-tile-icon { position: relative; display: block; }
+.app-tile-name { max-width: 100%; font-size: 12.5px; font-weight: 600; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.app-badge { position: absolute; right: -5px; bottom: -5px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--green-solid); box-shadow: 0 0 0 2px var(--page); }
+.app-badge[data-tone="danger"] { background: var(--danger-solid); }
+/* Four to a row on a phone, like a home screen. */
+@media (max-width: 600px) {
+  .app-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 2px; }
+  .app-tile { padding: 8px 0; }
+  .app-tile-name { font-size: 11.5px; }
+}
+
+.app-hero { display: flex; align-items: center; gap: 24px; }
+.app-hero-text { display: grid; gap: 6px; min-width: 0; }
+.app-hero-name { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.app-hero-tagline { margin: 0; color: var(--text-2); font-size: 15px; }
+.app-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
+.app-get { border-radius: 999px; min-width: 112px; justify-content: center; font-weight: 700; }
+@media (max-width: 600px) {
+  .app-hero { gap: 16px; align-items: flex-start; }
+  .app-hero .app-icon[data-size="lg"] { --size: 84px; }
+  .app-hero-name { font-size: 24px; }
+}
+/* The strip of facts under the name, divided like an app store listing's. */
+.app-facts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(120px, 1fr); margin: 0; padding: 12px 0; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); overflow-x: auto; scrollbar-width: none; }
+.app-facts > div { display: grid; gap: 2px; justify-items: center; text-align: center; padding: 0 12px; border-left: 1px solid var(--divider); }
+.app-facts > div:first-child { border-left: 0; }
+.app-facts dt { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
+.app-facts dd { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+@media (max-width: 600px) { .app-facts { grid-auto-columns: minmax(112px, 42%); } }
+
+.app-highlights { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; }
+.app-highlight { display: grid; gap: 4px; align-content: start; padding: 16px; border-radius: var(--radius-card); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-xs); }
+.app-highlight-icon { width: 32px; height: 32px; margin-bottom: 4px; border-radius: 9px; display: grid; place-items: center; background: var(--green-tint); color: var(--green-dark); }
+.app-about { margin: 0; max-width: 70ch; font-size: 15px; line-height: 1.55; }
+.app-info { margin: 0; }
+.app-info > div { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--row-divider); font-size: 14px; }
+.app-info > div:first-child { border-top: 0; }
+.app-info dt { color: var(--text-3); }
+.app-info dd { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .app-info > div { grid-template-columns: 1fr; gap: 2px; } }
+.app-access { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.app-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; color: var(--text-2); }
+.app-details > summary { list-style: none; display: flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; }
+.app-details > summary::-webkit-details-marker { display: none; }
+.app-details > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-fast); margin-right: 4px; }
+.app-details[open] > summary::before { transform: rotate(45deg); }
+
+/* Calendars from other apps */
+.cal-source { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; }
+.cal-source[data-off] { opacity: 0.6; }
+.cal-swatch { width: 12px; height: 12px; flex: none; border-radius: 4px; background: var(--c); }
+.cal-source .cal-swatch { align-self: flex-start; margin-top: 4px; }
+.color-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.color-swatch { width: 28px; height: 28px; border-radius: 50%; border: 0; display: grid; place-items: center; color: #fff; background: var(--c); cursor: pointer; }
+.color-swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--c); }
+.color-swatch:focus-visible { outline: none; box-shadow: var(--ring); }
+
 .code-pill { display: flex; align-items: center; min-height: 38px; padding: 8px 12px; border-radius: 8px; background: var(--fill); border: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
 
 /* ---------- Measure ---------- */
@@ -328,6 +394,13 @@ a.field-card:active { transform: scale(0.99); }
 .tg-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; }
 .tg-resize::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 18px; height: 3px; margin-left: -9px; border-radius: 2px; background: color-mix(in srgb, var(--crew, #6b7280) 45%, transparent); opacity: 0; transition: opacity var(--dur-fast); }
 .tg-event:hover .tg-resize::after { opacity: 1; }
+/* Other calendars' events: hatched in their calendar's color, so they never read as visits. */
+.tg-event.tg-ext, .tg-chip[data-external], .month-chip[data-external] { --cal-c: var(--cal, #64748b); color: var(--text-2); border: 1px solid color-mix(in srgb, var(--cal-c) 40%, var(--surface)); border-left: 3px solid var(--cal-c); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--cal-c) 14%, var(--surface)) 0 6px, color-mix(in srgb, var(--cal-c) 6%, var(--surface)) 6px 12px); }
+.tg-event.tg-ext { z-index: 0; box-shadow: none; }
+.tg-event.tg-ext .tg-n { font-weight: 600; }
+.tg-event.tg-ext .tg-m { display: inline-flex; align-items: center; gap: 3px; }
+.tg-event.tg-ext[data-free], .tg-chip[data-external][data-free], .month-chip[data-external][data-free] { opacity: 0.6; border-style: dashed; }
+.crew-legend i[data-calendar] { background: repeating-linear-gradient(135deg, var(--c) 0 3px, color-mix(in srgb, var(--c) 35%, transparent) 3px 6px); }
 .tg-ghost { position: absolute; left: 2px; right: 2px; border-radius: 8px; border: 2px dashed var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); color: var(--green-dark); font-size: 12px; font-weight: 700; padding: 4px 7px; pointer-events: none; z-index: 4; }
 .tg-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--danger); pointer-events: none; z-index: 3; }
 .tg-now::before { content: ""; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); }

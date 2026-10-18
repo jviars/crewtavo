@@ -26,26 +26,26 @@ $$;
 grant execute on all functions in schema t16 to authenticated, service_role;
 
 insert into auth.users (id, email, raw_user_meta_data) values
-  ('b0000000-0000-0000-0000-000000000001', 'owner@quebec.test', '{"full_name": "Quinn Owner"}'),
-  ('b0000000-0000-0000-0000-000000000002', 'office@quebec.test', '{"full_name": "Odie Office"}'),
-  ('b0000000-0000-0000-0000-000000000003', 'lead@quebec.test', '{"full_name": "Lee Lead"}'),
-  ('b0000000-0000-0000-0000-000000000004', 'crew@quebec.test', '{"full_name": "Cy Crew"}'),
-  ('b0000000-0000-0000-0000-000000000005', 'owner@romeo.test', '{"full_name": "Rae Romeo"}');
+  ('b1000000-0000-0000-0000-000000000001', 'owner@quebec.test', '{"full_name": "Quinn Owner"}'),
+  ('b1000000-0000-0000-0000-000000000002', 'office@quebec.test', '{"full_name": "Odie Office"}'),
+  ('b1000000-0000-0000-0000-000000000003', 'lead@quebec.test', '{"full_name": "Lee Lead"}'),
+  ('b1000000-0000-0000-0000-000000000004', 'crew@quebec.test', '{"full_name": "Cy Crew"}'),
+  ('b1000000-0000-0000-0000-000000000005', 'owner@romeo.test', '{"full_name": "Rae Romeo"}');
 
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub": "b0000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
 select public.create_company('Quebec Gutters', 'gutters') as co \gset
 insert into public.memberships (company_id, user_id, role) values
-  (:'co', 'b0000000-0000-0000-0000-000000000002', 'office'),
-  (:'co', 'b0000000-0000-0000-0000-000000000003', 'crew_lead'),
-  (:'co', 'b0000000-0000-0000-0000-000000000004', 'field_crew');
+  (:'co', 'b1000000-0000-0000-0000-000000000002', 'office'),
+  (:'co', 'b1000000-0000-0000-0000-000000000003', 'crew_lead'),
+  (:'co', 'b1000000-0000-0000-0000-000000000004', 'field_crew');
 insert into public.crews (company_id, name) values (:'co', 'North') returning id as crew \gset
 commit;
 
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub": "b0000000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
 select public.create_company('Romeo Roofing', 'roofing') as other \gset
 commit;
 
@@ -71,7 +71,7 @@ select t16.expect_error(format('insert into public.calendar_events (company_id, 
 -- ===== People who schedule see them; field crew and other companies don't ======================
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub": "b0000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 select t16.check((select count(*) from public.calendar_events where company_id = :'co') = 2, 'the office sees other calendars on the schedule');
 select t16.check((select name from public.calendar_sources where id = :'zoho') = 'Office calendar', 'and which calendar each event is from');
 select t16.expect_error('select url_sealed from public.calendar_sources', 'but never the link itself');
@@ -83,19 +83,19 @@ commit;
 
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub": "b0000000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
 select t16.check((select count(*) from public.calendar_events) = 2, 'crew leads see them too (they see the whole schedule)');
 commit;
 
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub": "b0000000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
 select t16.check((select count(*) from public.calendar_events) = 0 and (select count(*) from public.calendar_sources) = 0, 'field crew see only their own visits, not other calendars');
 commit;
 
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub": "b0000000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
 select t16.check((select count(*) from public.calendar_events) = 0 and (select count(*) from public.calendar_sources) = 0, 'another company sees none of them');
 commit;
 

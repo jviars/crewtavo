@@ -210,7 +210,11 @@ Inspired by Jobber's calendar, built on our own tables:
 - **Rain days**: a weather task flags visits whose trade rules are broken (minimum temperature for
   asphalt, dry hours for sealcoat). "Shift day" moves them in one action.
 - **Live board**: the web app subscribes to `visits` changes with Supabase Realtime.
-- **Google Calendar** (optional): one-way push of visits to a crew calendar.
+- **Other calendars**: any calendar's ICS link (Zoho Calendar, Outlook, iCloud, Google's secret
+  address...) or calendars from a connected Google account show on the schedule, read every 15
+  minutes. A calendar can belong to a crew; its busy time counts in "Find a time".
+- **Google Calendar** (optional): visits go onto a Google calendar Crewtavo makes, through the
+  outbox, within a few minutes of each change.
 
 ---
 
@@ -270,7 +274,8 @@ restricted to the Solar API. Swapping in Mapbox or Esri later only changes the m
 | --- | --- | --- |
 | QuickBooks Online | OAuth 2.0; push customers, invoices, payments | Implemented, untested against a live account |
 | Zoho Books | OAuth 2.0 with data-center aware URLs | Implemented, untested |
-| Google Calendar | OAuth 2.0 | Connect flow only |
+| Google Calendar | OAuth 2.0 | Calendars on the schedule, visits pushed to a Crewtavo calendar; untested against a live account |
+| Zoho Calendar, Outlook, Apple, any ICS link | Calendar link (ICS), stored encrypted | Implemented |
 | Stripe | Platform keys (env) | Checkout + webhook |
 | Twilio, Resend | Platform keys (env) or per-company keys | Send helpers |
 | Anthropic / OpenAI | Platform key, or a company's own key | Claude implemented |

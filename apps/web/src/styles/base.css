@@ -128,6 +128,7 @@ select.business-name:hover { background: var(--fill-2); }
 .wrap { flex-wrap: wrap; }
 .order-last { order: 1; }
 .grow { flex: 1; min-width: 0; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .muted { color: var(--text-3); }
 .small { font-size: 12px; }
 .text-sm { font-size: 13px; }

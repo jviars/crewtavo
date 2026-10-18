@@ -10,7 +10,7 @@ const conflicts = (visits: GridVisit[]) => Object.fromEntries(place(visits, tz).
 
 describe("double bookings on the schedule", () => {
   it("marks both visits that overlap for one crew", () => {
-    expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("b", "en_route", "10:00", "12:00")])).toEqual({ a: true, b: true });
+    expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("b", "en_route", "10:00", "12:00")])).toEqual({ a: "visit", b: "visit" });
   });
 
   it("doesn't mark work that's done or a visit booked over it", () => {
