@@ -98,8 +98,8 @@ docker compose --env-file .env.instance down -v   # delete the instance and all 
 ```
 
 **On a server:** set `APP_URL=https://your-domain` in `.env.instance`, run `npm run instance` again,
-and put a web server with HTTPS in front of port 8080 (`CREWTAVO_PORT`). With Caddy, this
-`Caddyfile` does it:
+and put a web server with HTTPS in front of port 8080 (`CREWTAVO_PORT`) on the same server, since
+the port only answers there. With Caddy, this `Caddyfile` does it:
 
 ```
 your-domain {
@@ -111,6 +111,13 @@ Caddy adds each visitor's address to `X-Forwarded-For`, which Crewtavo's rate li
 [Visitors' addresses](#visitors-addresses)). Another web server has to add it the same way (nginx:
 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). A Caddyfile with a
 `header_up X-Real-IP {remote_host}` line, from earlier versions of these steps, works as it is.
+
+**Updating from an earlier version:** Crewtavo used to go by `X-Real-IP`. A web server that only
+sets that one (nginx's `proxy_set_header X-Real-IP $remote_addr;`) needs the `X-Forwarded-For` line
+above as well, or `CREWTAVO_VISITOR_IP=x-real-ip` in `.env.instance`. Without either, visitors can
+pick their own address, and everyone who doesn't shares the web server's. Port 8080 also used to
+answer on every address; now it only answers on the server itself. If your web server runs on
+another machine, see [Visitors' addresses](#visitors-addresses).
 
 **Backups:** back up the `crewtavo-instance_db-data` and `crewtavo-instance_storage-data` Docker
 volumes, and `.env.instance`.
@@ -141,6 +148,7 @@ lists them all).
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SCHEDULER` | Set to `off` on extra replicas of `crewtavo`, so background tasks run in one place. |
 | `CREWTAVO_VISITOR_IP` | Only when something other than Railway's edge or one web server is in front of Crewtavo: where visitors' addresses come from (see [Visitors' addresses](#visitors-addresses)). |
+| `CREWTAVO_BIND` | Docker only: the address port 8080 answers on. Defaults to `127.0.0.1`, the computer itself, which is all a web server there needs; read [Visitors' addresses](#visitors-addresses) before changing it. |
 | `CREWTAVO_SENTRY_DSN` | Error tracking for the API and the web app (see below). Unset turns it off. |
 | `CREWTAVO_SENTRY_WEB_DSN` | Optional: send the web app's errors to a separate project. Defaults to `CREWTAVO_SENTRY_DSN`. |
 | `CREWTAVO_SENTRY_ENVIRONMENT` | Optional: the environment shown on each report, such as `staging`. Defaults to `production`. |
@@ -156,7 +164,20 @@ header, so Crewtavo only goes by what the instance's own proxy sets:
   the visitor sent.
 - **With Docker or on your own server:** the last `X-Forwarded-For` entry, which the web server in
   front adds, on connections from the same machine or a private network (where that web server
-  connects from). A visitor who reaches port 8080 directly is counted by their own address.
+  connects from). Connections from anywhere else count by their own address.
+
+With Docker, port 8080 only answers on the server itself (`CREWTAVO_BIND`, `127.0.0.1` by
+default), so the web server there is the only way in. Keep it that way with a web server in front:
+Docker hands some outside connections to Crewtavo from its own network address (over IPv6, and on
+Docker Desktop or rootless Docker often all of them), and Crewtavo would take them for the web
+server's and believe their `X-Forwarded-For`.
+
+- **Web server on another machine:** set `CREWTAVO_BIND` to this server's address on the private
+  network between them, not `0.0.0.0`.
+- **No web server** (trying Crewtavo from other computers on your network): set
+  `CREWTAVO_BIND=0.0.0.0` and `CREWTAVO_VISITOR_IP=connection`. On Docker Desktop, everyone then
+  counts as one visitor.
+- **Without Docker:** close port 8080 to other computers with the server's firewall.
 
 Sign-in and file storage get the same address from Crewtavo (Auth records it with each sign-in).
 With something else in front, set `CREWTAVO_VISITOR_IP`:
@@ -164,11 +185,14 @@ With something else in front, set `CREWTAVO_VISITOR_IP`:
 | Value | When |
 | --- | --- |
 | `x-forwarded-for:2` | Two proxies add to `X-Forwarded-For`, such as Cloudflare's proxy in front of Caddy. Caddy keeps Cloudflare's entries only from addresses in its `trusted_proxies` setting, so list Cloudflare's there. The number counts the proxies. |
-| `cf-connecting-ip` (or another header) | The proxy in front sets this header to the visitor's address, replacing any the visitor sent. |
+| `cf-connecting-ip`, `x-real-ip` (or another header) | The proxy in front sets this header to the visitor's address, replacing any the visitor sent (nginx's `proxy_set_header X-Real-IP $remote_addr;` does). |
 | `connection` | Nothing is in front: the address each connection comes from. |
 
-Once set, it's believed on every connection, so make sure nothing reaches Crewtavo without going
-through those proxies.
+Once set, it's believed on every connection, so nothing may reach Crewtavo without going through
+those proxies: keep port 8080 on the server (above), and let the web server take connections only
+from the proxy in front of it (for Cloudflare, allow only [Cloudflare's addresses](https://www.cloudflare.com/ips/)
+in the server's firewall). Caddy with `x-forwarded-for:2` doesn't need the firewall, since it
+replaces the `X-Forwarded-For` of anyone outside `trusted_proxies`; nginx adds to it.
 
 ### Error tracking
 

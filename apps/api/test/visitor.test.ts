@@ -1,8 +1,11 @@
 /**
  * Visitors' addresses (lib/visitor.ts): only what the deployment's own proxy says counts, or the
- * connection's address with nothing in front. And the gateway (lib/gateway.ts) tells Auth, REST and
- * Storage that address, not the headers the visitor sent.
+ * connection's address with nothing in front. Docker publishes the port on this computer only, which
+ * that rule depends on. And the gateway (lib/gateway.ts) tells Auth, REST and Storage that address,
+ * not the headers the visitor sent.
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { HttpBindings } from "@hono/node-server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
@@ -59,6 +62,10 @@ describe("visitor addresses", () => {
     expect(ip(cloudflare, { ...forged, "CF-Connecting-IP": "203.0.113.9" }, "172.70.1.1")).toBe("203.0.113.9");
     expect(ip(cloudflare, forged, "172.70.1.1")).toBe("172.70.1.1");
 
+    // nginx with proxy_set_header X-Real-IP $remote_addr, which replaces the visitor's own.
+    const nginx = { ...env, CREWTAVO_VISITOR_IP: "x-real-ip" };
+    expect(ip(nginx, { ...forged, "X-Real-IP": "203.0.113.9" }, "127.0.0.1")).toBe("203.0.113.9");
+
     const none = { ...railway, CREWTAVO_VISITOR_IP: "connection" };
     expect(ip(none, { ...forged, "X-Real-IP": "203.0.113.9" }, "10.0.0.5")).toBe("10.0.0.5");
   });
@@ -79,6 +86,24 @@ describe("visitor addresses", () => {
     }
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("CREWTAVO_VISITOR_IP=x-forwarded-for:0"));
     warn.mockRestore();
+  });
+});
+
+describe("the Docker instance", () => {
+  /** The ports docker-compose.yml publishes, with its ${NAME:-default} settings filled in from `vars`. */
+  function published(vars: Record<string, string> = {}) {
+    const compose = readFileSync(fileURLToPath(new URL("../../../docker-compose.yml", import.meta.url)), "utf8");
+    return [...compose.matchAll(/^\s+ports:\n((?:\s+- .*\n)+)/gm)]
+      .flatMap((m) => m[1]!.trim().split("\n"))
+      .map((line) => line.trim().replace(/^- "?|"?$/g, "").replace(/\$\{(\w+):-([^}]*)\}/g, (_, name: string, fallback: string) => vars[name] || fallback));
+  }
+
+  it("publishes Crewtavo's port on this computer only, unless CREWTAVO_BIND opens it", () => {
+    // On every address, Docker hands some outside connections over from its own network (over IPv6,
+    // or all of them on Docker Desktop), and those would pass for the web server's.
+    expect(published()).toEqual(["127.0.0.1:8080:8080"]);
+    expect(published({ CREWTAVO_PORT: "9090" })).toEqual(["127.0.0.1:9090:8080"]);
+    expect(published({ CREWTAVO_BIND: "0.0.0.0" })).toEqual(["0.0.0.0:8080:8080"]);
   });
 });
 
