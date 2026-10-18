@@ -50,8 +50,13 @@ const DAY = 86_400_000;
 const MAX_REPEATS = 1500;
 /** Hourly at most: calendars repeat a few times a day (BYHOUR=9,17), and every minute or second isn't an event. */
 const MAX_PER_DAY = 24;
-/** The last moment there is here (years have four digits). DURATION:P99999999W ends there instead of past it. */
-const END_OF_TIME = Date.UTC(9999, 11, 31, 23, 59, 59);
+/**
+ * The first and last days there are here: Postgres takes years 1 to 9999, written with four
+ * digits. DURATION:P99999999W ends at the start of the last day instead of past it, so the end is
+ * still in 9999 in every zone (14 hours ahead of UTC at most).
+ */
+const FIRST_DAY = new Date(0).setUTCFullYear(1, 0, 1);
+const END_OF_TIME = Date.UTC(9999, 11, 31);
 /** A repeat that steps further than a century at a time isn't one (INTERVAL=999999999999). */
 const MAX_STEP = 100 * 366 * DAY;
 /** Different time zones one file may use; real calendars use a handful. */
@@ -277,7 +282,14 @@ export function isIanaZone(name: string): boolean {
   return ok;
 }
 
-function ianaZone(name: string, offset = (utc: number) => zoneOffsetMs(new Date(utc), name)): Zone {
+/**
+ * A zone's offset at an instant. Every zone was on its local mean time until well after 1800, and
+ * zoneOffsetMs reads a year before 100 as 1900 and something, so earlier instants take 1800's.
+ */
+const MEAN_TIME = Date.UTC(1800, 0, 1);
+const offsetAt = (utc: number, name: string) => zoneOffsetMs(new Date(Math.max(utc, MEAN_TIME)), name);
+
+function ianaZone(name: string, offset = (utc: number) => offsetAt(utc, name)): Zone {
   return {
     toUtc(wall) {
       // Two passes settle the hour around daylight-saving changes (as zonedTimeToUtc does).
@@ -299,12 +311,12 @@ function dailyOffsets(name: string): (utc: number) => number {
     const day = Math.floor(utc / DAY);
     let offset = days.get(day);
     if (offset === undefined) {
-      const start = zoneOffsetMs(new Date(day * DAY), name);
-      offset = start === zoneOffsetMs(new Date(day * DAY + DAY - 1000), name) ? start : null;
+      const start = offsetAt(day * DAY, name);
+      offset = start === offsetAt(day * DAY + DAY - 1000, name) ? start : null;
       if (days.size >= 20_000) days.clear();
       days.set(day, offset);
     }
-    return offset ?? zoneOffsetMs(new Date(utc), name);
+    return offset ?? offsetAt(utc, name);
   };
 }
 
@@ -540,6 +552,8 @@ function zoneResolver(components: Component[], fallback: string, work: Work) {
     if (id) definitions.set(id, c);
   }
   const cache = new Map<string, Zone>();
+  // Outlook writes the same rules again and again ("Customized Time Zone 1", "2"...): they're read once.
+  const read = new Map<string, Zone | null>();
   const iana = (name: string) => ianaZone(name, dailyOffsets(name));
   const fallbackZone = isIanaZone(fallback) ? iana(fallback) : UTC_ZONE;
   return (tzid: string | null): Zone => {
@@ -559,10 +573,15 @@ function zoneResolver(components: Component[], fallback: string, work: Work) {
     else if (WINDOWS_ZONES[id]) zone = iana(WINDOWS_ZONES[id]!);
     else if (location && isIanaZone(location)) zone = iana(location);
     else if (definition) {
-      try {
-        zone = vtimezone(definition, work);
-      } catch {
-        zone = null; // read as if the file didn't define it
+      const parts = JSON.stringify(definition.children.map((c) => [c.type, c.props]));
+      if (read.has(parts)) zone = read.get(parts)!;
+      else {
+        try {
+          zone = vtimezone(definition, work);
+        } catch {
+          zone = null; // read as if the file didn't define it
+        }
+        read.set(parts, zone);
       }
     }
     if (!zone && pattern && isIanaZone(pattern)) zone = iana(pattern);
@@ -575,6 +594,8 @@ function zoneResolver(components: Component[], fallback: string, work: Work) {
 // ---------------------------------------------------------------------------------------------
 // Repeats
 // ---------------------------------------------------------------------------------------------
+
+const size = (list: unknown) => (list === undefined || list === null ? 0 : Array.isArray(list) ? list.length : 1);
 
 const RULE_PARTS = new Set(["FREQ", "UNTIL", "COUNT", "INTERVAL", "BYSECOND", "BYMINUTE", "BYHOUR", "BYDAY", "BYMONTHDAY", "BYYEARDAY", "BYWEEKNO", "BYMONTH", "BYSETPOS", "WKST"]);
 /** The values each list may hold (RFC 5545). Zero isn't one where the list counts from either end. */
@@ -597,9 +618,18 @@ interface Rule {
   count: number | null;
   dtstart: number;
   until: number | null;
-  /** The most instances a period can have, and the fewest each has after the first (0 when one can have none). */
+  /**
+   * The most instances a period can have, and (in a monthly or yearly rule) the fewest each has
+   * after the first: 0 when one can have none.
+   */
   most: number;
   least: number;
+  /**
+   * A daily or weekly rule with no other lists has `each` instances in every `block` periods
+   * counting from DTSTART (BYDAY=MO,TU,WE,TH,FR on a daily rule: five every seven days); null for others.
+   */
+  block: number;
+  each: number | null;
   /** Roughly what stepping through one period costs, in the same units as the work allowed. */
   cost: number;
 }
@@ -651,7 +681,6 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
     }
     options.byweekday = [...days.values()];
   }
-  const size = (list: unknown) => (list === undefined || list === null ? 0 : Array.isArray(list) ? list.length : 1);
   // One instance for each BYHOUR, BYMINUTE and BYSECOND together on each day it falls on.
   const perDay = (size(options.byhour) || 1) * (size(options.byminute) || 1) * (size(options.bysecond) || 1);
   if (perDay > MAX_PER_DAY) return null;
@@ -663,22 +692,36 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
   const plain = new Set(weekdays.filter((d) => !d.n || freq > RRule.MONTHLY).map((d) => d.weekday)).size;
   const months = size(options.bymonth);
   const { longest, shortest, cost } = PERIODS[freq]!;
+  // A week number is up to 7 days, and week 1 and the last week also take a few days from the years either side.
+  const weeks = size(options.byweekno) && 7 * size(options.byweekno) + 6;
   let days = 1;
-  if (freq === RRule.WEEKLY) days = plain || 1;
+  // A weekly rule with no BYDAY has every day of the week when another list picks the days.
+  if (freq === RRule.WEEKLY) days = plain || (size(options.bymonthday) || size(options.byyearday) || weeks ? 7 : 1);
   else if (freq !== RRule.DAILY) {
     const yearly = freq === RRule.YEARLY;
     const narrowed = [
       size(options.bymonthday) * (yearly ? months || 12 : 1),
       size(options.byyearday),
-      7 * size(options.byweekno),
+      weeks,
       weekdays.length && plain * (!yearly ? 5 : months ? 5 * months : 53) + nth * (yearly ? months || 1 : 1),
     ].filter((n) => n > 0);
     days = narrowed.length ? Math.min(...narrowed, longest) : yearly ? months || 1 : 1;
   }
-  const most = Math.min(days * perDay, size(options.bysetpos) || Infinity);
-  // A plain daily or weekly rule has the same number in every period after the first.
-  const even = freq === RRule.WEEKLY || (freq === RRule.DAILY && !weekdays.length);
-  const least = even && !["bymonth", "bymonthday", "byyearday", "byweekno", "bysetpos"].some((name) => size(lists[name])) ? days * perDay : 0;
+  // rrule gives one for each BYSETPOS the period has, and one for each counted from its end even
+  // when it hasn't (the period's first again: -2 when it has just one).
+  const positions = (options.bysetpos ?? []) as number[];
+  const most = positions.length ? Math.min(positions.filter((p) => p > 0).length, days * perDay) + positions.filter((p) => p < 0).length : days * perDay;
+  const least = freq <= RRule.MONTHLY ? fewest(options, freq, dtstartWall, perDay) : 0;
+  // A daily step lands on each weekday once in seven steps, unless it's a whole number of weeks.
+  let block = 1;
+  let each: number | null = null;
+  if (freq >= RRule.WEEKLY && !["bymonth", "bymonthday", "byyearday", "byweekno", "bysetpos"].some((name) => size(lists[name]))) {
+    if (freq === RRule.WEEKLY || !weekdays.length) each = (plain || 1) * perDay;
+    else {
+      block = interval % 7 ? 7 : 1;
+      each = (block === 7 ? plain : weekdays.some((d) => d.weekday === (new Date(dtstartWall).getUTCDay() + 6) % 7) ? 1 : 0) * perDay;
+    }
+  }
 
   // On top of a period's base cost: each day is looked up in the lists, each BYDAY like 2TU is
   // placed again in each month, BYSETPOS goes through the period's days once for each position,
@@ -690,7 +733,50 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
     (nth * (freq === RRule.YEARLY ? months || 1 : 1) + size(options.byweekno)) / 8 +
     setpos * (0.3 + (longest + setpos) / 1000) +
     (freq >= RRule.WEEKLY ? (interval * shortest) / 300 : 0);
-  return { options, freq, interval, count, dtstart: dtstartWall, until: untilWall, most, least, cost: periodCost };
+  return { options, freq, interval, count, dtstart: dtstartWall, until: untilWall, most, least, block, each, cost: periodCost };
+}
+
+/** The days in each month of a common year: the fewest it can have. */
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * The fewest instances a monthly or yearly period after the first has, or 0 when one can have none
+ * (or it's hard to say). Values counted from the same end (BYMONTHDAY=1,15, or BYDAY=2TU,4TU) are
+ * different days, so a period has at least as many as either end's values that it always has.
+ */
+function fewest(options: Partial<Options>, freq: number, dtstart: number, perDay: number): number {
+  const list = (value: unknown) => (value === undefined || value === null ? [] : ((Array.isArray(value) ? value : [value]) as number[]));
+  const ends = (values: number[], always: number) => Math.max(values.filter((v) => v > 0 && v <= always).length, values.filter((v) => v < 0 && -v <= always).length);
+  const yearly = freq === RRule.YEARLY;
+  const weekdays = (options.byweekday ?? []) as Weekday[];
+  let monthdays = list(options.bymonthday);
+  const yeardays = list(options.byyearday);
+  let months = list(options.bymonth);
+  // Lists that leave some periods with none, or that a day has to match together.
+  if (size(options.byweekno) || (!yearly && (months.length || yeardays.length))) return 0;
+  const lists = [monthdays, yeardays, weekdays].filter((l) => l.length).length;
+  if (lists > 1) return 0;
+  if (!lists) {
+    // With no days given, rrule repeats DTSTART's day of the month (and month, in a yearly rule).
+    monthdays = [new Date(dtstart).getUTCDate()];
+    if (yearly && !months.length) months = [new Date(dtstart).getUTCMonth() + 1];
+  }
+  // Summed over the period's months, given the days each month always has.
+  const inMonths = (inMonth: (always: number) => number) =>
+    yearly ? (months.length ? months : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).reduce((n, m) => n + inMonth(MONTH_DAYS[m - 1]!), 0) : inMonth(28);
+  let days: number;
+  if (yeardays.length) days = months.length ? 0 : ends(yeardays, 365);
+  else if (monthdays.length) days = inMonths((always) => ends(monthdays, always));
+  else if (weekdays.some((d) => d.n) && weekdays.some((d) => !d.n)) days = 0; // 2TU and every Friday: both at once
+  else if (weekdays.some((d) => d.n)) {
+    // Each weekday's own list: 2TU,-1TU are different Tuesdays unless the month has just 4.
+    const byDay = new Map<number, number[]>();
+    for (const d of weekdays) byDay.set(d.weekday, [...(byDay.get(d.weekday) ?? []), d.n!]);
+    const per = (always: number) => [...byDay.values()].reduce((n, ns) => n + ends(ns, always), 0);
+    days = yearly && !months.length ? per(52) : inMonths(() => per(4));
+  } else days = new Set(weekdays.map((d) => d.weekday)).size * (yearly && !months.length ? 52 : inMonths(() => 4));
+  const setpos = list(options.bysetpos);
+  return setpos.length ? ends(setpos, days * perDay) : days * perDay;
 }
 
 /** Days in the longest and the shortest of each kind of period, and roughly what stepping through a plain one costs. */
@@ -703,13 +789,14 @@ const PERIODS: Record<number, { longest: number; shortest: number; cost: number 
 
 /**
  * The latest start at or before `target` that changes nothing about the rule: a whole number of
- * periods after DTSTART, on the same weekday, day of the month and time of day.
+ * periods (of blocks, for a daily or weekly rule) after DTSTART, on the same weekday, day of the
+ * month and time of day.
  */
 function alignedStart(rule: Rule, target: number): number {
   const { freq, interval, dtstart } = rule;
   if (target <= dtstart) return dtstart;
   if (freq === RRule.DAILY || freq === RRule.WEEKLY) {
-    const step = interval * PERIODS[freq]!.shortest * DAY;
+    const step = rule.block * interval * PERIODS[freq]!.shortest * DAY;
     return dtstart + Math.floor((target - dtstart) / step) * step;
   }
   const d = new Date(dtstart);
@@ -717,8 +804,9 @@ function alignedStart(rule: Rule, target: number): number {
   const months = freq === RRule.MONTHLY ? interval : 12 * interval;
   let k = Math.floor(((t.getUTCFullYear() - d.getUTCFullYear()) * 12 + t.getUTCMonth() - d.getUTCMonth()) / months);
   // Not every month has a 31st, or every year a February 29th; a few periods earlier will do.
+  // (Not Date.UTC: it reads a year before 100 as 1900 and something.)
   for (let tries = 0; k > 0 && tries < 50; k--, tries++) {
-    const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + k * months, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
+    const start = new Date(dtstart).setUTCFullYear(d.getUTCFullYear(), d.getUTCMonth() + k * months, d.getUTCDate());
     if (start <= target && new Date(start).getUTCDate() === d.getUTCDate()) return start;
   }
   return dtstart;
@@ -731,15 +819,25 @@ function alignedStart(rule: Rule, target: number): number {
 function expand(rule: Rule, lo: number, hi: number, max: number, file: Work, own: Work): number[] {
   const found: number[] = [];
   if (hi < rule.dtstart || (rule.until !== null && rule.until < lo) || max <= 0) return found;
-  const step = rule.interval * PERIODS[rule.freq]!.shortest * DAY;
+  const { shortest, longest } = PERIODS[rule.freq]!;
+  const step = rule.interval * shortest * DAY;
   const periods = (from: number) => Math.floor((hi - from) / step) + 4;
-  // A COUNT counts from DTSTART, so the walk has to start there, unless it can't run out by hi...
-  const count = rule.count !== null && rule.count < periods(rule.dtstart) * rule.most ? rule.count : null;
-  // ...or it surely ran out before lo: a plain rule's period n ends before n + 1 steps from DTSTART.
-  if (count !== null && rule.least && rule.dtstart + (Math.ceil(count / rule.least) + 1) * step < lo) return found;
   // Instances before the walk's start are left out, and they're all before lo. A weekly walk's
   // first week only begins at its start, which BYSETPOS would count from, so it starts a week early.
-  const start = count === null ? alignedStart(rule, rule.freq === RRule.WEEKLY ? lo - 7 * DAY : lo) : rule.dtstart;
+  let start = alignedStart(rule, rule.freq === RRule.WEEKLY ? lo - 7 * DAY : lo);
+  // A COUNT counts from DTSTART. With the same number in every block of periods, the ones before
+  // the walk's start are counted rather than walked...
+  let count = rule.count;
+  if (count !== null && rule.each !== null) {
+    count -= rule.each * Math.round((start - rule.dtstart) / (rule.block * step));
+    if (count <= 0) return found;
+  } else if (count !== null) {
+    // ...and otherwise the walk has to start at DTSTART, unless the COUNT can't run out by hi, or
+    // it surely ran out before lo (period n ends within n + 1 of the longest periods of DTSTART).
+    if (count >= periods(rule.dtstart) * rule.most) count = null;
+    else if (rule.least && rule.dtstart + (Math.ceil(count / rule.least) + 1) * rule.interval * longest * DAY < lo) return found;
+    else start = rule.dtstart;
+  }
   const allowed = Math.min(file.left, own.left);
   if (allowed <= 0) {
     file.short = true;
@@ -893,15 +991,16 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
       description: d.description,
       url: d.url,
       allDay: instance.allDay,
-      start: instance.allDay ? isoDate(instance.start) : new Date(instance.start).toISOString(),
+      // A date can be written in the year 0 (a timed one can't: 0000 reads as 1900).
+      start: instance.allDay ? isoDate(Math.max(instance.start, FIRST_DAY)) : new Date(instance.start).toISOString(),
       end: instance.allDay ? isoDate(instance.end) : new Date(instance.end).toISOString(),
       busy: d.busy,
       tentative: d.tentative,
     };
   };
 
-  /** One event's own start and end (no repeats). */
-  const single = (event: Component): (Instance & { zone: Zone; startWall: number; length: number }) | null => {
+  /** One event's own start and end (no repeats: when it has none, `alone`). */
+  const single = (event: Component, alone: boolean): (Instance & { zone: Zone; startWall: number; length: number }) | null => {
     const start = readStamp(first(event, "DTSTART"));
     if (!start) return null;
     const end = readStamp(first(event, "DTEND"));
@@ -914,6 +1013,13 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     }
     const zone = start.kind === "utc" ? UTC_ZONE : zoneOf(start.tzid);
     const startWall = start.kind === "utc" ? start.ms : start.wall;
+    if (alone) {
+      // A zone moves a time by 100 hours at most (TZOFFSETTO:+995959), and an end by its own zone's
+      // and then the start's, so an event two weeks from the window can't be in it. Its times aren't
+      // worked out: for an old event in a file's own zone, that's working out the zone's year.
+      const endAt = !end ? startWall + (duration ?? 0) : end.kind === "date" ? dateMs(end.date) : end.kind === "utc" ? end.ms : end.wall;
+      if (startWall - 14 * DAY >= to || Math.max(startWall, endAt) + 14 * DAY < from) return { allDay: false, start: NaN, end: NaN, zone, startWall, length: 0 };
+    }
     let endWall = startWall;
     if (end && end.kind !== "date") endWall = zone.toWall(identity(end, zoneOf));
     else if (end?.kind === "date") endWall = dateMs(end.date);
@@ -927,7 +1033,7 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     const out: Found[] = [];
     const add = (event: Component, original: string | null, instance: Instance) =>
       out.push({ at: instance.allDay ? dayOf(instance.start) : instance.start, event, uid, original, instance });
-    const base = master ? single(master) : null;
+    const base = master ? single(master, !first(master, "RRULE") && !first(master, "RDATE")) : null;
     // Exceptions and exclusions written without a zone belong to the series' zone.
     const zoneFor = (tzid: string | null) => (tzid || !base ? zoneOf(tzid) : base.zone);
     const moved = new Map<string, Component>();
@@ -937,7 +1043,7 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     }
     const emitOverride = (key: string, o: Component) => {
       if (first(o, "STATUS")?.value.trim().toUpperCase() === "CANCELLED") return;
-      const own = single(o);
+      const own = single(o, true);
       if (own && inWindow(own)) add(o, key, own);
     };
 
@@ -1030,7 +1136,9 @@ export function eventDays(item: Pick<IcsItem, "allDay" | "start" | "end">, zone:
   const z = isIanaZone(zone) ? ianaZone(zone) : UTC_ZONE;
   const start = Date.parse(item.start);
   const end = Math.max(start, Date.parse(item.end) - 1); // an event ending at midnight doesn't cover the next day
-  return { starts_on: isoDate(z.toWall(start)), ends_on: isoDate(z.toWall(end)) };
+  // Only the days Postgres takes, whatever the times.
+  const day = (utc: number) => isoDate(Math.min(Math.max(z.toWall(utc), FIRST_DAY), END_OF_TIME));
+  return { starts_on: day(start), ends_on: day(end) };
 }
 
 /** Is this a calendar file at all? (A login page or an error comes back as HTML.) */
