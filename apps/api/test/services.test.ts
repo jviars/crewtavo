@@ -6,7 +6,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
-import { signToken } from "../src/lib/crypto";
+import { encryptJson, signToken } from "../src/lib/crypto";
+import { clientLink } from "../src/lib/links";
 import { sendWithMailbox } from "../src/lib/notify";
 import { adminClient } from "../src/lib/supabase";
 import { zohoAccountsServer, zohoApiDomain } from "../src/integrations/registry";
@@ -243,5 +244,164 @@ describe("calendar feed queries", () => {
     expect(pages[0]!.get("order")).toBe("visit_id.asc");
     // No list of visit ids in a URL, however many visits someone has had.
     expect(calls.every((c) => !c.url.search.includes("id.in."))).toBe(true);
+  });
+});
+
+describe("sign-in links", () => {
+  /**
+   * Ana is in one company, whose own mailbox (Resend, with the company's key) is in `status`, and
+   * `companySends` says whether that key still works. Returns the emails that went out.
+   */
+  async function emailLink(options: { status: string; companySends: boolean; env?: Env }) {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const companyId = crypto.randomUUID(); // mailboxes are cached by company
+    const ciphertext = await encryptJson(env, { api_key: "re_company" });
+    const calls = serve((call) => {
+      if (call.path === "rpc/rate_limit_hit") return true;
+      if (call.path === "rpc/user_id_for_email") return "user-1";
+      if (call.path === "memberships") return [{ company_id: companyId, company: { name: "Acme Lawn Care", email: "office@acme.example" } }];
+      if (call.method === "GET" && call.path === "integrations") return [{ status: options.status, settings: { preset: "resend", kind: "resend", from_email: "office@acme.example" } }];
+      if (call.path === "integration_secrets") return [{ ciphertext }];
+      if (call.url.pathname === "/auth/v1/admin/generate_link") return { id: "user-1", email: "ana@example.com", hashed_token: "hashed-1", verification_type: "recovery" };
+      if (call.url.pathname === "/auth/v1/recover") return {};
+      if (call.url.host === "api.resend.com") {
+        const fromCompany = call.body.from.includes("office@acme.example");
+        return fromCompany && !options.companySends ? Response.json({ message: "API key is invalid" }, { status: 403 }) : Response.json({ id: "email-1" });
+      }
+      return [];
+    });
+    const res = await app.request("/api/auth/email-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "ana@example.com", kind: "recovery" }) }, options.env ?? env);
+    expect(await res.json()).toEqual({ sent: true });
+    const emails = calls.filter((c) => c.url.host === "api.resend.com").map((c) => ({ from: c.body.from as string, link: (c.body.text as string).includes("token_hash=hashed-1") }));
+    return { emails, calls };
+  }
+  const company = '"Acme Lawn Care" <office@acme.example>';
+  const server = "Crewtavo <noreply@example.com>";
+
+  it("go out from the company's mailbox while it works", async () => {
+    expect((await emailLink({ status: "connected", companySends: true })).emails).toEqual([{ from: company, link: true }]);
+  });
+
+  it("skip a company mailbox whose sign-in failed and use the server's email", async () => {
+    expect((await emailLink({ status: "error", companySends: true })).emails).toEqual([{ from: server, link: true }]);
+  });
+
+  it("go out from the server's email when the company mailbox fails", async () => {
+    expect((await emailLink({ status: "connected", companySends: false })).emails).toEqual([{ from: company, link: true }, { from: server, link: true }]);
+  });
+
+  it("fall back to Supabase's mailer when the company mailbox fails and the server has no email", async () => {
+    const { emails, calls } = await emailLink({ status: "connected", companySends: false, env: { ...env, RESEND_API_KEY: undefined, EMAIL_FROM: undefined } });
+    expect(emails).toEqual([{ from: company, link: true }]);
+    expect(calls.find((c) => c.url.pathname === "/auth/v1/recover")?.body).toMatchObject({ email: "ana@example.com" });
+  });
+});
+
+describe("public submissions", () => {
+  /** The database for one company's forms; rate limits whose key matches `full` are used up. */
+  function database(options: { full?: RegExp } = {}) {
+    const calls = serve((call) => {
+      if (call.path === "rpc/rate_limit_hit") return !options.full?.test(call.body.p_key);
+      if (call.path === "companies") return [{ id: "co-1", name: "Acme Lawn Care", phone: null, timezone: "America/New_York", settings: {} }];
+      if (call.path === "intake_forms") return [{ id: "form-1", name: "Request a quote", kind: "request", questions: [], service_area_zips: [], lead_time_days: 0, slot_minutes: null }];
+      if (call.method === "GET" && call.path === "clients") return [{ id: "client-1", display_name: "Ana Smith" }];
+      if (call.method === "POST" && call.path === "clients") return Response.json({ id: "client-2" }, { status: 201 });
+      if (call.method === "POST" && call.path === "properties") return Response.json({ id: "property-2" }, { status: 201 });
+      if (call.method === "POST" && call.path === "requests") return Response.json({ id: "request-2", number: 1042 }, { status: 201 });
+      return [];
+    });
+    const made = () => calls.filter((c) => c.method === "POST" && ["clients", "properties", "requests", "referrals"].includes(c.path)).map((c) => c.path);
+    const limits = () => calls.filter((c) => c.path === "rpc/rate_limit_hit").map((c) => [c.body.p_key, c.body.p_max, c.body.p_window_seconds]);
+    return { calls, made, limits };
+  }
+  const post = (path: string, body: unknown) =>
+    app.request(`/api${path}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Real-IP": "203.0.113.9" }, body: JSON.stringify(body) }, env);
+  const lead = { name: "Bob Jones", email: "bob@example.com", address: { line1: "12 Main St", city: "Radford", postal_code: "24141" } };
+  const token = async (t: "refer" | "client" | "quote", id: string) => (await clientLink(env, "https://ops.example.com", { c: "co-1", t, id })).split(/\/(?:refer|hub)\//)[1]!;
+
+  it("limits booking forms per visitor and per company, before anything is made", async () => {
+    const ok = database();
+    expect((await post("/public/forms/acme/quote", lead)).status).toBe(201);
+    expect(ok.limits()).toEqual([["form:ip:203.0.113.9", 10, 3600], ["form:company:co-1", 100, 3600]]);
+    expect(ok.made()).toEqual(["clients", "properties", "requests"]);
+
+    for (const full of [/^form:ip:/, /^form:company:/]) {
+      const limited = database({ full });
+      const res = await post("/public/forms/acme/quote", lead);
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ error: "Too many requests. Try again later, or call us." });
+      expect(limited.made()).toEqual([]);
+      // No address lookup either.
+      expect(limited.calls.every((c) => c.url.host === "example.supabase.co")).toBe(true);
+    }
+  });
+
+  it("keeps booking form answers to the size and shape of real ones", async () => {
+    const answers = { details: "Front and back yard", extras: ["Edging", "Leaf pickup"], acres: 2, gate: true };
+    const ok = database();
+    expect((await post("/public/forms/acme/quote", { ...lead, answers })).status).toBe(201);
+    expect(ok.calls.find((c) => c.method === "POST" && c.path === "requests")?.body.answers).toEqual(answers);
+
+    const tooMany = Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`q${i}`, "yes"]));
+    const bulky = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`q${i}`, "x".repeat(3000)]));
+    for (const bad of [{ details: "x".repeat(4001) }, { details: { nested: "object" } }, { extras: Array(51).fill("Edging") }, tooMany, bulky]) {
+      const db = database();
+      expect((await post("/public/forms/acme/quote", { ...lead, answers: bad })).status).toBe(400);
+      expect(db.made()).toEqual([]);
+    }
+  });
+
+  it("limits referrals per visitor and per company", async () => {
+    const path = `/public/refer/${await token("refer", "client-1")}`;
+    const ok = database();
+    expect((await post(path, lead)).status).toBe(201);
+    expect(ok.limits()).toEqual([["referral:ip:203.0.113.9", 10, 3600], ["referral:company:co-1", 100, 3600]]);
+
+    const limited = database({ full: /^referral:company:/ });
+    expect((await post(path, lead)).status).toBe(429);
+    expect(limited.made()).toEqual([]);
+  });
+
+  it("limits work requests from the Client Hub, and counts their promo codes with other promo checks", async () => {
+    const path = `/hub/${await token("client", "client-1")}/request`;
+    const ok = database();
+    expect((await post(path, { title: "Gutter cleaning", promo_code: "spring10" })).status).toBe(201);
+    expect(ok.limits()).toEqual([["hub-request:ip:203.0.113.9", 10, 3600], ["hub-request:company:co-1", 100, 3600], ["promo:203.0.113.9", 10, 600]]);
+    expect(ok.calls.find((c) => c.path === "requests")?.body.promo_code).toBe("SPRING10");
+
+    for (const full of [/^hub-request:/, /^promo:/]) {
+      const limited = database({ full });
+      expect((await post(path, { title: "Gutter cleaning", promo_code: "SPRING10" })).status).toBe(429);
+      // Whether the code is real isn't checked (or given away), and nothing is made.
+      expect(limited.calls.some((c) => c.path === "rpc/check_promo_code")).toBe(false);
+      expect(limited.made()).toEqual([]);
+    }
+  });
+});
+
+describe("quote approval", () => {
+  it("records the amounts the client approved, with the options they picked", async () => {
+    const option = crypto.randomUUID();
+    const calls = serve((call) => {
+      const picked = calls.some((c) => c.method === "PATCH" && c.path === "quote_line_items" && c.body.selected === true);
+      if (call.method === "GET" && call.path === "quotes") {
+        if (call.url.searchParams.get("select") === "id,status") return [{ id: "quote-1", status: "sent" }];
+        // The database's totals follow the lines picked.
+        return [picked ? { subtotal: 1450, discount_amount: 100, tax_amount: 70.2, total: 1420.2 } : { subtotal: 1200, discount_amount: 100, tax_amount: 57.2, total: 1157.2 }];
+      }
+      if (call.method === "GET" && call.path === "quote_line_items") return [{ id: option }];
+      if (call.method === "PATCH" && call.path === "quotes") return [{ id: "quote-1" }];
+      return [];
+    });
+    const quote = (await clientLink(env, "https://ops.example.com", { c: "co-1", t: "quote", id: "quote-1" })).split("/hub/")[1];
+    const res = await app.request(
+      `/api/hub/${quote}/approve`,
+      { method: "POST", headers: { "Content-Type": "application/json", "X-Real-IP": "203.0.113.9" }, body: JSON.stringify({ name: "Ana Smith", selected_line_ids: [option] }) },
+      env,
+    );
+    expect(await res.json()).toEqual({ status: "approved" });
+    expect(calls.find((c) => c.method === "PATCH" && c.path === "quotes")?.body.approval).toMatchObject({
+      name: "Ana Smith", selected_line_ids: [option], subtotal: 1450, discount_amount: 100, tax_amount: 70.2, total: 1420.2, ip: "203.0.113.9",
+    });
   });
 });

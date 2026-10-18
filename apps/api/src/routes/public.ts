@@ -36,6 +36,17 @@ function geocodeLater(c: Parameters<typeof appUrl>[0], propertyId: string, addre
   );
 }
 
+/**
+ * Booking forms, referrals and "request work" each make a request and tell the office, and the
+ * first two add a client and look up the address (a billed Google call). So a script can't send
+ * them by the thousand: a few an hour from one visitor, and a hundred an hour for each company.
+ */
+async function limitSubmissions(c: Parameters<typeof appUrl>[0], kind: "form" | "referral" | "hub-request", companyId: string) {
+  if (!(await allow(c.env, `${kind}:ip:${clientIp(c)}`, 10, 60 * 60)) || !(await allow(c.env, `${kind}:company:${companyId}`, 100, 60 * 60))) {
+    throw new HttpError(429, "Too many requests. Try again later, or call us.");
+  }
+}
+
 async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | undefined) {
   if (!c.env.TURNSTILE_SECRET_KEY) return;
   const verify = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
@@ -117,13 +128,15 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
     const { error } = await admin.from("quote_line_items").update({ selected: body.selected_line_ids.includes(line.id) }).eq("id", line.id);
     if (error) throw dbError(error);
   }
+  // The amounts with those choices, so the approval shows the price that was agreed to.
+  const totals = must(await admin.from("quotes").select("subtotal, discount_amount, tax_amount, total").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
   // Only while it's still waiting for an answer: two approvals at once record one.
   const { data: approved, error } = await admin
     .from("quotes")
     .update({
       status: "approved",
       approved_at: new Date().toISOString(),
-      approval: { name: body.name, selected_line_ids: body.selected_line_ids, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c) },
+      approval: { name: body.name, selected_line_ids: body.selected_line_ids, ...totals, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c) },
     })
     .eq("id", l.id)
     .in("status", ["sent", "changes_requested"])
@@ -238,6 +251,12 @@ publicRoutes.get("/public/forms/:company/:form", async (c) => {
   return c.json({ company: { name: company.name, phone: company.phone }, form: { name: form.name, kind: form.kind, questions: form.questions } });
 });
 
+// Answers to a form's questions: text, or the options picked. Sized well past what a form asks (up
+// to 30 questions, 4,000 characters for a long answer), so a script can't store megabytes with each.
+const formAnswers = z
+  .record(z.string().max(100), z.union([z.string().max(4000), z.number(), z.boolean(), z.array(z.string().max(500)).max(50)]))
+  .refine((answers) => Object.keys(answers).length <= 50 && JSON.stringify(answers).length <= 50_000, "Too many answers.");
+
 publicRoutes.post("/public/forms/:company/:form", async (c) => {
   const body = await readJson(
     c,
@@ -246,7 +265,7 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
       email: z.email().optional(),
       phone: z.string().trim().min(7).max(30).optional(),
       address: z.object({ line1: z.string().trim().min(3).max(200), city: z.string().max(100).optional(), postal_code: z.string().max(12).optional() }),
-      answers: z.record(z.string(), z.unknown()).default({}),
+      answers: formAnswers.default({}),
       promo_code: z.string().trim().max(40).optional(),
       turnstile_token: z.string().optional(),
     }),
@@ -256,6 +275,7 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
   await verifyTurnstile(c, body.turnstile_token);
 
   const { admin, company, form } = await findForm(c);
+  await limitSubmissions(c, "form", company.id);
   const zips = (form.service_area_zips ?? []) as string[];
   // A code that doesn't check out is dropped rather than blocking the request.
   let promo: string | null = null;
@@ -448,6 +468,7 @@ publicRoutes.post("/hub/:token/request", async (c) => {
       promo_code: z.string().trim().max(40).optional(),
     }),
   );
+  await limitSubmissions(c, "hub-request", l.c);
   const admin = adminClient(c.env);
   must(await admin.from("clients").select("id").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "This link isn't valid anymore.");
   if (body.property_id) {
@@ -455,6 +476,8 @@ publicRoutes.post("/hub/:token/request", async (c) => {
   }
   let promo: string | null = null;
   if (body.promo_code) {
+    // The answer says whether a code is real, so this counts toward the same limit as checking one.
+    if (!(await allow(c.env, `promo:${clientIp(c)}`, 10, 10 * 60))) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
     const { error } = await admin.rpc("check_promo_code", { p_company: l.c, p_code: body.promo_code });
     if (error) throw dbError(error);
     promo = body.promo_code.toUpperCase().replace(/\s/g, "");
@@ -541,6 +564,7 @@ publicRoutes.post("/public/refer/:token", async (c) => {
   );
   if (!body.email && !body.phone) throw new HttpError(400, "Add an email or phone number so we can reach you.");
   await verifyTurnstile(c, body.turnstile_token);
+  await limitSubmissions(c, "referral", l.c);
   const admin = adminClient(c.env);
   const referrer = must(await admin.from("clients").select("id, display_name").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "This referral link isn't valid anymore.");
   const { data: company } = await admin.from("companies").select("settings").eq("id", l.c).maybeSingle();

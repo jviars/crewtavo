@@ -36,13 +36,30 @@ interface Connection {
   write(data: string): Promise<void>;
   /** Next chunk of text from the server, or null when the connection closed. */
   read(): Promise<string | null>;
+  /** Drops text that arrived but wasn't read yet; true if there was any. */
+  discard(): boolean;
+  /** How long the server may stay silent before the connection is given up. */
+  idle(ms: number): void;
   startTls(): Promise<void>;
   close(): void;
 }
 
-const TIMEOUT_MS = 20_000;
+/** How long the server may take: for each step, and for its answer once it has the message. */
+export interface SmtpTimeouts {
+  stepMs: number;
+  sentMs: number;
+}
 
-async function open({ host, port, security }: SmtpSettings): Promise<Connection> {
+const TIMEOUTS: SmtpTimeouts = {
+  stepMs: 20_000,
+  // Once it has the message, a server may check it before answering. Giving up then would report a
+  // message that still arrives as failed, and sending it again would deliver it twice. RFC 5321
+  // (4.5.3.2.6) allows 10 minutes, but background tasks claim their work for 5 and some sends have
+  // someone waiting on them, so 2 minutes: far more than a working server takes.
+  sentMs: 2 * 60_000,
+};
+
+async function open({ host, port, security }: SmtpSettings, idleMs: number): Promise<Connection> {
   const net = await import("node:net");
   const tls = await import("node:tls");
   type Sock = import("node:net").Socket;
@@ -74,7 +91,7 @@ async function open({ host, port, security }: SmtpSettings): Promise<Connection>
 
   let socket: Sock = await new Promise<Sock>((resolve, reject) => {
     const s: Sock = security === "tls" ? tls.connect({ host, port, servername: host }) : net.connect({ host, port });
-    s.setTimeout(TIMEOUT_MS, () => s.destroy(new Error("timed out")));
+    s.setTimeout(idleMs, () => s.destroy(new Error("timed out")));
     s.once(security === "tls" ? "secureConnect" : "connect", () => resolve(s));
     s.once("error", reject);
   });
@@ -87,6 +104,8 @@ async function open({ host, port, security }: SmtpSettings): Promise<Connection>
       if (closed) return failure ? Promise.reject(failure) : Promise.resolve(null);
       return new Promise((resolve) => (waiting = resolve));
     },
+    discard: () => chunks.splice(0).length > 0,
+    idle: (ms) => socket.setTimeout(ms),
     startTls: async () => {
       const plain = socket;
       plain.removeAllListeners("data");
@@ -94,10 +113,12 @@ async function open({ host, port, security }: SmtpSettings): Promise<Connection>
       plain.removeAllListeners("error");
       socket = await new Promise<Sock>((resolve, reject) => {
         const s = tls.connect({ socket: plain, servername: host });
-        s.setTimeout(TIMEOUT_MS, () => s.destroy(new Error("timed out")));
+        s.setTimeout(idleMs, () => s.destroy(new Error("timed out")));
         s.once("secureConnect", () => resolve(s));
         s.once("error", reject);
       });
+      // The secure connection watches for silence from here on, so it alone can be given longer.
+      plain.setTimeout(0);
       attach(socket);
     },
     close: () => socket.destroy(),
@@ -123,6 +144,13 @@ class Replies {
       if (chunk === null) throw new SmtpError("The mail server closed the connection.");
       this.buffer += chunk;
     }
+  }
+
+  /** Drops whatever arrived but wasn't read as a reply yet; true if there was any. */
+  discard(): boolean {
+    const unread = this.buffer !== "";
+    this.buffer = "";
+    return this.conn.discard() || unread;
   }
 }
 
@@ -221,14 +249,14 @@ function explain(step: string, reply: { code: number; text: string }, settings: 
  * Connect, sign in, and (unless `message` is null, which only checks the sign-in) send one message.
  * Returns the Message-ID.
  */
-export async function smtpSend(settings: SmtpSettings, message: SmtpMessage | null): Promise<{ id: string }> {
+export async function smtpSend(settings: SmtpSettings, message: SmtpMessage | null, timeouts = TIMEOUTS): Promise<{ id: string }> {
   let conn: Connection;
   try {
-    conn = await open(settings);
+    conn = await open(settings, timeouts.stepMs);
   } catch (error) {
     throw new SmtpError(`Couldn't connect to ${settings.host} on port ${settings.port}. Check the server name and port${error instanceof Error && /timed out/i.test(error.message) ? " (the connection timed out)" : ""}.`);
   }
-  const deadline = setTimeout(() => conn.close(), TIMEOUT_MS * 2);
+  let deadline = setTimeout(() => conn.close(), timeouts.stepMs * 2);
   try {
     const replies = new Replies(conn);
     const expect = async (step: string, ok: number[]) => {
@@ -251,6 +279,9 @@ export async function smtpSend(settings: SmtpSettings, message: SmtpMessage | nu
     if (settings.security === "starttls") {
       if (!/\bSTARTTLS\b/i.test(ehlo.text)) throw new SmtpError(`${settings.host} doesn't offer a secure connection on port ${settings.port}. Try port 465 with SSL.`);
       await command("STARTTLS", "starttls", [220]);
+      // Anything after the 220 came unencrypted, where whoever is in between could have written it
+      // (a real server waits for the handshake). Kept, it would pass for the first encrypted reply.
+      if (replies.discard()) throw new SmtpError(`${settings.host} sent more than it should have before the secure connection started, so nothing was sent. Try again, or try port 465 with SSL.`);
       await conn.startTls();
       ehlo = await command(`EHLO ${helo}`, "ehlo", [250]);
     }
@@ -274,6 +305,10 @@ export async function smtpSend(settings: SmtpSettings, message: SmtpMessage | nu
     await command("DATA", "data", [354]);
     // Dot-stuffing: a line that starts with "." gets another one (headers could; base64 can't).
     await conn.write(`${mime.replace(/\r\n\./g, "\r\n..")}\r\n.\r\n`);
+    // The server has the message now: its answer gets longer than a step (see TIMEOUTS).
+    clearTimeout(deadline);
+    deadline = setTimeout(() => conn.close(), timeouts.sentMs);
+    conn.idle(timeouts.sentMs);
     await expect("send", [250]);
     await conn.write("QUIT\r\n").catch(() => undefined);
     return { id: messageId };
