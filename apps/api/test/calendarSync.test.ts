@@ -6,7 +6,7 @@ import { addDays, localDate } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
-import { googleEventId, pushUpcomingVisits, syncSource } from "../src/integrations/calendars";
+import { googleEventId, pushUpcomingVisits, runCalendarJob, syncSource } from "../src/integrations/calendars";
 import { encryptJson } from "../src/lib/crypto";
 import type { Db } from "../src/lib/supabase";
 
@@ -186,6 +186,10 @@ async function world(options: { source?: Row; visitsCalendar?: boolean } = {}) {
   } as Record<string, Row[]>;
 }
 
+type GoogleFailure = { status: number; reason: string; message: string };
+/** What Google says to a change on a calendar the account can only read. */
+const READ_ONLY: GoogleFailure = { status: 403, reason: "requiredAccessLevel", message: "You need to have writer access to this calendar." };
+
 /** Google Calendar's API, as far as these tests need it: calendars, and events by ID in each. */
 function fakeGoogle() {
   const calendars = new Map<string, Map<string, Row>>([["visits-cal", new Map()], ["team-cal", new Map()]]);
@@ -193,8 +197,8 @@ function fakeGoogle() {
     calendars,
     list: [] as Row[],
     calls: [] as string[],
-    /** A status to answer with instead, by method and path (and event ID, for a new event). */
-    fail: (_method: string, _path: string, _body: Row | null): number | null => null,
+    /** A status (or a whole error) to answer with instead, by method and path (and event ID, for a new event). */
+    fail: (_method: string, _path: string, _body: Row | null): number | GoogleFailure | null => null,
     /** Hold a request until this settles. */
     hold: (_method: string, _path: string): Promise<void> | null => null,
   };
@@ -207,6 +211,7 @@ function fakeGoogle() {
     state.calls.push(`${method} ${path}`);
     await state.hold(method, path);
     const failed = state.fail(method, path, body);
+    if (typeof failed === "object" && failed) return Response.json({ error: { message: failed.message, errors: [{ reason: failed.reason, message: failed.message }] } }, { status: failed.status });
     if (failed === 403) return error(403, "Request had insufficient authentication scopes.");
     if (failed) return error(failed, "Backend Error");
     if (path === "/users/me/calendarList") return Response.json({ items: state.list });
@@ -342,6 +347,8 @@ describe("visits on Google Calendar after reconnecting", () => {
   });
   const onGoogle = (google: ReturnType<typeof fakeGoogle>) => [...google.calendars.get("visits-cal")!.keys()].sort();
   const eventFor = (key: string) => googleEventId(visit(key).id);
+  /** The outbox's turn for one of its rows (drainOutbox). */
+  const runJob = (db: Db, row: Row) => runCalendarJob(env, db, row as Parameters<typeof runCalendarJob>[2]);
   beforeEach(() => vi.spyOn(console, "error").mockImplementation(() => undefined));
 
   it("takes visits cancelled, deleted, unscheduled or moved meanwhile off their old days", async () => {
@@ -378,15 +385,108 @@ describe("visits on Google Calendar after reconnecting", () => {
     expect(tables.integrations![0]).toMatchObject({ last_sync_at: expect.any(String), last_error: null });
   });
 
-  it("leaves the rest to the outbox while Google keeps failing", async () => {
+  it("leaves the rest to the outbox as one batch while Google keeps failing", async () => {
     const tables = await world({ visitsCalendar: true });
     tables.visits = Array.from({ length: 12 }, (_, i) => visit(String(i + 1)));
+    const ids = tables.visits.map((v) => v.id);
     const db = fakeDb(tables);
     const google = fakeGoogle();
     google.fail = (method, path) => (method === "PUT" && path.includes("/events/") ? 503 : null);
     expect(await pushUpcomingVisits(env, db, COMPANY)).toEqual({ pushed: 0, queued: 12 });
     expect(google.calls.filter((c) => c.startsWith("PUT"))).toHaveLength(5);
-    expect(tables.outbox!.map((r) => r.payload.visit_id).sort()).toEqual(tables.visits!.map((v) => v.id).sort());
+    expect(tables.outbox).toMatchObject([{ company_id: COMPANY, topic: "calendar.visit", payload: { visit_ids: ids }, done_at: null }]);
+
+    // Reconnected again before the outbox got to it: nothing more is queued.
+    expect(await pushUpcomingVisits(env, db, COMPANY)).toEqual({ pushed: 0, queued: 0 });
+    expect(tables.outbox).toHaveLength(1);
+
+    // Its turn while Google still fails: five tries, and the whole batch waits for the next.
+    google.calls.length = 0;
+    await expect(runJob(db, tables.outbox![0]!)).rejects.toThrow(/503/);
+    expect(google.calls.filter((c) => c.startsWith("PUT"))).toHaveLength(5);
+    expect(tables.outbox).toHaveLength(1);
+
+    google.fail = () => null;
+    await runJob(db, tables.outbox![0]!);
+    expect(onGoogle(google)).toEqual(ids.map(googleEventId).sort());
+    expect(tables.outbox).toHaveLength(1);
+  });
+
+  it("sends a batch a hundred at a time, behind what was queued meanwhile", async () => {
+    const tables = await world({ visitsCalendar: true });
+    tables.visits = Array.from({ length: 230 }, (_, i) => visit(String(i + 1)));
+    const ids = tables.visits.map((v) => v.id);
+    const db = fakeDb(tables);
+    const google = fakeGoogle();
+    const soon = new Date(Date.now() + 5 * 60_000).toISOString();
+    // Claimed by the outbox, with another company's invoice queued after it.
+    tables.outbox = [
+      { id: 1, company_id: COMPANY, topic: "calendar.visit", payload: { visit_ids: ids }, attempts: 1, done_at: null, dead_at: null, locked_until: soon },
+      { id: 2, company_id: "someone-else", topic: "stripe.invoice", payload: {}, attempts: 0, done_at: null, dead_at: null },
+    ];
+    // One visit Google turns down just then.
+    google.fail = (method, path) => (method === "PUT" && path.endsWith(eventFor("50")) ? 503 : null);
+
+    await runJob(db, tables.outbox![0]!);
+    expect(onGoogle(google)).toHaveLength(99);
+    expect(tables.outbox!.slice(2)).toMatchObject([
+      { company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: visit("50").id } },
+      { company_id: COMPANY, topic: "calendar.visit", payload: { visit_ids: ids.slice(100) } },
+    ]);
+
+    google.fail = () => null;
+    for (const row of tables.outbox!.slice(2)) await runJob(db, row);
+    expect(onGoogle(google)).toHaveLength(200);
+    await runJob(db, tables.outbox!.at(-1)!);
+    expect(onGoogle(google)).toEqual(ids.map(googleEventId).sort());
+    expect(tables.outbox).toHaveLength(5);
+  });
+
+  it("doesn't queue a visit that's waiting in the outbox already", async () => {
+    const tables = await world({ visitsCalendar: true });
+    tables.visits = ["1", "2", "3", "4"].map((key) => visit(key));
+    const row = (key: string, extra: Row) => ({ id: Number(key), company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: visit(key).id }, attempts: 0, done_at: null, dead_at: null, ...extra });
+    tables.outbox = [
+      row("1", {}),
+      row("2", { locked_until: new Date(Date.now() + 60_000).toISOString() }), // under way: it may have read the visit already
+      row("3", { done_at: new Date().toISOString() }),
+      { ...row("4", {}), payload: { visit_ids: [visit("4").id] } },
+    ];
+    const db = fakeDb(tables);
+    const google = fakeGoogle();
+    google.fail = (method, path) => (method === "PUT" && path.includes("/events/") ? 503 : null);
+    expect(await pushUpcomingVisits(env, db, COMPANY)).toEqual({ pushed: 0, queued: 2 });
+    expect(tables.outbox!.slice(4)).toMatchObject([{ payload: { visit_ids: [visit("2").id, visit("3").id] } }]);
+  });
+
+  it("stops, and says what to do, when the visits calendar is gone or can only be read", async () => {
+    for (const cause of ["gone", "read-only"]) {
+      const tables = await world({ visitsCalendar: true });
+      tables.visits = Array.from({ length: 12 }, (_, i) => visit(String(i + 1)));
+      const db = fakeDb(tables);
+      const google = fakeGoogle();
+      // Deleted in Google, or Google reconnected with another account; or shared with this one to read.
+      if (cause === "gone") google.calendars.delete("visits-cal");
+      else google.fail = (method) => (method === "GET" ? null : READ_ONLY);
+      expect(await pushUpcomingVisits(env, db, COMPANY), cause).toEqual({ pushed: 0, queued: 0 });
+      expect(google.calls, cause).toHaveLength(cause === "gone" ? 1 : 2);
+      expect(tables.outbox, cause).toEqual([]);
+      expect(tables.integrations![0], cause).toMatchObject({ status: "connected", last_error: expect.stringMatching(/Turn visits off and on again to make a new one/) });
+
+      // A batch left from before stops at the first visit too.
+      tables.outbox = [{ id: 1, company_id: COMPANY, topic: "calendar.visit", payload: { visit_ids: tables.visits.map((v) => v.id) }, attempts: 1, done_at: null, dead_at: null }];
+      tables.integrations![0]!.last_error = null;
+      google.calls.length = 0;
+      await runJob(db, tables.outbox[0]!);
+      expect(google.calls, cause).toHaveLength(cause === "gone" ? 2 : 1);
+      expect(tables.outbox, cause).toHaveLength(1);
+      expect(tables.integrations![0]!.last_error, cause).toMatch(/to make a new one/);
+
+      // And turning visits off (to make a new calendar) still works.
+      const res = await request("PUT", "/calendars/google/visits", { enabled: false });
+      expect(res.status, cause).toBe(200);
+      expect(tables.integrations![0]!.settings, cause).toEqual({});
+    }
   });
 
   it("doesn't take a visit off Google because it couldn't be read", async () => {
@@ -411,14 +511,40 @@ describe("visits on Google Calendar after reconnecting", () => {
     expect(tables.outbox).toEqual([]);
   });
 
-  it("still sends the visits when it can't see what's on Google, and says so", async () => {
+  it("takes Google's rate limit for trouble that passes, not a calendar it can't add to", async () => {
     const tables = await world({ visitsCalendar: true });
-    tables.visits = [visit("1")];
+    tables.visits = ["1", "2", "3"].map((key) => visit(key));
     const db = fakeDb(tables);
     const google = fakeGoogle();
+    google.fail = (method) => (method === "PUT" ? { status: 403, reason: "rateLimitExceeded", message: "Rate Limit Exceeded" } : null);
+    expect(await pushUpcomingVisits(env, db, COMPANY)).toEqual({ pushed: 0, queued: 3 });
+    expect(tables.integrations![0]!.last_error).toBeNull();
+  });
+
+  it("looks at what's on Google again later when it can't now", async () => {
+    const tables = await world({ visitsCalendar: true });
+    tables.visits = ["1", "2"].map((key) => visit(key));
+    const db = fakeDb(tables);
+    const google = fakeGoogle();
+    await pushUpcomingVisits(env, db, COMPANY);
+    // Deleted while Google needed reconnecting.
+    tables.visits = tables.visits.filter((v) => v.id !== visit("2").id);
+
     google.fail = (method, path) => (method === "GET" && path === "/calendars/visits-cal/events" ? 503 : null);
     expect(await pushUpcomingVisits(env, db, COMPANY)).toEqual({ pushed: 1, queued: 0 });
+    expect(onGoogle(google)).toEqual([eventFor("1"), eventFor("2")].sort());
+    expect(tables.outbox).toMatchObject([{ company_id: COMPANY, topic: "calendar.visit", payload: { recheck: true }, done_at: null }]);
+    // Only one look waits, however often it can't.
+    await pushUpcomingVisits(env, db, COMPANY);
+    expect(tables.outbox).toHaveLength(1);
+
+    // Its turn while Google still can't list them: it tries again later, and says why if it never can.
+    await expect(runJob(db, tables.outbox![0]!)).rejects.toThrow(/visits cancelled or deleted lately may still show there/);
+
+    google.fail = () => null;
+    await runJob(db, tables.outbox![0]!);
+    expect(tables.outbox!.slice(1)).toMatchObject([{ company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: visit("2").id } }]);
+    await runJob(db, tables.outbox![1]!);
     expect(onGoogle(google)).toEqual([eventFor("1")]);
-    expect(tables.integrations![0]!.last_error).toMatch(/Turn visits off and on again/);
   });
 });
