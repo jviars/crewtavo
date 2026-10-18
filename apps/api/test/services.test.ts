@@ -3,6 +3,7 @@
  * stubbed, and each test answers the requests it expects. (What the database itself does, such as
  * claiming campaign recipients, is tested in supabase/tests.)
  */
+import net from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -249,21 +250,28 @@ describe("calendar feed queries", () => {
 
 describe("sign-in links", () => {
   /**
-   * Ana is in one company, whose own mailbox (Resend, with the company's key) is in `status`, and
-   * `companySends` says whether that key still works. Returns the emails that went out.
+   * Ana is in one company, whose own mailbox is in `status`: Resend with the company's key, which
+   * `companySends` says still works, or else the mail server on `smtpPort`. As in GoTrue, Supabase's
+   * mailer won't send to her right after a link was made. Returns the emails that went out.
    */
-  async function emailLink(options: { status: string; companySends: boolean; env?: Env }) {
+  async function emailLink(options: { status: string; companySends?: boolean; smtpPort?: number; env?: Env }) {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const companyId = crypto.randomUUID(); // mailboxes are cached by company
-    const ciphertext = await encryptJson(env, { api_key: "re_company" });
+    const mailbox = options.smtpPort
+      ? { settings: { preset: "custom", kind: "smtp", host: "127.0.0.1", port: options.smtpPort, security: "tls", username: "office@acme.example", from_email: "office@acme.example" }, secret: { password: "app-password" } }
+      : { settings: { preset: "resend", kind: "resend", from_email: "office@acme.example" }, secret: { api_key: "re_company" } };
+    const ciphertext = await encryptJson(env, mailbox.secret);
     const calls = serve((call) => {
       if (call.path === "rpc/rate_limit_hit") return true;
       if (call.path === "rpc/user_id_for_email") return "user-1";
       if (call.path === "memberships") return [{ company_id: companyId, company: { name: "Acme Lawn Care", email: "office@acme.example" } }];
-      if (call.method === "GET" && call.path === "integrations") return [{ status: options.status, settings: { preset: "resend", kind: "resend", from_email: "office@acme.example" } }];
+      if (call.method === "GET" && call.path === "integrations") return [{ status: options.status, settings: mailbox.settings }];
       if (call.path === "integration_secrets") return [{ ciphertext }];
       if (call.url.pathname === "/auth/v1/admin/generate_link") return { id: "user-1", email: "ana@example.com", hashed_token: "hashed-1", verification_type: "recovery" };
-      if (call.url.pathname === "/auth/v1/recover") return {};
+      if (call.url.pathname === "/auth/v1/recover") {
+        const linked = calls.some((c) => c.url.pathname === "/auth/v1/admin/generate_link");
+        return linked ? Response.json({ code: 429, error_code: "over_email_send_rate_limit", msg: "For security purposes, you can only request this after 59 seconds." }, { status: 429 }) : {};
+      }
       if (call.url.host === "api.resend.com") {
         const fromCompany = call.body.from.includes("office@acme.example");
         return fromCompany && !options.companySends ? Response.json({ message: "API key is invalid" }, { status: 403 }) : Response.json({ id: "email-1" });
@@ -277,9 +285,11 @@ describe("sign-in links", () => {
   }
   const company = '"Acme Lawn Care" <office@acme.example>';
   const server = "Crewtavo <noreply@example.com>";
+  const noServerEmail = { ...env, RESEND_API_KEY: undefined, EMAIL_FROM: undefined };
 
   it("go out from the company's mailbox while it works", async () => {
     expect((await emailLink({ status: "connected", companySends: true })).emails).toEqual([{ from: company, link: true }]);
+    expect((await emailLink({ status: "connected", companySends: true, env: noServerEmail })).emails).toEqual([{ from: company, link: true }]);
   });
 
   it("skip a company mailbox whose sign-in failed and use the server's email", async () => {
@@ -290,10 +300,23 @@ describe("sign-in links", () => {
     expect((await emailLink({ status: "connected", companySends: false })).emails).toEqual([{ from: company, link: true }, { from: server, link: true }]);
   });
 
-  it("fall back to Supabase's mailer when the company mailbox fails and the server has no email", async () => {
-    const { emails, calls } = await emailLink({ status: "connected", companySends: false, env: { ...env, RESEND_API_KEY: undefined, EMAIL_FROM: undefined } });
-    expect(emails).toEqual([{ from: company, link: true }]);
+  it("without the server's email, check the mailbox signs in before making a link, and else use Supabase's mailer", async () => {
+    const closed = net.createServer(); // a mail server that's gone
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const smtpPort = (closed.address() as net.AddressInfo).port;
+    await new Promise((resolve) => closed.close(resolve));
+    const { calls } = await emailLink({ status: "connected", smtpPort, env: noServerEmail });
+    // No link first: that would have kept Supabase's mailer from sending.
+    expect(calls.some((c) => c.url.pathname === "/auth/v1/admin/generate_link")).toBe(false);
     expect(calls.find((c) => c.url.pathname === "/auth/v1/recover")?.body).toMatchObject({ email: "ana@example.com" });
+  });
+
+  it("without the server's email, set aside a mailbox whose Resend key is refused, so the next link skips it", async () => {
+    const { emails, calls } = await emailLink({ status: "connected", companySends: false, env: noServerEmail });
+    expect(emails).toEqual([{ from: company, link: true }]);
+    // Supabase's mailer would refuse right after the link, so it isn't asked.
+    expect(calls.some((c) => c.url.pathname === "/auth/v1/recover")).toBe(false);
+    expect(calls.find((c) => c.method === "PATCH" && c.path === "integrations")?.body).toEqual({ status: "error", last_error: "The email provider refused it (403: API key is invalid)." });
   });
 });
 

@@ -77,12 +77,16 @@ docker compose --env-file .env.instance down -v   # delete the instance and all 
 ```
 
 **On a server:** set `APP_URL=https://your-domain` in `.env.instance`, run `npm run instance` again,
-and put a web server with HTTPS in front of port 8080 (`CREWTAVO_PORT`). With Caddy, a two-line
-`Caddyfile` does it:
+and put a web server with HTTPS in front of port 8080 (`CREWTAVO_PORT`). With Caddy, this
+`Caddyfile` does it. Its `header_up` line passes on each visitor's address in `X-Real-IP`, which
+Crewtavo's rate limits go by; another web server has to set that header the same way, or visitors
+could send their own:
 
 ```
 your-domain {
-  reverse_proxy localhost:8080
+  reverse_proxy localhost:8080 {
+    header_up X-Real-IP {remote_host}
+  }
 }
 ```
 

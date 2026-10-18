@@ -93,13 +93,17 @@ export function fromAddress(name: string | null | undefined, email: string): str
   return clean ? `"${clean.replace(/[\\"]/g, "\\$&")}" <${email}>` : email;
 }
 
+const smtpOf = (settings: MailboxSettings, secret: MailboxSecret): SmtpSettings => ({
+  host: settings.host!, port: settings.port!, security: settings.security ?? "tls", username: settings.username!, password: secret.password ?? "",
+});
+
 /** Send through a mailbox's settings (also used by Settings → Email to test before saving). */
 export async function sendWithMailbox(settings: MailboxSettings, secret: MailboxSecret, message: EmailMessage): Promise<SendResult> {
   const fromName = settings.from_name || message.fromName || null;
   if (settings.kind === "resend") {
     return resendSend(secret.api_key ?? "", fromAddress(fromName, settings.from_email), message);
   }
-  const smtp: SmtpSettings = { host: settings.host!, port: settings.port!, security: settings.security ?? "tls", username: settings.username!, password: secret.password ?? "" };
+  const smtp = smtpOf(settings, secret);
   try {
     const { id } = await smtpSend(smtp, { from: { name: fromName, email: settings.from_email }, to: message.to, subject: message.subject, text: message.text, html: message.html, replyTo: message.replyTo, headers: message.headers });
     return { sent: true, id };
@@ -107,6 +111,23 @@ export async function sendWithMailbox(settings: MailboxSettings, secret: Mailbox
     if (error instanceof SmtpError) return { sent: false, reason: error.message };
     throw error;
   }
+}
+
+/**
+ * Does the company's mailbox still sign in? Checked without sending, as Settings → Email does before
+ * saving. A Resend key can't be checked without sending, so it passes. A refused sign-in shows in Settings.
+ */
+export async function checkMailbox(env: Env, companyId: string, mailbox: Mailbox): Promise<boolean> {
+  if (mailbox.settings.kind !== "smtp") return true;
+  let result: SendResult = { sent: true };
+  try {
+    await smtpSend(smtpOf(mailbox.settings, mailbox.secret), null);
+  } catch (error) {
+    if (!(error instanceof SmtpError)) throw error;
+    result = { sent: false, reason: error.message };
+  }
+  await noteMailboxHealth(env, companyId, mailbox, result);
+  return result.sent;
 }
 
 export async function sendEmail(env: Env, message: EmailMessage, companyId?: string | null): Promise<SendResult> {
@@ -123,9 +144,12 @@ export async function sendEmail(env: Env, message: EmailMessage, companyId?: str
   return resendSend(env.RESEND_API_KEY, env.EMAIL_FROM, message);
 }
 
-/** Show a broken mailbox (changed password, revoked app password) in Settings, and clear it once it works again. */
+/**
+ * Show a broken mailbox (changed password, revoked app password, a Resend key that's revoked or not
+ * allowed to send) in Settings, and clear it once it works again.
+ */
 async function noteMailboxHealth(env: Env, companyId: string, mailbox: Mailbox, result: SendResult) {
-  const failedSignIn = !result.sent && /password|sign-in|didn't accept|turned off/i.test(result.reason ?? "");
+  const failedSignIn = !result.sent && /password|sign-in|didn't accept|turned off|refused it \(40[13]\b/i.test(result.reason ?? "");
   const next = result.sent ? "connected" : failedSignIn ? "error" : mailbox.status;
   if (next === mailbox.status) return;
   mailbox.status = next;

@@ -4,8 +4,16 @@
  */
 import net from "node:net";
 import tls from "node:tls";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { smtpSend, SmtpError, type SmtpTimeouts } from "../src/lib/smtp";
+
+// The client trusts the test certificate below (and only it), so certificates are still checked.
+// Each connection is given it, which works on every Node version (setting the default ones needs 22.19).
+vi.mock("node:tls", async (importOriginal) => {
+  const tls = await importOriginal<typeof import("node:tls") & { default: typeof import("node:tls") }>();
+  const connect = (options: import("node:tls").ConnectionOptions) => tls.connect({ ...options, ca: CERT });
+  return { ...tls, connect, default: { ...tls.default, connect } };
+});
 
 // A self-signed certificate for "localhost", made for these tests (it's trusted nowhere else).
 const KEY = `-----BEGIN PRIVATE KEY-----
@@ -90,11 +98,6 @@ async function mailServer(options: { afterStartTls?: string; authDelayMs?: numbe
 }
 
 describe("SMTP", () => {
-  // The test certificate is trusted for the length of these tests, so certificates are still checked.
-  const trusted = tls.getCACertificates("default");
-  beforeAll(() => tls.setDefaultCACertificates([CERT]));
-  afterAll(() => tls.setDefaultCACertificates(trusted));
-
   it("sends one message over STARTTLS", async () => {
     const { state, send } = await mailServer();
     expect((await send()).id).toMatch(/^<.+@acme\.example>$/);
