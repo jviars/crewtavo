@@ -1,13 +1,49 @@
 {
+  "id": "/",
   "name": "Crewtavo",
   "short_name": "Crewtavo",
+  "description": "Quotes, scheduling, field work and invoicing for service businesses.",
+  "lang": "en",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#F6F5F1",
+  "categories": ["business", "productivity"],
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    {
+      "name": "My day",
+      "description": "Your visits today and your clock",
+      "url": "/field",
+      "icons": [
+        { "src": "/shortcut-day-96.png", "sizes": "96x96", "type": "image/png" },
+        { "src": "/shortcut-day-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Schedule",
+      "description": "Who's working where, and when",
+      "url": "/schedule",
+      "icons": [
+        { "src": "/shortcut-schedule-96.png", "sizes": "96x96", "type": "image/png" },
+        { "src": "/shortcut-schedule-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "New request",
+      "description": "Log a request from a client",
+      "url": "/requests?new=1",
+      "icons": [
+        { "src": "/shortcut-request-96.png", "sizes": "96x96", "type": "image/png" },
+        { "src": "/shortcut-request-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
   ]
 }

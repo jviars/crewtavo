@@ -231,6 +231,10 @@ the Sentry project's security settings so the server never infers them.
 - **Settings → Profile → Notifications** (each person): turn on notifications for their phone and
   choose what also comes by email or text. On an iPhone, add Crewtavo to the Home Screen first
   (Share → Add to Home Screen) and open it from there. Phone notifications are free and need no setup.
+  Where the browser offers it (Chrome or Edge, on Android or a computer), **Install the app** is
+  there too, and on the crew's Home and My day, where crews in Safari on an iPhone get the Home
+  Screen steps instead. Crew updates made with no signal go out once Crewtavo is open with signal;
+  on Android, if it's closed by then, a notification says how many are waiting.
 - **Company settings**: address (used for route starts and email footers), payment terms, tax rate and brand color.
 - **Marketing > Reviews**: paste your Google review link so review requests point at it.
 - **Marketing > Referrals**: set the reward you offer, if any.

@@ -10,13 +10,14 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
-import { useSession } from "@/lib/session";
+import { hasRole, useSession } from "@/lib/session";
 import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
 import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
 import { pendingVisitStatus, setVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl } from "./fieldData";
+import { InstallAppCard } from "./InstallAppCard";
 import { OfflineNote } from "./OfflineNote";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { toast } from "@/lib/toast";
@@ -109,6 +110,7 @@ export function FieldTodayPage() {
       </div>
 
       <OfflineNote />
+      {!hasRole(session, "admin", "office", "estimator") && <InstallAppCard />}
       <ClockCard />
       {session.role === "crew_lead" && <CrewClockCard visits={data.data?.today ?? []} />}
 
