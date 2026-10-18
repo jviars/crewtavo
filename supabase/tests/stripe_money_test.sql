@@ -18,6 +18,11 @@ begin
   begin execute p_sql; exception when others then raise notice 'ok - % (%)', p_what, sqlerrm; return; end;
   raise exception 'FAIL (expected an error): %', p_what;
 end $$;
+create function tstripemoney.error_of(p_sql text) returns text language plpgsql as $$
+begin
+  begin execute p_sql; exception when others then return sqlerrm; end;
+  return null;
+end $$;
 grant execute on all functions in schema tstripemoney to authenticated, service_role;
 
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -88,6 +93,27 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "5b000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 delete from public.invoices where id = :'bank_inv';
 select tstripemoney.check((select count(*) from public.invoices where id = :'bank_inv') = 0, 'and one only a Stripe account Crewtavo left still has can be deleted');
+commit;
+
+-- When Stripe's isn't voided (Stripe stopped answering Crewtavo: its key was revoked there, say),
+-- the draft says what to do instead.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "5b000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+insert into public.invoices (company_id, client_id, subject) values (:'co', :'client', 'Raking') returning id as stuck_inv \gset
+insert into public.invoice_line_items (company_id, invoice_id, name, unit_price) values (:'co', :'stuck_inv', 'Raking', 45);
+update public.invoices set status = 'sent' where id = :'stuck_inv';
+commit;
+reset role;
+insert into public.stripe_invoices (company_id, invoice_id, stripe_id, origin, status, amount_due) values (:'co', :'stuck_inv', 'in_stuck', 'crewtavo', 'open', 45);
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "5b000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+update public.invoices set status = 'draft', sent_at = null where id = :'stuck_inv';
+select tstripemoney.check(tstripemoney.error_of(format('delete from public.invoices where id = %L', :'stuck_inv')) like '%If it isn''t, void this invoice instead',
+  'a draft Stripe still has open says to void it if it can''t be deleted');
+update public.invoices set status = 'void' where id = :'stuck_inv';
+select tstripemoney.check((select status from public.invoices where id = :'stuck_inv') = 'void', 'and it can be voided');
 commit;
 
 -- ===== Payments on an invoice made in Stripe ===================================================

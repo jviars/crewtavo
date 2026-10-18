@@ -183,7 +183,8 @@ Then:
   until it clears (no reminders meanwhile), and a check you record replaces the Stripe invoice with
   one for what's still owed. A few cents left, less than Stripe can charge (50¢ in dollars), aren't
   put in Stripe: collect them another way. A sent invoice moved back to draft can be deleted once
-  its Stripe invoice is voided, a few minutes later.
+  its Stripe invoice is voided, a few minutes later (if Stripe can't be reached to void it, void the
+  invoice instead).
 - **Invoices you make in Stripe** (a one-off or a big job you'd rather bill by hand) come into
   Crewtavo on their own, matched to the client by email or added as a new client, and their
   payments are recorded when they're paid. Stripe asks the client for what it billed, so record a
@@ -191,7 +192,9 @@ Then:
 - **Payments** record the fee Stripe kept, and **Invoices → Stripe deposits** shows each payout to
   your bank with the payments in it. Refunds, failed bank payments and disputes show up on their own.
   A client's balance in Stripe goes on their next Stripe invoice: credit they had is recorded on
-  that invoice, and money they owed from before as a payment from them that isn't on the invoice.
+  that invoice, and money they owed from before as a payment from them that isn't on the invoice
+  (a refund or a lost dispute of that charge takes it back too). A credit note you issue in Stripe
+  before the invoice is paid is recorded on it, so it isn't asked for again.
 - **Bring in your Stripe history** on the Stripe card imports past invoices, their clients and
   payments, and deposits, from a date you choose. History comes in quietly: no automations,
   reminders or notifications. Running it again only updates what's already there. On the
