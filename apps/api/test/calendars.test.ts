@@ -60,7 +60,7 @@ vi.mock("node:https", async (importOriginal) => {
 // A rebinding name gives a lookup made ahead of the connection a public address, and the one made
 // for the connection an inside one. Here a lookup made ahead always gets the public answer, and
 // the connection's gets the one in `names`: only checking the address connected to keeps it out.
-vi.mock("node:dns/promises", () => ({ lookup: async () => [{ address: "203.0.113.7", family: 4 }] }));
+vi.mock("node:dns/promises", async (original) => ({ ...(await original<typeof import("node:dns/promises")>()), lookup: async () => [{ address: "203.0.113.7", family: 4 }] }));
 
 // Every connection's lookup (the code's own, or Node's when a request brings none) answers from here.
 const names = new Map<string, string[]>();
