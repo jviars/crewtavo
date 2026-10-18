@@ -78,6 +78,32 @@ describe("saving a measurement", () => {
     expect(state.writes).toEqual([]);
   });
 
+  it("keeps the map picture and where the map was", async () => {
+    const snapshot_path = "00000000-0000-4000-8000-000000000001/measurements/0b5c9f1e-1d2a-4c3b-9e8f-7a6b5c4d3e2f.jpg";
+    const view = { center: [-79.8717, 37.0547], zoom: 19.2, imagery: "state:VA", attribution: "Virginia imagery" };
+    const res = await post("/measurements", { geojson: shapes({ type: "Polygon", coordinates: [RECT] }), snapshot_path, view, provider: "state:VA" });
+    expect(res.status).toBe(201);
+    expect(state.writes[0].row).toMatchObject({ snapshot_path, view, provider: "state:VA" });
+    // Saving again without a new picture leaves the saved one alone.
+    state.writes = [];
+    await post("/measurements", { id: "00000000-0000-4000-8000-0000000000aa", geojson: shapes({ type: "Polygon", coordinates: [RECT] }) });
+    expect(state.writes[0].row).not.toHaveProperty("snapshot_path");
+  });
+
+  it("only takes a picture from this company's map pictures", async () => {
+    // The Client Hub serves this file with the service key, so it can't point at a receipt or another company's file.
+    for (const snapshot_path of [
+      "00000000-0000-4000-8000-000000000002/measurements/0b5c9f1e-1d2a-4c3b-9e8f-7a6b5c4d3e2f.jpg",
+      "00000000-0000-4000-8000-000000000001/receipts/0b5c9f1e-1d2a-4c3b-9e8f-7a6b5c4d3e2f.jpg",
+      "00000000-0000-4000-8000-000000000001/measurements/../receipts/x.jpg",
+    ]) {
+      const res = await post("/measurements", { geojson: shapes({ type: "Polygon", coordinates: [RECT] }), snapshot_path });
+      expect(res.status, snapshot_path).toBe(400);
+      expect((await res.json()).error).toBe("That map picture isn't one of this company's.");
+    }
+    expect(state.writes).toEqual([]);
+  });
+
   it("refuses a measurement too large to save", async () => {
     // Totals past numeric(14, 2), or squares past numeric(10, 2), used to fail in the database (a 500).
     const huge = [

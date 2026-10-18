@@ -73,29 +73,55 @@ export interface GeocodeResult {
   lat: number;
   lng: number;
   formatted: string | null;
-  source: "google" | "census";
+  /** Two-letter country code when the geocoder says (US for the Census geocoder). */
+  country: string | null;
+  source: "google" | "census" | "openstreetmap";
 }
 
 /**
  * Address -> coordinates. Google's Geocoding API when GOOGLE_MAPS_SERVER_KEY is set, otherwise the
- * free US Census Bureau geocoder (US addresses only, no key). Returns null when nothing matched.
+ * free US Census Bureau geocoder (US addresses only, no key). With `world`, an address the Census
+ * doesn't know is looked up in OpenStreetMap (Photon, free, no key), so the measuring map can find
+ * places outside the US. Returns null when nothing matched.
  */
-export async function geocodeAddress(address: string, googleKey?: string | null): Promise<GeocodeResult | null> {
+export async function geocodeAddress(address: string, googleKey?: string | null, options: { world?: boolean } = {}): Promise<GeocodeResult | null> {
   const query = address.replace(/\s+/g, " ").trim();
   if (query.length < 5) return null;
   if (googleKey) {
     const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${new URLSearchParams({ address: query, key: googleKey })}`).catch(() => null);
     if (res?.ok) {
-      const body = (await res.json()) as { status: string; results?: Array<{ formatted_address: string; geometry: { location: { lat: number; lng: number } } }> };
+      const body = (await res.json()) as {
+        status: string;
+        results?: Array<{ formatted_address: string; geometry: { location: { lat: number; lng: number } }; address_components?: Array<{ short_name: string; types: string[] }> }>;
+      };
       const hit = body.results?.[0];
-      if (body.status === "OK" && hit) return { lat: hit.geometry.location.lat, lng: hit.geometry.location.lng, formatted: hit.formatted_address, source: "google" };
+      const country = hit?.address_components?.find((part) => part.types.includes("country"))?.short_name ?? null;
+      if (body.status === "OK" && hit) return { lat: hit.geometry.location.lat, lng: hit.geometry.location.lng, formatted: hit.formatted_address, country, source: "google" };
       if (body.status === "ZERO_RESULTS") return null;
     }
   }
   const params = new URLSearchParams({ address: query, benchmark: "Public_AR_Current", format: "json" });
-  const res = await fetch(`https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?${params}`, { headers: { Accept: "application/json" } }).catch(() => null);
-  if (!res?.ok) return null;
-  const body = (await res.json().catch(() => null)) as { result?: { addressMatches?: Array<{ matchedAddress: string; coordinates: { x: number; y: number } }> } } | null;
+  const res = await fetch(`https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?${params}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
+  const body = res?.ok ? ((await res.json().catch(() => null)) as { result?: { addressMatches?: Array<{ matchedAddress: string; coordinates: { x: number; y: number } }> } } | null) : null;
   const match = body?.result?.addressMatches?.[0];
-  return match ? { lat: match.coordinates.y, lng: match.coordinates.x, formatted: match.matchedAddress, source: "census" } : null;
+  if (match) return { lat: match.coordinates.y, lng: match.coordinates.x, formatted: match.matchedAddress, country: "US", source: "census" };
+  return options.world ? photon(query) : null;
+}
+
+/** OpenStreetMap search through komoot's public Photon server (fair use, no key). */
+async function photon(query: string): Promise<GeocodeResult | null> {
+  const res = await fetch(`https://photon.komoot.io/api/?${new URLSearchParams({ q: query, limit: "1" })}`, {
+    headers: { Accept: "application/json", "User-Agent": "Crewtavo (https://github.com/jviars/crewtavo)" },
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+  if (!res?.ok) return null;
+  const body = (await res.json().catch(() => null)) as {
+    features?: Array<{ geometry: { coordinates: [number, number] }; properties: Record<string, string | undefined> }>;
+  } | null;
+  const hit = body?.features?.[0];
+  if (!hit) return null;
+  const p = hit.properties;
+  const street = [p.housenumber, p.street].filter(Boolean).join(" ");
+  const formatted = [p.name && p.name !== street ? p.name : null, street || null, p.city ?? p.county, p.state, p.country].filter(Boolean).join(", ") || null;
+  return { lat: hit.geometry.coordinates[1], lng: hit.geometry.coordinates[0], formatted, country: p.countrycode?.toUpperCase() ?? null, source: "openstreetmap" };
 }

@@ -60,6 +60,31 @@ async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | 
 
 const BRANDING = "name, phone, email, website, timezone, settings->branding, settings->hub_tips";
 
+/**
+ * Map drawings the office chose to show on this quote or invoice: the sizes, and whether there's a
+ * picture (served by /hub/:token/drawings/:id, never as a storage link).
+ */
+async function hubDrawings(admin: ReturnType<typeof adminClient>, companyId: string, on: "quote_id" | "invoice_id", id: string) {
+  const { data } = await admin
+    .from("measurements")
+    .select("id, title, sections, total_area_sqft, total_length_ft, roofing_squares, roof_pitch, snapshot_path, view")
+    .eq("company_id", companyId)
+    .eq(on, id)
+    .eq(on === "quote_id" ? "show_on_quote" : "show_on_invoice", true)
+    .order("created_at");
+  return (data ?? []).map((m) => ({
+    id: m.id,
+    title: m.title,
+    has_picture: Boolean(m.snapshot_path),
+    sections: ((m.sections ?? []) as Array<{ label: string; kind: string; value: number; unit: string }>).map((s) => ({ label: s.label, kind: s.kind, value: s.value, unit: s.unit })),
+    total_area_sqft: m.total_area_sqft,
+    total_length_ft: m.total_length_ft,
+    roofing_squares: m.roofing_squares,
+    roof_pitch: m.roof_pitch,
+    imagery: ((m.view ?? {}) as { attribution?: string }).attribution ?? null,
+  }));
+}
+
 publicRoutes.get("/hub/:token", async (c) => {
   const l = await link(c);
   const admin = adminClient(c.env);
@@ -79,7 +104,8 @@ publicRoutes.get("/hub/:token", async (c) => {
     );
     if (quote.status === "draft" && !l.pv) throw new HttpError(404, "This quote isn't ready yet.");
     (quote.lines as Array<{ sort: number }>).sort((a, b) => a.sort - b.sort);
-    return c.json({ kind: "quote", company, quote, preview: Boolean(l.pv), home: l.pv ? null : await homeLink(c, l.c, quote.client_id) });
+    const drawings = await hubDrawings(admin, l.c, "quote_id", quote.id);
+    return c.json({ kind: "quote", company, quote, drawings, preview: Boolean(l.pv), home: l.pv ? null : await homeLink(c, l.c, quote.client_id) });
   }
   const invoice = must(
     await admin
@@ -102,6 +128,7 @@ publicRoutes.get("/hub/:token", async (c) => {
   const tips = (company as { hub_tips?: unknown }).hub_tips === true && !online.imported;
   return c.json({
     kind: "invoice", company, invoice, preview: Boolean(l.pv), tips,
+    drawings: await hubDrawings(admin, l.c, "invoice_id", invoice.id),
     can_pay: !l.pv && online.enabled && !online.processing && Number(invoice.balance_due) > 0,
     processing: online.processing,
     from_stripe: online.imported,
@@ -430,6 +457,21 @@ publicRoutes.post("/hub/:token/message", async (c) => {
   });
   if (error) throw dbError(error);
   return c.json({ ok: true }, 201);
+});
+
+// The picture of a map drawing on a quote or invoice. Only drawings shown to the client, and only
+// through the link to the quote or invoice they're on.
+publicRoutes.get("/hub/:token/drawings/:file", async (c) => {
+  const l = await link(c, ["quote", "invoice"]);
+  const id = (c.req.param("file") ?? "").replace(/\.jpg$/i, "");
+  if (!z.uuid().safeParse(id).success) throw new HttpError(404, "Drawing not found.");
+  const admin = adminClient(c.env);
+  const drawing = must(await admin.from("measurements").select("snapshot_path, show_on_quote, show_on_invoice, quote_id, invoice_id").eq("company_id", l.c).eq("id", id).maybeSingle(), "Drawing not found.");
+  const shown = l.t === "quote" ? drawing.show_on_quote && drawing.quote_id === l.id : drawing.show_on_invoice && drawing.invoice_id === l.id;
+  if (!shown || !drawing.snapshot_path) throw new HttpError(404, "Drawing not found.");
+  const { data, error } = await admin.storage.from("files").download(drawing.snapshot_path);
+  if (error || !data) throw new HttpError(404, "Drawing not found.");
+  return c.body(await data.arrayBuffer(), 200, { "Content-Type": data.type || "image/jpeg", "Cache-Control": "private, max-age=3600" });
 });
 
 // "Add to calendar" for one of the client's visits.

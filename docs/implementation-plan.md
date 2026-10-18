@@ -51,7 +51,7 @@ Supabase: Postgres (all data, RLS per company), Auth (staff sign-in, OAuth serve
           Storage (photos, receipts, PDFs), Realtime (schedule board), Cron (optional scheduler)
 
 Outbound from the API: QuickBooks Online, Zoho Books, Google Calendar, Stripe, Twilio, Resend,
-Google Maps + Solar API, Open-Meteo, Anthropic (Claude)
+Google Geocoding and Solar API (optional), US Census and OpenStreetMap geocoders, Open-Meteo, Anthropic (Claude)
 Inbound to the API: Claude and ChatGPT over MCP at /mcp; Stripe webhooks; public booking forms
 ```
 
@@ -88,7 +88,7 @@ The API also forwards the user's token, so RLS still applies to its queries.
 | Background work | Postgres outbox table drained by cron | Portable, retryable, visible in SQL |
 | Recurrence | `rrule` (RFC 5545) | Standard rules; same format Google Calendar uses |
 | SOP editor | TipTap (MIT) | Rich text stored as JSON, rendered to HTML for reading and search |
-| Maps | Google Maps JS + Terra Draw + Turf | Google's own drawing library is gone; Terra Draw replaces it |
+| Maps | MapLibre GL + Terra Draw | Free imagery with no key (NAIP, state programs); Esri or Google with a company's own key |
 | Payments | Stripe (Invoicing + webhooks) | Card and ACH; Stripe Connect for the hosted version |
 | Email / SMS | Resend / Twilio | Simple REST APIs that work from Workers |
 | AI | Anthropic SDK (Claude) | Rewrite messages, draft quotes, answer from SOPs |
@@ -249,19 +249,31 @@ Categories, pages, revisions, search and templates, built into our app:
 
 ## 9. Map measuring
 
-1. The estimator opens **Measure** from a request, quote or property. Google Maps loads satellite
-   imagery centered on the property.
+1. The estimator opens **Measure** from a request, quote, invoice or property, or searches any
+   address (US or worldwide). MapLibre shows free US aerial imagery (USDA NAIP, about 2 ft, via
+   Microsoft's Planetary Computer) centered on the property. Where a state publishes sharper imagery
+   for free (`packages/core/src/imagery.ts`: 17 states and DC, 3 in to 1 ft) the map offers it.
+   Outside the US it offers Esri World Imagery, with a key the company adds in **Settings → Maps**,
+   or the OpenStreetMap street map (OpenFreeMap), which needs no key.
 2. They draw areas (driveway, lawn, roof plane), lines (curb, edging, gutters) and points (drains,
-   trees) with Terra Draw. Totals update live using Turf in the browser.
-3. On save, `POST /api/measurements` recomputes everything on the server with the same math
-   (`packages/core/src/geo.ts`), so stored totals don't depend on the browser.
-4. For roofs, `POST /api/roof-insights` asks Google's Solar API for roof segments and suggests a
+   trees) with Terra Draw. Sizes show on each shape and update live, with the same math the server
+   uses. Undo and redo cover points and whole shapes.
+3. On save, the browser keeps a picture of the drawing (`<company>/measurements/<uuid>.jpg` in the
+   files bucket), and `POST /api/measurements` recomputes everything on the server with the same
+   math (`packages/core/src/geo.ts`), so stored totals don't depend on the browser.
+4. A drawing can go on a quote, an invoice or both, and be shown to the client on each
+   (`show_on_quote`, `show_on_invoice`). The
+   Client Hub, and the PDF printed from it, show the picture (served through the client link, never
+   as a storage URL) and the sizes.
+5. For roofs, `POST /api/roof-insights` asks Google's Solar API for roof segments and suggests a
    pitch; squares = plan area × pitch factor × (1 + waste) ÷ 100.
-5. Quote line quantities use preset formulas, for example asphalt tons =
+6. Quote line quantities use preset formulas, for example asphalt tons =
    `area_sqyd * depth_in * 110 / 2000`, evaluated by a small safe parser (no `eval`).
 
-Keys: a **browser key** restricted to your domain and the Maps JavaScript API, and a **server key**
-restricted to the Solar API. Swapping in Mapbox or Esri later only changes the map adapter.
+Keys: none are needed to measure. Esri (free ArcGIS Location Platform account, 2 million tiles a
+month) or Google (Map Tiles API) keys are browser keys a company adds in **Settings → Maps**; a
+deployment can set `GOOGLE_MAPS_BROWSER_KEY` for everyone. Roof pitch suggestions need a **server
+key** restricted to the Solar API.
 
 ---
 

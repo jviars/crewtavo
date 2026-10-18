@@ -32,8 +32,21 @@ interface HubLine {
   selected?: boolean;
 }
 interface Company { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null }
+/** A map drawing the office chose to show the client, with the sizes measured on it. */
+interface HubDrawing {
+  id: string;
+  title: string;
+  has_picture: boolean;
+  sections: Array<{ label: string; kind: string; value: number; unit: string }>;
+  total_area_sqft: number;
+  total_length_ft: number;
+  roofing_squares: number | null;
+  roof_pitch: string | null;
+  imagery: string | null;
+}
 interface QuoteView {
   kind: "quote";
+  drawings?: HubDrawing[];
   preview?: boolean;
   home: string | null;
   company: Company;
@@ -41,6 +54,7 @@ interface QuoteView {
 }
 interface InvoiceView {
   kind: "invoice";
+  drawings?: HubDrawing[];
   preview?: boolean;
   home: string | null;
   company: Company;
@@ -156,6 +170,44 @@ export function HubPage() {
   );
 }
 
+const sizeText = (value: number, unit: string) => `${Number(value).toLocaleString(undefined, { maximumFractionDigits: unit === "ft" ? 1 : 0 })} ${unit}`;
+
+/** The drawings on a quote or invoice: the picture of the map, then what was measured. */
+function HubDrawings({ token, drawings }: { token: string; drawings?: HubDrawing[] }) {
+  const [broken, setBroken] = useState<string[]>([]);
+  if (!drawings?.length) return null;
+  return (
+    <>
+      {drawings.map((d) => {
+        const measured = d.sections.filter((s) => s.kind !== "Count");
+        // Counts read better added up: "Trees: 4" rather than four rows of one.
+        const counts = new Map<string, number>();
+        for (const s of d.sections.filter((s) => s.kind === "Count")) {
+          const label = /^Count \d+$/.test(s.label) ? "Items" : s.label;
+          counts.set(label, (counts.get(label) ?? 0) + Number(s.value));
+        }
+        return (
+          <section key={d.id} className="card hub-drawing">
+            {d.has_picture && !broken.includes(d.id) && (
+              <img src={`/api/hub/${token}/drawings/${d.id}.jpg`} alt={`Map of the measured areas: ${d.title}`} onError={() => setBroken((b) => [...b, d.id])} />
+            )}
+            <div className="card-pad stack-sm">
+              <strong>{d.title}</strong>
+              <div className="totals">
+                {measured.map((s, i) => <div key={i} className="line"><span>{s.label}</span><span className="tabular">{sizeText(s.value, s.unit)}</span></div>)}
+                {[...counts].map(([label, n]) => <div key={label} className="line"><span>{label}</span><span className="tabular">{n.toLocaleString()}</span></div>)}
+                {measured.filter((s) => s.kind === "Area").length > 1 && <div className="line grand"><span>Total area</span><span className="tabular">{sizeText(d.total_area_sqft, "sq ft")}</span></div>}
+                {d.roofing_squares && <div className="line"><span>Roofing squares{d.roof_pitch ? ` (${d.roof_pitch} pitch)` : ""}</span><span className="tabular">{Number(d.roofing_squares).toLocaleString()}</span></div>}
+              </div>
+              <span className="muted small">Measured from aerial imagery{d.imagery ? ` (${d.imagery})` : ""}. Sizes on site may differ slightly.</span>
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
 function HubSkeleton() {
   return (
     <div className="skeleton-wrap stack-lg" aria-busy="true" role="status">
@@ -205,6 +257,8 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
         {q.property && <span className="muted">{q.property.line1}{q.property.city ? `, ${q.property.city}` : ""}</span>}
         {q.message && <p className="pre-wrap" style={{ margin: "8px 0 0" }}>{q.message}</p>}
       </section>
+
+      <HubDrawings token={token} drawings={data.drawings} />
 
       <section className="card">
         {q.lines.map((l) => (
@@ -294,6 +348,7 @@ function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceVi
         <span className={late ? "text-danger strong" : "muted"}>Issued {formatDate(inv.issued_on)}{inv.due_on ? ` · due ${formatDate(inv.due_on)}` : " · due on receipt"}</span>
       </section>
       {params.get("paid") === "1" && <Done title="Thank you!">Your payment is processing. You'll get a receipt by email.</Done>}
+      <HubDrawings token={token} drawings={data.drawings} />
       <section className="card">
         {inv.lines.map((l, i) => (
           <div key={i} className="card-row" style={{ alignItems: "flex-start" }}>

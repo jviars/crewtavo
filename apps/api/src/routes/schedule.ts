@@ -132,10 +132,13 @@ schedule.post("/jobs/:id/generate-visits", requireUser, requireCompany(DISPATCH,
   }
 });
 
-/** Address -> coordinates (the shop address for route planning, and similar). */
+/**
+ * Address -> coordinates (the shop address for route planning, and similar). `world` also looks
+ * outside the US, for the measuring map; the answer says which country it found.
+ */
 schedule.post("/geocode", requireUser, requireCompany(), async (c) => {
-  const body = await readJson(c, z.object({ address: z.string().trim().min(5).max(300) }));
-  const result = await geocodeAddress(body.address, c.env.GOOGLE_MAPS_SERVER_KEY);
+  const body = await readJson(c, z.object({ address: z.string().trim().min(5).max(300), world: z.boolean().optional() }));
+  const result = await geocodeAddress(body.address, c.env.GOOGLE_MAPS_SERVER_KEY, { world: body.world });
   return c.json(result ? { found: true, ...result } : { found: false });
 });
 
@@ -146,8 +149,9 @@ schedule.post("/properties/:id/geocode", requireUser, requireCompany(), async (c
     await c.var.db.from("properties").select("id, line1, line2, city, region, postal_code, country").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(),
     "Property not found.",
   );
-  const address = [property.line1, property.line2, property.city, property.region, property.postal_code].filter(Boolean).join(", ");
-  const result = await geocodeAddress(address, c.env.GOOGLE_MAPS_SERVER_KEY);
+  const abroad = Boolean(property.country && !/^(us|usa|united states( of america)?)$/i.test(property.country.trim()));
+  const address = [property.line1, property.line2, property.city, property.region, property.postal_code, abroad ? property.country : null].filter(Boolean).join(", ");
+  const result = await geocodeAddress(address, c.env.GOOGLE_MAPS_SERVER_KEY, { world: abroad });
   if (!result) return c.json({ found: false });
   const { error } = await c.var.db.from("properties").update({ lat: result.lat, lng: result.lng }).eq("id", id);
   if (error) throw dbError(error);
