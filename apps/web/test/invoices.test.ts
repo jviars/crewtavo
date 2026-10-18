@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { refundable } from "../src/features/invoices/refunds";
-import { paidInStripe } from "../src/features/invoices/stripeInvoices";
+import { bankPayment, paidInStripe } from "../src/features/invoices/stripeInvoices";
 
 describe("refunds", () => {
   const check = { amount: 100, method: "check", processor: null };
@@ -36,5 +36,20 @@ describe("payments on invoices in Stripe", () => {
     expect(paidInStripe([{ origin: "crewtavo", status: "open", detached_at: null }])).toBe(false);
     expect(paidInStripe([made("open", "2026-10-01T00:00:00Z")])).toBe(false);
     expect(paidInStripe([])).toBe(false);
+  });
+});
+
+describe("a bank payment on its way through Stripe", () => {
+  const row = (status: string, detached_at: string | null = null) => ({ origin: "crewtavo", status, detached_at, amount_due: 160 });
+  const now = Date.parse("2026-10-18T12:00:00Z");
+
+  it("is the one still clearing, and says when it's in a Stripe account Crewtavo left", () => {
+    expect(bankPayment([row("void"), row("processing")], now)).toMatchObject({ status: "processing", left: false, amount_due: 160 });
+    expect(bankPayment([row("processing", "2026-10-10T00:00:00Z")], now)).toMatchObject({ left: true });
+    expect(bankPayment([row("open")], now)).toBeNull();
+  });
+
+  it("stops counting a month after Crewtavo left its account: it cleared or bounced there by then", () => {
+    expect(bankPayment([row("processing", "2026-09-17T00:00:00Z")], now)).toBeNull();
   });
 });

@@ -22,7 +22,7 @@ import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
 import { SendDialog } from "../quotes/SendDialog";
 import { refundable } from "./refunds";
-import { paidInStripe } from "./stripeInvoices";
+import { bankPayment, paidInStripe } from "./stripeInvoices";
 
 const METHODS: Record<string, string> = { check: "Check", cash: "Cash", card: "Card", ach: "Bank transfer", other: "Other" };
 
@@ -98,7 +98,7 @@ function InvoicePageScreen() {
   const lastPayment = inv.payments.at(-1);
   // The Stripe invoice that matters now: the live one, else the latest.
   const stripe = inv.stripe.find((s) => s.status === "open" || s.status === "processing") ?? inv.stripe.find((s) => s.stripe_id);
-  const processing = stripe?.status === "processing";
+  const bank = bankPayment(inv.stripe);
   // Made in Stripe: paid as Stripe billed it, so its total changes there, not here.
   const fromStripe = inv.stripe.some((s) => s.origin === "stripe");
   // And while it's open there, so do its payments.
@@ -156,13 +156,17 @@ function InvoicePageScreen() {
 
       {isVoid && <div className="callout"><Icon name="x" size={18} /><div className="grow">This invoice is void and isn't owed.</div></div>}
       {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
-      {processing && balance > 0 && (
+      {bank && balance > 0 && (
         <div className="callout callout-info">
           <Icon name="clock" size={18} />
-          <div className="grow">A bank payment of {formatMoneyCents(stripe.amount_due)} is on its way through Stripe. It usually clears in a few business days, and shows up here when it does.</div>
+          <div className="grow">
+            {bank.left
+              ? `A bank payment of ${formatMoneyCents(bank.amount_due)} was still clearing in the Stripe account Crewtavo used before, so it won't show up here on its own. Check it in that Stripe account, and record it here once it clears.`
+              : `A bank payment of ${formatMoneyCents(bank.amount_due)} is on its way through Stripe. It usually clears in a few business days, and shows up here when it does.`}
+          </div>
         </div>
       )}
-      {daysLate > 0 && !processing && (
+      {daysLate > 0 && !bank && (
         <div className="callout callout-danger">
           <Icon name="alert" size={18} />
           <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.</div>

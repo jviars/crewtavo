@@ -184,6 +184,8 @@ publicRoutes.post("/hub/:token/promo", async (c) => {
 });
 
 publicRoutes.delete("/hub/:token/promo", async (c) => {
+  // Like putting one on: each change to what's owed is a new Stripe invoice for an invoice.
+  if (!(await allow(c.env, `promo:${clientIp(c)}`, 10, 10 * 60))) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
   const { l, admin, kind } = await hubDocument(c);
   const { error } = await admin.rpc("remove_promo_code", { p_kind: kind, p_id: l.id });
   if (error) throw dbError(error);

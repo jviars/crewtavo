@@ -156,17 +156,18 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
   let webhook: { id: string; secret: string } | null = null;
   const url = `${input.baseUrl}/api/webhooks/stripe/${input.companyId}`;
   if (reachable(input.baseUrl)) {
+    const endpoint = { url, enabled_events: STRIPE_EVENTS, description: "Crewtavo: invoices, payments and deposits", metadata: { crewtavo_company_id: input.companyId } };
     try {
       // Webhooks an earlier try left at this address go. The one in use stays until the new one is saved.
-      for await (const endpoint of stripeList<{ id: string; url: string }>(key, "/v1/webhook_endpoints")) {
-        if (endpoint.url === url && endpoint.id !== previous?.extra?.webhook_id) await stripeApi(key, "DELETE", `/v1/webhook_endpoints/${endpoint.id}`);
+      for await (const found of stripeList<{ id: string; url: string }>(key, "/v1/webhook_endpoints")) {
+        if (found.url === url && found.id !== previous?.extra?.webhook_id) await stripeApi(key, "DELETE", `/v1/webhook_endpoints/${found.id}`);
       }
-      webhook = await stripeApi<{ id: string; secret: string }>(key, "POST", "/v1/webhook_endpoints", {
-        url,
-        enabled_events: STRIPE_EVENTS,
-        api_version: STRIPE_VERSION,
-        description: "Crewtavo: invoices, payments and deposits",
-        metadata: { crewtavo_company_id: input.companyId },
+      webhook = await stripeApi<{ id: string; secret: string }>(key, "POST", "/v1/webhook_endpoints", { ...endpoint, api_version: STRIPE_VERSION }).catch(async (error) => {
+        // Stripe has no room for another (16 in an account), say: a key rolled in the same account
+        // takes over the one in use instead, which keeps its secret. Another account's key can't reach it.
+        const reused = await sameWebhook(key, previous, endpoint);
+        if (!reused) throw error;
+        return reused;
       });
     } catch (error) {
       if (error instanceof StripeError && (error.status === 401 || error.status === 403)) {
@@ -198,7 +199,7 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
     await saveSecret(env, admin, input.companyId, "stripe", { api_key: key, extra });
   } catch (error) {
     // Not saved, so the old key and its webhook are still the ones in use: take the new webhook out.
-    if (webhook) await stripeApi(key, "DELETE", `/v1/webhook_endpoints/${webhook.id}`).catch(() => undefined);
+    if (webhook && webhook.id !== previous?.extra?.webhook_id) await stripeApi(key, "DELETE", `/v1/webhook_endpoints/${webhook.id}`).catch(() => undefined);
     throw error;
   }
 
@@ -218,6 +219,20 @@ export async function disconnectStripe(env: Env, admin: Db, companyId: string, s
   const left = before && (!env.STRIPE_SECRET_KEY || (await movesAccount(before, env.STRIPE_SECRET_KEY, null))) ? await leaveAccount(before) : { settled: Promise.resolve() };
   await removeStripeWebhook(secret);
   return left;
+}
+
+/**
+ * The webhook in use, brought up to date with `key`, when `key` can reach it: Stripe only finds a
+ * webhook with a key for its own account (and mode). Null otherwise.
+ */
+async function sameWebhook(key: string, previous: StoredSecret | null, endpoint: Record<string, string | string[] | Record<string, string>>) {
+  const id = previous?.extra?.webhook_id;
+  const secret = previous?.extra?.webhook_secret;
+  if (!id || !secret) return null;
+  return stripeApi(key, "POST", `/v1/webhook_endpoints/${id}`, endpoint).then(
+    () => ({ id, secret }),
+    () => null,
+  );
 }
 
 /** Best effort: take Crewtavo's webhook out of the Stripe account (with `fallbackKey` if the secret's key no longer works). */
@@ -282,7 +297,9 @@ async function stillClearing(old: Ctx, row: Linked & { invoice_id: string | null
   if (!invoice) return;
   await noteOnClient(old.admin, {
     company_id: old.companyId, client_id: invoice.client_id, invoice_id: invoice.id, key: `${row.stripe_id}:left`, subject: "Bank payment still clearing",
-    body: `A bank payment for invoice #${invoice.number} was still clearing in the Stripe account Crewtavo used before, so it won't show up here on its own. Check it in that Stripe account, and record the payment here once it clears.`,
+    body:
+      `A bank payment for invoice #${invoice.number} was still clearing in the Stripe account Crewtavo used before, so it won't show up here on its own. Check it in that Stripe account, and record the payment here once it clears. ` +
+      `The client can't pay this invoice online for the next ${CLEARING_DAYS} days while it might still clear; after that they can again, in case it bounced.`,
   });
 }
 
@@ -332,10 +349,19 @@ async function detach(admin: Db, ids: string[]) {
 const missing = (error: unknown) => error instanceof StripeError && error.status === 404 && error.code === "resource_missing";
 
 /**
- * A bank payment on its way: don't ask for the money again. That holds for one in a Stripe account
- * Crewtavo has since left too, as it may still clear there; but test money never holds up a live key.
+ * Past this, a bank payment has cleared or bounced (SEPA debits, the slowest, take up to 14
+ * business days).
  */
-const waiting = (row: { status: string; livemode: boolean }, livemode: boolean) => row.status === "processing" && (row.livemode || !livemode);
+const CLEARING_DAYS = 30;
+
+/**
+ * A bank payment on its way: don't ask for the money again. That holds for one in a Stripe account
+ * Crewtavo has since left too, as it may still clear there, but only as long as one can take:
+ * Crewtavo doesn't hear if it bounces there, and the office was told to record it if it clears
+ * (stillClearing). Test money never holds up a live key.
+ */
+const waiting = (row: { status: string; livemode: boolean; detached_at: string | null }, livemode: boolean) =>
+  row.status === "processing" && (row.livemode || !livemode) && (!row.detached_at || Date.now() - Date.parse(row.detached_at) < CLEARING_DAYS * 24 * 60 * 60_000);
 
 /** An invoice's Stripe invoices, newest first, and the live one (if any). */
 async function linkedTo(ctx: Ctx, invoiceId: string): Promise<{ linked: Linked[]; live: Linked | undefined }> {
@@ -524,7 +550,7 @@ async function stillThere(ctx: Ctx, row: Linked): Promise<boolean> {
   return true;
 }
 
-/** Stripe invoices made for one invoice in an hour, past which another tip has to wait. */
+/** Stripe invoices made for one invoice in an hour, past which the Client Hub doesn't make another. */
 const STRIPE_INVOICES_PER_HOUR = 5;
 
 /** The Stripe page where the client pays this invoice (plus an optional tip), made if needed. */
@@ -555,10 +581,19 @@ export async function stripeCheckout(env: Env, admin: Db, companyId: string, inv
     // Less than Stripe charges (see syncStripeInvoice), unless the tip makes it enough.
     if (cents(invoice.balance_due) + tipCents < minimumCharge(ctx.currency)) throw new HttpError(409, "What's left on this invoice is too small to pay online. Contact us to pay it.");
     if (live) {
-      // Each new tip voids the Stripe invoice and makes another, numbered in Stripe, so only a few an hour.
+      // Each new tip (or promo code put on or taken off here) voids the Stripe invoice and makes
+      // another, numbered in Stripe, so only a few an hour, counting the ones the sync made. When
+      // what's owed changed, the sync replaces it within a few minutes anyway.
       const tipOnly = cents(live.amount_due) - cents(live.tip_amount) === cents(invoice.balance_due);
       const lastHour = linked.filter((row) => row.origin === "crewtavo" && Date.now() - Date.parse(row.created_at) < 60 * 60_000).length;
-      if (tipOnly && lastHour >= STRIPE_INVOICES_PER_HOUR) throw new HttpError(429, "You've changed the tip a few times already. Pay with the tip you chose before, or try another in an hour.");
+      if (lastHour >= STRIPE_INVOICES_PER_HOUR) {
+        throw new HttpError(
+          429,
+          tipOnly
+            ? "You've changed the tip a few times already. Pay with the tip you chose before, or try another in an hour."
+            : "This invoice just changed, so its payment page is being updated. Try again in a few minutes.",
+        );
+      }
       if (!(await voidStripeInvoice(ctx, live))) throw new HttpError(409, "This invoice is already paid.");
     }
     const made = await createStripeInvoice(ctx, invoice, tipCents);
@@ -572,7 +607,7 @@ export async function stripeCheckout(env: Env, admin: Db, companyId: string, inv
 export async function hubPayment(env: Env, admin: Db, companyId: string, invoiceId: string) {
   const [access, { data: linked }] = await Promise.all([
     stripeAccess(env, admin, companyId),
-    admin.from("stripe_invoices").select("origin, status, livemode").eq("company_id", companyId).eq("invoice_id", invoiceId),
+    admin.from("stripe_invoices").select("origin, status, livemode, detached_at").eq("company_id", companyId).eq("invoice_id", invoiceId),
   ]);
   const livemode = Boolean(access?.key.includes("_live_"));
   return {
@@ -837,13 +872,16 @@ async function refunded(admin: Db, route: WebhookRoute, charge: StripeCharge) {
   if (!paid || (route.companyId && paid.company_id !== route.companyId)) return null;
   const { amount: paidAmount, tip_amount: paidTip, ...original } = paid;
   const prefix = `${charge.payment_intent}:refund:`;
-  const { data: earlier } = await admin.from("payments").select("amount, tip_amount, processor_ref").like("processor_ref", `${prefix}%`);
-  const { data: owed } = await admin.from("payments").select("amount").eq("processor_ref", `${charge.payment_intent}:before`).maybeSingle();
-  const back = takenBack(earlier ?? []);
+  const { data: rows } = await admin.from("payments").select("amount, tip_amount, processor_ref").like("processor_ref", `${charge.payment_intent}:%`);
+  const owed = (rows ?? []).find((p) => p.processor_ref === `${charge.payment_intent}:before`);
+  // Everything taken back of the charge already: refunds, and disputes lost (see disputed).
+  const earlier = (rows ?? []).filter((p) => p !== owed);
+  const refunds = takenBack(earlier.filter((p) => p.processor_ref?.startsWith(prefix)));
   // Stripe's total includes the tip, which the payment keeps apart from what the invoice was
-  // paid: a refund comes off the invoice first, then the tip (then what was owed from before).
-  const newly = Number(charge.amount_refunded ?? 0) - back.amount - back.tip - back.before;
-  const { amount, tip, before } = splitBack(newly, { amount: paidAmount, tip_amount: paidTip }, cents(owed?.amount), back);
+  // paid: a refund comes off the invoice first, then the tip (then what was owed from before), out
+  // of what refunds and lost disputes left of each.
+  const newly = Number(charge.amount_refunded ?? 0) - refunds.amount - refunds.tip - refunds.before;
+  const { amount, tip, before } = splitBack(newly, { amount: paidAmount, tip_amount: paidTip }, cents(owed?.amount), takenBack(earlier));
   // (A refund of only the tip, once the invoice part was all refunded, has no invoice amount to
   // record; payments can't be zero.)
   if (amount > 0) {
