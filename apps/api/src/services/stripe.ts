@@ -6,6 +6,7 @@
  * The rest of this file turns invoices into Stripe line items and back. It's pure, so it's tested
  * directly (apps/api/test/stripe.test.ts).
  */
+import { providerTimeout } from "../integrations/registry";
 import { hmacSha256Hex, safeEqual } from "../lib/crypto";
 
 export const STRIPE_VERSION = "2024-06-20";
@@ -41,8 +42,10 @@ export function stripeForm(params: Record<string, Param>, prefix = "", out = new
 }
 
 /**
- * One API call. Rate limits and Stripe's own errors are retried twice for reads and for writes
- * that carry an idempotency key (Stripe replays the first result instead of doing it again).
+ * One API call, given up on after the time other providers get. Rate limits, Stripe's own errors
+ * and no answer (or none in time) are retried twice for reads and for writes that carry an
+ * idempotency key (Stripe replays the first result instead of doing it again). Other writes aren't
+ * sent again, since Stripe may have done them anyway.
  */
 export async function stripeApi<T>(
   key: string,
@@ -56,13 +59,33 @@ export async function stripeApi<T>(
   const headers: Record<string, string> = { Authorization: `Bearer ${key}`, "Stripe-Version": STRIPE_VERSION };
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+  const repeatable = method === "GET" || Boolean(options.idempotencyKey);
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, { method, headers, body: method === "POST" ? form : undefined });
-    const json = (await response.json().catch(() => ({}))) as { error?: { message?: string; code?: string; param?: string } };
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetch(url, { method, headers, body: method === "POST" ? form : undefined, signal: providerTimeout() });
+      text = await response.text();
+    } catch (error) {
+      // Stripe couldn't be reached, or stopped answering partway: the same as Stripe being down.
+      if (!repeatable || attempt >= 2) throw new StripeError(`Stripe didn't answer (${error instanceof Error ? error.message : String(error)})`, 0);
+      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      continue;
+    }
+    const json = readJson(text) as { error?: { message?: string; code?: string; param?: string } };
     if (response.ok) return json as T;
-    const retry = (response.status === 429 || response.status >= 500) && attempt < 2 && (method === "GET" || Boolean(options.idempotencyKey));
+    const retry = (response.status === 429 || response.status >= 500) && attempt < 2 && repeatable;
     if (!retry) throw new StripeError(json.error?.message ?? `Stripe returned ${response.status}`, response.status, json.error?.code, json.error?.param);
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+  }
+}
+
+/** A body that isn't JSON (a proxy's error page, say) reads as empty. */
+function readJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
   }
 }
 

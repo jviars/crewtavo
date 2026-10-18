@@ -194,6 +194,10 @@ publicRoutes.delete("/hub/:token/promo", async (c) => {
 publicRoutes.post("/hub/:token/pay", async (c) => {
   const l = await link(c);
   if (l.t !== "invoice" || l.pv) throw new HttpError(400, "Only invoices can be paid.");
+  // Each try can void a Stripe invoice and make another, so a script can't keep at it.
+  if (!(await allow(c.env, `pay:ip:${clientIp(c)}`, 20, 10 * 60)) || !(await allow(c.env, `pay:invoice:${l.id}`, 10, 10 * 60))) {
+    throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
+  }
   const body = await readJson(c, z.object({ tip: z.number().min(0).max(100_000).default(0) }).default({ tip: 0 }));
   const admin = adminClient(c.env);
   const company = must(await admin.from("companies").select("settings->hub_tips").eq("id", l.c).maybeSingle());
