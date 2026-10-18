@@ -4,7 +4,7 @@
  *
  * This container is the only public address. It forwards /auth/v1, /rest/v1 and /storage/v1 to the
  * services over the private network, the way Supabase's API gateway does
- * (apps/api/src/server.ts), and it mints the anon and service keys from the shared JWT_SECRET, so the
+ * (apps/api/src/lib/gateway.ts), and it mints the anon and service keys from the shared JWT_SECRET, so the
  * template generates every secret and nobody copies keys around.
  *
  * Stack mode is on when JWT_SECRET is set. Without it, SUPABASE_URL and keys point at a Supabase

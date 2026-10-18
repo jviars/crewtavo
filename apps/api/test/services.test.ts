@@ -3,6 +3,7 @@
  * stubbed, and each test answers the requests it expects. (What the database itself does, such as
  * claiming campaign recipients, is tested in supabase/tests.)
  */
+import type { IncomingMessage } from "node:http";
 import net from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
@@ -55,6 +56,8 @@ function serve(answer: (call: Call) => Response | unknown) {
   return calls;
 }
 const counted = (n: number) => new Response(null, { status: 200, headers: { "Content-Range": `*/${n}` } });
+/** The settings plus the connection a request came in on, as server.ts hands them to the app. */
+const connectedFrom = (remoteAddress: string, e: Env = env) => ({ ...e, incoming: { socket: { remoteAddress } } as unknown as IncomingMessage });
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -337,8 +340,9 @@ describe("public submissions", () => {
     const limits = () => calls.filter((c) => c.path === "rpc/rate_limit_hit").map((c) => [c.body.p_key, c.body.p_max, c.body.p_window_seconds]);
     return { calls, made, limits };
   }
-  const post = (path: string, body: unknown) =>
-    app.request(`/api${path}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Real-IP": "203.0.113.9" }, body: JSON.stringify(body) }, env);
+  // A visitor at 203.0.113.9, with nothing in front of the server.
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}, bindings = connectedFrom("203.0.113.9")) =>
+    app.request(`/api${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }, bindings);
   const lead = { name: "Bob Jones", email: "bob@example.com", address: { line1: "12 Main St", city: "Radford", postal_code: "24141" } };
   const token = async (t: "refer" | "client" | "quote", id: string) => (await clientLink(env, "https://ops.example.com", { c: "co-1", t, id })).split(/\/(?:refer|hub)\//)[1]!;
 
@@ -357,6 +361,22 @@ describe("public submissions", () => {
       // No address lookup either.
       expect(limited.calls.every((c) => c.url.host === "example.supabase.co")).toBe(true);
     }
+  });
+
+  it("counts visitors by the address the deployment's own proxy gives, whatever headers they send", async () => {
+    const forged = { "X-Real-IP": "198.51.100.2", "X-Forwarded-For": "198.51.100.1" };
+    const visitorKey = async (headers: Record<string, string>, bindings: ReturnType<typeof connectedFrom>) => {
+      const db = database();
+      expect((await post("/public/forms/acme/quote", lead, headers, bindings)).status).toBe(201);
+      return db.limits()[0]![0];
+    };
+    // Straight to the port: the connection's address.
+    expect(await visitorKey(forged, connectedFrom("203.0.113.50"))).toBe("form:ip:203.0.113.50");
+    // Behind Caddy (connecting from Docker's network): the entry it adds to X-Forwarded-For.
+    expect(await visitorKey({ ...forged, "X-Forwarded-For": "198.51.100.1, 203.0.113.9" }, connectedFrom("172.18.0.1"))).toBe("form:ip:203.0.113.9");
+    // On Railway: the X-Real-IP its edge sets.
+    const railway = { ...env, RAILWAY_PROJECT_ID: "proj-1" };
+    expect(await visitorKey({ ...forged, "X-Real-IP": "203.0.113.9" }, connectedFrom("100.64.0.7", railway))).toBe("form:ip:203.0.113.9");
   });
 
   it("keeps booking form answers to the size and shape of real ones", async () => {
@@ -405,7 +425,7 @@ describe("public submissions", () => {
 describe("quote approval", () => {
   // The database claims the quote, then picks the options and records the approval with the amounts
   // they came to, in one step (approve_hub_quote; supabase/tests/hub_approval_test.sql).
-  const approve = async (approved: boolean) => {
+  const approve = async (approved: boolean, headers: Record<string, string> = {}, bindings = connectedFrom("203.0.113.9")) => {
     const option = crypto.randomUUID();
     const calls = serve((call) => {
       if (call.method === "GET" && call.path === "quotes") return [{ id: "quote-1", status: "sent" }];
@@ -415,8 +435,8 @@ describe("quote approval", () => {
     const quote = (await clientLink(env, "https://ops.example.com", { c: "co-1", t: "quote", id: "quote-1" })).split("/hub/")[1];
     const res = await app.request(
       `/api/hub/${quote}/approve`,
-      { method: "POST", headers: { "Content-Type": "application/json", "X-Real-IP": "203.0.113.9" }, body: JSON.stringify({ name: "Ana Smith", selected_line_ids: [option] }) },
-      env,
+      { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ name: "Ana Smith", selected_line_ids: [option] }) },
+      bindings,
     );
     return { option, calls, res };
   };
@@ -433,6 +453,17 @@ describe("quote approval", () => {
       p_approval: { name: "Ana Smith", selected_line_ids: [option], signature: null, signed_at: expect.any(String), ip: "203.0.113.9" },
     });
     expect(writes(calls)).toEqual([]);
+  });
+
+  it("records the address the deployment's own proxy gives, not one the client sent", async () => {
+    const recorded = async (headers: Record<string, string>, bindings: ReturnType<typeof connectedFrom>) => {
+      const { calls } = await approve(true, headers, bindings);
+      return calls.find((c) => c.path === "rpc/approve_hub_quote")?.body.p_approval.ip;
+    };
+    const forged = { "X-Real-IP": "198.51.100.2", "X-Forwarded-For": "198.51.100.1" };
+    expect(await recorded(forged, connectedFrom("203.0.113.50"))).toBe("203.0.113.50");
+    expect(await recorded({ ...forged, "X-Forwarded-For": "198.51.100.1, 203.0.113.9" }, connectedFrom("172.18.0.1"))).toBe("203.0.113.9");
+    expect(await recorded({ ...forged, "X-Real-IP": "203.0.113.9" }, connectedFrom("100.64.0.7", { ...env, RAILWAY_PROJECT_ID: "proj-1" }))).toBe("203.0.113.9");
   });
 
   it("changes nothing when another approval got there first", async () => {

@@ -10,10 +10,11 @@ import { handleStripeEvent, hubPayment, stripeAccess, stripeCheckout, type Webho
 import { kickAutomations, runInBackground } from "../lib/background";
 import { geocodeAddress } from "../services/external";
 import { firstName } from "../lib/email";
-import { appUrl, asJson, clientIp, dbError, HttpError, must, readJson, uuid } from "../lib/http";
+import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { clientLink, readClientLink, type LinkKind } from "../lib/links";
 import { adminClient } from "../lib/supabase";
+import { clientIp } from "../lib/visitor";
 import { buildCalendar } from "../lib/ics";
 import { StripeError, verifyStripeSignature, type StripeEvent } from "../services/stripe";
 

@@ -13,6 +13,7 @@
  *   CREWTAVO_LOG_TASKS=1    log every background task run, even when it had nothing to do
  *   APP_URL           public address; defaults to https://$RAILWAY_PUBLIC_DOMAIN on Railway (see readEnv)
  *   CREWTAVO_SENTRY_DSN     report errors to Sentry or GlitchTip (see lib/monitoring.ts)
+ *   CREWTAVO_VISITOR_IP     where visitors' addresses come from, behind other proxies (lib/visitor.ts)
  *   CREWTAVO_VERSION        the release, reported by /api/health (the Docker image sets it)
  */
 import { spawn } from "node:child_process";
@@ -21,17 +22,17 @@ import type { Server as HttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { serve } from "@hono/node-server";
+import { serve, type HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { app } from "./app";
 import { readEnv } from "./env";
 import { forwardTo } from "./lib/address";
 import { closeAfterUnreadBodies } from "./lib/connection";
 import { cronMatches } from "./lib/cron";
+import { gateway } from "./lib/gateway";
 import { reportError } from "./lib/monitoring";
 import { startMonitoring } from "./lib/monitoring-node";
-import { guardSignIn, isGuessable } from "./lib/signInGuard";
 import { stackServices, withStack } from "./lib/stack";
 import { setStartup, startup, type Startup } from "./lib/startup";
 import { CRON_TASKS, runTask, type TaskName } from "./tasks";
@@ -44,8 +45,9 @@ const stack = stackServices(process.env);
 const env = readEnv(withStack(process.env, port));
 startMonitoring(env);
 
-const server = new Hono();
-const api = (request: Request) => app.fetch(request, env);
+const server = new Hono<{ Bindings: HttpBindings }>();
+// The app gets the connection too: with no proxy in front, its address is the visitor's (lib/visitor.ts).
+const api = (c: Context<{ Bindings: HttpBindings }>) => app.fetch(c.req.raw, { ...env, incoming: c.env.incoming });
 
 // Railway routes traffic to a new deployment once this answers 200: after migrations, or when a
 // brand-new instance couldn't finish them (the setup page then says why). A failed update answers
@@ -56,54 +58,13 @@ server.get("/api/health", (c) => {
   if (s?.state === "failed" && s.firstInstall === false) return c.json({ ok: false, version, problem: s.problem }, 503);
   return c.json({ ok: true, version });
 });
-server.all("/api/*", (c) => api(c.req.raw));
-server.all("/mcp", (c) => api(c.req.raw));
-server.all("/mcp/*", (c) => api(c.req.raw));
-server.all("/.well-known/*", (c) => api(c.req.raw));
+server.all("/api/*", api);
+server.all("/mcp", api);
+server.all("/mcp/*", api);
+server.all("/.well-known/*", api);
 
-// ---------------------------------------------------------------------------------------------
-// Gateway to the instance's Supabase services, in place of Supabase's own API gateway: the browser
-// and supabase-js use this server's address as the Supabase URL.
-// ---------------------------------------------------------------------------------------------
-if (stack) {
-  server.all("/auth/v1/*", (c) => {
-    const send = (request: Request) => forward(request, stack.auth, "/auth/v1");
-    return isGuessable(c.req.method, new URL(c.req.url), "/auth/v1") ? guardSignIn(env, c.req.raw, send) : send(c.req.raw);
-  });
-  server.all("/rest/v1/*", (c) => forward(c.req.raw, stack.rest, "/rest/v1"));
-  server.all("/storage/v1/*", (c) => forward(c.req.raw, stack.storage, "/storage/v1", { "x-forwarded-prefix": "/storage/v1" }));
-}
-
-async function forward(request: Request, upstream: string, prefix: string, extra: Record<string, string> = {}): Promise<Response> {
-  const incoming = new URL(request.url);
-  const target = new URL(upstream);
-  target.pathname = target.pathname.replace(/\/$/, "") + (incoming.pathname.slice(prefix.length) || "/");
-  target.search = incoming.search;
-  const headers = new Headers(request.headers);
-  // Hop-by-hop headers describe the browser's connection to this server, not the next one (fetch
-  // refuses some of them outright, e.g. a chunked upload's transfer-encoding or expect: 100-continue).
-  for (const name of ["host", "connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "expect", "proxy-authorization", "proxy-connection", "accept-encoding", "content-length"]) headers.delete(name);
-  headers.set("x-forwarded-host", incoming.host);
-  headers.set("x-forwarded-proto", request.headers.get("x-forwarded-proto") ?? incoming.protocol.replace(":", ""));
-  for (const [name, value] of Object.entries(extra)) headers.set(name, value);
-  const hasBody = !["GET", "HEAD"].includes(request.method);
-  try {
-    const res = await fetch(target, {
-      method: request.method,
-      headers,
-      body: hasBody ? request.body : undefined,
-      redirect: "manual",
-      ...(hasBody ? { duplex: "half" } : {}),
-    } as RequestInit);
-    const out = new Headers(res.headers);
-    // fetch already decoded the body.
-    for (const name of ["content-encoding", "content-length", "transfer-encoding", "connection"]) out.delete(name);
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
-  } catch (error) {
-    console.error(`Gateway: ${target.host} didn't answer`, (error as Error).message);
-    return Response.json({ message: "This part of Crewtavo is still starting. Try again in a moment." }, { status: 503 });
-  }
-}
+// Gateway to the instance's Supabase services (lib/gateway.ts).
+if (stack) server.route("/", gateway(env, stack));
 
 // After a switch in Settings → Web address, pages opened on an old address forward to the new one
 // (lib/address.ts). Client links, webhooks and the API keep answering where they are.

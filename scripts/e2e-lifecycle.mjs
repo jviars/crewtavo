@@ -84,11 +84,11 @@ async function api(who, method, path, body) {
   return { status: res.status, body: json };
 }
 // Rate limits on public endpoints are kept in Postgres per visitor IP, so reruns within a few
-// minutes would trip them. Each run comes from its own documentation-range address (the header
-// Railway's edge sets in production).
+// minutes would trip them. Each run comes from its own documentation-range address, passed on the
+// way a web server in front of the API would (it believes X-Forwarded-For from this machine).
 const visitorIp = `198.51.100.${1 + Math.floor(Math.random() * 254)}`;
 async function publicApi(method, path, body) {
-  const headers = { "X-Real-IP": visitorIp, ...(body ? { "Content-Type": "application/json" } : {}) };
+  const headers = { "X-Forwarded-For": visitorIp, ...(body ? { "Content-Type": "application/json" } : {}) };
   const res = await fetch(`${API}/api${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }

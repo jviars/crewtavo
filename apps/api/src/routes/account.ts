@@ -4,11 +4,12 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { emailAuthLink, requireCompany, requireUser } from "../lib/auth";
-import { appUrl, asJson, clientIp, dbError, HttpError, must, readJson, uuid } from "../lib/http";
+import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { renderEmail } from "../lib/email";
 import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
+import { clientIp } from "../lib/visitor";
 
 export const account = new Hono<AppEnv>();
 
