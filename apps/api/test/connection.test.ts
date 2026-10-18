@@ -31,6 +31,8 @@ async function start(hooked: boolean) {
   app.use(bodyLimit({ maxSize: 4 * 1024 * 1024, onError: (c) => c.json({ error: "That's too large to send." }, 413) }));
   app.post("/upload", (c) => c.json({ error: "too large" }, 413));
   app.post("/refuse", (c) => c.json({ error: "Sign in first." }, 401));
+  // A streamed answer says keep-alive itself, and doesn't read the body.
+  app.post("/stream", (c) => c.body("streamed", 200, { Connection: "keep-alive" }));
   app.post("/count", (c) => {
     counted++;
     return c.text("counted");
@@ -128,6 +130,14 @@ describe("answers sent before the body arrives", () => {
     expect(text).toMatch(/^HTTP\/1\.1 401/);
     expect(text).not.toContain("counted");
     expect(counted).toBe(0);
+  });
+
+  it("close even when the answer says keep-alive itself, so the next request isn't left waiting", async () => {
+    const port = await start(true);
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    expect(await send(agent, port, "POST", "/stream", "x".repeat(100_000))).toMatchObject({ status: 200, connection: "close" });
+    expect(await send(agent, port, "GET", "/next")).toMatchObject({ status: 200 });
+    agent.destroy();
   });
 
   it("leave connections that read their body, and plain GETs, open", async () => {
