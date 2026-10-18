@@ -208,7 +208,8 @@ const GCAL = "https://www.googleapis.com/calendar/v3";
 type GoogleJson = Record<string, any>;
 
 export class GoogleError extends IntegrationError {
-  constructor(readonly status: number, message: string) {
+  /** `reason`: Google's own words for why (its error details). */
+  constructor(readonly status: number, message: string, readonly reason = "") {
     super(message);
   }
 }
@@ -232,7 +233,7 @@ async function gcal(env: Env, admin: Db, companyId: string, method: "GET" | "POS
         .eq("company_id", companyId).eq("provider", "google_calendar");
       throw new GoogleError(403, "Google Calendar needs to be reconnected to allow this. Disconnect it and connect it again.");
     }
-    throw new GoogleError(response.status, `Google Calendar: ${response.status} ${message}`.trim());
+    throw new GoogleError(response.status, `Google Calendar: ${response.status} ${message}`.trim(), reasons);
   }
   return json;
 }
@@ -464,12 +465,21 @@ export async function createVisitsCalendar(env: Env, admin: Db, companyId: strin
   return { id: String(created.id), name };
 }
 
-/** Remove the visits calendar from the Google account (best effort: it may already be gone). */
+/**
+ * Google won't take visits on the visits calendar at all: it's gone from the account (or this is
+ * another account), or the account can only read it. Busy (rate limits) and other trouble isn't that.
+ */
+const calendarRefused = (error: unknown) =>
+  error instanceof GoogleError && (error.status === 404 || (error.status === 403 && /requiredAccessLevel|writer access|forbidden/i.test(`${error.message} ${error.reason}`)));
+
+const REFUSED = "The visits calendar is gone from this Google account, or the account can't add to it. Turn visits off and on again to make a new one.";
+
+/** Remove the visits calendar from the Google account (best effort: it may already be gone, or not this account's to remove). */
 export async function deleteVisitsCalendar(env: Env, admin: Db, companyId: string, calendarId: string) {
   try {
     await gcal(env, admin, companyId, "DELETE", `/calendars/${encodeURIComponent(calendarId)}`);
   } catch (error) {
-    if (!(error instanceof GoogleError && (error.status === 404 || error.status === 410))) throw error;
+    if (!(error instanceof GoogleError && error.status === 410) && !calendarRefused(error)) throw error;
   }
 }
 
@@ -539,53 +549,31 @@ async function visitsCalendar(admin: Db, companyId: string): Promise<string | nu
   return data?.status === "connected" && id ? id : null;
 }
 
-/** Run one queued visit change (outbox topic calendar.visit). Throws so the caller retries. */
-export async function runCalendarJob(env: Env, admin: Db, row: { company_id: string; topic: string; payload: Record<string, string> }) {
+/**
+ * What the outbox holds for the visits calendar (topic calendar.visit): one visit's change, a batch
+ * of visits left over from bringing the calendar in line, or another look at what's on Google.
+ */
+type VisitJob = { visit_id?: string; visit_ids?: string[]; recheck?: boolean };
+
+/** A batch sends this many visits each outbox run (as many as one run takes; see drainOutbox). */
+const BATCH = 100;
+
+/** Run one queued job for the visits calendar. Throws so the caller retries. */
+export async function runCalendarJob(env: Env, admin: Db, row: { id?: number; company_id: string; topic: string; payload: Record<string, unknown> }) {
   if (row.topic !== "calendar.visit") throw new IntegrationError(`Unknown topic ${row.topic}`);
   const calendarId = await visitsCalendar(admin, row.company_id);
   if (!calendarId) return; // turned off since it was queued
-  await pushVisit(env, admin, row.company_id, calendarId, row.payload.visit_id!);
+  const job = row.payload as VisitJob;
+  if (job.recheck) return recheckVisits(env, admin, row.company_id, calendarId);
+  if (job.visit_ids) return pushBatch(env, admin, row.company_id, calendarId, job.visit_ids, row.id);
+  await pushVisit(env, admin, row.company_id, calendarId, job.visit_id!);
   await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: row.company_id, provider: "google_calendar" });
 }
 
 const VISIT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The visits that have an event on the visits calendar between two days (events people added there themselves aren't). */
-async function visitsOnGoogle(env: Env, admin: Db, companyId: string, calendarId: string, from: string, to: string): Promise<string[]> {
-  const ids: string[] = [];
-  let page: string | undefined;
-  do {
-    const params = new URLSearchParams({ timeMin: `${from}T00:00:00Z`, timeMax: `${to}T00:00:00Z`, maxResults: "2500", fields: "items(id,extendedProperties),nextPageToken" });
-    if (page) params.set("pageToken", page);
-    const json = (await gcal(env, admin, companyId, "GET", `/calendars/${encodeURIComponent(calendarId)}/events?${params}`))!;
-    for (const e of json.items ?? []) {
-      const visit = e.extendedProperties?.private?.crewtavo_visit;
-      if (typeof visit === "string" && VISIT_ID.test(visit) && e.id === googleEventId(visit)) ids.push(visit);
-    }
-    page = json.nextPageToken;
-  } while (page && ids.length < MAX_EVENTS);
-  return ids;
-}
-
-/** Leave visits to the outbox (topic calendar.visit), which tries them again in a few minutes. */
-async function queueVisits(admin: Db, companyId: string, visitIds: string[]) {
-  for (let i = 0; i < visitIds.length; i += 500) {
-    const rows = visitIds.slice(i, i + 500).map((id) => ({ company_id: companyId, topic: "calendar.visit", payload: { visit_id: id } }));
-    const { error } = await admin.from("outbox").insert(rows);
-    if (error) throw new Error(`Couldn't queue visits for Google Calendar: ${error.message}`);
-  }
-}
-
-/**
- * Bring the visits calendar in line with the schedule from last week through the next six months:
- * when visits start going to Google, and after it's reconnected (changes made while it needed
- * reconnecting weren't queued). Events for visits cancelled, deleted, unscheduled or moved away
- * meanwhile are found on Google and brought in line too. A visit Google doesn't take now is left
- * to the outbox, and the rest still go.
- */
-export async function pushUpcomingVisits(env: Env, admin: Db, companyId: string) {
-  const calendarId = await visitsCalendar(admin, companyId);
-  if (!calendarId) return { pushed: 0, queued: 0 };
+/** The days the visits calendar covers (last week through the next six months), and the visits on them. */
+async function upcoming(admin: Db, companyId: string) {
   const { data: company } = await admin.from("companies").select("timezone").eq("id", companyId).single();
   const today = localDate(new Date(), company?.timezone ?? "UTC");
   const from = addDays(today, -7);
@@ -600,17 +588,130 @@ export async function pushUpcomingVisits(env: Env, admin: Db, companyId: string)
     .order("scheduled_on")
     .limit(2000);
   if (error) throw new Error(error.message);
-  // What's on Google for those days (a day either side covers every time zone).
-  let lastError: string | null = null;
-  let onGoogle: string[] = [];
+  return { from, to, visits: (visits ?? []).map((v) => v.id) };
+}
+
+/** The visits that have an event on the visits calendar over those days (events people added there themselves aren't). */
+async function visitsOnGoogle(env: Env, admin: Db, companyId: string, calendarId: string, days: { from: string; to: string }): Promise<string[]> {
+  const ids: string[] = [];
+  let page: string | undefined;
+  do {
+    // A day either side covers every time zone.
+    const params = new URLSearchParams({ timeMin: `${addDays(days.from, -1)}T00:00:00Z`, timeMax: `${addDays(days.to, 2)}T00:00:00Z`, maxResults: "2500", fields: "items(id,extendedProperties),nextPageToken" });
+    if (page) params.set("pageToken", page);
+    const json = (await gcal(env, admin, companyId, "GET", `/calendars/${encodeURIComponent(calendarId)}/events?${params}`))!;
+    for (const e of json.items ?? []) {
+      const visit = e.extendedProperties?.private?.crewtavo_visit;
+      if (typeof visit === "string" && VISIT_ID.test(visit) && e.id === googleEventId(visit)) ids.push(visit);
+    }
+    page = json.nextPageToken;
+  } while (page && ids.length < MAX_EVENTS);
+  return ids;
+}
+
+/** What's waiting in the outbox for the visits calendar, not counting jobs under way (as enqueue_calendar_push doesn't) or `except`. */
+async function waiting(admin: Db, companyId: string, except?: number) {
+  const { data, error } = await admin
+    .from("outbox")
+    .select("id, payload, locked_until")
+    .match({ company_id: companyId, topic: "calendar.visit" })
+    .is("done_at", null)
+    .is("dead_at", null);
+  if (error) throw new Error(`Couldn't queue visits for Google Calendar: ${error.message}`);
+  const now = Date.now();
+  const jobs = (data ?? []).filter((row) => row.id !== except && (!row.locked_until || Date.parse(row.locked_until) < now)).map((row) => row.payload as VisitJob);
+  return { visits: new Set(jobs.flatMap((job) => job.visit_ids ?? (job.visit_id ? [job.visit_id] : []))), recheck: jobs.some((job) => job.recheck) };
+}
+
+async function enqueue(admin: Db, companyId: string, jobs: VisitJob[]) {
+  if (!jobs.length) return;
+  const { error } = await admin.from("outbox").insert(jobs.map((payload) => ({ company_id: companyId, topic: "calendar.visit", payload })));
+  if (error) throw new Error(`Couldn't queue visits for Google Calendar: ${error.message}`);
+}
+
+/**
+ * Leave visits to the outbox, which tries them again in a few minutes: each on its own, or
+ * (`together`) as one batch, so a long list doesn't hold up everything queued after it. Visits
+ * already waiting there (outside the job `except`) aren't added again. Returns how many were added.
+ */
+async function queueVisits(admin: Db, companyId: string, visitIds: string[], { together = false, except }: { together?: boolean; except?: number } = {}) {
+  if (!visitIds.length) return 0;
+  const { visits } = await waiting(admin, companyId, except);
+  const ids = visitIds.filter((id) => !visits.has(id));
+  await enqueue(admin, companyId, together && ids.length > 1 ? [{ visit_ids: ids }] : ids.map((id) => ({ visit_id: id })));
+  return ids.length;
+}
+
+/** Google won't take visits on that calendar: the Apps page says what to do. */
+async function refused(admin: Db, companyId: string) {
+  await admin.from("integrations").update({ last_error: REFUSED }).match({ company_id: companyId, provider: "google_calendar" });
+}
+
+/** A batch's turn: its first hundred visits go, and the rest wait their turn again. One that doesn't go is queued on its own. */
+async function pushBatch(env: Env, admin: Db, companyId: string, calendarId: string, ids: string[], jobId?: number) {
+  const failed: string[] = [];
+  let failedInARow = 0;
+  for (const id of ids.slice(0, BATCH)) {
+    try {
+      await pushVisit(env, admin, companyId, calendarId, id);
+      failedInARow = 0;
+    } catch (err) {
+      // Google refused the sign-in, or visits were turned off: nothing more to send.
+      if (!(await visitsCalendar(admin, companyId))) return;
+      if (calendarRefused(err)) return refused(admin, companyId);
+      // Google is still having trouble: the whole batch tries again later.
+      if (++failedInARow === 5) throw err;
+      failed.push(id);
+    }
+  }
+  await queueVisits(admin, companyId, failed, { except: jobId });
+  await queueVisits(admin, companyId, ids.slice(BATCH), { together: true, except: jobId });
+  await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: companyId, provider: "google_calendar" });
+}
+
+const UNCHECKED = "Couldn't check what's on Google Calendar, so visits cancelled or deleted lately may still show there. Turn visits off and on again to rebuild it.";
+
+/** Look at the visits calendar again (it couldn't be read last time), and queue the visits on it that aren't upcoming anymore so they come off or move. */
+async function recheckVisits(env: Env, admin: Db, companyId: string, calendarId: string) {
+  const days = await upcoming(admin, companyId);
+  let listed: string[];
   try {
-    onGoogle = await visitsOnGoogle(env, admin, companyId, calendarId, addDays(from, -1), addDays(to, 2));
+    listed = await visitsOnGoogle(env, admin, companyId, calendarId, days);
+  } catch (err) {
+    if (!(await visitsCalendar(admin, companyId))) return;
+    if (calendarRefused(err)) return refused(admin, companyId);
+    console.error("Couldn't read the visits calendar", err);
+    throw new IntegrationError(UNCHECKED); // on the Apps page if it never works
+  }
+  const current = new Set(days.visits);
+  await queueVisits(admin, companyId, listed.filter((id) => !current.has(id)), { together: true });
+}
+
+/**
+ * Bring the visits calendar in line with the schedule from last week through the next six months:
+ * when visits start going to Google, and after it's reconnected (changes made while it needed
+ * reconnecting weren't queued). Events for visits cancelled, deleted, unscheduled or moved away
+ * meanwhile are found on Google and brought in line too. What Google doesn't take now is left to
+ * the outbox and the rest still go; if the calendar can't be read now, the outbox looks again later.
+ */
+export async function pushUpcomingVisits(env: Env, admin: Db, companyId: string) {
+  const calendarId = await visitsCalendar(admin, companyId);
+  if (!calendarId) return { pushed: 0, queued: 0 };
+  const days = await upcoming(admin, companyId);
+  let onGoogle: string[] = [];
+  let recheck = false;
+  try {
+    onGoogle = await visitsOnGoogle(env, admin, companyId, calendarId, days);
   } catch (err) {
     if (!(await visitsCalendar(admin, companyId))) return { pushed: 0, queued: 0 };
+    if (calendarRefused(err)) {
+      await refused(admin, companyId);
+      return { pushed: 0, queued: 0 };
+    }
     console.error("Couldn't read the visits calendar", err);
-    lastError = "Couldn't check what's on Google Calendar, so visits cancelled or deleted lately may still show there. Turn visits off and on again to rebuild it.";
+    recheck = true;
   }
-  const ids = [...new Set([...(visits ?? []).map((v) => v.id), ...onGoogle])];
+  const ids = [...new Set([...days.visits, ...onGoogle])];
   const retry: string[] = [];
   let pushed = 0;
   let failedInARow = 0;
@@ -624,16 +725,22 @@ export async function pushUpcomingVisits(env: Env, admin: Db, companyId: string)
     } catch (err) {
       // Google refused the sign-in (gcal and accessToken mark it), or visits were turned off: nothing more to send.
       if (!(await visitsCalendar(admin, companyId))) return { pushed, queued: 0 };
+      // Nor when the calendar won't take any: the outbox would only fail them all again.
+      if (calendarRefused(err)) {
+        await refused(admin, companyId);
+        return { pushed, queued: 0 };
+      }
       console.error("Couldn't put a visit on Google Calendar", id, err);
       retry.push(id);
-      // Google is having trouble: the outbox takes the rest.
+      // Google is having trouble: the outbox takes the rest, as one batch.
       if (++failedInARow === 5) {
         retry.push(...ids.slice(i + 1));
         break;
       }
     }
   }
-  await queueVisits(admin, companyId, retry);
-  await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: lastError }).match({ company_id: companyId, provider: "google_calendar" });
-  return { pushed, queued: retry.length };
+  const queued = await queueVisits(admin, companyId, retry, { together: true });
+  if (recheck && !(await waiting(admin, companyId)).recheck) await enqueue(admin, companyId, [{ recheck: true }]);
+  await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: companyId, provider: "google_calendar" });
+  return { pushed, queued };
 }
