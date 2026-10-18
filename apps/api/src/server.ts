@@ -26,6 +26,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { app } from "./app";
 import { readEnv } from "./env";
+import { forwardTo } from "./lib/address";
 import { closeAfterUnreadBodies } from "./lib/connection";
 import { cronMatches } from "./lib/cron";
 import { reportError } from "./lib/monitoring";
@@ -103,6 +104,14 @@ async function forward(request: Request, upstream: string, prefix: string, extra
     return Response.json({ message: "This part of Crewtavo is still starting. Try again in a moment." }, { status: 503 });
   }
 }
+
+// After a switch in Settings → Web address, pages opened on an old address forward to the new one
+// (lib/address.ts). Client links, webhooks and the API keep answering where they are.
+server.use("*", async (c, next) => {
+  const target = await forwardTo(env, c.req.raw);
+  if (target) return c.redirect(target, 302);
+  await next();
+});
 
 // The web app: fingerprinted assets cache forever; everything else falls back to index.html.
 const indexPath = join(staticDir, "index.html");
@@ -214,6 +223,8 @@ void migrate().then(() => {
   if (startup()?.state === "failed" || process.env.CREWTAVO_SCHEDULER === "off") return;
   scheduleNext();
   console.log("Background tasks: running in this process");
+  // Started with a new web address (Settings → Web address)? Say so now rather than at the next tick.
+  runTask("address", env).catch((error) => console.error("Task address failed", error));
 });
 
 function shutdown(signal: string) {

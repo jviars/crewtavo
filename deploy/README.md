@@ -72,8 +72,9 @@ move them to versions nobody tested here.
 
 ## The live template
 
-**https://railway.com/deploy/Chzzxj?referralCode=pQ_v0d** (template code `Chzzxj`, in the
-`jviars's Projects` workspace on Railway). Edit it under **Workspace → Templates → Crewtavo**. The
+**https://railway.com/deploy/crewtavo?referralCode=pQ_v0d** (template code `crewtavo`, in the
+`jviars's Projects` workspace on Railway; publishing it to the marketplace changed the code from
+`Chzzxj`, and links with the old code no longer deploy). Edit it under **Workspace → Templates → Crewtavo**. The
 template names the moving tags, so a release doesn't need a template change. The exception is a new
 Postgres major version: point `db` at its new tag (`pg18`) so new deploys start on it.
 
@@ -107,7 +108,7 @@ delete an earlier test project before deploying the template again.
 ## The button
 
 ```html
-<a href="https://railway.com/deploy/Chzzxj?referralCode=pQ_v0d"><img src="https://railway.com/button.svg" alt="Deploy on Railway"></a>
+<a href="https://railway.com/deploy/crewtavo?referralCode=pQ_v0d"><img src="https://railway.com/button.svg" alt="Deploy on Railway"></a>
 ```
 
 ## Updates

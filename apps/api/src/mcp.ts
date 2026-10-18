@@ -15,6 +15,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "./env";
+import { ownOrigin } from "./lib/address";
 import { bearerToken } from "./lib/auth";
 import { appUrl } from "./lib/http";
 import { allow } from "./lib/limit";
@@ -29,9 +30,11 @@ const SERVER_INFO = { name: "crewtavo", title: "Crewtavo", version: "0.1.0" };
 // OAuth discovery
 // ---------------------------------------------------------------------------------------------
 
-const resourceMetadata = (c: Context<AppEnv>) =>
+// The resource is the address the client used (a connector added before a switch in Settings → Web
+// address keeps its old one); sign-in stays at APP_URL, the issuer Auth knows.
+const resourceMetadata = async (c: Context<AppEnv>) =>
   c.json({
-    resource: `${appUrl(c)}/mcp`,
+    resource: `${await ownOrigin(c)}/mcp`,
     // In an instance, SUPABASE_URL is this server's own loopback address; sign-in is public at /auth/v1.
     authorization_servers: [`${c.env.CREWTAVO_GATEWAY ? appUrl(c) : c.env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`],
     bearer_methods_supported: ["header"],
@@ -227,9 +230,9 @@ type RpcId = string | number | null;
 const result = (id: RpcId, value: unknown) => ({ jsonrpc: "2.0" as const, id, result: value });
 const failure = (id: RpcId, code: number, message: string) => ({ jsonrpc: "2.0" as const, id, error: { code, message } });
 
-function unauthorized(c: Context<AppEnv>) {
+async function unauthorized(c: Context<AppEnv>) {
   return c.json(failure(null, -32001, "Sign in required"), 401, {
-    "WWW-Authenticate": `Bearer resource_metadata="${appUrl(c)}/.well-known/oauth-protected-resource/mcp"`,
+    "WWW-Authenticate": `Bearer resource_metadata="${await ownOrigin(c)}/.well-known/oauth-protected-resource/mcp"`,
   });
 }
 

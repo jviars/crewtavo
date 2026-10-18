@@ -9,17 +9,19 @@ import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
 import { syncStripeInvoice } from "./integrations/stripe";
 import { reportError } from "./lib/monitoring";
 import { adminClient, type Db } from "./lib/supabase";
+import { runAddressTask } from "./services/address";
 import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
 import { deliverNotifications } from "./services/delivery";
 import { dailyOutlook } from "./services/external";
 
-export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather"] as const;
+export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address"] as const;
 export type TaskName = (typeof TASKS)[number];
 
 /** Cron expressions -> tasks, run by server.ts's scheduler. */
 export const CRON_TASKS: Record<string, TaskName[]> = {
   "* * * * *": ["automations", "campaigns", "notify"],
+  "*/2 * * * *": ["address"],
   "*/5 * * * *": ["outbox"],
   "*/15 * * * *": ["calendars"],
   "0 * * * *": ["followups"],
@@ -45,6 +47,8 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return hourlyUpkeep(env);
     case "weather":
       return weatherHolds(env);
+    case "address":
+      return runAddressTask(env, adminClient(env));
   }
 }
 
