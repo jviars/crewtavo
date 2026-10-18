@@ -20,6 +20,8 @@ export interface AssistantConnection {
 /** This person's connected assistants, newest first. */
 export async function loadConnections(db: Db): Promise<AssistantConnection[]> {
   const { data: grants, error } = await db.auth.oauth.listGrants();
+  // Auth's OAuth server is off (a Supabase project can have it off): nothing can be connected.
+  if (error?.code === "feature_disabled") return [];
   if (error) throw new ApiError("Your connected assistants couldn't be loaded. Try again in a moment.", error.status ?? 500);
   const rows = unwrap(await db.from("assistant_connections").select("client_id, allow_changes"));
   const allowed = new Set(rows.filter((r) => r.allow_changes).map((r) => r.client_id));

@@ -52,7 +52,10 @@ try {
   // *.railway.internal. Anything else (a hosted database) requires it.
   const host = new URL(url).hostname;
   const local = !host.includes(".") || host === "127.0.0.1" || host.endsWith(".railway.internal") || /sslmode=disable/.test(url);
-  sql = postgres(url, { max: 1, ssl: local ? false : "require", onnotice: () => {}, connect_timeout: 10 });
+  // Notices ("already exists, skipping") are noise, but a migration's warning is for whoever runs
+  // Crewtavo (something it couldn't do, and what to run instead), so that goes to the log.
+  const onnotice = (notice) => notice.severity === "WARNING" && console.warn(`migrate: warning${current ? ` in ${current}` : ""}: ${notice.message}`);
+  sql = postgres(url, { max: 1, ssl: local ? false : "require", onnotice, connect_timeout: 10 });
 
   const deadline = Date.now() + waitSeconds * 1000;
   const until = async (ready, what) => {

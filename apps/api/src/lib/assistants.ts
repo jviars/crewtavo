@@ -4,18 +4,18 @@
  * claim: client_id, the OAuth client the person approved. An ordinary sign-in has none.
  *
  * Each connection only reads until the person who made it turns on "Allow changes" for it
- * (public.assistant_connections, shown in Settings → Apps → AI assistants). That's checked for the
- * MCP tools (mcp.ts), for our own API (requireUser in lib/auth.ts) and, in an instance, at the
- * gateway to Auth, the Data API and Storage (guardAssistant, from server.ts). The database checks
- * it again for the Data API and Storage (the assistant_access migration), so it holds on a
- * Supabase project without the gateway too.
+ * (public.assistant_connections, in Settings → Profile → AI assistants, which every role has).
+ * That's checked for the MCP tools (mcp.ts), for our own API (requireUser in lib/auth.ts) and, in
+ * an instance, at the gateway to Auth, the Data API and Storage (guardAssistant, from server.ts).
+ * The database checks it again for the Data API and Storage (the assistant_access migrations), so
+ * it holds on a Supabase project without the gateway too.
  */
 import type { Env } from "../env";
 import { bearerToken } from "./auth";
 import { userClient, type Db } from "./supabase";
 
 export const ASSISTANT_READ_ONLY =
-  'This assistant can only read. To let it make changes, turn on "Allow changes" for it in Crewtavo, under Settings → Apps → AI assistants.';
+  'This assistant can only read. To let it make changes, turn on "Allow changes" for it in Crewtavo, under Settings → Profile → AI assistants.';
 
 /** Requests that only read. */
 export const isRead = (method: string) => method === "GET" || method === "HEAD" || method === "OPTIONS";

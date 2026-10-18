@@ -83,8 +83,12 @@ export function AssistantAccess() {
   );
 }
 
-/** The assistants this person has connected. Each one only reads until they turn on Allow changes. */
-export function ConnectedAssistants() {
+/**
+ * The assistants this person has connected. Each one only reads until they turn on Allow changes.
+ * Everyone has it in Settings → Profile → AI assistants, whatever their role, once they've connected
+ * one; owners and admins also see it on the Claude and ChatGPT pages, under the steps to connect.
+ */
+export function ConnectedAssistants({ inProfile = false }: { inProfile?: boolean }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const key = ["assistant-connections", session.userId];
@@ -113,9 +117,12 @@ export function ConnectedAssistants() {
     if (await confirm({ title: `Disconnect ${c.name}?`, body, confirmLabel: "Disconnect", danger: true })) remove.mutate(c.clientId);
   };
 
+  // In the profile there's only something to show once they've connected one (or it didn't load).
+  if (inProfile && (connections.isPending || (!connections.error && !connections.data.length))) return null;
+
   return (
-    <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
-      <strong>Your connected assistants</strong>
+    <div className={inProfile ? "card card-pad stack-sm" : "stack-sm"} style={inProfile ? undefined : { borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
+      <strong>{inProfile ? "AI assistants" : "Your connected assistants"}</strong>
       <span className="muted small">
         An assistant you connect can look things up, but can't add or change anything until you turn on Allow changes for it. Assistants connected before this switch
         was added can only read too, until you turn it on.

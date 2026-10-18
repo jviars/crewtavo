@@ -1,7 +1,7 @@
--- Database tests for 20261019001040_assistant_access.sql: an AI assistant's token (one with a
--- client_id claim) only reads until the person who connected it turns on "Allow changes", in the
--- Data API (hooks.before_request, PostgREST's pre-request) and in Storage. Ordinary sign-ins and
--- visitors are left as they were.
+-- Database tests for 20261019001040_assistant_access.sql (and its followups): an AI assistant's
+-- token (one with a client_id claim) only reads until the person who connected it turns on "Allow
+-- changes", in the Data API (hooks.before_request, PostgREST's pre-request) and in Storage.
+-- Ordinary sign-ins and visitors are left as they were.
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -118,8 +118,8 @@ rollback;
 begin;
 set local role authenticated;
 select t1040.as_request(:'owner', :'reading', 'POST', '/clients');
-select t1040.check(e like 'PT403: This assistant can only read. To let it make changes, turn on "Allow changes" for it in Crewtavo, under Settings → Apps → AI assistants.',
-  'it can''t add to a table, and is told where to allow it: ' || e) from (select t1040.error_of('select hooks.before_request()') as e) x;
+select t1040.check(e like 'PT403: This assistant can only read. To let it make changes, turn on "Allow changes" for it in Crewtavo, under Settings → Profile → AI assistants.',
+  'it can''t add to a table, and is told where to allow it (in the profile, which every role has): ' || e) from (select t1040.error_of('select hooks.before_request()') as e) x;
 select t1040.as_request(:'owner', :'reading', 'PATCH', '/clients');
 select t1040.check(t1040.error_of('select hooks.before_request()') like 'PT403:%', 'or change a row');
 select t1040.as_request(:'owner', :'reading', 'DELETE', '/clients');
