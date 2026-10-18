@@ -19,7 +19,9 @@
     "./privacy": "./src/privacy.ts",
     "./email": "./src/email.ts",
     "./notifications": "./src/notifications.ts",
-    "./terms": "./src/terms.ts"
+    "./terms": "./src/terms.ts",
+    "./address": "./src/address.ts",
+    "./dns": "./src/dns.ts"
   },
   "scripts": {
     "test": "vitest run",

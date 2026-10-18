@@ -39,8 +39,27 @@ of credit) is enough to try Crewtavo; to keep running, an instance needs Railway
 month, including $5 of usage). Use grows with data and traffic; check
 [Railway's pricing](https://railway.com/pricing).
 
-**Your own domain:** in the crewtavo service, **Settings → Networking → Custom Domain**. Then change
-its `APP_URL` variable to `https://your-domain` and redeploy `crewtavo` and `auth`.
+**Your own domain:** in Crewtavo, **Settings → Web address**. The owner types the address (like
+`app.yourbusiness.com`) and presses **Log in with Railway**. On Railway's consent screen they pick
+this project. Crewtavo then adds the address to the crewtavo service and shows the two DNS records
+Railway wants, with steps for the domain's DNS provider. On Cloudflare it can add them itself, from a
+token used once and never stored. Then it checks the records live. Once Railway has verified the
+address and issued its certificate, and the address answers as this instance, Crewtavo does the rest:
+- sets `APP_URL`
+- redeploys `auth` and `crewtavo`
+- tells the admins
+- deletes its Railway access
+
+Pages on the old address forward to the new one. Client links, calendar feeds, the Twilio webhook and
+assistant connectors keep working on both addresses.
+
+Each instance registers its own client with Railway, so there's no shared app to run. If Railway won't
+register it, the screen asks for a project token instead. By hand, the steps are:
+1. In the crewtavo service, **Settings → Networking → Custom Domain**.
+2. Change its `APP_URL` variable to `https://your-domain`.
+3. Redeploy `crewtavo` and `auth`.
+
+The screen lists these steps with links, and notices when they're done.
 
 **Backups:** Railway's volume backups (open the `db` or `storage` volume, then **Backups**) need
 Railway's Pro plan.
@@ -103,7 +122,7 @@ lists them all).
 
 | Name | Turns on |
 | --- | --- |
-| `APP_URL` | Your own domain (see above). Defaults to the instance's address. |
+| `APP_URL` | Your own domain (see above; **Settings → Web address** sets it on Railway). Defaults to the instance's address. |
 | `ENCRYPTION_KEY` | A separate key for encrypting app tokens and signing client links: 32+ random bytes in base64, or any 32+ characters. Without it, one is derived from the instance's secret. **Keep it stable once set**: changing it disconnects every app and invalidates links already sent to clients. |
 | `ANTHROPIC_API_KEY` (optional `AI_MODEL`) | AI rewrite and SOP answers. Companies can also add their own key on the Apps page. |
 | `GOOGLE_MAPS_BROWSER_KEY` | Measuring on satellite imagery. Restrict it to your domain and the Maps JavaScript API. |

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { greetingName, LEVEL_PERMISSIONS, memberPermissions, TERMS_VERSION } from "@crewtavo/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { decryptJson, encryptJson, hmacSha256Hex, signToken, verifyToken } from "../src/lib/crypto";
@@ -122,6 +122,10 @@ describe("routes", () => {
 });
 
 describe("MCP discovery", () => {
+  // The instance's earlier addresses (none here).
+  beforeEach(() => vi.stubGlobal("fetch", async () => Response.json([])));
+  afterEach(() => vi.unstubAllGlobals());
+
   it("publishes protected resource metadata pointing at Supabase Auth", async () => {
     const res = await request("/.well-known/oauth-protected-resource/mcp");
     expect(res.status).toBe(200);
@@ -179,6 +183,9 @@ describe("client links by kind", () => {
 });
 
 describe("texting", () => {
+  beforeEach(() => vi.stubGlobal("fetch", async () => Response.json([])));
+  afterEach(() => vi.unstubAllGlobals());
+
   it("signs webhook requests the way Twilio does", async () => {
     const url = "https://ops.example.com/api/webhooks/twilio";
     const params = { To: "+15405550100", From: "+15405550163", Body: "Running late?", MessageSid: "SM123", AccountSid: "AC1" };
