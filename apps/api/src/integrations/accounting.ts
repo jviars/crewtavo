@@ -43,12 +43,18 @@ async function linked(ctx: Ctx, entity: Entity, localId: string): Promise<string
   return data?.external_id ?? null;
 }
 
+/** The provider took the record but the link to it wasn't saved. Retrying the job would send it again. */
+export class SentButUnrecorded extends IntegrationError {
+  override name = "SentButUnrecorded";
+}
+
 /**
- * A link that couldn't be saved fails the job instead of passing quietly, naming the provider's record
- * so a copy sent by the retry (or by the next payment on it) can be spotted.
+ * Once the provider has the record, sending it again makes a copy in the books. So a link that
+ * couldn't be saved is tried once more here, then fails the job for good (not to be retried),
+ * naming the provider's record so it can be checked there.
  */
 async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: string, syncToken?: string) {
-  const { error } = await ctx.admin.from("sync_links").upsert({
+  const link = {
     company_id: ctx.companyId,
     provider: ctx.provider,
     entity,
@@ -56,8 +62,10 @@ async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: s
     external_id: externalId,
     sync_token: syncToken ?? null,
     synced_at: new Date().toISOString(),
-  });
-  if (error) throw new IntegrationError(`Sent ${entity} ${externalId} but couldn't record it: ${error.message}`);
+  };
+  let { error } = await ctx.admin.from("sync_links").upsert(link);
+  if (error) ({ error } = await ctx.admin.from("sync_links").upsert(link));
+  if (error) throw new SentButUnrecorded(`Sent ${entity} ${externalId} but couldn't record it: ${error.message}`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -262,9 +270,11 @@ export async function runAccountingJob(env: Env, admin: Db, row: { company_id: s
   else if (row.topic === "accounting.payment") await pushPayment(ctx, row.payload.payment_id);
   else throw new IntegrationError(`Unknown topic ${row.topic}`);
 
+  // last_error stays: it's about a change that never went through (see drainOutbox in tasks.ts),
+  // which this one going through doesn't fix. Reconnecting or disconnecting clears it.
   await admin
     .from("integrations")
-    .update({ last_sync_at: new Date().toISOString(), last_error: null, status: "connected" })
+    .update({ last_sync_at: new Date().toISOString(), status: "connected" })
     .match({ company_id: row.company_id, provider: integration.provider });
 }
 
