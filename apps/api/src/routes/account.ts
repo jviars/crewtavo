@@ -333,6 +333,12 @@ account.post("/auth/email-link", async (c) => {
     throw new HttpError(429, "Too many requests. Wait a few minutes and try again.");
   }
   const admin = adminClient(c.env);
+  // A one-business instance that can't send email says so instead of pretending a link went out.
+  // The answer is the same for every address, so it doesn't reveal who has an account.
+  if (c.env.CREWTAVO_SINGLE_COMPANY === "1" && !emailConfigured(c.env)) {
+    const { data: mailbox } = await admin.from("integrations").select("company_id").eq("provider", "email").eq("status", "connected").limit(1);
+    if (!mailbox?.length) return c.json({ sent: false, reason: "email_off" });
+  }
   const redirectTo = `${appUrl(c)}/`;
   const { data: userId } = await admin.rpc("user_id_for_email", { p_email: email });
   if (!userId) return c.json({ sent: true });

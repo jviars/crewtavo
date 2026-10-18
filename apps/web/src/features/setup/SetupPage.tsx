@@ -11,6 +11,7 @@ import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { ShellSkeleton } from "@/components/ui/Skeleton";
 import { AuthLayout, authMessage } from "@/features/auth/LoginPage";
+import { SpareKeysSheet } from "@/features/auth/SpareKeys";
 import styles from "@/features/auth/auth.module.css";
 import { api, ApiError, supabase } from "@/lib/api";
 
@@ -67,9 +68,17 @@ export function SetupGate({ children }: { children: ReactNode }) {
 export function FirstRun({ children }: { children: ReactNode }) {
   const status = useSetupStatus();
   const reloading = useReloadWhenReady(status.data?.ready);
+  // Once owner setup starts it stays until the owner is signed in: the account exists as soon as
+  // it's made, so the next check says no owner is needed, and the key file screen mustn't vanish.
+  const [ownerSetup, setOwnerSetup] = useState(false);
+  useEffect(() => {
+    if (status.data?.needsOwner) setOwnerSetup(true);
+  }, [status.data?.needsOwner]);
+  if (ownerSetup || status.data?.needsOwner) {
+    return <OwnerSetupPage onTaken={() => { setOwnerSetup(false); void status.refetch(); }} />;
+  }
   if (status.isPending || reloading) return <ShellSkeleton />;
   if (status.data && !status.data.ready) return <SetupPage status={status.data} onCheck={() => status.refetch()} checking={status.isFetching} />;
-  if (status.data?.needsOwner) return <OwnerSetupPage onTaken={() => status.refetch()} />;
   return <>{children}</>;
 }
 
@@ -152,6 +161,18 @@ export function OwnerSetupPage({ onTaken }: { onTaken: () => void }) {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown once, right after the account is made, before signing in.
+  const [spareKeys, setSpareKeys] = useState<string[] | null>(null);
+
+  async function signIn() {
+    setBusy(true);
+    const { error: signInError } = await supabase().auth.signInWithPassword({ email: email.trim(), password });
+    // Signed in: SessionProvider moves on to setting up the business.
+    if (signInError) {
+      setError(authMessage(signInError));
+      setBusy(false);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -160,10 +181,11 @@ export function OwnerSetupPage({ onTaken }: { onTaken: () => void }) {
     if (password.length < 8) return setError("Use at least 8 characters for your password.");
     setBusy(true);
     try {
-      await api.post("/setup/owner", { full_name: fullName.trim(), email: email.trim(), password });
-      const { error: signInError } = await supabase().auth.signInWithPassword({ email: email.trim(), password });
-      if (signInError) throw signInError;
-      // Signed in: SessionProvider moves on to setting up the business.
+      const result = await api.post<{ spare_keys: string[] | null }>("/setup/owner", { full_name: fullName.trim(), email: email.trim(), password });
+      if (result.spare_keys?.length) {
+        setSpareKeys(result.spare_keys);
+        setBusy(false);
+      } else await signIn();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : authMessage(err as { message: string });
       setError(message);
@@ -171,6 +193,17 @@ export function OwnerSetupPage({ onTaken }: { onTaken: () => void }) {
       setBusy(false);
     }
   }
+
+  if (spareKeys)
+    return (
+      <AuthLayout>
+        <div className={`card card-pad ${styles.card}`} style={{ padding: 28 }}>
+          <h1 className={styles.title}>Save your key file</h1>
+          <SpareKeysSheet keys={spareKeys} email={email.trim()} doneLabel="Continue" busy={busy} onDone={signIn} />
+          {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}
+        </div>
+      </AuthLayout>
+    );
 
   return (
     <AuthLayout>

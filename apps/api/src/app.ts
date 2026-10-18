@@ -23,6 +23,7 @@ import { push } from "./routes/push";
 import { railway } from "./routes/railway";
 import { sales } from "./routes/sales";
 import { schedule } from "./routes/schedule";
+import { recovery } from "./routes/recovery";
 import { setup } from "./routes/setup";
 import { runTask, TASKS, type TaskName } from "./tasks";
 
@@ -41,6 +42,7 @@ app.use("/.well-known/*", cors({ origin: "*" }));
 
 app.route("/api", account);
 app.route("/api", setup);
+app.route("/api", recovery);
 app.route("/api", schedule);
 app.route("/api", sales);
 app.route("/api", apps);
