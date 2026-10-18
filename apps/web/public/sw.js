@@ -6,9 +6,10 @@
  *     signal. Pages come from the network when possible and from the cache when not; the built
  *     files under /assets/ never change, so they're kept. Data and the API are left to the app,
  *     which keeps the crew's day on the phone and queues their changes until they're back online.
- *   - Updates waiting: the app sends the crew's queued changes while it's open (src/lib/offline.ts).
- *     Where there's Background Sync (Android), it asks to hear when the phone has signal; if
- *     Crewtavo isn't open then, a notification says how many are waiting and opens the app.
+ *   - Updates waiting: the app sends the crew's queued changes while it's on the screen
+ *     (src/lib/offline.ts). Where there's Background Sync (Android), it asks to hear when the phone
+ *     has signal; if Crewtavo isn't on the screen then, a notification says how many are waiting
+ *     and opens the app.
  */
 const CACHE = "crewtavo-app-v1";
 const OFFLINE = new URL(self.location.href).searchParams.get("cache") === "1";
@@ -135,9 +136,11 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 // Background Sync (Android): the phone has signal again and crew updates wait to be sent. Crewtavo
-// sends them itself while it's open, so then this fails on purpose: the browser tries it again in a
-// few minutes, in case the app is closed by then. Closed, a notification says how many are waiting,
-// and opening Crewtavo sends them.
+// sends them itself while it's on the screen, so then this fails on purpose: the browser tries it
+// again in a few minutes, in case the app is put away or closed by then. Put away (in a pocket,
+// behind another app), it waits to be back on the screen (React Query carries on with a paused
+// action only on a visible page); closed, it can't send. Either way a notification says how many
+// are waiting, and opening Crewtavo sends them.
 self.addEventListener("sync", (event) => {
   if (event.tag !== SYNC_TAG) return;
   event.waitUntil(
@@ -145,9 +148,10 @@ self.addEventListener("sync", (event) => {
       const waiting = await waitingUpdates();
       if (!waiting || self.Notification?.permission !== "granted") return;
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      if (windows.some((w) => new URL(w.url).origin === self.location.origin)) {
+      const onScreen = (w) => new URL(w.url).origin === self.location.origin && (w.visibilityState === "visible" || w.focused);
+      if (windows.some(onScreen)) {
         if (event.lastChance) return;
-        throw new Error("Crewtavo is open: it sends them itself.");
+        throw new Error("Crewtavo is open on the screen: it sends them itself.");
       }
       await self.registration.showNotification("Crewtavo", {
         body: `${waiting === 1 ? "1 update is" : `${waiting} updates are`} waiting to be sent. Open Crewtavo to send them.`,

@@ -15,7 +15,7 @@ import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
 import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
-import { pendingVisitStatus, setVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
+import { pendingVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl } from "./fieldData";
 import { InstallAppCard } from "./InstallAppCard";
 import { OfflineNote } from "./OfflineNote";
@@ -80,12 +80,13 @@ export function FieldTodayPage() {
     queryClient.invalidateQueries({ queryKey: ["running-timer"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
-  // Works offline: the tap is saved on the phone (with its time) and sent when there's signal.
+  // Works offline: the tap is saved on the phone (with its time) and sent when there's signal. Sent
+  // by the action registered for it (fieldActions.ts), not a mutationFn here: lib/offline.ts notes
+  // when it's on its way, for the count of updates waiting.
   const setStatus = useMutation({
     mutationKey: ["visit-status"],
     scope: FIELD_SCOPE,
     meta: { success: statusSaved },
-    mutationFn: setVisitStatus,
     onMutate: async (change: VisitStatusChange) => {
       if (!onlineManager.isOnline()) toast.info("Saved on this phone. It'll send when you have signal.");
       await queryClient.cancelQueries({ queryKey: key });

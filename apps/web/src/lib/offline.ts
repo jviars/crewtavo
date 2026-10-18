@@ -6,12 +6,13 @@
  * crew phone. Cleared when the person signs out; when the app signs them out (an expired sign-in),
  * only their unsent field actions are kept, for when they sign back in.
  *
- * They go out while Crewtavo is open: as it opens, when the connection is back, and when it comes
- * back on the screen. With it closed nothing sends them (that would take the person's sign-in in
- * the service worker); where the phone has Background Sync (Android), the service worker says how
- * many are waiting once there's signal (tellServiceWorker).
+ * They go out while Crewtavo is on the screen: as it opens, when the connection is back, and when it
+ * comes back on the screen. Put away, they wait (React Query carries on with a paused action only on
+ * a visible page); closed, nothing sends them (that would take the person's sign-in in the service
+ * worker). Where the phone has Background Sync (Android), the service worker says how many are
+ * waiting once there's signal (tellServiceWorker).
  */
-import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type QueryClient } from "@tanstack/react-query";
+import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type MutationFunction, type QueryClient } from "@tanstack/react-query";
 import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } from "./errors";
 
 // React Query assumes it's online until it hears otherwise; a phone that opens the app with no
@@ -40,11 +41,35 @@ const signInExpired = (error: unknown) => isAuthError(error) && (error as ApiErr
 /** Not sent yet: waiting for a connection or its turn, or on its way, or turned away only because the sign-in expired. */
 const unsent = (m: Mutation) => isFieldAction(m) && (m.state.status === "pending" || (m.state.status === "error" && signInExpired(m.state.error)));
 /**
- * Unsent and not on its way, as the service worker counts them: waiting for signal (or for requests
- * to get through), its turn, or a new sign-in. One on its way when the app closes has most likely
- * gone, and goes again when the app next opens anyway.
+ * Field actions whose request is out right now, known by their variables (React Query sends each
+ * action with its own). Their state can't tell: one put back from the phone's storage stays isPaused
+ * while it goes, and one waiting to try again after a failure isn't paused, though it hasn't gone.
  */
-const queued = (m: Mutation) => unsent(m) && (m.state.isPaused || m.state.status === "error" || !onlineManager.isOnline());
+const sending = new Set<unknown>();
+/** Sends that already note what's out, so starting again (a remount) doesn't wrap them twice. */
+const noting = new WeakSet<object>();
+
+/** A field action's registered send, noting in `sending` while its request is out. */
+function noteSending(send: MutationFunction<unknown, unknown>): MutationFunction<unknown, unknown> {
+  if (noting.has(send)) return send;
+  const noted = async (variables: unknown) => {
+    sending.add(variables);
+    try {
+      return await send(variables);
+    } finally {
+      sending.delete(variables);
+    }
+  };
+  noting.add(noted);
+  return noted;
+}
+
+/**
+ * Unsent and not on its way, as the service worker counts them: waiting for signal (or for requests
+ * to get through), its turn, its next try, or a new sign-in. One on its way when the app closes has
+ * most likely gone, and goes again when the app next opens anyway.
+ */
+const queued = (m: Mutation) => unsent(m) && !sending.has(m.state.variables);
 
 /** No answer from the server itself: no signal, too little to carry a request, or the server restarting or deploying. */
 const cannotReach = (error: unknown) => isNetworkError(error) || (error instanceof ApiError && isRestarting(error.status));
@@ -227,13 +252,18 @@ function stopSaving(userId: string) {
 
 export function startOfflineCache(queryClient: QueryClient, userId: string, keepQueries: boolean): () => void {
   // Added to the defaults registerFieldActions set (setMutationDefaults replaces, so call this after it), before restoring any.
-  for (const key of OFFLINE_MUTATIONS) queryClient.setMutationDefaults([key], { ...queryClient.getMutationDefaults([key]), ...FIELD_RETRY });
+  // The screens send field actions with these too (no mutationFn of their own), so every request out is noted.
+  for (const key of OFFLINE_MUTATIONS) {
+    const defaults = queryClient.getMutationDefaults([key]);
+    queryClient.setMutationDefaults([key], { ...defaults, ...FIELD_RETRY, ...(defaults.mutationFn && { mutationFn: noteSending(defaults.mutationFn) }) });
+  }
   restore(queryClient, userId);
 
   let told = -1;
-  const tell = () => {
+  /** `again`: with some waiting, asks again to hear when there's signal, even if the count is the same. */
+  const tell = (again = false) => {
     const waiting = queryClient.getMutationCache().getAll().filter(queued).length;
-    if (waiting !== told) tellServiceWorker(userId, waiting);
+    if (waiting !== told || (again && waiting > 0)) tellServiceWorker(userId, waiting);
     told = waiting;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -252,8 +282,9 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   const onVisibility = () => {
     if (document.visibilityState === "visible") return void checkServer();
     flush();
-    // Put away with updates waiting: ask again to hear when there's signal, in case Crewtavo is closed by then.
-    if (told > 0) tellServiceWorker(userId, told);
+    // Put away with updates waiting: ask again to hear when there's signal, in case Crewtavo is closed
+    // by then. Counted again first: one may have gone out since the last count.
+    tell(true);
   };
 
   const stopQueries = queryClient.getQueryCache().subscribe(saveSoon);
@@ -269,8 +300,9 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   });
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
   if (typeof window !== "undefined") window.addEventListener("pagehide", flush);
-  tell();
   queryClient.resumePausedMutations().catch(() => undefined);
+  // Counted once they've resumed: one put back that's on its way again at once isn't waiting.
+  tell();
 
   const end = (saveFirst: boolean) => {
     if (!running.delete(self)) return;

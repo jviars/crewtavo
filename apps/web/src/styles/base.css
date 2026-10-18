@@ -25,7 +25,9 @@ img, svg { flex-shrink: 0; }
 .sidebar {
   width: var(--sidebar-width); flex: none; background: var(--ground); border-right: 1px solid var(--ground-border);
   padding: 16px 12px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
-  scrollbar-width: thin; padding-left: max(12px, env(safe-area-inset-left)); /* clear of a phone's notch, sideways */
+  scrollbar-width: thin;
+  /* Clear of a phone's notch and home indicator, sideways (a big phone is wider than 900px then). */
+  padding-left: max(12px, env(safe-area-inset-left)); padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 .brand { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px 8px; color: var(--brand-ink); font-weight: 800; font-size: 19px; letter-spacing: -0.03em; }
 .brand:hover { color: var(--brand-ink); }
@@ -83,7 +85,7 @@ select.business-name:hover { background: var(--fill-2); }
   color: #fff; font-size: 10px; font-weight: 800; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--page); animation: pop-in var(--dur) var(--ease-spring);
 }
 
-.content { padding: 20px 48px 56px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
+.content { padding: 20px max(48px, env(safe-area-inset-right)) 56px 48px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
 .content-narrow { max-width: 880px; }
 
 /* Main navigation cross-fades between screens (React Router's viewTransition, see AppShell). */
