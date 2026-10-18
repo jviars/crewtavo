@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { ASSISTANT_READ_ONLY, assistantClient, guardAssistant } from "../src/lib/assistants";
+import { gateway } from "../src/lib/gateway";
 
 const env: Env = {
   SUPABASE_URL: "http://127.0.0.1:8080",
@@ -185,6 +186,22 @@ describe("the instance's gateway", () => {
       expect(await res.json()).toEqual({ code: "assistant_read_only", message: ASSISTANT_READ_ONLY });
     }
     expect(sent).toHaveLength(0);
+  });
+
+  it("is what the instance's gateway runs for the Data API, Storage and Auth", async () => {
+    const calls = supabase();
+    const routes = gateway(env, { auth: "http://auth.internal:9999", rest: "http://rest.internal:3000", storage: "http://storage.internal:5000" });
+    const through = (method: string, path: string, bearer: string) => routes.fetch(ask(method, path, bearer), {});
+    // The services' own paths, which only a forwarded request reaches.
+    const forwarded = () => calls.filter((c) => !c.path.startsWith("/rest/v1/") && !c.path.startsWith("/auth/v1/")).map((c) => `${c.method} ${c.path}`);
+    for (const [method, path] of [["POST", "/rest/v1/clients"], ["DELETE", "/storage/v1/object/files/company-1/photo.jpg"], ["PUT", "/auth/v1/user"]]) {
+      expect((await through(method, path, reading)).status, path).toBe(403);
+    }
+    expect(forwarded()).toEqual([]);
+    expect((await through("GET", "/rest/v1/clients?select=*", reading)).status).toBe(200);
+    expect((await through("POST", "/rest/v1/clients", allowed)).status).toBe(200);
+    expect((await through("PATCH", "/rest/v1/clients?id=eq.1", signedIn)).status).toBe(200);
+    expect(forwarded()).toEqual(["GET /clients", "POST /clients", "PATCH /clients"]);
   });
 
   it("lets its reads through", async () => {
