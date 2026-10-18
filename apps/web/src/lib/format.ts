@@ -1,3 +1,5 @@
+import { taxPercent } from "@crewtavo/core/money";
+
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const moneyCents = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const compact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
@@ -17,6 +19,10 @@ export const formatTime = (value: string | Date, timeZone?: string) =>
 
 export const formatNumber = (n: number, digits = 0) =>
   n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+/** A tax rate (stored as a fraction) as a percent, to the 0.0001% it's kept to: "8.875%", "8.25%". */
+export const formatTaxRate = (rate: number | string | null | undefined) =>
+  `${taxPercent(rate).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}%`;
 
 /** "Oct 16, 2026" */
 export const formatDate = (value: string | Date | null | undefined) =>

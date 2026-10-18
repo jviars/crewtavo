@@ -1,4 +1,5 @@
 import type { TablesUpdate } from "@crewtavo/core/database";
+import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -15,7 +16,7 @@ import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { addDaysIso, formatDate, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
+import { addDaysIso, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { LineItems } from "../quotes/LineItems";
@@ -230,8 +231,8 @@ function InvoicePageScreen() {
               onChanged={refresh}
             />
             <div className="line">
-              <span>Tax {draft ? "" : `(${formatNumber(Number(inv.tax_rate) * 100, 2)}%)`}</span>
-              {draft ? <MoneyInput percent label="Tax rate" value={Math.round(Number(inv.tax_rate) * 10000) / 100} max={99.99} onSave={(v) => update.mutate({ tax_rate: v / 100 })} /> : <span>{formatMoneyCents(inv.tax_amount)}</span>}
+              <span>Tax {draft ? "" : `(${formatTaxRate(inv.tax_rate)})`}</span>
+              {draft ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => update.mutate({ tax_rate: taxRateFromPercent(v) })} /> : <span>{formatMoneyCents(inv.tax_amount)}</span>}
             </div>
             {draft && <div className="line"><span>Tax amount</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
             <div className="line grand"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>

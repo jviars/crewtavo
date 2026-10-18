@@ -1,4 +1,16 @@
+import { toUnits } from "@crewtavo/core/money";
 import { useEffect, useState } from "react";
+
+/**
+ * What was typed in a MoneyInput, read as written and rounded to cents, or for a percent to
+ * 0.0001% (the precision tax rates are kept to, so 8.875 stays 8.875). Null when it isn't valid.
+ */
+export function readAmount(draft: string, { percent, max }: { percent?: boolean; max?: number } = {}): number | null {
+  const n = Number(draft);
+  if (draft.trim() === "" || !Number.isFinite(n) || n < 0 || (max !== undefined && n > max)) return null;
+  const decimals = percent ? 4 : 2;
+  return Number(toUnits(draft, decimals)) / 10 ** decimals;
+}
 
 /** Dollar or percent field that saves on blur or Enter and rejects bad values. */
 export function MoneyInput({ value, onSave, percent, max, width = 120, label }: { value: number; onSave: (v: number) => void; percent?: boolean; max?: number; width?: number; label?: string }) {
@@ -6,14 +18,13 @@ export function MoneyInput({ value, onSave, percent, max, width = 120, label }: 
   const [error, setError] = useState(false);
   useEffect(() => setDraft(String(value)), [value]);
   const commit = () => {
-    const n = Number(draft);
-    if (draft.trim() === "" || !Number.isFinite(n) || n < 0 || (max !== undefined && n > max)) {
+    const rounded = readAmount(draft, { percent, max });
+    if (rounded === null) {
       setError(true);
       setDraft(String(value));
       setTimeout(() => setError(false), 1500);
       return;
     }
-    const rounded = Math.round(n * 100) / 100;
     if (rounded !== value) onSave(rounded);
   };
   return (
