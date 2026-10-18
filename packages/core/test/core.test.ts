@@ -240,6 +240,12 @@ describe("recurrence", () => {
     expect(occurrenceDates(job, "2026-01-20", "2026-12-31")).toEqual(["2026-01-20", "2026-01-27"]);
   });
 
+  it("lists no dates for COUNT=0, as rrule does", () => {
+    // 0 isn't "no limit": that's a rule without COUNT.
+    expect(occurrenceDates({ starts_on: "2026-01-06", recurrence_rule: "FREQ=WEEKLY;COUNT=0;BYDAY=TU" }, "2026-01-01", "2026-12-31")).toEqual([]);
+    expect(occurrenceDates({ starts_on: "2026-01-06", recurrence_rule: "FREQ=DAILY;COUNT=0" }, "2026-03-01", "2026-03-31")).toEqual([]);
+  });
+
   it("lists the same dates as rrule", () => {
     const rules = [
       "FREQ=DAILY", "FREQ=DAILY;INTERVAL=3", "FREQ=DAILY;BYDAY=MO,WE,FR", "FREQ=DAILY;INTERVAL=2;BYMONTH=3,4",
@@ -248,7 +254,7 @@ describe("recurrence", () => {
       "FREQ=MONTHLY;BYDAY=1MO", "FREQ=MONTHLY;BYDAY=-1FR", "FREQ=MONTHLY;INTERVAL=3;BYDAY=2TU,4TU", "FREQ=MONTHLY;BYDAY=MO,TU;BYMONTHDAY=1,2,3",
       "FREQ=MONTHLY;BYDAY=5SA", "FREQ=YEARLY", "FREQ=YEARLY;BYMONTH=3,9;BYDAY=1SA", "FREQ=YEARLY;BYDAY=20MO", "FREQ=YEARLY;BYDAY=-1SU",
       "FREQ=YEARLY;INTERVAL=2;BYMONTH=6;BYMONTHDAY=1,15", "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29", "FREQ=YEARLY;BYMONTH=4", "FREQ=WEEKLY;COUNT=10;BYDAY=TU,FR",
-      "FREQ=MONTHLY;COUNT=5;BYMONTHDAY=31", "FREQ=DAILY;INTERVAL=5;UNTIL=20261115T000000Z",
+      "FREQ=MONTHLY;COUNT=5;BYMONTHDAY=31", "FREQ=DAILY;INTERVAL=5;UNTIL=20261115T000000Z", "FREQ=WEEKLY;COUNT=0;BYDAY=MO",
     ];
     const iso = (d: Date) => d.toISOString().slice(0, 10);
     for (const starts_on of ["2024-02-29", "2025-12-31", "2026-01-31", "2026-03-08"]) {
