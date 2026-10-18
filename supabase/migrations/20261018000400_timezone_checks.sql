@@ -4,9 +4,13 @@
 -- zone in one statement, so one unknown zone stopped overdue invoices, visit reminders, equipment
 -- alerts and clocks for every company.
 
+-- pg_timezone_names also lists Factory (and posixrules on some servers), which aren't places' zones:
+-- browsers and Node refuse them, so every page and task showing the company's times would fail.
+-- Neither counts as a zone name here.
+
 -- Existing values that aren't zone names: a name in other capitals becomes that name, and anything
 -- else (an offset, a typo) becomes UTC. The owner can pick the right zone again in Settings.
-with zones as materialized (select name from pg_catalog.pg_timezone_names)
+with zones as materialized (select name from pg_catalog.pg_timezone_names where name not in ('Factory', 'posixrules'))
 update public.companies c
 set timezone = coalesce((select z.name from zones z where lower(z.name) = lower(btrim(c.timezone)) limit 1), 'UTC')
 where c.timezone not in (select name from zones);
@@ -17,7 +21,7 @@ begin
   if tg_op = 'UPDATE' and new.timezone = old.timezone then
     return new;
   end if;
-  if not exists (select 1 from pg_catalog.pg_timezone_names where name = new.timezone) then
+  if not exists (select 1 from pg_catalog.pg_timezone_names where name = new.timezone and name not in ('Factory', 'posixrules')) then
     raise exception 'Unknown time zone "%". Pick one from the list, like America/New_York', new.timezone using errcode = '22023';
   end if;
   return new;
