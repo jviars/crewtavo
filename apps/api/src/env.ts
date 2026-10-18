@@ -35,6 +35,8 @@ export interface Env {
    */
   CREWTAVO_GATEWAY?: string;
   CREWTAVO_SINGLE_COMPANY?: string;
+  /** "1" on the public demo: every visitor gets their own sample company (services/demo.ts). */
+  CREWTAVO_DEMO?: string;
   /** Shared secret for /api/cron/* (run a background task by hand, as a bearer token). */
   CRON_SECRET?: string;
   /**

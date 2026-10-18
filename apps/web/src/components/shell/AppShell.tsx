@@ -10,6 +10,7 @@ import { CommandPalette, openPalette } from "./CommandPalette";
 import { MOBILE_TABS, NAV_GROUPS, navVisible, SETTINGS_ITEM, type NavItem } from "./nav";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
+import { DemoBar } from "@/features/demo/Demo";
 
 export function initials(name: string | null | undefined) {
   return (name || "?")
@@ -130,6 +131,7 @@ export function AppShell() {
       </aside>
 
       <div className="main">
+        {session.config.demo && <DemoBar />}
         <header className="topbar" data-scrolled={scrolled || undefined}>
           <div className="business">
             <span className="business-tile" aria-hidden="true">{initials(session.company.name)}</span>

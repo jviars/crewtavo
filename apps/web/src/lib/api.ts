@@ -16,6 +16,8 @@ export interface AppConfig {
   supabaseKey: string;
   /** One business per instance: no sign-up; the first person to open it creates the owner account. */
   singleCompany?: boolean;
+  /** The public demo: no sign-in; each visitor gets their own sample company (features/demo). */
+  demo?: boolean;
   /** Where the instance runs: on Railway, setup offers to connect it (features/setup/RailwaySetupPage). */
   platform?: "railway" | "compose" | "server";
   mapsBrowserKey: string | null;

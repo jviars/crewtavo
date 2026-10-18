@@ -15,6 +15,7 @@ import { ErrorState } from "@/components/ui/States";
 import { LoginPage, SetPasswordPage } from "@/features/auth/LoginPage";
 import { OnboardingPage } from "@/features/auth/OnboardingPage";
 import { FirstRun, SetupGate } from "@/features/setup/SetupPage";
+import { DemoStart } from "@/features/demo/Demo";
 import { registerFieldActions } from "@/features/field/fieldActions";
 import { TermsPage } from "@/features/legal/License";
 import { RailwaySetupPage } from "@/features/setup/RailwaySetupPage";
@@ -292,6 +293,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   }
   if (!config.data || auth === undefined) return <ShellSkeleton />;
   if (!auth) {
+    if (config.data.demo) return <DemoStart />;
     // A one-business instance: setup steps, or the owner's first account, before the sign-in page.
     return config.data.singleCompany ? <FirstRun><LoginPage notice={linkProblem} /></FirstRun> : <LoginPage notice={linkProblem} />;
   }

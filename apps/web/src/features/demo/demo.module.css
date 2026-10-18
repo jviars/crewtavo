@@ -1,0 +1,22 @@
+.tag {
+  justify-self: start; display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px;
+  background: var(--green-tint); color: var(--green-dark); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.points { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.points li { display: flex; gap: 8px; align-items: flex-start; }
+.points li svg { margin-top: 2px; flex: none; color: var(--green-dark); }
+
+.bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px;
+  padding: 8px max(24px, env(safe-area-inset-right)) 8px 40px; background: var(--green-tint); border-bottom: 1px solid var(--green-tint-2);
+  font-size: 13px; color: var(--ink);
+}
+.label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.label .tag { background: var(--green-solid); color: #fff; flex: none; }
+.note { color: var(--text-3); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+@media (max-width: 760px) {
+  .bar { padding: 8px max(12px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); }
+  .note { display: none; }
+}

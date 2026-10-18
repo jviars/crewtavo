@@ -15,6 +15,7 @@ import { address, addressWellKnown } from "./routes/address";
 import { apps } from "./routes/apps";
 import { automations } from "./routes/automations";
 import { calendar } from "./routes/calendar";
+import { demo } from "./routes/demo";
 import { email } from "./routes/email";
 import { marketing } from "./routes/marketing";
 import { messages } from "./routes/messages";
@@ -53,6 +54,7 @@ app.route("/api", email);
 app.route("/api", push);
 app.route("/api", address);
 app.route("/api", railway);
+app.route("/api", demo);
 app.route("/", addressWellKnown);
 app.route("/", mcp);
 

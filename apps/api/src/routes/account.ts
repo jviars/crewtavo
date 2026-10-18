@@ -23,6 +23,8 @@ account.get("/config", (c) =>
       supabaseUrl: c.env.CREWTAVO_GATEWAY ? "" : c.env.SUPABASE_URL,
       supabaseKey: publishableKey(c.env),
       singleCompany: c.env.CREWTAVO_SINGLE_COMPANY === "1",
+      // The public demo: no sign-in, each visitor gets a sample company (services/demo.ts).
+      demo: c.env.CREWTAVO_DEMO === "1",
       // Where the instance runs (railway, compose or server), for setup steps that depend on it.
       platform: platformOf(c.env),
       // The Crewtavo License version that setting up a business agrees to (packages/core/src/terms.ts).
@@ -168,7 +170,7 @@ account.post("/terms", requireUser, requireCompany(ADMINS), async (c) => {
 });
 
 /** Load a trade preset into a new company. Runs as the new owner, so RLS still applies. */
-async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
+export async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
   const formulas = new Map(preset.formulas.map((f) => [f.name, f]));
   const steps = [
     db.from("services").insert(
