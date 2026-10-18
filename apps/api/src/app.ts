@@ -20,6 +20,7 @@ import { marketing } from "./routes/marketing";
 import { messages } from "./routes/messages";
 import { publicRoutes } from "./routes/public";
 import { push } from "./routes/push";
+import { railway } from "./routes/railway";
 import { sales } from "./routes/sales";
 import { schedule } from "./routes/schedule";
 import { setup } from "./routes/setup";
@@ -51,6 +52,7 @@ app.route("/api", calendar);
 app.route("/api", email);
 app.route("/api", push);
 app.route("/api", address);
+app.route("/api", railway);
 app.route("/", addressWellKnown);
 app.route("/", mcp);
 

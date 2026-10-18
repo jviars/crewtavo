@@ -209,8 +209,8 @@ interface RailwayDomain {
   status: RailwayDomainStatus;
 }
 
-/** Adds the domain to the crewtavo service, or finds it when the owner already added it by hand. */
-export async function addCustomDomain(env: Env, access: RailwayAccess, domain: string): Promise<RailwayDomain> {
+/** The custom domains on the crewtavo service: added by hand, by Crewtavo, or bought from Railway there. */
+export async function serviceDomains(env: Env, access: RailwayAccess): Promise<RailwayDomain[]> {
   const { projectId, environmentId, serviceId } = ids(env);
   const { domains } = await gql<{ domains: { customDomains: RailwayDomain[] } }>(
     access,
@@ -219,8 +219,14 @@ export async function addCustomDomain(env: Env, access: RailwayAccess, domain: s
     }`,
     { projectId, environmentId, serviceId },
   );
-  const existing = domains.customDomains.find((d) => d.domain === domain);
-  if (existing) return existing;
+  return domains.customDomains;
+}
+
+/** Adds the domain to the crewtavo service, or finds it there (`added` false) when it already is. */
+export async function addCustomDomain(env: Env, access: RailwayAccess, domain: string): Promise<RailwayDomain & { added: boolean }> {
+  const { projectId, environmentId, serviceId } = ids(env);
+  const existing = (await serviceDomains(env, access)).find((d) => d.domain === domain);
+  if (existing) return { ...existing, added: false };
   const { customDomainAvailable } = await gql<{ customDomainAvailable: { available: boolean; message: string | null } }>(
     access,
     "query ($domain: String!) { customDomainAvailable(domain: $domain) { available message } }",
@@ -238,7 +244,7 @@ export async function addCustomDomain(env: Env, access: RailwayAccess, domain: s
     }
     throw error;
   });
-  return customDomainCreate;
+  return { ...customDomainCreate, added: true };
 }
 
 export async function customDomainStatus(env: Env, access: RailwayAccess, id: string): Promise<RailwayDomain> {

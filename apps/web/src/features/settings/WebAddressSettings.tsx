@@ -22,7 +22,7 @@ import { copyText } from "@/lib/clipboard";
 import { toast } from "@/lib/toast";
 import styles from "./WebAddressSettings.module.css";
 
-const KEY = ["web-address"];
+export const WEB_ADDRESS_KEY = ["web-address"];
 
 const bare = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 const recordsIn = (change: AddressChange) => change.records.length > 0 && change.records.every((r) => r.status === "ok");
@@ -34,7 +34,7 @@ const knownProvider = (id: string | null): DnsProvider | null => {
 
 export function WebAddressSettings() {
   const overview = useQuery({
-    queryKey: KEY,
+    queryKey: WEB_ADDRESS_KEY,
     queryFn: () => api.get<AddressOverview>("/address"),
     staleTime: 5_000,
     // While records go in and Crewtavo switches over, keep checking so the page moves on by itself.
@@ -68,7 +68,7 @@ const RETURNS: Record<string, string> = {
 };
 
 /** Back from Railway's consent screen (?railway=connected, expired, cancelled or error): say how it went, then tidy the address bar. */
-function useRailwayReturn() {
+export function useRailwayReturn() {
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
   const result = params.get("railway");
@@ -76,7 +76,7 @@ function useRailwayReturn() {
     if (!result) return;
     if (result === "connected") toast.success("Connected to Railway", { description: "Crewtavo is adding your address there now." });
     else toast.error(RETURNS[result] ?? RETURNS.error!);
-    queryClient.invalidateQueries({ queryKey: KEY });
+    queryClient.invalidateQueries({ queryKey: WEB_ADDRESS_KEY });
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -91,7 +91,7 @@ function useRailwayReturn() {
 /** An action that answers with the overview: the screen moves on to it. */
 function useAddressAction<V = void>(action: (variables: V) => Promise<AddressOverview>, meta: { inline?: boolean; success?: string } = {}) {
   const queryClient = useQueryClient();
-  return useMutation({ meta, mutationFn: action, onSuccess: (next) => queryClient.setQueryData(KEY, next) });
+  return useMutation({ meta, mutationFn: action, onSuccess: (next) => queryClient.setQueryData(WEB_ADDRESS_KEY, next) });
 }
 
 function CurrentAddress({ overview, onChange }: { overview: AddressOverview; onChange: () => void }) {
@@ -110,11 +110,92 @@ function CurrentAddress({ overview, onChange }: { overview: AddressOverview; onC
         </div>
       </section>
       <RailwayAccess overview={overview} />
+      <RailwayConnection overview={overview} />
+      <RailwayDomains overview={overview} />
     </>
   );
 }
 
-function ChooseAddress({ overview, onDone }: { overview: AddressOverview; onDone: () => void }) {
+/** On Railway without access yet: connecting lets Crewtavo do the Railway steps itself. */
+function RailwayConnection({ overview }: { overview: AddressOverview }) {
+  const railway = overview.railway;
+  if (overview.platform !== "railway" || !railway || railway.connected) return null;
+  return (
+    <section className="card card-pad stack-sm">
+      <strong style={{ fontSize: 16 }}>Connect Railway</strong>
+      <span className="muted">With access to your Railway project, Crewtavo adds your address there and switches over by itself. It can also use a domain you buy on Railway, with nothing to set up.</span>
+      {railway.error && <Problem title="Railway isn't connected">{railway.error}</Problem>}
+      {railway.oauth ? <ConnectRailway returnTo="settings" projectName={railway.projectName} /> : <RailwayTokenForm tokensUrl={railway.tokensUrl} />}
+    </section>
+  );
+}
+
+/** Log in with Railway: Railway's consent screen, then back to Settings or the setup step. */
+export function ConnectRailway({ returnTo, projectName, label = "Log in with Railway" }: { returnTo: "setup" | "settings"; projectName: string | null; label?: string }) {
+  const queryClient = useQueryClient();
+  const connect = useMutation({
+    meta: { inline: true },
+    mutationFn: () => api.post<{ authorization_url: string }>("/railway/connect", { return_to: returnTo }),
+    onSuccess: (r) => window.location.assign(r.authorization_url),
+    // Railway may have refused to register this instance; the overview then offers the token instead.
+    onError: () => queryClient.invalidateQueries({ queryKey: WEB_ADDRESS_KEY }),
+  });
+  return (
+    <div className="stack-sm">
+      <div className="row wrap">
+        <Button variant="primary" icon="arrowRight" loading={connect.isPending || connect.isSuccess} onClick={() => connect.mutate()}>{label}</Button>
+      </div>
+      <span className="muted small">On Railway's screen, choose {projectName ? <strong>{projectName}</strong> : "this project"} and press Allow.</span>
+      <FormError error={connect.error} />
+    </div>
+  );
+}
+
+/**
+ * Domains already on the crewtavo service in Railway, such as one just bought there. Railway runs
+ * their DNS, so switching to one needs no records at all.
+ */
+export function RailwayDomains({ overview, buying = false }: { overview: AddressOverview; buying?: boolean }) {
+  const queryClient = useQueryClient();
+  const use = useMutation({
+    meta: { inline: true },
+    mutationFn: (domain: string) => api.post<AddressOverview>("/address/start", { domain }),
+    onSuccess: (next) => queryClient.setQueryData(WEB_ADDRESS_KEY, next),
+  });
+  const railway = overview.railway;
+  if (!railway?.connected) return null;
+  return (
+    <section className="card card-pad stack-sm" aria-labelledby="railway-domains-title">
+      <strong id="railway-domains-title" style={{ fontSize: 16 }}>Domains on Railway</strong>
+      {railway.domains.length > 0 ? (
+        <ul className={styles.records}>
+          {railway.domains.map((d) => (
+            <li key={d.domain} className={`row-between wrap ${styles.record}`}>
+              <span className="stack-sm" style={{ gap: 2, minWidth: 0 }}>
+                <strong style={{ overflowWrap: "anywhere" }}>{d.domain}</strong>
+                <span className="muted small">{d.verified && d.certificate === "issued" ? "Ready to use" : "Railway is still setting it up. You can choose it now."}</span>
+              </span>
+              <Button size="sm" variant="primary" loading={use.isPending && use.variables === d.domain} onClick={() => use.mutate(d.domain)}>Use this domain</Button>
+            </li>
+          ))}
+        </ul>
+      ) : buying ? (
+        <span className="row muted"><Spinner size={14} />Waiting for your new domain. It shows here a minute or so after you buy it.</span>
+      ) : (
+        <span className="muted">Need a domain? Buy one on Railway and it shows here. Railway sets it up, so there's nothing to add.</span>
+      )}
+      {!buying && railway.settingsUrl && (
+        <div className="stack-sm">
+          <ExternalButton href={railway.settingsUrl}>Buy a domain on Railway</ExternalButton>
+          <span className="muted small">On the crewtavo service's Settings, under Networking, press Buy a Domain.</span>
+        </div>
+      )}
+      <FormError error={use.error} />
+    </section>
+  );
+}
+
+export function ChooseAddress({ overview, onDone }: { overview: AddressOverview; onDone: () => void }) {
   const queryClient = useQueryClient();
   const currentDomain = normalizeDomain(overview.current ?? "");
   const [text, setText] = useState(overview.suggestion && overview.suggestion !== currentDomain ? overview.suggestion : "");
@@ -145,7 +226,7 @@ function ChooseAddress({ overview, onDone }: { overview: AddressOverview; onDone
     meta: { inline: true },
     mutationFn: () => api.post<AddressOverview>("/address/start", { domain }),
     onSuccess: (next) => {
-      queryClient.setQueryData(KEY, next);
+      queryClient.setQueryData(WEB_ADDRESS_KEY, next);
       onDone();
     },
   });
@@ -192,7 +273,7 @@ function ChooseAddress({ overview, onDone }: { overview: AddressOverview; onDone
   );
 }
 
-function Waiting({ overview, change, checking, onCheck }: { overview: AddressOverview; change: AddressChange; checking: boolean; onCheck: () => void }) {
+export function Waiting({ overview, change, checking, onCheck }: { overview: AddressOverview; change: AddressChange; checking: boolean; onCheck: () => void }) {
   const lastStep = !change.automatic && change.reachable && !change.live;
   return (
     <>
@@ -312,17 +393,9 @@ function ServerAppUrl({ domain }: { domain: string }) {
 
 /** Railway has to know the address: Crewtavo adds it with Railway access, or the owner does it by hand. */
 function RailwayStep({ overview, domain }: { overview: AddressOverview; domain: string }) {
-  const queryClient = useQueryClient();
   const railway = overview.railway;
   const oauth = Boolean(railway?.oauth);
   const [pasting, setPasting] = useState(false);
-  const connect = useMutation({
-    meta: { inline: true },
-    mutationFn: () => api.post<{ authorization_url: string }>("/address/railway/connect"),
-    onSuccess: (r) => window.location.assign(r.authorization_url),
-    // Railway may have refused to register this instance; the overview then offers the token instead.
-    onError: () => queryClient.invalidateQueries({ queryKey: KEY }),
-  });
 
   return (
     <section className="card card-pad stack" aria-labelledby="railway-title">
@@ -337,11 +410,8 @@ function RailwayStep({ overview, domain }: { overview: AddressOverview; domain: 
         <RailwayTokenForm tokensUrl={railway?.tokensUrl ?? null} onLogin={oauth ? () => setPasting(false) : undefined} />
       ) : (
         <div className="stack-sm">
-          <div className="row wrap">
-            <Button variant="primary" icon="arrowRight" loading={connect.isPending || connect.isSuccess} onClick={() => connect.mutate()}>Log in with Railway</Button>
-          </div>
+          <ConnectRailway returnTo="settings" projectName={railway?.projectName ?? null} />
           <span className="muted small">Recommended. Crewtavo adds the address in Railway for you, then switches over by itself once it works.</span>
-          <FormError error={connect.error} />
           <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => setPasting(true)}>Or paste a Railway token instead</button>
         </div>
       )}
@@ -369,9 +439,9 @@ function RailwayStep({ overview, domain }: { overview: AddressOverview; domain: 
   );
 }
 
-function RailwayTokenForm({ tokensUrl, onLogin }: { tokensUrl: string | null; onLogin?: () => void }) {
+export function RailwayTokenForm({ tokensUrl, onLogin }: { tokensUrl: string | null; onLogin?: () => void }) {
   const [token, setToken] = useState("");
-  const save = useAddressAction((value: string) => api.post<AddressOverview>("/address/railway/token", { token: value }), { inline: true, success: "Connected to Railway" });
+  const save = useAddressAction((value: string) => api.post<AddressOverview>("/railway/token", { token: value }), { inline: true, success: "Connected to Railway" });
   return (
     <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (token.trim()) save.mutate(token.trim()); }}>
       <span className="muted small">With a project token, Crewtavo adds the address in Railway for you, then switches over by itself once it works.</span>
@@ -501,7 +571,7 @@ function CloudflareAdd({ onAdded }: { onAdded: (count: number) => void }) {
     mutationFn: () => api.post<{ added: number; overview: AddressOverview }>("/address/cloudflare", { token: token.trim() }),
     onSuccess: (r) => {
       setToken("");
-      queryClient.setQueryData(KEY, r.overview);
+      queryClient.setQueryData(WEB_ADDRESS_KEY, r.overview);
       onAdded(r.added);
     },
   });
@@ -549,7 +619,7 @@ function ServerSteps({ domain }: { domain: string }) {
   );
 }
 
-function Switching({ change }: { change: AddressChange }) {
+export function Switching({ change }: { change: AddressChange }) {
   const url = addressUrl(change.domain);
   return (
     <section className="card card-pad stack" style={{ justifyItems: "center", textAlign: "center" }} aria-live="polite">
@@ -564,7 +634,7 @@ function Switching({ change }: { change: AddressChange }) {
   );
 }
 
-function Done({ overview, change, onChange }: { overview: AddressOverview; change: AddressChange; onChange: () => void }) {
+export function Done({ overview, change, onChange }: { overview: AddressOverview; change: AddressChange; onChange: () => void }) {
   const url = addressUrl(change.domain);
   return (
     <>
@@ -586,11 +656,12 @@ function Done({ overview, change, onChange }: { overview: AddressOverview; chang
         </ul>
       </section>
       <RailwayAccess overview={overview} />
+      {overview.railway?.domains.length ? <RailwayDomains overview={overview} /> : null}
     </>
   );
 }
 
-function Failed({ overview, change }: { overview: AddressOverview; change: AddressChange }) {
+export function Failed({ overview, change }: { overview: AddressOverview; change: AddressChange }) {
   const finish = useAddressAction(() => api.post<AddressOverview>("/address/finish"), { inline: true });
   return (
     <>
@@ -622,7 +693,7 @@ function StopButton({ overview, domain }: { overview: AddressOverview; domain: s
 
 /** Crewtavo holds Railway access: say so, and let the owner take it back. */
 function RailwayAccess({ overview }: { overview: AddressOverview }) {
-  const forget = useAddressAction(() => api.delete<AddressOverview>("/address/railway"), { success: "Railway access removed" });
+  const forget = useAddressAction(() => api.delete<AddressOverview>("/railway"), { success: "Railway access removed" });
   if (!overview.railway?.connected) return null;
   const busy = overview.change?.status === "waiting" || overview.change?.status === "switching";
   const ask = async () => {

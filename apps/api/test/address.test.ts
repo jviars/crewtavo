@@ -8,10 +8,11 @@ import type { Env } from "../src/env";
 import { addCloudflareRecords } from "../src/integrations/cloudflare";
 import { certificateOf, railwayRecords, registerClient, type RailwayDomainStatus } from "../src/integrations/railway";
 import { forgetAddressHistory, forwardTo } from "../src/lib/address";
-import { encryptJson, instanceFingerprint } from "../src/lib/crypto";
+import { decryptJson, encryptJson, instanceFingerprint, signToken } from "../src/lib/crypto";
 import { checkRecord, findZone, type Lookup } from "../src/lib/dns";
 import { twilioSignature } from "../src/routes/messages";
-import { runAddressTask, useLookup } from "../src/services/address";
+import { addressOverview, runAddressTask, useLookup } from "../src/services/address";
+import { keepRailwayAlive, KEEP_ALIVE_MS, setRailwaySetup } from "../src/services/railway";
 import { adminClient } from "../src/lib/supabase";
 
 const env: Env = {
@@ -125,9 +126,9 @@ describe("Railway", () => {
 
   it("registers this instance as its own OAuth client, and says so plainly when Railway won't", async () => {
     const calls = serve(() => Response.json({ client_id: "cid", client_secret: "sec", registration_access_token: "rat", registration_client_uri: "https://backboard.railway.com/oauth/register/cid" }, { status: 201 }));
-    const client = await registerClient("https://x.up.railway.app/api/address/railway/callback", "Crewtavo for Green Lawn");
-    expect(client).toMatchObject({ client_id: "cid", client_secret: "sec", redirect_uri: "https://x.up.railway.app/api/address/railway/callback" });
-    expect(calls[0]!.body).toMatchObject({ redirect_uris: ["https://x.up.railway.app/api/address/railway/callback"], scope: "openid project:member offline_access" });
+    const client = await registerClient("https://x.up.railway.app/api/railway/callback", "Crewtavo for Green Lawn");
+    expect(client).toMatchObject({ client_id: "cid", client_secret: "sec", redirect_uri: "https://x.up.railway.app/api/railway/callback" });
+    expect(calls[0]!.body).toMatchObject({ redirect_uris: ["https://x.up.railway.app/api/railway/callback"], scope: "openid project:member offline_access" });
 
     serve(() => Response.json({ error: "invalid_client_metadata", error_description: "registration closed" }, { status: 400 }));
     await expect(registerClient("https://x.up.railway.app/cb", "Crewtavo")).rejects.toThrow("Use a project token instead");
@@ -149,6 +150,7 @@ describe("the switch-over task", () => {
     const calls = serve((call) => {
       if (call.path === "web_address" && call.method === "GET") return [waiting];
       if (call.path === "integration_secrets") return [{ ciphertext: secret }];
+      if (call.path === "integrations") return [{ status: "connected" }];
       if (call.url.pathname === "/.well-known/crewtavo-instance") return { instance: fingerprint };
       if (call.url.host === "backboard.railway.com") {
         const q = call.body.query as string;
@@ -170,7 +172,7 @@ describe("the switch-over task", () => {
     expect(calls.filter((c) => c.url.host === "backboard.railway.com").every((c) => c.projectToken === "project-token")).toBe(true);
   });
 
-  it("finishes when Crewtavo starts with the new address: tells the admins and forgets Railway", async () => {
+  it("finishes when Crewtavo starts with the new address: tells the admins and keeps Railway connected", async () => {
     const calls = serve((call) => {
       if (call.path === "web_address" && call.method === "GET") return [{ ...waiting, status: "switching", switching_at: "2026-10-18T10:30:00Z" }];
       if (call.path === "web_address" && call.method === "PATCH") {
@@ -185,7 +187,7 @@ describe("the switch-over task", () => {
     const done = calls.find((c) => c.path === "web_address" && c.method === "PATCH")!;
     expect(done.body).toMatchObject({ status: "done", previous_urls: ["https://crewtavo-production.up.railway.app"] });
     expect(calls.find((c) => c.path === "notifications" && c.method === "POST")?.body).toHaveLength(2);
-    expect(calls.some((c) => c.path === "integrations" && c.method === "DELETE")).toBe(true);
+    expect(calls.some((c) => c.path === "integrations" && c.method === "DELETE")).toBe(false);
   });
 
   it("gives up on a switch that never came back", async () => {
@@ -291,8 +293,74 @@ describe("routes", () => {
   });
 
   it("come back from Railway with a code, never a message", async () => {
-    const res = await app.request("/api/address/railway/callback?state=forged&code=abc", {}, env);
+    const res = await app.request("/api/railway/callback?state=forged&code=abc", {}, env);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://app.greenlawn.com/settings?tab=address&railway=expired");
+  });
+
+  it("go back to setup when that's where the owner connected from", async () => {
+    const state = await signToken(env, { company: "co-1", user: "user-1", purpose: "railway", return_to: "setup", nonce: "n1", exp: Math.floor(Date.now() / 1000) + 600 });
+    const res = await app.request(`/api/railway/callback?state=${encodeURIComponent(state)}&error=access_denied`, { headers: { cookie: "crewtavo_railway=n1.verifier" } }, env);
+    expect(res.headers.get("location")).toBe("https://app.greenlawn.com/?railway=cancelled");
+  });
+
+  it("aren't there off Railway", async () => {
+    const res = await app.request("/api/railway/callback?state=x&code=abc", {}, { ...env, RAILWAY_PROJECT_ID: undefined, RAILWAY_PUBLIC_DOMAIN: undefined });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("the Railway connection", () => {
+  const oauth = (refreshedAt: number) =>
+    encryptJson(env, { access_token: "at", refresh_token: "rt-old", expires_at: Date.now() - 1, extra: { method: "oauth", client_id: "cid", client_secret: "sec", redirect_uri: "https://x/cb", refreshed_at: String(refreshedAt) } });
+
+  it("refreshes a sign-in that hasn't rotated in a month, and leaves fresh ones alone", async () => {
+    const stale = await oauth(Date.now() - KEEP_ALIVE_MS - 1000);
+    const fresh = await oauth(Date.now() - 1000);
+    const calls = serve((call) => {
+      if (call.path === "integrations") return [{ company_id: "co-stale" }, { company_id: "co-fresh" }];
+      if (call.path === "integration_secrets" && call.method === "GET") return [{ ciphertext: call.url.searchParams.get("company_id") === "eq.co-stale" ? stale : fresh }];
+      if (call.url.pathname === "/oauth/token") return { access_token: "at-new", refresh_token: "rt-new", expires_in: 3600 };
+      return [];
+    });
+    expect(await keepRailwayAlive(env, adminClient(env))).toEqual({ refreshed: 1, lapsed: 0 });
+    expect(calls.filter((c) => c.url.pathname === "/oauth/token")).toHaveLength(1);
+    const saved = calls.find((c) => c.path === "integration_secrets" && c.method === "POST")!;
+    expect(await decryptJson(env, saved.body.ciphertext)).toMatchObject({ access_token: "at-new", refresh_token: "rt-new" });
+  });
+
+  it("marks the connection lapsed when Railway refuses the refresh", async () => {
+    const stale = await oauth(0);
+    const calls = serve((call) => {
+      if (call.path === "integrations" && call.method === "GET") return [{ company_id: "co-1" }];
+      if (call.path === "integration_secrets") return [{ ciphertext: stale }];
+      if (call.url.pathname === "/oauth/token") return Response.json({ error: "invalid_grant" }, { status: 400 });
+      return [];
+    });
+    expect(await keepRailwayAlive(env, adminClient(env))).toEqual({ refreshed: 0, lapsed: 1 });
+    expect(calls.find((c) => c.path === "integrations" && c.method === "PATCH")?.body).toMatchObject({ status: "error", last_error: expect.stringContaining("Connect Railway again") });
+  });
+
+  it("marks the setup step without losing the business's other settings", async () => {
+    const calls = serve((call) => (call.path === "companies" && call.method === "GET" ? [{ settings: { payment_terms_days: 30 } }] : []));
+    await setRailwaySetup(adminClient(env), "co-1", "pending");
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ settings: { payment_terms_days: 30, railway_setup: "pending" } });
+  });
+
+  it("offers domains already on Railway, but not the one in use", async () => {
+    const secret = await encryptJson(env, { api_key: "project-token", extra: { method: "token" } });
+    serve((call) => {
+      if (call.path === "web_address") return [];
+      if (call.path === "companies") return [{ website: null, email: null }];
+      if (call.path === "integrations") return [{ status: "connected", settings: {}, last_error: null }];
+      if (call.path === "integration_secrets") return [{ ciphertext: secret }];
+      if (call.url.host === "backboard.railway.com") {
+        const custom = (domain: string, verified: boolean) => ({ id: domain, domain, status: { ...readyStatus, verified } });
+        return { data: { domains: { customDomains: [custom("app.greenlawn.com", true), custom("greenlawnco.com", true)] } } };
+      }
+      return [];
+    });
+    const overview = await addressOverview(env, adminClient(env), "co-domains");
+    expect(overview.railway).toMatchObject({ connected: true, domains: [{ domain: "greenlawnco.com", verified: true, certificate: "issued" }] });
   });
 });

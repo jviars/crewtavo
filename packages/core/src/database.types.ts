@@ -1640,14 +1640,14 @@ isOneToOne: false
                   ]
                 },"web_address": {
                   Row: {
-                    "automatic": boolean,"certificate": string | null,"company_id": string,"domain": string,"error": string | null,"finished_at": string | null,"from_url": string | null,"previous_urls": (string)[],"railway_domain_id": string | null,"records": NonNullable<Json>,"started_at": string,"started_by": string | null,"status": string,"switching_at": string | null,"updated_at": string
+                    "automatic": boolean,"certificate": string | null,"company_id": string,"domain": string,"error": string | null,"finished_at": string | null,"from_url": string | null,"previous_urls": (string)[],"railway_domain_added": boolean,"railway_domain_id": string | null,"records": NonNullable<Json>,"started_at": string,"started_by": string | null,"status": string,"switching_at": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "automatic"?: boolean,"certificate"?: string | null,"company_id": string,"domain": string,"error"?: string | null,"finished_at"?: string | null,"from_url"?: string | null,"previous_urls"?: (string)[],"railway_domain_id"?: string | null,"records"?: NonNullable<Json>,"started_at"?: string,"started_by"?: string | null,"status"?: string,"switching_at"?: string | null,"updated_at"?: string
+                    "automatic"?: boolean,"certificate"?: string | null,"company_id": string,"domain": string,"error"?: string | null,"finished_at"?: string | null,"from_url"?: string | null,"previous_urls"?: (string)[],"railway_domain_added"?: boolean,"railway_domain_id"?: string | null,"records"?: NonNullable<Json>,"started_at"?: string,"started_by"?: string | null,"status"?: string,"switching_at"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "automatic"?: boolean,"certificate"?: string | null,"company_id"?: string,"domain"?: string,"error"?: string | null,"finished_at"?: string | null,"from_url"?: string | null,"previous_urls"?: (string)[],"railway_domain_id"?: string | null,"records"?: NonNullable<Json>,"started_at"?: string,"started_by"?: string | null,"status"?: string,"switching_at"?: string | null,"updated_at"?: string
+                    "automatic"?: boolean,"certificate"?: string | null,"company_id"?: string,"domain"?: string,"error"?: string | null,"finished_at"?: string | null,"from_url"?: string | null,"previous_urls"?: (string)[],"railway_domain_added"?: boolean,"railway_domain_id"?: string | null,"records"?: NonNullable<Json>,"started_at"?: string,"started_by"?: string | null,"status"?: string,"switching_at"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {

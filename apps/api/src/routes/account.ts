@@ -3,6 +3,7 @@ import { ADMINS, getPreset, isRole, isTimeZoneName, memberPermissions, OFFICE, p
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
+import { platformOf } from "../lib/address";
 import { emailAuthLink, requireCompany, requireUser } from "../lib/auth";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { renderEmail } from "../lib/email";
@@ -10,6 +11,7 @@ import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
 import { clientIp } from "../lib/visitor";
+import { setRailwaySetup } from "../services/railway";
 
 export const account = new Hono<AppEnv>();
 
@@ -21,6 +23,8 @@ account.get("/config", (c) =>
       supabaseUrl: c.env.CREWTAVO_GATEWAY ? "" : c.env.SUPABASE_URL,
       supabaseKey: publishableKey(c.env),
       singleCompany: c.env.CREWTAVO_SINGLE_COMPANY === "1",
+      // Where the instance runs (railway, compose or server), for setup steps that depend on it.
+      platform: platformOf(c.env),
       // The Crewtavo License version that setting up a business agrees to (packages/core/src/terms.ts).
       termsVersion: TERMS_VERSION,
       mapsBrowserKey: c.env.GOOGLE_MAPS_BROWSER_KEY ?? null,
@@ -127,6 +131,8 @@ account.post("/companies", requireUser, async (c) => {
   });
   if (error) throw dbError(error);
   await applyPreset(db, companyId as string, preset);
+  // An instance on Railway: the next screen offers to connect Railway and set up a web address.
+  if (c.env.CREWTAVO_SINGLE_COMPANY === "1" && platformOf(c.env) === "railway") await setRailwaySetup(adminClient(c.env), companyId as string, "pending");
   // The business exists either way; if this fails, the owner is asked to agree again when it opens.
   const agreed = await db.rpc("accept_terms", { p_company: companyId as string, p_version: TERMS_VERSION });
   if (agreed.error) console.error("Couldn't record the license agreement", agreed.error.message);

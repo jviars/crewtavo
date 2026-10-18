@@ -57,12 +57,16 @@ instead of an error.
 > including $5 of usage) to keep it running. Busy instances use more; check
 > [Railway's pricing](https://railway.com/pricing) for current numbers.
 
-**Your own domain:** in Crewtavo, open **Settings → Web address**, type the address you want (like
-`app.yourbusiness.com`) and press **Log in with Railway**. Crewtavo adds the address in Railway and
-shows the two DNS records to add where your domain is managed. On Cloudflare, it can add them for
-you. It checks the records as they go in and switches over by itself once the new address works.
-Links already sent keep working, and the old address forwards to the new one. The screen also
-walks you through doing it by hand.
+**Your own domain:** right after you set up the business, Crewtavo offers to connect to Railway
+(you're still signed in there, so it's one press of **Allow**) and then to set up your web address:
+- **Need a domain?** Buy one on Railway. Railway sets it up, Crewtavo spots it and switches over,
+  and there's nothing to add.
+- **Have one already** (like `app.yourbusiness.com`)? Crewtavo adds it in Railway and shows the two
+  DNS records to add where your domain is managed. On Cloudflare, it can add them for you. It
+  checks the records as they go in and switches over by itself once the new address works.
+
+Links already sent keep working, and the old address forwards to the new one. Skip it, and
+**Settings → Web address** does the same later, including the steps by hand.
 
 **Email:** Railway blocks outgoing mail servers (SMTP) on its trial and Hobby plans, so on those
 plans Crewtavo sends email through [Resend](https://resend.com): create a free Resend account,

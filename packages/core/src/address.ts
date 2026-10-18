@@ -66,6 +66,11 @@ export interface AddressOverview {
     projectName: string | null;
     /** Why the last Railway sign-in didn't work, until one does. */
     error: string | null;
+    /**
+     * Domains on the crewtavo service in Railway that Crewtavo doesn't use yet, such as one just
+     * bought there: Railway runs their DNS, so switching needs no records. Empty unless connected.
+     */
+    domains: Array<{ domain: string; verified: boolean; certificate: "pending" | "issued" | "failed" }>;
   } | null;
   /** A likely address, from the company's website or email domain. */
   suggestion: string | null;

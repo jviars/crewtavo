@@ -39,22 +39,30 @@ of credit) is enough to try Crewtavo; to keep running, an instance needs Railway
 month, including $5 of usage). Use grows with data and traffic; check
 [Railway's pricing](https://railway.com/pricing).
 
-**Your own domain:** in Crewtavo, **Settings → Web address**. The owner types the address (like
-`app.yourbusiness.com`) and presses **Log in with Railway**. On Railway's consent screen they pick
-this project. Crewtavo then adds the address to the crewtavo service and shows the two DNS records
-Railway wants, with steps for the domain's DNS provider. On Cloudflare it can add them itself, from a
-token used once and never stored. Then it checks the records live. Once Railway has verified the
+**Your own domain:** right after setting up the business, the owner sees **Connect Crewtavo to
+Railway** (Login with Railway: they're still signed in after deploying, so they pick this project and
+press Allow), then **Your web address**:
+- **Get a new domain** opens Railway's Buy a Domain on the crewtavo service. Railway attaches it and
+  runs its DNS, and Crewtavo offers to switch to it as soon as it shows up on the service.
+- **Use a domain I already have** is the flow below.
+
+Both can be skipped. **Settings → Web address** does the same any time, and businesses set up before
+this see it only there. For a domain they already have, the owner types the address (like
+`app.yourbusiness.com`). With Railway connected, Crewtavo adds it to the crewtavo service and shows
+the two DNS records Railway wants, with steps for the domain's DNS provider. On Cloudflare it can add
+them itself, from a token used once and never stored. Then it checks the records live. Once Railway has verified the
 address and issued its certificate, and the address answers as this instance, Crewtavo does the rest:
 - sets `APP_URL`
 - redeploys `auth` and `crewtavo`
 - tells the admins
-- deletes its Railway access
 
 Pages on the old address forward to the new one. Client links, calendar feeds, the Twilio webhook and
 assistant connectors keep working on both addresses.
 
-Each instance registers its own client with Railway, so there's no shared app to run. If Railway won't
-register it, the screen asks for a project token instead. By hand, the steps are:
+Crewtavo keeps its Railway access afterwards, encrypted, so later features don't ask again. A daily
+task refreshes it before Railway's sign-in runs out, and **Remove access** in Settings → Web address
+ends it. Each instance registers its own client with Railway, so there's no shared app to run. If
+Railway won't register it, the screen asks for a project token instead. By hand, the steps are:
 1. In the crewtavo service, **Settings → Networking → Custom Domain**.
 2. Change its `APP_URL` variable to `https://your-domain`.
 3. Redeploy `crewtavo` and `auth`.

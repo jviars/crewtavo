@@ -39,18 +39,15 @@ import {
   certificateOf,
   crewtavoServiceId,
   customDomainStatus,
-  deleteClient,
   deleteCustomDomain,
   projectAccess,
   railwayRecords,
   redeploy,
-  refreshAccess,
-  registerClient,
+  serviceDomains,
   setVariable,
   type RailwayAccess,
-  type RailwayClient,
 } from "../integrations/railway";
-import { loadSecret, saveSecret, type StoredSecret } from "../integrations/tokens";
+import { railwayAccess, railwayState } from "./railway";
 
 type Row = Tables<"web_address">;
 type StoredRecord = WantedRecord & { ok?: boolean };
@@ -125,13 +122,36 @@ export async function addressOverview(env: Env, admin: Db, companyId: string): P
     admin.from("companies").select("website, email").eq("id", companyId).maybeSingle(),
     platformOf(env) === "railway" ? railwayState(env, admin, companyId) : Promise.resolve(null),
   ]);
+  const inUse = new Set([originOf(env.APP_URL), row && row.status !== "done" ? addressUrl(row.domain) : null]);
   return {
     current: originOf(env.APP_URL),
     platform: platformOf(env),
-    railway,
+    railway: railway && { ...railway, domains: railway.connected ? (await railwayDomains(env, admin, companyId)).filter((d) => !inUse.has(addressUrl(d.domain))) : [] },
     suggestion: suggestAddress(company.data?.website, company.data?.email),
     change: row ? await describeChange(env, row) : null,
   };
+}
+
+const domainCache = new Map<string, { at: number; domains: NonNullable<AddressOverview["railway"]>["domains"] }>();
+
+/**
+ * Domains already on the crewtavo service in Railway, such as one bought there: the owner can switch
+ * to one without adding any records. Cached briefly: the screen asks every few seconds while it
+ * waits for a purchase, and Railway's API allows about 1,000 requests an hour.
+ */
+async function railwayDomains(env: Env, admin: Db, companyId: string): Promise<NonNullable<AddressOverview["railway"]>["domains"]> {
+  const cached = domainCache.get(companyId);
+  if (cached && Date.now() - cached.at < 10_000) return cached.domains;
+  try {
+    const access = await railwayAccess(env, admin, companyId);
+    const found = access ? await serviceDomains(env, access) : [];
+    const domains = found.map((d) => ({ domain: d.domain, verified: d.status.verified, certificate: certificateOf(d.status) }));
+    domainCache.set(companyId, { at: Date.now(), domains });
+    return domains;
+  } catch (error) {
+    console.error("Couldn't list Railway's domains", failure(error));
+    return [];
+  }
 }
 
 async function describeChange(env: Env, row: Row): Promise<AddressChange> {
@@ -171,7 +191,7 @@ export async function startChange(env: Env, admin: Db, companyId: string, userId
   if (existing?.status === "switching") throw new HttpError(409, `Crewtavo is switching to ${existing.domain} right now. Wait a few minutes, then try again.`);
   const access = await railwayAccess(env, admin, companyId).catch(() => null);
   // An address set up earlier but never finished: take it back out of Railway.
-  if (existing && existing.status !== "done" && existing.railway_domain_id && existing.domain !== check.domain && access) {
+  if (existing && existing.status !== "done" && existing.railway_domain_id && existing.railway_domain_added && existing.domain !== check.domain && access) {
     await deleteCustomDomain(access, existing.railway_domain_id).catch(() => undefined);
   }
   const { error } = await admin.from("web_address").upsert({
@@ -180,6 +200,7 @@ export async function startChange(env: Env, admin: Db, companyId: string, userId
     status: "waiting",
     automatic: false,
     railway_domain_id: null,
+    railway_domain_added: false,
     records: asJson(expectedRecords(env, check.domain)),
     certificate: null,
     error: null,
@@ -192,7 +213,7 @@ export async function startChange(env: Env, admin: Db, companyId: string, userId
   });
   if (error) throw new HttpError(500, "Couldn't save the address. Try again.");
   forgetAddressHistory();
-  if (access) await attachToRailway(env, admin, companyId, access);
+  if (access) await adoptRailway(env, admin, companyId, access);
   return addressOverview(env, admin, companyId);
 }
 
@@ -211,7 +232,7 @@ export async function cancelChange(env: Env, admin: Db, companyId: string): Prom
   const row = await loadRow(admin, companyId);
   if (row?.status === "switching") throw new HttpError(409, `Crewtavo is switching to ${row.domain} right now. Wait a few minutes.`);
   if (row && row.status !== "done") {
-    if (row.railway_domain_id) {
+    if (row.railway_domain_id && row.railway_domain_added) {
       const access = await railwayAccess(env, admin, companyId).catch(() => null);
       if (access) await deleteCustomDomain(access, row.railway_domain_id).catch(() => undefined);
     }
@@ -219,7 +240,7 @@ export async function cancelChange(env: Env, admin: Db, companyId: string): Prom
     // An earlier switch stays on record, so its old addresses keep working.
     if (row.previous_urls.length && current) {
       await update(admin, companyId, {
-        domain: new URL(current).hostname, status: "done", automatic: false, railway_domain_id: null, records: asJson([]), certificate: null, error: null,
+        domain: new URL(current).hostname, status: "done", automatic: false, railway_domain_id: null, railway_domain_added: false, records: asJson([]), certificate: null, error: null,
         from_url: row.previous_urls.at(-1) ?? null, previous_urls: row.previous_urls,
       });
     } else {
@@ -227,11 +248,10 @@ export async function cancelChange(env: Env, admin: Db, companyId: string): Prom
       forgetAddressHistory();
     }
   }
-  await forgetRailway(env, admin, companyId);
   return addressOverview(env, admin, companyId);
 }
 
-/** The new address is live: record it, tell the team, and let go of Railway. Safe to call twice. */
+/** The new address is live: record it and tell the team. Safe to call twice. */
 async function markDone(env: Env, admin: Db, row: Row): Promise<Row> {
   const railwayOrigin = env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : null;
   const previous = unique([...row.previous_urls, row.from_url, railwayOrigin]).filter((u) => u !== addressUrl(row.domain));
@@ -245,7 +265,6 @@ async function markDone(env: Env, admin: Db, row: Row): Promise<Row> {
   forgetAddressHistory();
   if (error || !data) return (await loadRow(admin, row.company_id)) ?? row;
   await announce(env, admin, data).catch((e) => console.error("Couldn't announce the new address", failure(e)));
-  await forgetRailway(env, admin, row.company_id).catch(() => undefined);
   return data;
 }
 
@@ -274,8 +293,8 @@ async function announce(env: Env, admin: Db, row: Row) {
 // Railway: watching the address and switching over
 // ---------------------------------------------------------------------------------------------
 
-/** Puts a change into Railway's hands: adds the address there, and from then on Crewtavo finishes it. */
-async function attachToRailway(env: Env, admin: Db, companyId: string, access: RailwayAccess): Promise<void> {
+/** Puts a change into Railway's hands: adds the address there (or finds it), and from then on Crewtavo finishes it. */
+export async function adoptRailway(env: Env, admin: Db, companyId: string, access: RailwayAccess): Promise<void> {
   const row = await loadRow(admin, companyId);
   if (!row || row.status === "done" || row.status === "switching" || row.automatic) return;
   try {
@@ -285,6 +304,7 @@ async function attachToRailway(env: Env, admin: Db, companyId: string, access: R
       automatic: true,
       status: "waiting",
       railway_domain_id: added.id,
+      railway_domain_added: added.added,
       records: asJson(railwayRecords(row.domain, added.status, zone)),
       certificate: certificateOf(added.status),
       error: null,
@@ -303,7 +323,7 @@ async function refreshChange(env: Env, admin: Db, row: Row): Promise<"waiting" |
       return "waiting";
     }
     if (!row.railway_domain_id) {
-      await attachToRailway(env, admin, row.company_id, access);
+      await adoptRailway(env, admin, row.company_id, access);
       return "waiting";
     }
     const domain = await customDomainStatus(env, access, row.railway_domain_id);
@@ -358,112 +378,10 @@ export async function runAddressTask(env: Env, admin: Db): Promise<{ checked: nu
   return { checked: rows?.length ?? 0, switching, done };
 }
 
-// ---------------------------------------------------------------------------------------------
-// Railway access: kept encrypted only while a change is in progress
-// ---------------------------------------------------------------------------------------------
-
-const clientOf = (secret: StoredSecret | null): RailwayClient | null =>
-  secret?.extra?.client_id && secret.extra.client_secret && secret.extra.redirect_uri
-    ? {
-        client_id: secret.extra.client_id,
-        client_secret: secret.extra.client_secret,
-        redirect_uri: secret.extra.redirect_uri,
-        registration_access_token: secret.extra.registration_access_token,
-        registration_client_uri: secret.extra.registration_client_uri,
-      }
-    : null;
-
-async function railwayState(env: Env, admin: Db, companyId: string): Promise<NonNullable<AddressOverview["railway"]>> {
-  const [{ data: row }, secret] = await Promise.all([
-    admin.from("integrations").select("status, settings, last_error").match({ company_id: companyId, provider: "railway" }).maybeSingle(),
-    loadSecret(env, admin, companyId, "railway").catch(() => null),
-  ]);
-  const links = railwayLinks(env);
-  return {
-    connected: Boolean(row?.status === "connected" && (secret?.access_token || secret?.api_key)),
-    oauth: Boolean(links) && (row?.settings as { oauth_refused?: boolean } | null)?.oauth_refused !== true,
-    settingsUrl: links?.settingsUrl ?? null,
-    variablesUrl: links?.variablesUrl ?? null,
-    tokensUrl: links?.tokensUrl ?? null,
-    projectName: env.RAILWAY_PROJECT_NAME ?? null,
-    error: row && row.status !== "connected" ? row.last_error : null,
-  };
-}
-
-/** Keeps why a Railway sign-in failed, for the screen to show (never taken from the address bar). */
-export async function noteRailwayError(admin: Db, companyId: string, message: string): Promise<void> {
-  const { data: row } = await admin.from("integrations").select("status").match({ company_id: companyId, provider: "railway" }).maybeSingle();
-  if (row) await admin.from("integrations").update({ last_error: message }).match({ company_id: companyId, provider: "railway" });
-  else await admin.from("integrations").insert({ company_id: companyId, provider: "railway", status: "disconnected", last_error: message });
-}
-
-/** Usable Railway access for this company, refreshed when it's about to run out; null without any. */
-export async function railwayAccess(env: Env, admin: Db, companyId: string): Promise<RailwayAccess | null> {
-  const secret = await loadSecret(env, admin, companyId, "railway");
-  if (secret?.extra?.method === "token" && secret.api_key) return { method: "token", token: secret.api_key };
-  if (!secret?.access_token) return null;
-  const access: RailwayAccess = { method: "oauth", token: secret.access_token, refresh_token: secret.refresh_token, expires_at: secret.expires_at };
-  if (!access.expires_at || access.expires_at - Date.now() > 120_000) return access;
-  const client = clientOf(secret);
-  if (!client) return null;
-  const fresh = await refreshAccess(client, access);
-  await saveSecret(env, admin, companyId, "railway", { ...secret, access_token: fresh.token, refresh_token: fresh.refresh_token, expires_at: fresh.expires_at });
-  return fresh;
-}
-
-/** This instance's OAuth client at Railway, registered once per address it signs in from. */
-export async function railwayClient(env: Env, admin: Db, companyId: string, redirectUri: string, name: string): Promise<RailwayClient> {
-  const secret = await loadSecret(env, admin, companyId, "railway").catch(() => null);
-  const known = clientOf(secret);
-  if (known?.redirect_uri === redirectUri) return known;
-  let client: RailwayClient;
-  try {
-    client = await registerClient(redirectUri, name);
-  } catch (error) {
-    // Railway turned the registration down: the screen offers a project token instead from now on.
-    const refused = { settings: asJson({ oauth_refused: true }), last_error: failure(error) };
-    const { data: row } = await admin.from("integrations").select("status").match({ company_id: companyId, provider: "railway" }).maybeSingle();
-    if (row) await admin.from("integrations").update(refused).match({ company_id: companyId, provider: "railway" });
-    else await admin.from("integrations").insert({ company_id: companyId, provider: "railway", status: "disconnected", ...refused });
-    throw error;
-  }
-  if (known) await deleteClient(known);
-  await admin.from("integrations").upsert({ company_id: companyId, provider: "railway", status: "disconnected", settings: asJson({}), last_error: null });
-  const { client_id, client_secret, redirect_uri, registration_access_token, registration_client_uri } = client;
-  await saveSecret(env, admin, companyId, "railway", {
-    extra: { method: "oauth", client_id, client_secret, redirect_uri, ...(registration_access_token ? { registration_access_token } : {}), ...(registration_client_uri ? { registration_client_uri } : {}) },
-  });
-  return client;
-}
-
-/** Keeps the access (after checking it reaches this project) and hands a waiting change to Railway. */
-export async function connectRailway(env: Env, admin: Db, companyId: string, userId: string, access: RailwayAccess): Promise<void> {
-  await projectAccess(env, access);
-  const secret = await loadSecret(env, admin, companyId, "railway").catch(() => null);
-  const stored: StoredSecret =
-    access.method === "token"
-      ? { api_key: access.token, extra: { method: "token" } }
-      : { ...secret, access_token: access.token, refresh_token: access.refresh_token, expires_at: access.expires_at, extra: { ...secret?.extra, method: "oauth" } };
-  const { error } = await admin.from("integrations").upsert({
-    company_id: companyId, provider: "railway", status: "connected", account_label: env.RAILWAY_PROJECT_NAME ?? "Railway", connected_by: userId, connected_at: new Date().toISOString(), last_error: null, settings: asJson({}),
-  });
-  if (error) throw new HttpError(500, "Couldn't save the Railway sign-in. Try again.");
-  // A project token replaces a Login with Railway client; let Railway forget that one.
-  if (access.method === "token") {
-    const client = clientOf(secret);
-    if (client) await deleteClient(client);
-  }
-  await saveSecret(env, admin, companyId, "railway", stored);
-  await attachToRailway(env, admin, companyId, access);
-}
-
-/** Forgets Railway access and removes this instance's OAuth client there. */
-export async function forgetRailway(env: Env, admin: Db, companyId: string): Promise<void> {
-  const client = clientOf(await loadSecret(env, admin, companyId, "railway").catch(() => null));
-  if (client) await deleteClient(client);
-  await admin.from("integrations").delete().match({ company_id: companyId, provider: "railway" });
+/** Railway access was removed: a change in progress goes back to the by-hand steps. */
+export async function stopAutomatic(admin: Db, companyId: string): Promise<void> {
   const row = await loadRow(admin, companyId).catch(() => null);
-  if (row?.automatic && row.status !== "done") await update(admin, companyId, { automatic: false }).catch(() => undefined);
+  if (row?.automatic && row.status !== "done") await update(admin, companyId, { automatic: false });
 }
 
 /** Records Crewtavo can add for the owner (Cloudflare), once Railway has said exactly what they are. */
