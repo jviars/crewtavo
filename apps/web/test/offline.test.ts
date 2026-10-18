@@ -7,12 +7,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath, URL } from "node:url";
-import { onlineManager, QueryClient, QueryObserver } from "@tanstack/react-query";
+import { focusManager, onlineManager, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveVisitNotes, setVisitStatus } from "../src/features/field/fieldActions";
 import { api, setActiveCompany, unwrap } from "../src/lib/api";
 import { ApiError, OFFLINE, SESSION_EXPIRED } from "../src/lib/errors";
-import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache, SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
+import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, OFFLINE_MUTATIONS, pendingFieldActions, startOfflineCache, SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
 import { FakeCaches, loadServiceWorker } from "./serviceWorker";
 
 // The phone's storage, which can be made to run out of room.
@@ -656,6 +656,196 @@ describe("closed with updates waiting", () => {
     stop();
   });
 
+  it("put away with no signal, and the signal back while it's still in a pocket: nothing goes until it's on the screen, so the worker says it's waiting", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const show = (state: DocumentVisibilityState) => {
+      page.visibilityState = state;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const { register, close, waiting, caches } = phone({ backgroundSync: true });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}")));
+    const qc = newClient();
+    const sent: string[] = [];
+    qc.setMutationDefaults(["visit-status"], { mutationFn: async (v: { status: string }) => void sent.push(v.status) });
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u36", true);
+    const result = tap(qc, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    await settle();
+    show("hidden");
+    await settle(100);
+    expect(register).toHaveBeenCalledWith(SYNC_TAG);
+
+    // Driving back into coverage, the phone still in a pocket: React Query sends nothing from a hidden page.
+    onlineManager.setOnline(true);
+    await settle(60_000);
+    expect(sent).toEqual([]);
+    expect(waiting()).toEqual({ "/waiting/u36": "1" });
+    // The browser wakes the worker. Crewtavo's window is there, but put away.
+    const sw = loadServiceWorker({ caches, windows: [{ url: "https://crew.example.com/field", visibilityState: "hidden" }] });
+    await expect(sw.dispatch("sync", { tag: SYNC_TAG })).resolves.toBe("done");
+    expect(sw.showNotification.mock.calls[0]![1]).toMatchObject({ body: "1 update is waiting to be sent. Open Crewtavo to send them." });
+
+    // Tapping it brings Crewtavo back on the screen (React Query's own listener hears it in a browser): it goes, and the notice goes.
+    show("visible");
+    focusManager.onFocus();
+    await settle();
+    await expect(result).resolves.toBe("sent");
+    expect(sent).toEqual(["completed"]);
+    expect(waiting()).toEqual({});
+    expect(close).toHaveBeenCalled();
+    stop();
+  });
+
+  it("opened again with signal, an update put back from the phone goes at once: not waiting, no wake-up, even put away (or closed) before the answer", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const show = (state: DocumentVisibilityState) => {
+      page.visibilityState = state;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const { register, waiting, caches } = phone({ backgroundSync: true });
+    // Earlier: tapped with no signal, then the app was closed.
+    const before = newClient();
+    before.setMutationDefaults(["visit-notes"], { mutationFn: async () => undefined });
+    onlineManager.setOnline(false);
+    const stopBefore = startOfflineCache(before, "u37", true);
+    void tap(before, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    await settle();
+    stopBefore();
+    before.clear();
+    expect(waiting()).toEqual({ "/waiting/u37": "1" });
+    register.mockClear();
+
+    // Opened again with signal, on a slow connection: each request takes 3 seconds.
+    onlineManager.setOnline(true);
+    const qc = newClient();
+    const sent: string[] = [];
+    qc.setMutationDefaults(["visit-notes"], {
+      mutationFn: async (v: { notes: string }) => {
+        await new Promise((r) => setTimeout(r, 3_000));
+        sent.push(v.notes);
+      },
+    });
+    const stop = startOfflineCache(qc, "u37", true);
+    // Swiped away straight after opening, or put away mid-send: the worker has nothing to say about it.
+    await settle(10);
+    expect(waiting()).toEqual({});
+    show("hidden");
+    await settle(100);
+    expect(waiting()).toEqual({});
+    expect(register).not.toHaveBeenCalled();
+    const sw = loadServiceWorker({ caches });
+    await sw.dispatch("sync", { tag: SYNC_TAG });
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    // Still saved, in case the app is closed before the answer: it goes again on the next start.
+    expect(saved("u37")!.mutations).toHaveLength(1);
+    await settle(4_000);
+    expect(sent).toEqual(["Gate was open"]);
+    expect(saved("u37")!.mutations).toHaveLength(0);
+    stop();
+  });
+
+  it("an update waiting to try again still counts while the phone says it has signal and My day reloads, so put away and closed then, the worker says so", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const show = (state: DocumentVisibilityState) => {
+      page.visibilityState = state;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const { register, waiting, caches } = phone({ backgroundSync: true });
+    // One bar: nothing gets through, though the phone keeps saying it's online.
+    let reachable = false;
+    vi.stubGlobal("fetch", vi.fn(async () => (reachable ? new Response("{}") : Promise.reject(new TypeError("Failed to fetch")))));
+    const qc = newClient();
+    const sent: unknown[] = [];
+    qc.setMutationDefaults(["visit-status"], {
+      mutationFn: async (v: unknown) => {
+        if (!reachable) throw new ApiError(OFFLINE, 0, "network");
+        sent.push(v);
+      },
+    });
+    // My day on the screen: it loads again when the connection comes back.
+    const screen = new QueryObserver(qc, { queryKey: ["field", "c1", "2026-10-17"], queryFn: async () => ({ today: [] }) });
+    const unsubscribe = screen.subscribe(() => undefined);
+    const stop = startOfflineCache(qc, "u38", true);
+    void tap(qc, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    await settle(1_500);
+    // The phone's online event: it tries again, fails again, and waits 2 seconds before its next try.
+    onlineManager.setOnline(true);
+    await settle(10);
+    // The phone's online event again during that wait: My day reloads, and the count is saved again.
+    onlineManager.setOnline(true);
+    await settle(1_000);
+    const [action] = qc.getMutationCache().getAll();
+    expect(action!.state).toMatchObject({ status: "pending", isPaused: false });
+    expect(sent).toEqual([]);
+    expect(waiting()).toEqual({ "/waiting/u38": "1" });
+
+    // Put away, then swiped away before that try: the worker says it's waiting.
+    register.mockClear();
+    show("hidden");
+    await settle(10);
+    expect(register).toHaveBeenCalledWith(SYNC_TAG);
+    const sw = loadServiceWorker({ caches });
+    await sw.dispatch("sync", { tag: SYNC_TAG });
+    expect(sw.showNotification.mock.calls[0]![1]).toMatchObject({ body: "1 update is waiting to be sent. Open Crewtavo to send them." });
+
+    // Or back on the screen in time, with requests getting through: it goes.
+    reachable = true;
+    show("visible");
+    await settle(2_000);
+    expect(sent).toHaveLength(1);
+    expect(waiting()).toEqual({});
+    unsubscribe();
+    stop();
+  });
+
+  it("put away while an update's next try is on its way, counts again first: nothing left waiting, so no wake-up for it", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const { register, waiting, caches } = phone({ backgroundSync: true });
+    let reachable = false;
+    vi.stubGlobal("fetch", vi.fn(async () => (reachable ? new Response("{}") : Promise.reject(new TypeError("Failed to fetch")))));
+    const qc = newClient();
+    const sent: unknown[] = [];
+    qc.setMutationDefaults(["visit-status"], {
+      mutationFn: async (v: unknown) => {
+        if (!reachable) throw new ApiError(OFFLINE, 0, "network");
+        await new Promise((r) => setTimeout(r, 3_000)); // a slow connection
+        sent.push(v);
+      },
+    });
+    const stop = startOfflineCache(qc, "u39", true);
+    void tap(qc, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    await settle(1_500);
+    // Failed again on the phone's online event, and counted while it waits 2 seconds for its next try.
+    onlineManager.setOnline(true);
+    await settle(10);
+    onlineManager.setOnline(true);
+    await settle(1_000);
+    expect(waiting()).toEqual({ "/waiting/u39": "1" });
+
+    // Requests get through now: the next try goes out (React Query says nothing when it does).
+    reachable = true;
+    await settle(1_100);
+    expect(sent).toEqual([]);
+    register.mockClear();
+    page.visibilityState = "hidden";
+    page.dispatchEvent(new Event("visibilitychange"));
+    await settle(10);
+    expect(waiting()).toEqual({});
+    expect(register).not.toHaveBeenCalled();
+    // Closed before the answer: the worker has nothing to say (it's saved, and goes again on the next start).
+    const sw = loadServiceWorker({ caches });
+    await sw.dispatch("sync", { tag: SYNC_TAG });
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(saved("u39")!.mutations).toHaveLength(1);
+    await settle(3_000);
+    expect(sent).toHaveLength(1);
+    stop();
+  });
+
   it("on an iPhone (no Background Sync), nothing breaks and the queue goes out when the app is open with signal", async () => {
     const { waiting } = phone({ backgroundSync: false });
     const qc = newClient();
@@ -690,15 +880,41 @@ describe("closed with updates waiting", () => {
   });
 });
 
+const SRC = fileURLToPath(new URL("../src", import.meta.url));
+const sources = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
+
 describe("signing out", () => {
   // A plain auth.signOut() counts as the app signing the person out (lib/session.tsx), which keeps
   // their queued field actions on the phone. Sign out buttons use the session's signOut instead.
-  const SRC = fileURLToPath(new URL("../src", import.meta.url));
-  const sources = (dir: string): string[] =>
-    readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
-
   it("on purpose, from any screen (the license, setting up a business, choosing a password), leaves nothing of theirs on the phone", () => {
     const callers = sources(SRC).filter((file) => /\.auth\s*\.signOut\(/.test(readFileSync(file, "utf8")));
     expect(callers.map((file) => relative(SRC, file).replaceAll("\\", "/"))).toEqual(["lib/session.tsx"]);
+  });
+});
+
+describe("screens", () => {
+  /** What each useMutation({ ... }) in a file is given, up to its closing brace. */
+  const mutationOptions = (text: string) =>
+    [...text.matchAll(/\buseMutation(?:<[^;()]*?>)?\(\{/g)].map((call) => {
+      let depth = 0;
+      for (let i = call.index + call[0].length - 1; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}" && --depth === 0) return text.slice(call.index, i + 1);
+      }
+      return text.slice(call.index);
+    });
+
+  it("send field actions with the function registered for them, which knows when each is on its way (for the count the worker reads)", () => {
+    const field = new RegExp(`mutationKey: \\["(${[...OFFLINE_MUTATIONS].join("|")})"\\]`);
+    const found: string[] = [];
+    for (const file of sources(SRC)) {
+      for (const options of mutationOptions(readFileSync(file, "utf8"))) {
+        if (!field.test(options)) continue;
+        found.push(`${relative(SRC, file).replaceAll("\\", "/")} ${options.match(field)![1]}`);
+        expect(options, relative(SRC, file)).not.toMatch(/\bmutationFn\b/);
+      }
+    }
+    expect(found.sort()).toEqual(["features/field/FieldTodayPage.tsx visit-status", "features/field/FieldVisitPage.tsx checklist-save", "features/field/FieldVisitPage.tsx visit-notes", "features/field/FieldVisitPage.tsx visit-status"]);
   });
 });

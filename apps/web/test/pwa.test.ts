@@ -176,6 +176,18 @@ describe("the first paint", () => {
     expect(phone).toMatch(/\.mobile-nav \{[^}]*env\(safe-area-inset-right\) env\(safe-area-inset-bottom\) env\(safe-area-inset-left\)/);
     expect(phone).toMatch(/\.topbar \{[^}]*env\(safe-area-inset-right\)[^}]*env\(safe-area-inset-left\)/);
   });
+
+  it("keeps clear of the notch and home indicator on a big phone sideways too, wider than 900 px (the computer layout)", () => {
+    const css = read("src/styles/base.css");
+    const wide = css.slice(0, css.indexOf("@media (max-width: 900px)"));
+    const rule = (selector: string) => wide.match(new RegExp(`\\n${selector.replace(".", "\\.")} \\{([^}]*)\\}`))![1]!;
+    // The sidebar on the left (the notch on that side, the home indicator under its last links)...
+    expect(rule(".sidebar")).toMatch(/padding-left: max\(12px, env\(safe-area-inset-left\)\)/);
+    expect(rule(".sidebar")).toMatch(/padding-bottom: max\(16px, env\(safe-area-inset-bottom\)\)/);
+    // ...and the top bar and the screen on the right.
+    expect(rule(".topbar")).toMatch(/padding: 10px max\(24px, env\(safe-area-inset-right\)\) /);
+    expect(rule(".content")).toMatch(/padding: 20px max\(48px, env\(safe-area-inset-right\)\) 56px 48px;/);
+  });
 });
 
 // --- Installing ----------------------------------------------------------------------------------
@@ -356,11 +368,32 @@ describe("the service worker, when the phone has signal again (Background Sync)"
     expect(sw.showNotification.mock.calls[0]![1]).toMatchObject({ body: "1 update is waiting to be sent. Open Crewtavo to send them." });
   });
 
-  it("with Crewtavo open, leaves it to the app, and fails so the browser asks again later (unless it's the last try)", async () => {
+  it("with Crewtavo on the screen, leaves it to the app, and fails so the browser asks again later (unless it's the last try)", async () => {
     const sw = loadServiceWorker({ caches, windows: ["https://crew.example.com/field"] });
     await expect(sw.dispatch("sync", { tag: SYNC_TAG })).rejects.toThrow(/open/);
     await expect(sw.dispatch("sync", { tag: SYNC_TAG, lastChance: true })).resolves.toBe("done");
+    // On the screen next to another app (split screen) counts, focused or not.
+    const beside = loadServiceWorker({ caches, windows: [{ url: "https://crew.example.com/field", visibilityState: "visible", focused: false }] });
+    await expect(beside.dispatch("sync", { tag: SYNC_TAG })).rejects.toThrow(/open/);
     expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(beside.showNotification).not.toHaveBeenCalled();
+  });
+
+  it("with Crewtavo put away (in a pocket, behind another app), says so all the same: the app sends nothing until it's back on the screen", async () => {
+    // React Query only carries on with a paused action while the page is visible.
+    const hidden = { url: "https://crew.example.com/field", visibilityState: "hidden" } as const;
+    const sw = loadServiceWorker({ caches, windows: [hidden, "https://elsewhere.example.com/"] });
+    await expect(sw.dispatch("sync", { tag: SYNC_TAG })).resolves.toBe("done");
+    expect(sw.showNotification.mock.calls[0]![1]).toMatchObject({ body: "3 updates are waiting to be sent. Open Crewtavo to send them.", tag: SYNC_TAG });
+    const last = loadServiceWorker({ caches, windows: [hidden] });
+    await expect(last.dispatch("sync", { tag: SYNC_TAG, lastChance: true })).resolves.toBe("done");
+    expect(last.showNotification).toHaveBeenCalledTimes(1);
+
+    // Tapping it brings that window back on the screen, on My day.
+    await sw.dispatch("notificationclick", { notification: { close: () => undefined, data: sw.showNotification.mock.calls[0]![1].data } });
+    expect(sw.windows[0]!.focus).toHaveBeenCalled();
+    expect(sw.windows[0]!.navigate).toHaveBeenCalledWith("https://crew.example.com/field");
+    expect(sw.openWindow).not.toHaveBeenCalled();
   });
 
   it("stays quiet with notifications not allowed, with nothing waiting, and for other sync tags", async () => {

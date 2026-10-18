@@ -47,11 +47,18 @@ export class FakeCaches {
 
 type Listener = (event: Record<string, unknown>) => void;
 
+/** A browser window the worker can see. Given by its address alone, it's on the screen and focused. */
+export type FakeWindow = string | { url: string; visibilityState?: DocumentVisibilityState; focused?: boolean };
+
 /** public/sw.js, registered as /sw.js?cache=1 in production builds (offline) or /sw.js. */
-export function loadServiceWorker(options: { offline?: boolean; caches?: FakeCaches; windows?: string[]; permission?: string; network?: (request: { url: string }) => Promise<Response> } = {}) {
+export function loadServiceWorker(options: { offline?: boolean; caches?: FakeCaches; windows?: FakeWindow[]; permission?: string; network?: (request: { url: string }) => Promise<Response> } = {}) {
   const listeners = new Map<string, Listener>();
   const caches = options.caches ?? new FakeCaches();
-  const windows = (options.windows ?? []).map((url) => ({ url, focus: vi.fn(async () => undefined), navigate: vi.fn(async () => undefined) }));
+  const windows = (options.windows ?? []).map((w) => ({
+    ...(typeof w === "string" ? { url: w, visibilityState: "visible", focused: true } : { visibilityState: "visible", focused: false, ...w }),
+    focus: vi.fn(async () => undefined),
+    navigate: vi.fn(async () => undefined),
+  }));
   const showNotification = vi.fn(async (_title: string, _options: Record<string, unknown>) => undefined);
   const openWindow = vi.fn(async (_url: string) => undefined);
   const scope = {
