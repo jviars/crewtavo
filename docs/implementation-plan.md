@@ -180,8 +180,10 @@ Policies are written with `private.has_role()`, `has_perm()` and `is_member()` o
 helpers `assigned_to_visit()`, `works_visit()`, `crew_sees_*()`, `schedules_crew()`, `manages_equipment()`), and
 `private.fold_member_checks()` (end any migration that adds policies with it) rewrites them to check the row against
 the person's companies, or the visits, clients, jobs, properties and requests they reach, looked up once per query:
-called for each row, the lookups made a list of 20,000 invoices take 1.5 s. Crew leads' checks on other people's time
-entries (`on_my_crew()`) still run per row.
+called for each row, the lookups made a list of 20,000 invoices take 1.5 s. Two checks still look one thing up per row,
+cheaply: a visit's crew (`visit_crew()`, for crew members' checklists and crew leads' visit equipment and assignees) and,
+for crew leads, whether a time entry's person is on their crew (`on_my_crew()`). `private.folded_helpers()` lists the
+body each folded helper had when its list was written; a test fails if one changes without its list.
 
 | Data | Read | Write |
 | --- | --- | --- |
