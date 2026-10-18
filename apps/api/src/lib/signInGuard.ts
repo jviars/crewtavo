@@ -1,11 +1,10 @@
 /**
- * Password and code guessing, stopped at the instance's gateway (server.ts). GoTrue only limits
- * sign-in attempts per address when told which header to trust, and no header can be trusted on
- * every host (Railway's edge sets one; a Docker install reached directly or through Caddy doesn't),
- * so failures are counted per account instead. After 10 wrong passwords or codes for an email in
- * 15 minutes, password and code sign-in for that email pause for 15 minutes. Successful sign-ins
- * don't count, and an emailed sign-in link (a long token, not a code) still works, so a stranger
- * can't lock anyone out of their account.
+ * Password and code guessing, stopped at the instance's gateway (lib/gateway.ts). GoTrue only limits
+ * sign-in attempts per address when told which header to trust (GOTRUE_RATE_LIMIT_HEADER, which an
+ * instance doesn't set), so failures are counted per account instead. After 10 wrong passwords or
+ * codes for an email in 15 minutes, password and code sign-in for that email pause for 15 minutes.
+ * Successful sign-ins don't count, and an emailed sign-in link (a long token, not a code) still
+ * works, so a stranger can't lock anyone out of their account.
  *
  * Counts are shared through Postgres (lib/limit.ts); each process remembers the accounts it has
  * seen paused, so a paused account's attempts never reach GoTrue.

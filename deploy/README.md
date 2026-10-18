@@ -40,6 +40,12 @@ every deploy generates its own and the person deploying fills in nothing.
 | `SUPABASE_STORAGE_URL` | `http://${{storage.RAILWAY_PRIVATE_DOMAIN}}:5000` |
 | `RAILWAY_HEALTHCHECK_TIMEOUT_SEC` | `600` |
 
+- **Visitors' addresses:** nothing to set. On Railway, rate limits and quote approvals go by the
+  `X-Real-IP` header Railway's edge sets on every request (`apps/api/src/lib/visitor.ts`), and the
+  gateway passes the same address on to `auth` and `storage`. `CREWTAVO_VISITOR_IP` is for other
+  proxies in front ([docs/deploy.md](../docs/deploy.md#visitors-addresses)); leave it out of the
+  template.
+
 ### db
 
 - **Source:** Docker image `ghcr.io/jviars/crewtavo-db:pg17`, which always points at the newest

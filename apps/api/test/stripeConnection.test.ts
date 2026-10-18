@@ -5,6 +5,7 @@
  * keeps accounts (and test and live mode) apart the way Stripe does: one account's invoice is
  * "No such invoice" to another's key.
  */
+import type { IncomingMessage } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -547,8 +548,10 @@ describe("importing Stripe history", () => {
 });
 
 describe("Hub Pay", () => {
+  // From a visitor at `ip`, with nothing in front of the server (lib/visitor.ts).
+  const from = (ip: string) => ({ ...env, incoming: { socket: { remoteAddress: ip } } as unknown as IncomingMessage });
   const pay = async (token: string, tip: number, ip = "203.0.113.7") =>
-    app.request(`/api/hub/${token}/pay`, { method: "POST", headers: { "Content-Type": "application/json", "X-Real-IP": ip }, body: JSON.stringify({ tip }) }, env);
+    app.request(`/api/hub/${token}/pay`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tip }) }, from(ip));
   const token = async () => (await clientLink(env, BASE, { c: CO, t: "invoice", id: INV })).split("/hub/")[1]!;
 
   it("is limited per link and per visitor", async () => {
@@ -590,7 +593,7 @@ describe("Hub Pay", () => {
     const res = await pay(t, 0);
     expect(((await res.json()) as { error: string }).error).toBe("This invoice just changed, so its payment page is being updated. Try again in a few minutes.");
 
-    for (let i = 0; i < 11; i++) await app.request(`/api/hub/${t}/promo`, { method: "DELETE", headers: { "X-Real-IP": "203.0.113.9" } }, env);
+    for (let i = 0; i < 11; i++) await app.request(`/api/hub/${t}/promo`, { method: "DELETE" }, from("203.0.113.9"));
     expect(db.rpcs.filter((r) => r.fn === "remove_promo_code")).toHaveLength(10);
   });
 });

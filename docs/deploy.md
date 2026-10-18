@@ -99,17 +99,18 @@ docker compose --env-file .env.instance down -v   # delete the instance and all 
 
 **On a server:** set `APP_URL=https://your-domain` in `.env.instance`, run `npm run instance` again,
 and put a web server with HTTPS in front of port 8080 (`CREWTAVO_PORT`). With Caddy, this
-`Caddyfile` does it. Its `header_up` line passes on each visitor's address in `X-Real-IP`, which
-Crewtavo's rate limits go by; another web server has to set that header the same way, or visitors
-could send their own:
+`Caddyfile` does it:
 
 ```
 your-domain {
-  reverse_proxy localhost:8080 {
-    header_up X-Real-IP {remote_host}
-  }
+  reverse_proxy localhost:8080
 }
 ```
+
+Caddy adds each visitor's address to `X-Forwarded-For`, which Crewtavo's rate limits go by (see
+[Visitors' addresses](#visitors-addresses)). Another web server has to add it the same way (nginx:
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). A Caddyfile with a
+`header_up X-Real-IP {remote_host}` line, from earlier versions of these steps, works as it is.
 
 **Backups:** back up the `crewtavo-instance_db-data` and `crewtavo-instance_storage-data` Docker
 volumes, and `.env.instance`.
@@ -139,9 +140,35 @@ lists them all).
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages. For two-way texting, set the number's **Messaging > A message comes in** webhook to `https://your-domain/api/webhooks/twilio` (HTTP POST). Replies appear in Messages and notify the office. `APP_URL` must match that address exactly, because Twilio signs the full URL. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SCHEDULER` | Set to `off` on extra replicas of `crewtavo`, so background tasks run in one place. |
+| `CREWTAVO_VISITOR_IP` | Only when something other than Railway's edge or one web server is in front of Crewtavo: where visitors' addresses come from (see [Visitors' addresses](#visitors-addresses)). |
 | `CREWTAVO_SENTRY_DSN` | Error tracking for the API and the web app (see below). Unset turns it off. |
 | `CREWTAVO_SENTRY_WEB_DSN` | Optional: send the web app's errors to a separate project. Defaults to `CREWTAVO_SENTRY_DSN`. |
 | `CREWTAVO_SENTRY_ENVIRONMENT` | Optional: the environment shown on each report, such as `staging`. Defaults to `production`. |
+
+### Visitors' addresses
+
+Public pages (booking forms, promo codes, Client Hub payments and messages, sign-in links, the
+first-run setup) limit how often each visitor can use them, by address, and a quote approval
+records the address it came from. Anyone can send their own `X-Real-IP` or `X-Forwarded-For`
+header, so Crewtavo only goes by what the instance's own proxy sets:
+
+- **On Railway:** `X-Real-IP`, which Railway's edge sets on every request in place of anything
+  the visitor sent.
+- **With Docker or on your own server:** the last `X-Forwarded-For` entry, which the web server in
+  front adds, on connections from the same machine or a private network (where that web server
+  connects from). A visitor who reaches port 8080 directly is counted by their own address.
+
+Sign-in and file storage get the same address from Crewtavo (Auth records it with each sign-in).
+With something else in front, set `CREWTAVO_VISITOR_IP`:
+
+| Value | When |
+| --- | --- |
+| `x-forwarded-for:2` | Two proxies add to `X-Forwarded-For`, such as Cloudflare's proxy in front of Caddy. Caddy keeps Cloudflare's entries only from addresses in its `trusted_proxies` setting, so list Cloudflare's there. The number counts the proxies. |
+| `cf-connecting-ip` (or another header) | The proxy in front sets this header to the visitor's address, replacing any the visitor sent. |
+| `connection` | Nothing is in front: the address each connection comes from. |
+
+Once set, it's believed on every connection, so make sure nothing reaches Crewtavo without going
+through those proxies.
 
 ### Error tracking
 

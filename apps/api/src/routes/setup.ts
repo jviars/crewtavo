@@ -11,10 +11,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv, Env } from "../env";
 import { platformOf } from "../lib/address";
-import { clientIp, HttpError, readJson } from "../lib/http";
+import { HttpError, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
 import { startup, type MigrationProblem } from "../lib/startup";
 import { adminClient } from "../lib/supabase";
+import { clientIp } from "../lib/visitor";
 
 export type Platform = "railway" | "compose" | "server";
 export type DatabaseStatus = "ok" | "starting" | "not_connected" | "wrong_keys" | "unreachable" | "empty" | "migration_failed";
