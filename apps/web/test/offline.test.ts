@@ -793,6 +793,90 @@ describe("closed with updates waiting", () => {
     stop();
   });
 
+  /** Tapped with no signal, then the app closed: one update saved on the phone for `userId`. */
+  async function savedFromEarlier(userId: string) {
+    const before = newClient();
+    before.setMutationDefaults(["visit-status"], { mutationFn: async () => undefined });
+    onlineManager.setOnline(false);
+    const stopBefore = startOfflineCache(before, userId, true);
+    void tap(before, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    await settle();
+    stopBefore();
+    before.clear();
+  }
+
+  it("the same when the server turns the update down: the notice shown as it went is taken down too", async () => {
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "hidden" as DocumentVisibilityState }));
+    const { close, waiting } = phone({ backgroundSync: true });
+    await savedFromEarlier("u40");
+    const qc = newClient();
+    qc.setMutationDefaults(["visit-status"], {
+      mutationFn: async () => {
+        await new Promise((r) => setTimeout(r, 3_000));
+        throw new ApiError("The office cancelled this visit.", 409, "conflict");
+      },
+    });
+    const stop = startOfflineCache(qc, "u40", true);
+    await settle();
+    onlineManager.setOnline(true);
+    await settle(10);
+    expect(waiting()).toEqual({});
+    close.mockClear();
+    await settle(4_000);
+    expect(close).toHaveBeenCalled();
+    expect(waiting()).toEqual({});
+    stop();
+  });
+
+  it("put away, an update that fails as it goes counts as waiting again at once, not after the next save", async () => {
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "hidden" as DocumentVisibilityState }));
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
+    const { register, waiting } = phone({ backgroundSync: true });
+    await savedFromEarlier("u41");
+    const qc = newClient();
+    qc.setMutationDefaults(["visit-status"], {
+      mutationFn: async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        throw new ApiError(OFFLINE, 0, "network"); // the network changing as the signal comes back
+      },
+    });
+    const stop = startOfflineCache(qc, "u41", true);
+    await settle();
+    register.mockClear();
+    onlineManager.setOnline(true);
+    await settle(10);
+    expect(waiting()).toEqual({});
+    await settle(60); // failed, well within the 800 ms save delay
+    expect(waiting()).toEqual({ "/waiting/u41": "1" });
+    expect(register).toHaveBeenCalledWith(SYNC_TAG);
+    stop();
+  });
+
+  it("on the screen, sending a backlog doesn't wake the worker for each one", async () => {
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState }));
+    const { register, waiting } = phone({ backgroundSync: true });
+    const qc = newClient();
+    const sent: string[] = [];
+    qc.setMutationDefaults(["visit-notes"], {
+      mutationFn: async (v: { notes: string }) => {
+        await new Promise((r) => setTimeout(r, 100));
+        sent.push(v.notes);
+      },
+    });
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u42", true);
+    for (const notes of ["one", "two", "three", "four", "five"]) void tap(qc, "visit-notes", { visitId: "v1", notes });
+    await settle();
+    expect(waiting()).toEqual({ "/waiting/u42": "5" });
+    register.mockClear();
+    onlineManager.setOnline(true);
+    await settle(2_000);
+    expect(sent).toEqual(["one", "two", "three", "four", "five"]);
+    expect(waiting()).toEqual({});
+    expect(register).not.toHaveBeenCalled();
+    stop();
+  });
+
   it("an update waiting to try again still counts while the phone says it has signal and My day reloads, so put away and closed then, the worker says so", async () => {
     const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
     vi.stubGlobal("document", page);

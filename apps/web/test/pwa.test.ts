@@ -406,6 +406,24 @@ describe("the service worker, when the phone has signal again (Background Sync)"
     expect(sw.openWindow).not.toHaveBeenCalled();
   });
 
+  it("doesn't count a client's page (Client Hub, a booking form) as Crewtavo: it holds nothing back, and the notice opens the app itself", async () => {
+    const hub = { url: "https://crew.example.com/hub/tok123", visibilityState: "visible", focused: true } as const;
+    const sw = loadServiceWorker({ caches, windows: [hub] });
+    await expect(sw.dispatch("sync", { tag: SYNC_TAG })).resolves.toBe("done");
+    const { tag, data } = sw.showNotification.mock.calls[0]![1];
+    await sw.dispatch("notificationclick", { notification: { close: () => undefined, tag, data } });
+    expect(sw.windows[0]!.navigate).not.toHaveBeenCalled();
+    expect(sw.openWindow).toHaveBeenCalledWith("https://crew.example.com/field");
+
+    // With the app put away behind a booking form, it's the app that comes back.
+    const both = loadServiceWorker({ caches, windows: ["https://crew.example.com/book/acme/quote", { url: "https://crew.example.com/visit/v1", visibilityState: "hidden" }] });
+    await both.dispatch("notificationclick", { notification: { close: () => undefined, tag, data } });
+    expect(both.windows[0]!.focus).not.toHaveBeenCalled();
+    expect(both.windows[1]!.focus).toHaveBeenCalled();
+    expect(both.windows[1]!.navigate).not.toHaveBeenCalled();
+    expect(both.openWindow).not.toHaveBeenCalled();
+  });
+
   it("still opens what a pushed notification links to in a window that's open", async () => {
     const sw = loadServiceWorker({ windows: [{ url: "https://crew.example.com/field", visibilityState: "hidden" }] });
     await sw.dispatch("notificationclick", { notification: { close: () => undefined, tag: "visit-moved", data: { link: "/schedule" } } });

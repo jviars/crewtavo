@@ -267,11 +267,19 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   restore(queryClient, userId);
 
   let told = -1;
+  const count = () => queryClient.getMutationCache().getAll().filter(queued).length;
   /** `again`: with some waiting, asks again to hear when there's signal, even if the count is the same. */
-  const tell = (again = false) => {
-    const waiting = queryClient.getMutationCache().getAll().filter(queued).length;
+  const tell = (again = false, waiting = count()) => {
     if (waiting !== told || (again && waiting > 0)) tellServiceWorker(userId, waiting);
     told = waiting;
+  };
+  /**
+   * As a request goes out. On the screen the worker leaves the sending to the app, so the next save's
+   * count will do, unless none are left; put away, the worker may be reading it now.
+   */
+  const recount = () => {
+    const waiting = count();
+    if (!waiting || typeof document === "undefined" || document.visibilityState !== "visible") tell(false, waiting);
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const saveNow = () => {
@@ -300,19 +308,18 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     if (event.type !== "updated" || !isFieldAction(event.mutation)) return;
     const { action } = event;
     if (action.type === "failed" && cannotReach(action.error)) cannotReachServer();
-    if (action.type === "success") {
-      recheckDelay = 0;
-      // Told again even with the same count: the worker may have said this one was waiting just as it
-      // went, and the next count closes that notification.
-      told = -1;
-    }
+    // It didn't get through: waiting again from now, not from the next save.
+    if (action.type === "failed") tell();
+    if (action.type === "success") recheckDelay = 0;
+    // Done with, sent or turned down: told again even with the same count, since the worker may have
+    // said this one was waiting just as it went, and the next count closes that notification.
+    if (action.type === "success" || action.type === "error") told = -1;
     // Turned down by the server: what the screens showed ahead of it is wrong, so load it again.
     // Screens do this too, but an action restored after a restart has no screen.
     if (action.type === "error" && !signInExpired(action.error)) queryClient.invalidateQueries({ predicate: (q) => KEEP.has(String(q.queryKey[0])) });
   });
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
   if (typeof window !== "undefined") window.addEventListener("pagehide", flush);
-  const recount = () => tell();
   recounts.add(recount);
   queryClient.resumePausedMutations().catch(() => undefined);
   // Counted once they've resumed: one put back that's on its way again at once isn't waiting.
