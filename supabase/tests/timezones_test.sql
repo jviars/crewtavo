@@ -25,8 +25,8 @@ begin
 end $$;
 grant execute on all functions in schema t23 to authenticated, service_role;
 
-select t23.check(not exists (select 1 from public.companies where timezone not in (select name from pg_timezone_names)),
-  'every company''s time zone is a zone name');
+select t23.check(not exists (select 1 from public.companies where timezone not in
+  (select name from pg_timezone_names where name not in ('Factory', 'posixrules'))), 'every company''s time zone is a zone name');
 
 -- Everything below is rolled back at the end, so the upkeep run doesn't touch other tests' clocks.
 begin;
@@ -44,6 +44,8 @@ select public.create_company('Quebec Paving', 'paving', 'America/Chicago') as qu
 select t23.check((select timezone from public.companies where id = :'quebec') = 'America/Chicago', 'a zone name is kept as given');
 select t23.expect_error(format('update public.companies set timezone = %L where id = %L', '+05:00', :'quebec'), 'owners can''t set an offset directly either');
 select t23.expect_error(format('update public.companies set timezone = %L where id = %L', 'Not/AZone', :'quebec'), 'or a made-up zone');
+select t23.expect_error(format('update public.companies set timezone = %L where id = %L', 'Factory', :'quebec'), 'or Factory, which Postgres lists but browsers refuse');
+select t23.expect_error(format('update public.companies set timezone = %L where id = %L', 'posixrules', :'quebec'), 'or posixrules');
 update public.companies set timezone = 'Asia/Kolkata' where id = :'quebec';
 select t23.check((select timezone from public.companies where id = :'quebec') = 'Asia/Kolkata', 'owners can move the business to another zone');
 insert into public.memberships (company_id, user_id, role) values (:'quebec', 'd7000000-0000-0000-0000-000000000002', 'field_crew');
@@ -58,7 +60,9 @@ select public.create_company('Romeo Lawn', 'lawn_exterior', 'Europe/London') as 
 -- ===== One company's odd settings don't stop clock upkeep =======================================
 reset role;
 insert into public.time_entries (company_id, user_id, started_at) values (:'quebec', 'd7000000-0000-0000-0000-000000000001', now() - interval '11 hours') returning id as quebec_long \gset
-insert into public.time_entries (company_id, user_id, started_at) values (:'quebec', 'd7000000-0000-0000-0000-000000000002', now() - interval '20 hours') returning id as quebec_overnight \gset
+-- Started at 06:00 yesterday in Kolkata, so it's always past 16 hours whatever time the tests run.
+insert into public.time_entries (company_id, user_id, started_at) values (:'quebec', 'd7000000-0000-0000-0000-000000000002',
+  ((now() at time zone 'Asia/Kolkata')::date - 1 + time '06:00') at time zone 'Asia/Kolkata') returning id as quebec_overnight \gset
 insert into public.time_entries (company_id, user_id, started_at) values (:'romeo', 'd7000000-0000-0000-0000-000000000003', now() - interval '11 hours') returning id as romeo_long \gset
 
 set local role service_role;
@@ -66,8 +70,9 @@ select public.clock_upkeep();
 reset role;
 select t23.check((select reminded_at is not null and ended_at is null from public.time_entries where id = :'quebec_long'),
   'a company whose clock limits aren''t numbers gets the default reminder after 10 hours');
-select t23.check((select ended_at is not null and auto_stopped_at is not null and ended_at > started_at and ended_at <= started_at + interval '16 hours'
-  from public.time_entries where id = :'quebec_overnight'), 'and its overnight clock is stopped within its day, after the default 16 hours');
+-- Kolkata has no daylight saving, so 18:00 that day is 12 hours after the start.
+select t23.check((select ended_at = started_at + interval '12 hours' and auto_stopped_at is not null
+  from public.time_entries where id = :'quebec_overnight'), 'and its overnight clock is stopped after the default 16 hours, at the default 18:00 end of its day');
 select t23.check((select reminded_at is not null from public.time_entries where id = :'romeo_long'), 'other companies'' clocks are looked after too');
 select t23.check((select count(*) from public.notifications where kind = 'time' and user_id in
   ('d7000000-0000-0000-0000-000000000001', 'd7000000-0000-0000-0000-000000000002', 'd7000000-0000-0000-0000-000000000003')) = 3,
