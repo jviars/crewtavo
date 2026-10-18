@@ -1,0 +1,298 @@
+/**
+ * Settings → Web address: DNS checks against a stand-in resolver, Railway's and Cloudflare's APIs
+ * and PostgREST stubbed through fetch, and the addresses an instance keeps answering on.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { app } from "../src/app";
+import type { Env } from "../src/env";
+import { addCloudflareRecords } from "../src/integrations/cloudflare";
+import { certificateOf, railwayRecords, registerClient, type RailwayDomainStatus } from "../src/integrations/railway";
+import { forgetAddressHistory, forwardTo } from "../src/lib/address";
+import { encryptJson, instanceFingerprint } from "../src/lib/crypto";
+import { checkRecord, findZone, type Lookup } from "../src/lib/dns";
+import { twilioSignature } from "../src/routes/messages";
+import { runAddressTask, useLookup } from "../src/services/address";
+import { adminClient } from "../src/lib/supabase";
+
+const env: Env = {
+  SUPABASE_URL: "https://example.supabase.co",
+  SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+  SUPABASE_SECRET_KEY: "sb_secret_test",
+  ENCRYPTION_KEY: btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i * 7))),
+  APP_URL: "https://app.greenlawn.com",
+  RAILWAY_PUBLIC_DOMAIN: "crewtavo-production.up.railway.app",
+  RAILWAY_PROJECT_ID: "proj-1",
+  RAILWAY_ENVIRONMENT_ID: "env-1",
+  RAILWAY_SERVICE_ID: "svc-crewtavo",
+  CREWTAVO_SINGLE_COMPANY: "1",
+};
+
+/** A resolver that knows only `zone`: name → type → answers. */
+function fakeDns(records: Record<string, Partial<Record<keyof Lookup, string[]>>>): Lookup {
+  const answer = (type: keyof Lookup) => async (name: string) => records[name.toLowerCase()]?.[type] ?? [];
+  return { cname: answer("cname"), txt: answer("txt"), a: answer("a"), aaaa: answer("aaaa"), ns: answer("ns") };
+}
+
+interface Call {
+  method: string;
+  url: URL;
+  path: string;
+  body: any;
+  accept: string;
+  projectToken: string | null;
+}
+
+function serve(answer: (call: Call) => Response | unknown) {
+  const calls: Call[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const text = typeof init?.body === "string" ? init.body : init?.body instanceof URLSearchParams ? init.body.toString() : "";
+    let body: unknown = text;
+    try {
+      body = text ? JSON.parse(text) : undefined;
+    } catch {
+      // form bodies stay text
+    }
+    const call: Call = { method: (init?.method ?? "GET").toUpperCase(), url, path: url.pathname.replace(/^\/rest\/v1\//, ""), body, accept: new Headers(init?.headers).get("accept") ?? "", projectToken: new Headers(init?.headers).get("project-access-token") };
+    calls.push(call);
+    const out = answer(call);
+    return out instanceof Response ? out : Response.json(out ?? []);
+  });
+  return calls;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  forgetAddressHistory();
+});
+
+describe("DNS checks", () => {
+  const zoneDns = { "greenlawn.com": { ns: ["ns01.domaincontrol.com", "ns02.domaincontrol.com"] } };
+
+  it("finds the zone a name lives in, not where a CNAME points", async () => {
+    const lookup = fakeDns({ ...zoneDns, "app.greenlawn.com": { cname: ["abc.up.railway.app"], ns: ["ns1.railway.app"] } });
+    expect(await findZone(lookup, "app.greenlawn.com")).toEqual({ zone: "greenlawn.com", nameservers: ["ns01.domaincontrol.com", "ns02.domaincontrol.com"] });
+    expect(await findZone(fakeDns({}), "app.nowhere.test")).toBeNull();
+  });
+
+  it("knows a record is in place, or what's wrong with it", async () => {
+    const want = { type: "CNAME" as const, purpose: "route" as const, name: "app.greenlawn.com", value: "abc123.up.railway.app" };
+    const check = (records: Parameters<typeof fakeDns>[0], provider = "godaddy") => checkRecord(fakeDns({ ...zoneDns, ...records }), want, "greenlawn.com", provider);
+
+    expect(await check({ "app.greenlawn.com": { cname: ["abc123.up.railway.app"] } })).toMatchObject({ status: "ok", host: "app" });
+    expect(await check({ "app.greenlawn.com": { cname: ["old-host.example.net"] } })).toMatchObject({ status: "wrong", hint: expect.stringContaining("abc123.up.railway.app") });
+    expect(await check({ "app.greenlawn.com": { a: ["192.0.2.1"] } })).toMatchObject({ status: "wrong", hint: expect.stringContaining("A record") });
+    expect(await check({ "app.greenlawn.com": { a: ["104.21.1.1"] } }, "cloudflare")).toMatchObject({ status: "wrong", hint: expect.stringContaining("grey cloud") });
+    expect(await check({ "app.greenlawn.com.greenlawn.com": { cname: ["abc123.up.railway.app"] } })).toMatchObject({
+      status: "wrong",
+      hint: expect.stringContaining("GoDaddy adds greenlawn.com by itself, so the Name should be just app"),
+    });
+    expect(await check({})).toMatchObject({ status: "missing" });
+    // Railway already sees it, whatever the resolvers say.
+    expect(await checkRecord(fakeDns(zoneDns), want, "greenlawn.com", "godaddy", true)).toMatchObject({ status: "ok" });
+  });
+
+  it("accepts any CNAME to Railway when only Railway knows the exact one", async () => {
+    const lookup = fakeDns({ ...zoneDns, "app.greenlawn.com": { cname: ["zz9.up.railway.app"] } });
+    expect(await checkRecord(lookup, { type: "CNAME", purpose: "route", name: "app.greenlawn.com", value: null }, "greenlawn.com", "godaddy")).toMatchObject({ status: "ok" });
+  });
+
+  it("checks TXT values whole, even when DNS splits them", async () => {
+    const want = { type: "TXT" as const, purpose: "verify" as const, name: "_railway-verify.app.greenlawn.com", value: "railway-verify=abc" };
+    expect(await checkRecord(fakeDns({ "_railway-verify.app.greenlawn.com": { txt: ["railway-verify=abc"] } }), want, "greenlawn.com", null)).toMatchObject({ status: "ok", host: "_railway-verify.app" });
+    expect(await checkRecord(fakeDns({ "_railway-verify.app.greenlawn.com": { txt: ["something-else"] } }), want, "greenlawn.com", null)).toMatchObject({ status: "wrong" });
+  });
+});
+
+describe("Railway", () => {
+  const status: RailwayDomainStatus = {
+    verified: false,
+    certificateStatus: "CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP",
+    certificateErrorMessage: null,
+    verificationDnsHost: "_railway-verify.app",
+    verificationToken: "railway-verify=tok",
+    dnsRecords: [{ recordType: "DNS_RECORD_TYPE_CNAME", purpose: "DNS_RECORD_PURPOSE_TRAFFIC_ROUTE", hostlabel: "app", fqdn: "app.greenlawn.com", zone: "greenlawn.com", requiredValue: "abc123.up.railway.app", status: "DNS_RECORD_STATUS_PROPAGATED" }],
+  };
+
+  it("turns Railway's domain status into the records to add", () => {
+    expect(railwayRecords("app.greenlawn.com", status, null)).toEqual([
+      { type: "CNAME", purpose: "route", name: "app.greenlawn.com", host: "app", value: "abc123.up.railway.app", ok: true },
+      { type: "TXT", purpose: "verify", name: "_railway-verify.app.greenlawn.com", host: "_railway-verify.app", value: "railway-verify=tok", ok: false },
+    ]);
+    expect(certificateOf(status)).toBe("pending");
+    expect(certificateOf({ ...status, certificateStatus: "CERTIFICATE_STATUS_TYPE_VALID" })).toBe("issued");
+  });
+
+  it("registers this instance as its own OAuth client, and says so plainly when Railway won't", async () => {
+    const calls = serve(() => Response.json({ client_id: "cid", client_secret: "sec", registration_access_token: "rat", registration_client_uri: "https://backboard.railway.com/oauth/register/cid" }, { status: 201 }));
+    const client = await registerClient("https://x.up.railway.app/api/address/railway/callback", "Crewtavo for Green Lawn");
+    expect(client).toMatchObject({ client_id: "cid", client_secret: "sec", redirect_uri: "https://x.up.railway.app/api/address/railway/callback" });
+    expect(calls[0]!.body).toMatchObject({ redirect_uris: ["https://x.up.railway.app/api/address/railway/callback"], scope: "openid project:member offline_access" });
+
+    serve(() => Response.json({ error: "invalid_client_metadata", error_description: "registration closed" }, { status: 400 }));
+    await expect(registerClient("https://x.up.railway.app/cb", "Crewtavo")).rejects.toThrow("Use a project token instead");
+  });
+});
+
+describe("the switch-over task", () => {
+  beforeEach(() => useLookup(fakeDns({ "greenlawn.com": { ns: ["ada.ns.cloudflare.com"] }, "app.greenlawn.com": { cname: ["abc123.up.railway.app"] } })));
+
+  const waiting = {
+    company_id: "co-1", domain: "app.greenlawn.com", status: "waiting", automatic: true, railway_domain_id: "dom-1", records: [], certificate: "pending", error: null,
+    from_url: "https://crewtavo-production.up.railway.app", previous_urls: [], started_by: "user-1", started_at: "2026-10-18T10:00:00Z", switching_at: null, finished_at: null, updated_at: "2026-10-18T10:00:00Z",
+  };
+
+  it("switches APP_URL and redeploys auth and crewtavo once Railway is ready and the address answers", async () => {
+    const before = { ...env, APP_URL: "https://crewtavo-production.up.railway.app" };
+    const secret = await encryptJson(before, { api_key: "project-token", extra: { method: "token" } });
+    const fingerprint = await instanceFingerprint(before);
+    const calls = serve((call) => {
+      if (call.path === "web_address" && call.method === "GET") return [waiting];
+      if (call.path === "integration_secrets") return [{ ciphertext: secret }];
+      if (call.url.pathname === "/.well-known/crewtavo-instance") return { instance: fingerprint };
+      if (call.url.host === "backboard.railway.com") {
+        const q = call.body.query as string;
+        if (q.includes("customDomain(")) return { data: { customDomain: { id: "dom-1", domain: "app.greenlawn.com", status: { ...readyStatus } } } };
+        if (q.includes("projectToken")) return { data: { projectToken: { projectId: "proj-1", environmentId: "env-1" } } };
+        if (q.includes("project(")) return { data: { project: { name: "Green Lawn", services: { edges: [{ node: { id: "svc-auth", name: "auth" } }, { node: { id: "svc-crewtavo", name: "crewtavo" } }] } } } };
+        return { data: { ok: true } };
+      }
+      return [];
+    });
+    const result = await runAddressTask(before, adminClient(before));
+    expect(result).toMatchObject({ checked: 1, switching: 1 });
+    const railway = calls.filter((c) => c.url.host === "backboard.railway.com").map((c) => c.body);
+    expect(railway.find((b) => b.query.includes("variableUpsert"))?.variables.input).toMatchObject({ name: "APP_URL", value: "https://app.greenlawn.com", serviceId: "svc-crewtavo", skipDeploys: true });
+    expect(railway.filter((b) => b.query.includes("serviceInstanceRedeploy")).map((b) => b.variables.serviceId)).toEqual(["svc-auth", "svc-crewtavo"]);
+    const patches = calls.filter((c) => c.path === "web_address" && c.method === "PATCH").map((c) => c.body);
+    expect(patches).toContainEqual(expect.objectContaining({ status: "switching" }));
+    // A project token goes in Railway's own header.
+    expect(calls.filter((c) => c.url.host === "backboard.railway.com").every((c) => c.projectToken === "project-token")).toBe(true);
+  });
+
+  it("finishes when Crewtavo starts with the new address: tells the admins and forgets Railway", async () => {
+    const calls = serve((call) => {
+      if (call.path === "web_address" && call.method === "GET") return [{ ...waiting, status: "switching", switching_at: "2026-10-18T10:30:00Z" }];
+      if (call.path === "web_address" && call.method === "PATCH") {
+        const row = { ...waiting, ...call.body };
+        return call.accept.includes("vnd.pgrst.object") ? row : [row];
+      }
+      if (call.path === "memberships") return [{ user_id: "user-1" }, { user_id: "user-2" }];
+      if (call.path === "companies") return [{ name: "Green Lawn" }];
+      return [];
+    });
+    expect(await runAddressTask(env, adminClient(env))).toMatchObject({ done: 1 });
+    const done = calls.find((c) => c.path === "web_address" && c.method === "PATCH")!;
+    expect(done.body).toMatchObject({ status: "done", previous_urls: ["https://crewtavo-production.up.railway.app"] });
+    expect(calls.find((c) => c.path === "notifications" && c.method === "POST")?.body).toHaveLength(2);
+    expect(calls.some((c) => c.path === "integrations" && c.method === "DELETE")).toBe(true);
+  });
+
+  it("gives up on a switch that never came back", async () => {
+    const calls = serve((call) => (call.path === "web_address" && call.method === "GET" ? [{ ...waiting, status: "switching", switching_at: "2026-01-01T00:00:00Z" }] : []));
+    await runAddressTask({ ...env, APP_URL: "https://crewtavo-production.up.railway.app" }, adminClient(env));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ status: "failed" });
+  });
+});
+
+const readyStatus: RailwayDomainStatus = {
+  verified: true,
+  certificateStatus: "CERTIFICATE_STATUS_TYPE_VALID",
+  certificateErrorMessage: null,
+  verificationDnsHost: "_railway-verify.app",
+  verificationToken: "railway-verify=tok",
+  dnsRecords: [],
+};
+
+describe("old addresses", () => {
+  const done = [{ domain: "app.greenlawn.com", status: "done", from_url: "https://crewtavo-production.up.railway.app", previous_urls: ["https://crewtavo-production.up.railway.app"] }];
+  const page = (url: string, accept = "text/html") => new Request(url, { headers: { accept, host: new URL(url).host, "x-forwarded-proto": "https" } });
+
+  it("forwards pages to the new address, but never API calls or client links", async () => {
+    serve((call) => (call.path === "web_address" ? done : []));
+    expect(await forwardTo(env, page("https://crewtavo-production.up.railway.app/schedule?day=2026-10-20"))).toBe("https://app.greenlawn.com/schedule?day=2026-10-20");
+    for (const path of ["/api/health", "/hub/abc", "/book/acme/quote", "/auth/v1/verify", "/.well-known/crewtavo-instance"]) {
+      expect(await forwardTo(env, page(`https://crewtavo-production.up.railway.app${path}`)), path).toBeNull();
+    }
+    expect(await forwardTo(env, page("https://crewtavo-production.up.railway.app/sw.js", "*/*"))).toBeNull();
+    expect(await forwardTo(env, page("https://app.greenlawn.com/schedule"))).toBeNull();
+    expect(await forwardTo(env, page("https://someone-else.example/schedule"))).toBeNull();
+  });
+
+  it("doesn't forward before a switch is done", async () => {
+    serve((call) => (call.path === "web_address" ? [{ ...done[0], status: "waiting" }] : []));
+    expect(await forwardTo(env, page("https://crewtavo-production.up.railway.app/schedule"))).toBeNull();
+  });
+
+  it("still takes texts Twilio signs for the old address", async () => {
+    serve((call) => (call.path === "web_address" ? done : call.path === "clients" ? [] : []));
+    const withTwilio = { ...env, TWILIO_AUTH_TOKEN: "twilio-token" };
+    const form = { From: "+15405550163", Body: "Yes please" };
+    const signature = await twilioSignature("twilio-token", "https://crewtavo-production.up.railway.app/api/webhooks/twilio", form);
+    const res = await app.request("/api/webhooks/twilio", { method: "POST", headers: { "x-twilio-signature": signature }, body: new URLSearchParams(form) }, withTwilio);
+    expect(res.status).toBe(200);
+  });
+
+  it("answers assistants on the address they were added with", async () => {
+    serve((call) => (call.path === "web_address" ? done : []));
+    const old = await app.request("https://crewtavo-production.up.railway.app/.well-known/oauth-protected-resource/mcp", { headers: { host: "crewtavo-production.up.railway.app", "x-forwarded-proto": "https" } }, { ...env, CREWTAVO_GATEWAY: "1" });
+    expect(await old.json()).toMatchObject({ resource: "https://crewtavo-production.up.railway.app/mcp", authorization_servers: ["https://app.greenlawn.com/auth/v1"] });
+    const stranger = await app.request("https://evil.example/.well-known/oauth-protected-resource/mcp", { headers: { host: "evil.example" } }, env);
+    expect(await stranger.json()).toMatchObject({ resource: "https://app.greenlawn.com/mcp" });
+  });
+
+  it("names the instance without giving anything away", async () => {
+    const res = await app.request("/.well-known/crewtavo-instance", {}, env);
+    const { instance } = (await res.json()) as { instance: string };
+    expect(instance).toBe(await instanceFingerprint(env));
+    expect(instance).toMatch(/^[\w-]{24}$/);
+    expect(instance).not.toBe(await instanceFingerprint({ ...env, ENCRYPTION_KEY: btoa("z".repeat(32)) }));
+  });
+});
+
+describe("Cloudflare", () => {
+  const records = [
+    { type: "CNAME" as const, name: "app.greenlawn.com", value: "abc123.up.railway.app" },
+    { type: "TXT" as const, name: "_railway-verify.app.greenlawn.com", value: "railway-verify=tok" },
+  ];
+  const ok = (result: unknown) => Response.json({ success: true, result });
+
+  it("adds what's missing, skips what's there, and keeps nothing", async () => {
+    const calls = serve((call) => {
+      if (call.url.pathname === "/client/v4/zones") return ok([{ id: "z1", name: "greenlawn.com" }]);
+      if (call.method === "GET") return ok(call.url.searchParams.get("name") === "app.greenlawn.com" ? [{ type: "CNAME", content: "abc123.up.railway.app" }] : []);
+      return ok({ id: "r1" });
+    });
+    expect(await addCloudflareRecords(" cf-token ", "greenlawn.com", records)).toBe(1);
+    const posted = calls.filter((c) => c.method === "POST");
+    expect(posted.map((c) => c.body)).toEqual([expect.objectContaining({ type: "TXT", name: "_railway-verify.app.greenlawn.com", content: "railway-verify=tok" })]);
+  });
+
+  it("never replaces a record that's in the way", async () => {
+    const calls = serve((call) => {
+      if (call.url.pathname === "/client/v4/zones") return ok([{ id: "z1", name: "greenlawn.com" }]);
+      if (call.method === "GET") return ok(call.url.searchParams.get("name") === "app.greenlawn.com" ? [{ type: "A", content: "192.0.2.10" }] : []);
+      return ok({});
+    });
+    await expect(addCloudflareRecords("cf-token", "greenlawn.com", records)).rejects.toThrow("already has a A record");
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("explains a token that can't see the domain", async () => {
+    serve(() => ok([]));
+    await expect(addCloudflareRecords("cf-token", "greenlawn.com", records)).rejects.toThrow("can't see greenlawn.com");
+  });
+});
+
+describe("routes", () => {
+  it("only exist in an instance", async () => {
+    const res = await app.request("/api/address", {}, { ...env, CREWTAVO_SINGLE_COMPANY: undefined });
+    expect(res.status).toBe(404);
+  });
+
+  it("come back from Railway with a code, never a message", async () => {
+    const res = await app.request("/api/address/railway/callback?state=forged&code=abc", {}, env);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://app.greenlawn.com/settings?tab=address&railway=expired");
+  });
+});

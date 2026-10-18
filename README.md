@@ -57,8 +57,12 @@ instead of an error.
 > including $5 of usage) to keep it running. Busy instances use more; check
 > [Railway's pricing](https://railway.com/pricing) for current numbers.
 
-**Your own domain:** on the **crewtavo** service, open **Settings → Networking → Custom Domain**,
-then set its `APP_URL` variable to `https://your-domain` and redeploy `crewtavo` and `auth`.
+**Your own domain:** in Crewtavo, open **Settings → Web address**, type the address you want (like
+`app.yourbusiness.com`) and press **Log in with Railway**. Crewtavo adds the address in Railway and
+shows the two DNS records to add where your domain is managed. On Cloudflare, it can add them for
+you. It checks the records as they go in and switches over by itself once the new address works.
+Links already sent keep working, and the old address forwards to the new one. The screen also
+walks you through doing it by hand.
 
 **Email:** Railway blocks outgoing mail servers (SMTP) on its trial and Hobby plans, so on those
 plans Crewtavo sends email through [Resend](https://resend.com): create a free Resend account,
@@ -95,6 +99,8 @@ docker compose --env-file .env.instance down -v    # delete the instance and all
 
 <details>
 <summary><strong>On a server with your own domain</strong></summary>
+
+**Settings → Web address** walks you through these steps with your domain filled in, and checks each one.
 
 1. Point a DNS record for your domain (say `ops.example.com`) at the server.
 2. In `.env.instance`, set `APP_URL=https://ops.example.com`, then run `npm run instance` again.
@@ -253,7 +259,7 @@ Everything an instance needs is generated. These optional settings turn on extra
 
 | Name | Turns on |
 | --- | --- |
-| `APP_URL` | Your own domain. Defaults to the instance's address. |
+| `APP_URL` | Your own domain. **Settings → Web address** sets it on Railway. Defaults to the instance's address. |
 | `ENCRYPTION_KEY` | A separate key for app tokens and client links (32+ characters). Keep it stable once set: changing it disconnects every app and invalidates links already sent. |
 | `ANTHROPIC_API_KEY`, `AI_MODEL` | AI rewriting and answers from your SOPs. Companies can also add their own key on the Apps page. |
 | `GOOGLE_MAPS_BROWSER_KEY`, `GOOGLE_MAPS_SERVER_KEY` | Measuring on satellite imagery, and roof pitch suggestions (Solar API). |

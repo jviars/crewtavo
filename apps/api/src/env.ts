@@ -19,6 +19,15 @@ export interface Env {
   ENCRYPTION_KEY?: string;
   /** Public URL of this deployment, e.g. https://ops.example.com. Defaults to the request origin. */
   APP_URL?: string;
+  /** Set by Railway on every deployment: where this instance lives, for Settings → Web address. */
+  RAILWAY_PUBLIC_DOMAIN?: string;
+  RAILWAY_PROJECT_ID?: string;
+  RAILWAY_PROJECT_NAME?: string;
+  RAILWAY_ENVIRONMENT_ID?: string;
+  RAILWAY_SERVICE_ID?: string;
+  /** "compose" when started by docker-compose.yml (npm run instance). */
+  CREWTAVO_PLATFORM?: string;
+  PORT?: string;
   /**
    * Set by server.ts in stack mode (lib/stack.ts): this server is the gateway to the instance's own
    * Supabase services, and the instance belongs to one company (the first person becomes the owner).

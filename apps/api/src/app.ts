@@ -11,6 +11,7 @@ import { HttpError } from "./lib/http";
 import { reportError } from "./lib/monitoring";
 import { mcp } from "./mcp";
 import { account } from "./routes/account";
+import { address, addressWellKnown } from "./routes/address";
 import { apps } from "./routes/apps";
 import { automations } from "./routes/automations";
 import { calendar } from "./routes/calendar";
@@ -49,6 +50,8 @@ app.route("/api", publicRoutes);
 app.route("/api", calendar);
 app.route("/api", email);
 app.route("/api", push);
+app.route("/api", address);
+app.route("/", addressWellKnown);
 app.route("/", mcp);
 
 /** Scheduled tasks over HTTP, for running one by hand (server.ts's scheduler calls runTask directly). */
