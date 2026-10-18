@@ -39,6 +39,13 @@ describe("email provider logos", () => {
     expect(used.size).toBe(MAIL_PRESETS.length - 1);
   });
 
+  it("is what both the provider picker and the connected mailbox show", () => {
+    const page = readFileSync(new URL("../src/features/settings/EmailSettings.tsx", import.meta.url), "utf8");
+    expect(page).toContain("<ProviderMark preset={p.id} />");
+    expect(page).toContain("<ProviderMark preset={mailbox.preset} />");
+    expect(page).not.toMatch(/\bMARKS\b/);
+  });
+
   it("keeps the mail icon for any other server", () => {
     const html = mark("other");
     expect(html).toContain("lucide-mail");

@@ -10,7 +10,7 @@ for Zoho Mail and outlook.svg for Microsoft 365 / Outlook:
 - gmail.svg: Gmail's M, from svgl.app (MIT).
 - google.svg: Google's G, for Google Workspace, from svgl.app (MIT): its flat four-color G as
   published in the svgl-react 1.1.4 package (svgl.app has since moved to Google's 2025 gradient G).
-- yahoo.svg: Yahoo's Y!, Simple Icons 9.20.0 (CC0; later releases dropped it), in Yahoo purple.
+- yahoo.svg: Yahoo's Y!, Simple Icons 9.20.0 (CC0), in Yahoo purple.
 - icloud.svg: iCloud's cloud, Simple Icons 16.35.0 (CC0), in iCloud blue.
 - resend.svg: Resend's R, Simple Icons 16.35.0 (CC0), in black.
 
