@@ -13,11 +13,14 @@ export class FormulaError extends Error {
   override name = "FormulaError";
 }
 
-/** Values a measurement can supply to formulas. */
+/**
+ * Values a measurement supplies to formulas (apply-measurement in apps/api/src/routes/sales.ts
+ * fills in each one). A formula that reads anything else could never be worked out.
+ */
 export const FORMULA_VARIABLES = [
   "area_sqft", "area_sqyd", "length_ft", "count", "depth_in", "pitch_factor", "waste", "waste_pct",
-  "hours", "rate", "unit_price", "quantity",
 ] as const;
+export type FormulaVariable = (typeof FORMULA_VARIABLES)[number];
 
 const MAX_LENGTH = 300;
 const MAX_POWER = 10;

@@ -6,8 +6,7 @@
     {
       "name": "Labor",
       "unit": "hr",
-      "unit_price": 75,
-      "formula_name": "Labor hours"
+      "unit_price": 75
     },
     {
       "name": "Service call",
@@ -20,12 +19,7 @@
     "Recurring",
     "Estimate"
   ],
-  "formulas": [
-    {
-      "name": "Labor hours",
-      "formula": "hours"
-    }
-  ],
+  "formulas": [],
   "checklists": [
     {
       "name": "Job completion",
