@@ -527,36 +527,61 @@ describe("accounting sync", () => {
 });
 
 describe("automation runs", () => {
-  const run = (id: number, locked_until: string) => ({ id, company_id: COMPANY, rule_id: `rule-${id}`, subject_type: "client", subject_id: "client-1", result: [], status: "running", attempts: 1, locked_until });
+  const run = (id: number) => ({
+    id, company_id: COMPANY, rule_id: `rule-${id}`, subject_type: "client", subject_id: "client-1", result: [], status: "running", attempts: 1, locked_until: "2026-10-17T15:05:00.123456+00:00", claim_token: "claim-1",
+  });
 
   it("are skipped once another worker has claimed them", async () => {
-    const runs = [run(1, "2026-10-17T15:05:00.123456+00:00"), run(2, "2026-10-17T15:05:00.123456+00:00")];
+    const runs = [run(1), run(2)];
     // The batch took so long that, by run 2, another worker had claimed it.
     const { queries, rpcs } = fakeDb(
       () => ({ data: null }), // the rule is gone, so a run that goes ahead is skipped
-      (fn, args) => (fn === "claim_automation_runs" ? { data: runs } : fn === "extend_automation_run" ? { data: args.p_id === 1 } : {}),
+      (fn, args) =>
+        fn === "claim_automation_runs" ? { data: runs } : fn === "start_automation_run" ? { data: args.p_id === 1 } : fn === "finish_automation_run" ? { data: true } : {},
     );
     expect(await processAutomations(env, { limit: 50 })).toEqual({ claimed: 2, done: 0, skipped: 1, failed: 0, lost: 1 });
 
-    expect(rpcs.filter((r) => r.fn === "extend_automation_run").map((r) => r.args)).toEqual([
-      { p_id: 1, p_locked_until: "2026-10-17T15:05:00.123456+00:00" },
-      { p_id: 2, p_locked_until: "2026-10-17T15:05:00.123456+00:00" },
+    expect(rpcs.filter((r) => r.fn === "start_automation_run").map((r) => r.args)).toEqual([
+      { p_id: 1, p_token: "claim-1" },
+      { p_id: 2, p_token: "claim-1" },
     ]);
     expect(queries.filter((q) => q.table === "automation_rules").map((q) => call(q, "eq"))).toEqual([["eq", "id", "rule-1"]]);
-    expect(queries.filter((q) => q.table === "automation_runs").map((q) => call(q, "eq"))).toEqual([["eq", "id", 1]]);
+    // Finished with the claim's token, so it's recorded only while this worker still holds the run.
+    expect(rpcs.filter((r) => r.fn === "finish_automation_run").map((r) => r.args)).toEqual([
+      { p_id: 1, p_token: "claim-1", p_status: "skipped", p_result: [], p_error: "The rule was turned off or deleted." },
+    ]);
+    expect(rpcs.some((r) => r.fn === "release_automation_runs")).toBe(false);
   });
 
   it("aren't done, or quietly skipped, when the claim can't be checked", async () => {
-    const { queries } = fakeDb(
+    const { queries, rpcs } = fakeDb(
       () => ({ data: null }),
       (fn) =>
         fn === "claim_automation_runs"
-          ? { data: [run(1, "2026-10-17T15:05:00.123456+00:00")] }
-          : fn === "extend_automation_run"
-            ? { error: { message: "Could not find the function public.extend_automation_run in the schema cache" } }
+          ? { data: [run(1), run(2)] }
+          : fn === "start_automation_run"
+            ? { error: { message: "Could not find the function public.start_automation_run in the schema cache" } }
             : {},
     );
     await expect(processAutomations(env, { limit: 50 })).rejects.toThrow("schema cache");
     expect(queries.filter((q) => q.table === "automation_rules")).toEqual([]);
+    // The runs it didn't start are free for the next batch now, not in five minutes.
+    expect(rpcs.filter((r) => r.fn === "release_automation_runs").map((r) => r.args)).toEqual([{ p_token: "claim-1", p_ids: [1, 2] }]);
+  });
+
+  it("aren't recorded or counted by a worker whose claim has gone", async () => {
+    const rows: Record<string, unknown> = {
+      automation_rules: { id: "rule-1", name: "Thank them", enabled: true, conditions: [], actions: [], run_count: 4 },
+      companies: { id: COMPANY, name: "Acme", timezone: "UTC", currency: "USD", settings: {}, address: {} },
+      clients: { id: "client-1", display_name: "Ana Smith", email: null, phone: null, tags: [], status: "active", lead_source: null },
+    };
+    const { queries, rpcs } = fakeDb(
+      (q) => ({ data: verb(q) === "select" ? (rows[q.table] ?? null) : null }),
+      // By the time it's done, another worker has claimed the run.
+      (fn) => (fn === "claim_automation_runs" ? { data: [run(1)] } : fn === "start_automation_run" ? { data: true } : { data: false }),
+    );
+    expect(await processAutomations(env, { limit: 50 })).toEqual({ claimed: 1, done: 0, skipped: 0, failed: 0, lost: 1 });
+    expect(rpcs.filter((r) => r.fn === "finish_automation_run").map((r) => r.args.p_status)).toEqual(["done"]);
+    expect(queries.filter((q) => q.table === "automation_rules" && verb(q) === "update")).toEqual([]);
   });
 });

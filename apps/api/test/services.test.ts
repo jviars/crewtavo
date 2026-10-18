@@ -63,10 +63,12 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("campaign sending", () => {
   const campaign = { id: "camp-1", company_id: "co-1", subject: "Fall cleanup", body: "Hi {{client.first_name}}, leaves are coming.", company: { name: "Acme Lawn Care, LLC", email: null, phone: null, address: {} } };
-  const recipients = [1, 2, 3].map((id) => ({ id, campaign_id: "camp-1", company_id: "co-1", client_id: `client-${id}`, email: `person${id}@example.com`, name: `Person ${id}`, status: "sending" }));
+  const recipients = [1, 2, 3].map((id) => ({
+    id, campaign_id: "camp-1", company_id: "co-1", client_id: `client-${id}`, email: `person${id}@example.com`, name: `Person ${id}`, status: "sending", claim_token: "claim-1",
+  }));
 
   /** One campaign with three claimed recipients; `onEmail` can change things as each email goes. */
-  function run(options: { optedOut?: string[]; onEmail?: (count: number, state: { status: string }) => Response | void } = {}) {
+  function run(options: { optedOut?: string[]; claimedSince?: number[]; onEmail?: (count: number, state: { status: string }) => Response | void } = {}) {
     const state = { status: "sending", emails: [] as string[], claims: 0 };
     const calls = serve((call) => {
       if (call.url.host === "api.resend.com") {
@@ -74,45 +76,58 @@ describe("campaign sending", () => {
         return options.onEmail?.(state.emails.length, state) ?? Response.json({ id: `email-${state.emails.length}` });
       }
       if (call.path === "rpc/claim_campaign_recipients") return state.claims++ ? [] : recipients;
+      if (call.path === "rpc/renew_campaign_recipient") return !(options.claimedSince ?? []).includes(call.body.p_id);
       if (call.method === "GET" && call.path === "campaigns") return call.url.searchParams.get("select") === "status" ? [{ status: state.status }] : [campaign];
       if (call.method === "GET" && call.path === "clients") return [{ marketing_opt_out: (options.optedOut ?? []).includes(call.url.searchParams.get("id")!.slice(3)) }];
       if (call.method === "HEAD") return counted(0);
       return [];
     });
-    const updates = () =>
-      calls.filter((c) => c.method === "PATCH" && c.path === "campaign_recipients").map((c) => ({ id: c.url.searchParams.get("id"), status: c.url.searchParams.get("status"), body: c.body }));
-    return { state, calls, updates, done: processCampaigns(env, { campaignId: "camp-1", baseUrl: "https://ops.example.com" }) };
+    /** What it recorded or put back, each with its claim's token. */
+    const settled = () =>
+      calls.filter((c) => c.path === "rpc/finish_campaign_recipients" || c.path === "rpc/release_campaign_recipients").map((c) => ({ fn: c.path.slice(4), ...c.body }));
+    return { state, calls, settled, done: processCampaigns(env, { campaignId: "camp-1", baseUrl: "https://ops.example.com" }) };
   }
 
   it("claims its batch instead of reading pending recipients, so overlapping runs don't send twice", async () => {
-    const { calls, done } = run();
+    const { calls, settled, done } = run();
     expect(await done).toMatchObject({ sent: 3 });
     expect(calls.find((c) => c.path === "rpc/claim_campaign_recipients")?.body).toEqual({ p_campaign: "camp-1", p_limit: 25 });
     expect(calls.some((c) => c.method === "GET" && c.path === "campaign_recipients")).toBe(false);
+    expect(settled()).toEqual([1, 2, 3].map((id) => ({ fn: "finish_campaign_recipients", p_token: "claim-1", p_ids: [id], p_status: "sent" })));
+  });
+
+  it("renews its claim right before each email, and leaves recipients another run has claimed since", async () => {
+    const { state, calls, settled, done } = run({ claimedSince: [2] });
+    expect(await done).toMatchObject({ sent: 2, lost: 1 });
+    expect(state.emails).toEqual(["person1@example.com", "person3@example.com"]);
+    const order = calls.filter((c) => c.path === "rpc/renew_campaign_recipient" || c.url.host === "api.resend.com").map((c) => c.body.p_id ?? c.body.to[0]);
+    expect(order).toEqual([1, "person1@example.com", 2, 3, "person3@example.com"]);
+    expect(calls.find((c) => c.path === "rpc/renew_campaign_recipient")?.body).toEqual({ p_id: 1, p_token: "claim-1" });
+    expect(settled().flatMap((s) => s.p_ids)).toEqual([1, 3]); // recipient 2 is the other run's to record
   });
 
   it("doesn't email people who unsubscribed after Send", async () => {
-    const { state, updates, done } = run({ optedOut: ["client-2"] });
+    const { state, settled, done } = run({ optedOut: ["client-2"] });
     expect(await done).toMatchObject({ sent: 2, skipped: 1 });
     expect(state.emails).toEqual(["person1@example.com", "person3@example.com"]);
-    expect(updates()).toContainEqual({ id: "in.(2)", status: "eq.sending", body: { status: "skipped", error: "Unsubscribed" } });
+    expect(settled()).toContainEqual({ fn: "finish_campaign_recipients", p_token: "claim-1", p_ids: [2], p_status: "skipped", p_error: "Unsubscribed" });
   });
 
   it("stops partway through a batch when the campaign is stopped", async () => {
-    const { state, updates, done } = run({
+    const { state, settled, done } = run({
       onEmail: (count, s) => {
         if (count === 1) s.status = "cancelled"; // Stop pressed while the first email went out
       },
     });
     expect(await done).toMatchObject({ sent: 1, skipped: 2 });
     expect(state.emails).toEqual(["person1@example.com"]);
-    expect(updates()).toContainEqual({ id: "in.(2,3)", status: "eq.sending", body: { status: "skipped", error: "Campaign stopped" } });
+    expect(settled()).toContainEqual({ fn: "finish_campaign_recipients", p_token: "claim-1", p_ids: [2, 3], p_status: "skipped", p_error: "Campaign stopped" });
   });
 
   it("puts the rest of the batch back when the provider rate limits", async () => {
-    const { updates, done } = run({ onEmail: (count) => (count === 2 ? Response.json({ message: "Too many requests" }, { status: 429 }) : undefined) });
+    const { settled, done } = run({ onEmail: (count) => (count === 2 ? Response.json({ message: "Too many requests" }, { status: 429 }) : undefined) });
     expect(await done).toMatchObject({ sent: 1, failed: 0 });
-    expect(updates()).toContainEqual({ id: "in.(2,3)", status: "eq.sending", body: { status: "pending", claimed_at: null } });
+    expect(settled()).toContainEqual({ fn: "release_campaign_recipients", p_token: "claim-1", p_ids: [2, 3] });
   });
 });
 
