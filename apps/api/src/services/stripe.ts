@@ -173,6 +173,8 @@ export interface StripeInvoice {
   amount_paid: number;
   /** The customer's balance in Stripe when it was finalized: credit (negative) or owed from before. */
   starting_balance: number;
+  /** Credit notes issued while it was open, which took that much off amount_due. */
+  pre_payment_credit_notes_amount: number;
   tax: number | null;
   total_discount_amounts: Array<{ amount: number }> | null;
   due_date: number | null;

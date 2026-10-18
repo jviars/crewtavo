@@ -1,8 +1,9 @@
 /**
  * Connecting, switching and disconnecting Stripe, history imports on the server's key, Hub Pay,
- * and the money Stripe reports (disputes, and customers' balances there), against an in-memory
- * database and a fake Stripe that keeps accounts (and test and live mode) apart the way Stripe
- * does: one account's invoice is "No such invoice" to another's key.
+ * the money Stripe reports (disputes, refunds, deposits, and customers' balances and credit notes
+ * there) and keeping Stripe invoices in step, against an in-memory database and a fake Stripe that
+ * keeps accounts (and test and live mode) apart the way Stripe does: one account's invoice is
+ * "No such invoice" to another's key.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
@@ -167,13 +168,14 @@ interface Side {
   webhooks: Map<string, Row>;
   customers: Row[];
   payouts: Row[];
+  transactions: Row[];
 }
 interface Key {
   account: string;
   live: boolean;
   webhooks: boolean;
 }
-const stripe = { sides: new Map<string, Side>(), keys: new Map<string, Key>(), calls: [] as string[], n: 0 };
+const stripe = { sides: new Map<string, Side>(), keys: new Map<string, Key>(), calls: [] as string[], n: 0, finalizing: null as (() => Promise<void>) | null };
 
 /** A key for `account` (live or test by its prefix). `webhooks: false` is a restricted key without that permission. */
 function stripeKey(key: string, account: string, options: { webhooks?: boolean } = {}) {
@@ -183,7 +185,7 @@ function stripeKey(key: string, account: string, options: { webhooks?: boolean }
 function side(key: string): Side {
   const k = stripe.keys.get(key)!;
   const name = `${k.account}:${k.live ? "live" : "test"}`;
-  if (!stripe.sides.has(name)) stripe.sides.set(name, { invoices: new Map(), webhooks: new Map(), customers: [], payouts: [] });
+  if (!stripe.sides.has(name)) stripe.sides.set(name, { invoices: new Map(), webhooks: new Map(), customers: [], payouts: [], transactions: [] });
   return stripe.sides.get(name)!;
 }
 /** The client pays a Stripe invoice (in whichever account it's in). */
@@ -248,6 +250,8 @@ async function fakeStripe(input: string | URL, init: RequestInit = {}): Promise<
   if ((m = path.match(/^\/v1\/invoices\/([^/]+)\/finalize$/))) {
     const invoice = s.invoices.get(m[1]!);
     if (!invoice) return noInvoice(m[1]!);
+    // Something else happening while Stripe makes it.
+    await stripe.finalizing?.();
     // The customer's balance goes on it: their credit comes off, and what they owed before is
     // added. Less than 50 cents left is marked paid without a charge, and goes on their next one.
     const customer = s.customers.find((c) => c.id === invoice.customer)!;
@@ -281,6 +285,8 @@ async function fakeStripe(input: string | URL, init: RequestInit = {}): Promise<
   }
   if (path === "/v1/invoices") return json({ data: [...s.invoices.values()], has_more: false });
   if (path === "/v1/payouts") return json({ data: s.payouts, has_more: false });
+  if ((m = path.match(/^\/v1\/payouts\/([^/]+)$/))) return json(s.payouts.find((p) => p.id === m![1]));
+  if (path === "/v1/balance_transactions") return json({ data: s.transactions.filter((t) => t.payout === url.searchParams.get("payout")), has_more: false });
   throw new Error(`The fake Stripe doesn't know ${method} ${path}`);
 }
 
@@ -315,6 +321,7 @@ beforeEach(() => {
   stripe.keys.clear();
   stripe.calls.length = 0;
   stripe.n = 0;
+  stripe.finalizing = null;
   db = fakeDb({
     companies: [{ id: CO, name: "Green Lawn", timezone: "America/Chicago", currency: "USD", settings: { hub_tips: true } }],
     memberships: [{ company_id: CO, user_id: USER, role: "owner", role_id: null, active: true }],
@@ -529,7 +536,7 @@ describe("Hub Pay", () => {
 describe("money Stripe reports", () => {
   const event = (type: string, object: Row) => handleStripeEvent(env, db.db, { companyId: CO }, { id: `evt_${++stripe.n}`, type, data: { object } });
   const dispute = (intent: string, amount: number, status: string, id = "dp_1") => ({ id, amount, charge: `ch_${intent}`, payment_intent: intent, status, reason: "fraudulent", evidence_details: { due_by: null } });
-  const paidIn = (invoiceId: string) => db.tables.payments!.filter((p) => p.invoice_id === invoiceId);
+  const paidIn = (invoiceId: string | null) => db.tables.payments!.filter((p) => p.invoice_id === invoiceId);
 
   it("takes a lost dispute off the invoice first, then the tip, like a refund", async () => {
     await connect(stripeKey("sk_live_A", "acct_A"));
@@ -631,5 +638,95 @@ describe("money Stripe reports", () => {
     // Stripe's webhook for it changes nothing more.
     await event("invoice.paid", { id: made!.stripe_id });
     expect(db.tables.payments).toHaveLength(1);
+  });
+
+  it("takes what was owed from before back with the rest of its charge, and puts it in the charge's deposit", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    // Pat owed $25 in Stripe from before each time, so Stripe charged $185 for each $160 invoice.
+    const pat = { id: "cus_pat", email: "pat@example.com", balance: 0 };
+    side(key).customers.push(pat);
+    for (const id of [INV, INV2]) {
+      pat.balance = 2500;
+      await syncStripeInvoice(env, db.db, CO, id);
+      payInStripe(rowsFor(id)[0]!.stripe_id);
+      await event("invoice.paid", { id: rowsFor(id)[0]!.stripe_id });
+    }
+    const [one, two] = [INV, INV2].map((id) => `pi_${rowsFor(id)[0]!.stripe_id}`);
+    expect(db.tables.payments!.map((p) => [p.invoice_id, p.amount])).toEqual([[INV, 160], [null, 25], [INV2, 160], [null, 25]]);
+
+    // The first charge reaches the bank: its deposit has both parts of it, and its fee.
+    side(key).payouts.push({ id: "po_1", amount: 17933, currency: "usd", arrival_date: 1_760_400_000, status: "paid", automatic: true, failure_message: null });
+    side(key).transactions.push({ id: "txn_1", payout: "po_1", type: "charge", amount: 18500, fee: 567, net: 17933, source: { id: "ch_1", object: "charge", payment_intent: one } });
+    await event("payout.paid", { id: "po_1" });
+    const deposit = db.tables.payouts![0]!.id;
+    expect(db.tables.payments!.filter((p) => p.payout_id === deposit).map((p) => [p.amount, p.fee_amount])).toEqual([[160, 5.67], [25, 0]]);
+
+    // It's refunded in two goes: $170 is the invoice's $160 and $10 of what was owed, then the last $15.
+    await event("charge.refunded", { id: "ch_1", payment_intent: one, amount_refunded: 17000 });
+    await event("charge.refunded", { id: "ch_1", payment_intent: one, amount_refunded: 18500 });
+    // The second is lost in a dispute (and Stripe says so twice).
+    await event("charge.dispute.closed", dispute(two!, 18500, "lost"));
+    await event("charge.dispute.closed", dispute(two!, 18500, "lost"));
+    expect(paidIn(INV).map((p) => p.amount)).toEqual([160, -160]);
+    expect(paidIn(INV2).map((p) => p.amount)).toEqual([160, -160]);
+    expect(paidIn(null).map((p) => [p.amount, p.processor_ref])).toEqual([
+      [25, `${one}:before`], [25, `${two}:before`], [-10, `${one}:refund:17000:before`], [-15, `${one}:refund:18500:before`], [-25, `${two}:dispute:dp_1:before`],
+    ]);
+    // Pat got back all they paid, and so is recorded as paying nothing.
+    expect(db.tables.payments!.reduce((sum, p) => sum + p.amount, 0)).toBe(0);
+  });
+
+  it("books a credit note issued in Stripe before it was paid", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    for (const id of [INV, INV2]) await syncStripeInvoice(env, db.db, CO, id);
+    const [card, check] = [INV, INV2].map((id) => stripeInvoice(rowsFor(id)[0]!.stripe_id)!);
+    // The office takes $20 off each in Stripe. One is paid there, the other marked paid for a check.
+    for (const invoice of [card!, check!]) Object.assign(invoice, { amount_due: 14000, pre_payment_credit_notes_amount: 2000 });
+    payInStripe(card!.id);
+    Object.assign(check!, { status: "paid", paid_out_of_band: true });
+    for (const invoice of [card!, check!]) await event("invoice.paid", { id: invoice.id });
+    expect(paidIn(INV).map((p) => [p.amount, p.method, p.notes ?? null])).toEqual([[140, "card", null], [20, "other", "Credit note in Stripe"]]);
+    expect(paidIn(INV2).map((p) => [p.amount, p.method, p.notes ?? null])).toEqual([[140, "other", "Marked paid in Stripe"], [20, "other", "Credit note in Stripe"]]);
+  });
+});
+
+describe("keeping Stripe in step", () => {
+  const event = (type: string, object: Row) => handleStripeEvent(env, db.db, { companyId: CO }, { id: `evt_${++stripe.n}`, type, data: { object } });
+  const toDraft = (id: string) => (db.tables.invoices!.find((i) => i.id === id)!.status = "draft");
+
+  it("tries again when the invoice changed while its Stripe invoice was being made", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    // The client presses Pay in the Hub, and the outbox's sync runs while Stripe makes the invoice:
+    // first with nothing changed, then once the office has moved it back to draft.
+    const synced: string[] = [];
+    stripe.finalizing = async () => {
+      synced.push(await syncStripeInvoice(env, db.db, CO, INV));
+      toDraft(INV);
+      synced.push(await syncStripeInvoice(env, db.db, CO, INV).catch((error: Error) => `failed: ${error.message}`));
+    };
+    await stripeCheckout(env, db.db, CO, INV, 0);
+    stripe.finalizing = null;
+    // The second failed, so the outbox runs it again, and then the Stripe invoice is voided.
+    expect(synced).toEqual(["busy", "failed: Stripe's invoice for this was still being made. Trying again in a few minutes."]);
+    const [made] = rowsFor(INV);
+    expect(made).toMatchObject({ status: "open" });
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("voided");
+    expect(stripeInvoice(made!.stripe_id)!.status).toBe("void");
+  });
+
+  it("catches up once a bank payment it waited for bounces", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    await syncStripeInvoice(env, db.db, CO, INV);
+    const [made] = rowsFor(INV);
+    // A bank payment is on its way, so the sync leaves the Stripe invoice be when the office moves
+    // the invoice back to draft.
+    await event("payment_intent.processing", { id: "pi_bank", invoice: made!.stripe_id });
+    toDraft(INV);
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("busy");
+    // It bounces: the Stripe invoice isn't left open for the client to pay.
+    await event("invoice.payment_failed", { id: made!.stripe_id });
+    expect(stripeInvoice(made!.stripe_id)!.status).toBe("void");
+    expect(rowsFor(INV)[0]).toMatchObject({ status: "void" });
   });
 });
