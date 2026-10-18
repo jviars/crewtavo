@@ -188,6 +188,14 @@ describe("the first paint", () => {
     expect(rule(".topbar")).toMatch(/padding: 10px max\(24px, env\(safe-area-inset-right\)\) /);
     expect(rule(".content")).toMatch(/padding: 20px max\(48px, env\(safe-area-inset-right\)\) 56px 48px;/);
   });
+
+  it("keeps toasts clear of the notch and home indicator, sideways too, in both layouts", () => {
+    const css = read("src/styles/components.css");
+    const wide = css.match(/\n\.toaster \{([^}]*)\}/)![1]!;
+    expect(wide).toMatch(/inset: auto max\(20px, env\(safe-area-inset-right\)\) max\(20px, env\(safe-area-inset-bottom\)\) auto;/);
+    const phone = css.match(/@media \(max-width: 900px\) \{ \.toaster \{([^}]*)\}/)![1]!;
+    expect(phone).toMatch(/inset: auto max\(16px, env\(safe-area-inset-right\)\) calc\(var\(--mobile-nav-height\) \+ 12px \+ env\(safe-area-inset-bottom\)\) max\(16px, env\(safe-area-inset-left\)\);/);
+  });
 });
 
 // --- Installing ----------------------------------------------------------------------------------
@@ -389,11 +397,20 @@ describe("the service worker, when the phone has signal again (Background Sync)"
     await expect(last.dispatch("sync", { tag: SYNC_TAG, lastChance: true })).resolves.toBe("done");
     expect(last.showNotification).toHaveBeenCalledTimes(1);
 
-    // Tapping it brings that window back on the screen, on My day.
-    await sw.dispatch("notificationclick", { notification: { close: () => undefined, data: sw.showNotification.mock.calls[0]![1].data } });
+    // Tapping it brings that window back on the screen as it was, which sends them: going to My day
+    // would load the page again and lose a note typed there, or checklist answers not saved.
+    const { tag, data } = sw.showNotification.mock.calls[0]![1];
+    await sw.dispatch("notificationclick", { notification: { close: () => undefined, tag, data } });
     expect(sw.windows[0]!.focus).toHaveBeenCalled();
-    expect(sw.windows[0]!.navigate).toHaveBeenCalledWith("https://crew.example.com/field");
+    expect(sw.windows[0]!.navigate).not.toHaveBeenCalled();
     expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("still opens what a pushed notification links to in a window that's open", async () => {
+    const sw = loadServiceWorker({ windows: [{ url: "https://crew.example.com/field", visibilityState: "hidden" }] });
+    await sw.dispatch("notificationclick", { notification: { close: () => undefined, tag: "visit-moved", data: { link: "/schedule" } } });
+    expect(sw.windows[0]!.focus).toHaveBeenCalled();
+    expect(sw.windows[0]!.navigate).toHaveBeenCalledWith("https://crew.example.com/schedule");
   });
 
   it("stays quiet with notifications not allowed, with nothing waiting, and for other sync tags", async () => {

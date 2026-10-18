@@ -7,8 +7,9 @@
  * only their unsent field actions are kept, for when they sign back in.
  *
  * They go out while Crewtavo is on the screen: as it opens, when the connection is back, and when it
- * comes back on the screen. Put away, they wait (React Query carries on with a paused action only on
- * a visible page); closed, nothing sends them (that would take the person's sign-in in the service
+ * comes back on the screen. Put away, one already waiting there waits (React Query carries on with a
+ * paused action only on a visible page), though one put back from the phone's storage goes once
+ * there's signal; closed, nothing sends them (that would take the person's sign-in in the service
  * worker). Where the phone has Background Sync (Android), the service worker says how many are
  * waiting once there's signal (tellServiceWorker).
  */
@@ -48,12 +49,18 @@ const unsent = (m: Mutation) => isFieldAction(m) && (m.state.status === "pending
 const sending = new Set<unknown>();
 /** Sends that already note what's out, so starting again (a remount) doesn't wrap them twice. */
 const noting = new WeakSet<object>();
+/**
+ * Counts again as a request goes out, for the service worker: the signal that sends it also wakes the
+ * worker, and an action put back from storage goes without any other change React Query reports.
+ */
+const recounts = new Set<() => void>();
 
 /** A field action's registered send, noting in `sending` while its request is out. */
 function noteSending(send: MutationFunction<unknown, unknown>): MutationFunction<unknown, unknown> {
   if (noting.has(send)) return send;
   const noted = async (variables: unknown) => {
     sending.add(variables);
+    recounts.forEach((recount) => recount());
     try {
       return await send(variables);
     } finally {
@@ -293,13 +300,20 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     if (event.type !== "updated" || !isFieldAction(event.mutation)) return;
     const { action } = event;
     if (action.type === "failed" && cannotReach(action.error)) cannotReachServer();
-    if (action.type === "success") recheckDelay = 0;
+    if (action.type === "success") {
+      recheckDelay = 0;
+      // Told again even with the same count: the worker may have said this one was waiting just as it
+      // went, and the next count closes that notification.
+      told = -1;
+    }
     // Turned down by the server: what the screens showed ahead of it is wrong, so load it again.
     // Screens do this too, but an action restored after a restart has no screen.
     if (action.type === "error" && !signInExpired(action.error)) queryClient.invalidateQueries({ predicate: (q) => KEEP.has(String(q.queryKey[0])) });
   });
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
   if (typeof window !== "undefined") window.addEventListener("pagehide", flush);
+  const recount = () => tell();
+  recounts.add(recount);
   queryClient.resumePausedMutations().catch(() => undefined);
   // Counted once they've resumed: one put back that's on its way again at once isn't waiting.
   tell();
@@ -309,6 +323,7 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     if (saveFirst) flush();
     stopQueries();
     stopMutations();
+    recounts.delete(recount);
     clearTimeout(timer);
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     if (typeof window !== "undefined") window.removeEventListener("pagehide", flush);

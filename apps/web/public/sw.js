@@ -127,7 +127,9 @@ self.addEventListener("notificationclick", (event) => {
       const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
       if (open) {
         await open.focus();
-        if ("navigate" in open) await open.navigate(link).catch(() => undefined);
+        // Updates waiting go out once Crewtavo is back on the screen, whatever it shows. Loading My day
+        // instead would lose what's only on that screen (a note typed, checklist answers not saved).
+        if (event.notification.tag !== SYNC_TAG && "navigate" in open) await open.navigate(link).catch(() => undefined);
         return;
       }
       await self.clients.openWindow(link);
@@ -138,9 +140,10 @@ self.addEventListener("notificationclick", (event) => {
 // Background Sync (Android): the phone has signal again and crew updates wait to be sent. Crewtavo
 // sends them itself while it's on the screen, so then this fails on purpose: the browser tries it
 // again in a few minutes, in case the app is put away or closed by then. Put away (in a pocket,
-// behind another app), it waits to be back on the screen (React Query carries on with a paused
-// action only on a visible page); closed, it can't send. Either way a notification says how many
-// are waiting, and opening Crewtavo sends them.
+// behind another app), an action that was already waiting there waits to be back on the screen
+// (React Query carries on with a paused action only on a visible page); closed, it can't send.
+// Either way a notification says how many are waiting, and opening Crewtavo sends them. (One put
+// back from the phone's storage does go while put away; the app takes it off the count as it goes.)
 self.addEventListener("sync", (event) => {
   if (event.tag !== SYNC_TAG) return;
   event.waitUntil(
