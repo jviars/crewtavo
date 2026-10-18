@@ -10,6 +10,10 @@
 -- don't run for a change of type. A rate that was already rounded (0.0888) stays as it was saved.
 -- supabase/tests/tax_rate_precision_test.sql covers it.
 
+-- Widening a column rewrites its table. Both are locked first, in the order the dashboard reads
+-- them (invoices, then quotes), so a dashboard load that starts meanwhile waits for this instead of
+-- holding one table while this holds the other.
+do $$ begin lock table public.invoices, public.quotes in access exclusive mode; end $$;
 alter table public.quotes alter column tax_rate type numeric(8, 6);
 alter table public.invoices alter column tax_rate type numeric(8, 6);
 
