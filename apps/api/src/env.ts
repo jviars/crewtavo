@@ -37,6 +37,8 @@ export interface Env {
    */
   CREWTAVO_GATEWAY?: string;
   CREWTAVO_SINGLE_COMPANY?: string;
+  /** "1" on the public demo: every visitor gets their own sample company (services/demo.ts). */
+  CREWTAVO_DEMO?: string;
   /** Owner account recovery without email (lib/recovery.ts): the account's email and a phrase of 12+ characters. */
   CREWTAVO_RECOVERY_EMAIL?: string;
   CREWTAVO_RECOVERY_CODE?: string;

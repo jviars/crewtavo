@@ -51,6 +51,7 @@ import { social } from "./routes/social";
 import { storage } from "./routes/storage";
 import { subOffers } from "./routes/subOffers";
 import { subs } from "./routes/subs";
+import { demo } from "./routes/demo";
 import { formInbox, formTooLarge, formVisitorLimit, websiteForms } from "./routes/websiteForms";
 import { runTask, TASKS, type TaskName } from "./tasks";
 
@@ -133,6 +134,7 @@ app.route("/api", websiteForms);
 app.route("/api", drive);
 app.route("/api", storage);
 app.route("/api", backups);
+app.route("/api", demo);
 app.route("/", addressWellKnown);
 app.route("/", mcp);
 // Website analytics: the script for the business's website, and its page views (routes/analytics.ts).

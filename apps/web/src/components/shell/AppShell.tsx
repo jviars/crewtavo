@@ -21,6 +21,7 @@ import { createItems, mobileTabs, NAV_GROUP_LABELS, NAV_GROUPS, navVisible, sett
 import { HelpButton } from "./Help";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
+import { DemoBar } from "@/features/demo/Demo";
 import { RestartBanner } from "./RestartBanner";
 import { getLocale, showScreenLang, t } from "@/lib/i18n";
 
@@ -258,6 +259,7 @@ export function AppShell() {
       </aside>
 
       <div className="main">
+        {session.config.demo && <DemoBar />}
         <header className="topbar" data-scrolled={scrolled || undefined} lang={shellLang}>
           <div className="business">
             <BusinessTile name={session.company.name} settings={session.company.settings} />
