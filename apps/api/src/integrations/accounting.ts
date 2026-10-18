@@ -251,7 +251,11 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
     ctx.admin.from("payments").select("id, client_id, invoice_id, amount, method, received_at").eq("company_id", ctx.companyId).eq("id", paymentId).maybeSingle(),
     "Payment",
   );
-  if (Number(payment.amount) <= 0) return null; // refunds are recorded in the books by hand for now
+  // Refunds are recorded in the books by hand for now. Tips aren't sent: they aren't on the invoice
+  // in the books, and sent with the payment they'd sit there as the customer's credit. So a payment
+  // that was only a tip (Stripe charged just the tip) has nothing to send; QuickBooks and Zoho
+  // refuse a payment of nothing anyway.
+  if (Number(payment.amount) <= 0) return null;
   const customerId = await pushClient(ctx, payment.client_id);
   const invoiceExternal = payment.invoice_id ? await pushInvoice(ctx, payment.invoice_id) : null;
   const date = String(payment.received_at).slice(0, 10);

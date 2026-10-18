@@ -648,6 +648,11 @@ async function settleOwnInvoice(ctx: Ctx, invoice: StripeInvoice) {
  * booked to it; what was owed from before is the client's, without an invoice (`<charge>:before`,
  * so a refund or a lost dispute of the charge takes it back too). A credit note issued in Stripe
  * before it was paid took its amount off what Stripe asked for, so that's booked to it as well.
+ *
+ * Credit that pays all of the invoice goes on to the tip (Stripe puts the balance on all it asks
+ * for): then only what's left of the tip is charged, so that payment is only a tip, and credit that
+ * covers the tip too leaves nothing to charge. The credit and the charge each carry the part of the
+ * tip they paid.
  */
 async function recordPayment(ctx: Ctx, invoice: StripeInvoice) {
   const meta = invoice.metadata ?? {};
@@ -659,25 +664,29 @@ async function recordPayment(ctx: Ctx, invoice: StripeInvoice) {
   const received = invoice.paid_out_of_band ? invoice.amount_due : invoice.amount_paid;
   const before = Math.min(Math.max(balance, 0), received);
   const credit = Math.min(Math.max(-balance, 0), invoice.total - tip);
+  const creditTip = Math.min(Math.max(-balance - credit, 0), tip);
   const credited = Math.min(invoice.pre_payment_credit_notes_amount ?? 0, invoice.total - tip - credit);
+  // What was received paid the rest of the tip, and the invoice.
+  const receivedTip = Math.max(0, Math.min(tip - creditTip, received - before));
+  const paid = received - before - receivedTip;
   const owedBefore = `Owed from before in Stripe, paid with invoice #${target.number}`;
   const payments: Array<{ amount: number; tip_amount?: number; method: string; processor: string | null; processor_ref: string; fee_amount?: number; notes?: string; invoice_id?: null }> = [];
   if (invoice.paid_out_of_band) {
     // Money that came some other way, so it stays editable.
-    if (received - before - tip > 0) payments.push({ amount: (received - before - tip) / 100, method: "other", processor: null, processor_ref: `${invoice.id}:paid`, notes: "Marked paid in Stripe" });
+    if (paid > 0) payments.push({ amount: paid / 100, method: "other", processor: null, processor_ref: `${invoice.id}:paid`, notes: "Marked paid in Stripe" });
     if (before > 0) payments.push({ amount: before / 100, method: "other", processor: null, processor_ref: `${invoice.id}:before`, invoice_id: null, notes: `Marked paid in Stripe. ${owedBefore}` });
   } else {
     const { charge, fee } = chargeOf(invoice);
     const ref = invoice.payment_intent ?? charge?.id ?? `${invoice.id}:paid`;
-    if (received - before - tip > 0) {
+    if (paid > 0 || receivedTip > 0) {
       payments.push({
-        amount: (received - before - tip) / 100, tip_amount: tip / 100, method: paymentMethod(charge), processor: "stripe",
+        amount: paid / 100, tip_amount: receivedTip / 100, method: paymentMethod(charge), processor: "stripe",
         processor_ref: ref, fee_amount: fee / 100,
       });
     }
     if (before > 0) payments.push({ amount: before / 100, method: paymentMethod(charge), processor: "stripe", processor_ref: `${ref}:before`, invoice_id: null, notes: owedBefore });
   }
-  if (credit > 0) payments.push({ amount: credit / 100, method: "other", processor: null, processor_ref: `${invoice.id}:credit`, notes: "Account credit in Stripe" });
+  if (credit > 0) payments.push({ amount: credit / 100, tip_amount: creditTip / 100, method: "other", processor: null, processor_ref: `${invoice.id}:credit`, notes: "Account credit in Stripe" });
   if (credited > 0) payments.push({ amount: credited / 100, method: "other", processor: null, processor_ref: `${invoice.id}:credit_note`, notes: "Credit note in Stripe" });
   if (!payments.length) return;
   // Paid after it was voided here (a bank payment that was already on its way): a void invoice
@@ -724,12 +733,15 @@ async function importInvoice(ctx: Ctx, invoice: StripeInvoice, quiet: boolean) {
   const lines = invoice.lines.has_more ? await allLines(ctx.key, invoice.id) : invoice.lines.data;
   const { charge, fee } = chargeOf(invoice);
   const paidAt = isoAt(invoice.status_transitions.paid_at);
+  // A credit note issued there before it was paid is how part of a payment is recorded in Stripe
+  // (see stripe_payment_guard), so it's booked too.
+  const credited = (invoice.pre_payment_credit_notes_amount ?? 0) / 100;
   const payment =
     invoice.status !== "paid" ? null
-    : invoice.paid_out_of_band ? { amount: invoice.amount_due / 100, method: "other", processor_ref: `${invoice.id}:paid`, received_at: paidAt, out_of_band: true }
+    : invoice.paid_out_of_band ? { amount: invoice.amount_due / 100, method: "other", processor_ref: `${invoice.id}:paid`, received_at: paidAt, out_of_band: true, credited }
     : {
         amount: invoice.amount_paid / 100, method: paymentMethod(charge), processor_ref: invoice.payment_intent ?? charge?.id ?? `${invoice.id}:paid`,
-        received_at: paidAt, fee: fee / 100, refunded: (charge?.amount_refunded ?? 0) / 100,
+        received_at: paidAt, fee: fee / 100, refunded: (charge?.amount_refunded ?? 0) / 100, credited,
       };
   const sent = invoice.status_transitions.finalized_at ?? invoice.created;
   const { error } = await ctx.admin.rpc("stripe_import_invoice", {
@@ -781,7 +793,7 @@ export async function handleStripeEvent(env: Env, admin: Db, route: WebhookRoute
   const access = route.companyId ? await stripeAccess(env, admin, route.companyId) : env.STRIPE_SECRET_KEY ? { key: env.STRIPE_SECRET_KEY, own: false } : null;
   const key = access?.key ?? null;
   if (event.type.startsWith("checkout.session.")) return checkoutSession(admin, route, event.type, object);
-  if (event.type === "payment_intent.processing") return bankPaymentStarted(admin, route, object.invoice as string | null);
+  if (event.type === "payment_intent.processing") return bankPaymentStarted(admin, route, object.invoice as string | null, event.created);
   if (event.type === "charge.refunded") return refunded(admin, route, object as StripeCharge);
   if (event.type === "charge.dispute.created" || event.type === "charge.dispute.closed") return disputed(admin, route, event.type, object as Dispute);
   if (!key) return null;
@@ -828,12 +840,15 @@ async function noteOnClient(admin: Db, note: { company_id: string; client_id: st
   });
 }
 
-/** A bank (ACH) payment started on a Stripe invoice: it takes a few days, so say so instead of asking again. */
-async function bankPaymentStarted(admin: Db, route: WebhookRoute, stripeInvoiceId: string | null) {
+/**
+ * A bank (ACH) payment started on a Stripe invoice: it takes a few days, so say so instead of asking
+ * again. The office sees when it started (`at`, the event's time), so nobody records it twice.
+ */
+async function bankPaymentStarted(admin: Db, route: WebhookRoute, stripeInvoiceId: string | null, at: number | undefined) {
   if (!stripeInvoiceId) return null;
   const { data: row } = await admin.from("stripe_invoices").select("id, company_id").eq("stripe_id", stripeInvoiceId).maybeSingle();
   if (!row || (route.companyId && row.company_id !== route.companyId)) return null;
-  await admin.from("stripe_invoices").update({ status: "processing" }).eq("id", row.id).eq("status", "open");
+  await admin.from("stripe_invoices").update({ status: "processing", processing_at: isoAt(at) }).eq("id", row.id).eq("status", "open");
   return null;
 }
 
@@ -882,9 +897,9 @@ async function refunded(admin: Db, route: WebhookRoute, charge: StripeCharge) {
   // of what refunds and lost disputes left of each.
   const newly = Number(charge.amount_refunded ?? 0) - refunds.amount - refunds.tip - refunds.before;
   const { amount, tip, before } = splitBack(newly, { amount: paidAmount, tip_amount: paidTip }, cents(owed?.amount), takenBack(earlier));
-  // (A refund of only the tip, once the invoice part was all refunded, has no invoice amount to
-  // record; payments can't be zero.)
-  if (amount > 0) {
+  // A refund of only the tip (once the invoice part was all refunded, or of a payment that was only
+  // a tip) gives back the tip and no amount.
+  if (amount > 0 || tip > 0) {
     const { error } = await admin.from("payments").insert({
       ...original, amount: -amount / 100, tip_amount: -tip / 100, processor: "stripe", processor_ref: `${prefix}${charge.amount_refunded}`, notes: "Refunded in Stripe", recorded_by: null,
     });
@@ -957,7 +972,8 @@ async function disputed(admin: Db, route: WebhookRoute, type: string, dispute: D
     const key = `${ref}:dispute:${dispute.id}`;
     const already = takenBack((rows ?? []).filter((p) => p.processor_ref === key || p.processor_ref === `${key}:before`));
     const { amount: fromInvoice, tip: fromTip, before } = splitBack(dispute.amount - already.amount - already.tip - already.before, original, cents(owed?.amount), back);
-    if (fromInvoice > 0) {
+    // Or only the tip, of a payment that was only a tip (as with refunds).
+    if (fromInvoice > 0 || fromTip > 0) {
       const { error } = await admin.from("payments").insert({
         company_id: original.company_id, client_id: original.client_id, invoice_id: original.invoice_id, method: original.method,
         amount: -fromInvoice / 100, tip_amount: -fromTip / 100, processor: "stripe", processor_ref: key, notes: "Dispute lost in Stripe", recorded_by: null,
@@ -965,7 +981,8 @@ async function disputed(admin: Db, route: WebhookRoute, type: string, dispute: D
       if (error && error.code !== "23505") fail(error);
     }
     if (before > 0) await takeBackBefore(admin, original, before, `${key}:before`, "Dispute lost in Stripe");
-    await note("lost", "Dispute lost", `The bank sided with the client on the ${amount} payment${on}, so that money went back to them. The invoice is owed again.`);
+    const outcome = cents(original.amount) ? "The invoice is owed again." : "It was a tip, so the invoice is still paid.";
+    await note("lost", "Dispute lost", `The bank sided with the client on the ${amount} payment${on}, so that money went back to them. ${outcome}`);
   } else if (dispute.status === "won") {
     // Nothing was taken off when it was opened, so there's nothing to put back.
     await note("won", "Dispute won", `The bank sided with you on the ${amount} payment${on}. The money stays with you.`);

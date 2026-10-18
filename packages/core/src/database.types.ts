@@ -1432,14 +1432,14 @@ isOneToOne: false
                   ]
                 },"stripe_invoices": {
                   Row: {
-                    "amount_due": number,"company_id": string,"created_at": string,"detached_at": string | null,"hosted_url": string | null,"id": string,"invoice_id": string | null,"livemode": boolean,"number": string | null,"origin": string,"status": string,"stripe_account": string | null,"stripe_id": string | null,"tip_amount": number,"updated_at": string
+                    "amount_due": number,"company_id": string,"created_at": string,"detached_at": string | null,"hosted_url": string | null,"id": string,"invoice_id": string | null,"livemode": boolean,"number": string | null,"origin": string,"processing_at": string | null,"status": string,"stripe_account": string | null,"stripe_id": string | null,"tip_amount": number,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_due"?: number,"company_id": string,"created_at"?: string,"detached_at"?: string | null,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin": string,"status"?: string,"stripe_account"?: string | null,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
+                    "amount_due"?: number,"company_id": string,"created_at"?: string,"detached_at"?: string | null,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin": string,"processing_at"?: string | null,"status"?: string,"stripe_account"?: string | null,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
                   }
                   Update: {
-                    "amount_due"?: number,"company_id"?: string,"created_at"?: string,"detached_at"?: string | null,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin"?: string,"status"?: string,"stripe_account"?: string | null,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
+                    "amount_due"?: number,"company_id"?: string,"created_at"?: string,"detached_at"?: string | null,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin"?: string,"processing_at"?: string | null,"status"?: string,"stripe_account"?: string | null,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
                   }
                   Relationships: [
                     {

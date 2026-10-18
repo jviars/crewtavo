@@ -119,6 +119,8 @@ export async function verifyStripeSignature(payload: string, header: string | un
 export interface StripeEvent {
   id: string;
   type: string;
+  /** When it happened (seconds). */
+  created?: number;
   data: { object: Record<string, any> };
 }
 
