@@ -8,14 +8,17 @@
  *   Elsewhere    the last X-Forwarded-For entry, which the web server in front adds (Caddy does by
  *                itself), but only on connections from this machine or a private network, where
  *                that web server connects from. A connection from anywhere else came straight to
- *                the port, so its own address counts.
+ *                the port, so its own address counts. With Docker, the web server's connections
+ *                and some outside ones (over IPv6, or all of them on Docker Desktop) arrive from
+ *                Docker's own network address, so docker-compose.yml publishes the port on this
+ *                machine only (CREWTAVO_BIND).
  *
  * CREWTAVO_VISITOR_IP says what else is in front (docs/deploy.md). Set, it's believed on every
  * connection:
  *   x-forwarded-for:2   two proxies add to X-Forwarded-For (say Cloudflare, then Caddy): the visitor
  *                       is the second entry from the end
- *   cf-connecting-ip    the header a proxy sets to the visitor's address (any name; a list counts
- *                       from the end too)
+ *   cf-connecting-ip    the header a proxy sets to the visitor's address (any name, such as x-real-ip
+ *                       behind nginx; a list counts from the end too)
  *   connection          nothing in front: the connection's own address
  */
 import type { IncomingMessage } from "node:http";

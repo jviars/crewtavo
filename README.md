@@ -104,7 +104,7 @@ docker compose --env-file .env.instance down -v    # delete the instance and all
 
 1. Point a DNS record for your domain (say `ops.example.com`) at the server.
 2. In `.env.instance`, set `APP_URL=https://ops.example.com`, then run `npm run instance` again.
-3. Put a web server with HTTPS in front of port 8080. With [Caddy](https://caddyserver.com), this
+3. Put a web server with HTTPS in front of port 8080, on the same server. With [Caddy](https://caddyserver.com), this
    whole `Caddyfile` gets a certificate and forwards everything (Caddy passes on each visitor's
    address in `X-Forwarded-For`, which Crewtavo's rate limits go by; see
    [docs/deploy.md](docs/deploy.md#visitors-addresses) for other web servers):
@@ -115,8 +115,9 @@ docker compose --env-file .env.instance down -v    # delete the instance and all
    }
    ```
 
-Only the `crewtavo` container is published (port `CREWTAVO_PORT`, default 8080). It forwards
-sign-in, data and files to the other containers over Docker's private network.
+Only the `crewtavo` container is published, and only on the server itself (port `CREWTAVO_PORT`,
+default 8080, on `CREWTAVO_BIND`, default `127.0.0.1`), so visitors come in through the web server.
+It forwards sign-in, data and files to the other containers over Docker's private network.
 
 **Backups:** the data lives in two Docker volumes, `crewtavo-instance_db-data` (the database) and
 `crewtavo-instance_storage-data` (photos and documents). Back up both, along with `.env.instance`.
