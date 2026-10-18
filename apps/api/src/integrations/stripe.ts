@@ -511,7 +511,8 @@ export type WebhookRoute = { companyId?: string };
 
 /**
  * Handle one verified event. Objects are read back from Stripe at our pinned API version (the
- * event may be old, or rendered at another version). Returns the company it touched, if any.
+ * event may be old, or rendered at another version). Returns the company whose automations should
+ * run: one where the event recorded money or an invoice, if any.
  */
 export async function handleStripeEvent(env: Env, admin: Db, route: WebhookRoute, event: StripeEvent): Promise<string | null> {
   const object = event.data.object;
@@ -536,7 +537,7 @@ export async function handleStripeEvent(env: Env, admin: Db, route: WebhookRoute
     const ctx = companyId ? await context(env, admin, companyId, { key, own: Boolean(route.companyId) }) : null;
     if (!ctx) return null;
     await savePayout(ctx, await stripeApi<StripePayout>(key, "GET", `/v1/payouts/${object.id}`));
-    return ctx.companyId;
+    return null;
   }
   return null;
 }
@@ -570,7 +571,7 @@ async function bankPaymentStarted(admin: Db, route: WebhookRoute, stripeInvoiceI
   const { data: row } = await admin.from("stripe_invoices").select("id, company_id").eq("stripe_id", stripeInvoiceId).maybeSingle();
   if (!row || (route.companyId && row.company_id !== route.companyId)) return null;
   await admin.from("stripe_invoices").update({ status: "processing" }).eq("id", row.id).eq("status", "open");
-  return row.company_id;
+  return null;
 }
 
 /** Checkout pages from before invoices went through Stripe: card payments, and bank payments days later. */
@@ -589,6 +590,7 @@ async function checkoutSession(admin: Db, route: WebhookRoute, type: string, obj
       processor: "stripe", processor_ref: object.payment_intent ?? object.id, recorded_by: null,
     });
     if (error && error.code !== "23505") fail(error);
+    return company_id;
   }
   if (type === "checkout.session.async_payment_failed") {
     await noteOnClient(admin, {
@@ -596,7 +598,8 @@ async function checkoutSession(admin: Db, route: WebhookRoute, type: string, obj
       subject: "Bank payment failed", body: `The bank payment for invoice #${invoice.number} didn't go through. The invoice is still owed.`,
     });
   }
-  return company_id;
+  // A bank payment that has only started changes nothing yet.
+  return null;
 }
 
 /** Refunds made in Stripe show up as negative payments. Each refunded total is recorded once. */
