@@ -79,9 +79,14 @@ language sql immutable set search_path = '' as $$
 $$;
 revoke execute on function private.stripe_billing_address(jsonb) from public;
 
--- Clients brought in before this have Stripe's shape (or a JSON null).
-update public.clients set billing_address = private.stripe_billing_address(billing_address)
-where jsonb_typeof(billing_address) <> 'object' or billing_address ? 'state';
+-- Clients the import brought in before this have Stripe's shape (or a JSON null): their state
+-- becomes the region, and whatever else is on the address stays.
+update public.clients
+set billing_address = case when jsonb_typeof(billing_address) = 'object'
+  then (billing_address - 'state') || jsonb_strip_nulls(jsonb_build_object('region',
+         coalesce(nullif(billing_address ->> 'region', ''), nullif(billing_address ->> 'state', ''))))
+  else '{}'::jsonb end
+where lead_source = 'Stripe' and (jsonb_typeof(billing_address) <> 'object' or billing_address ? 'state');
 
 -- As in 20261018000300_stripe.sql, with the customer's address in the app's shape.
 create or replace function public.stripe_import_invoice(p_company uuid, p_data jsonb, p_quiet boolean default false)
