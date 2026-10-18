@@ -152,11 +152,14 @@ await must(
 );
 
 async function quote(client, title, status, lines, extra = {}) {
+  // An approved quote's lines are locked, so they go in while it's still sent.
+  const approved = status === "approved";
   const q = await must(
-    db.from("quotes").insert(c({ client_id: byName[client], property_id: propOf[byName[client]], title, status, tax_rate: 0.053, ...extra })).select("id").single(),
+    db.from("quotes").insert(c({ client_id: byName[client], property_id: propOf[byName[client]], title, status: approved ? "sent" : status, tax_rate: 0.053, ...(approved ? {} : extra) })).select("id").single(),
     `quote ${title}`,
   );
   await must(db.from("quote_line_items").insert(lines.map((l, i) => c({ ...l, quote_id: q.id, sort: i })), DEFAULTS), `lines ${title}`);
+  if (approved) await must(db.from("quotes").update({ status, ...extra }).eq("id", q.id), `approve ${title}`);
   return q.id;
 }
 const daysAgo = (n) => new Date(Date.now() - n * 86_400_000).toISOString();
