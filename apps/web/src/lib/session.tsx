@@ -123,6 +123,9 @@ function redeemEmailLink(): Promise<string | null> {
   return redeeming;
 }
 
+/** After a password reset (which may follow a lost phone or a leaked password): end every other sign-in, keep this one. */
+const signOutElsewhere = () => supabase().auth.signOut({ scope: "others" }).then(() => undefined, () => undefined);
+
 export function SessionProvider({ children, requireCompany = true }: { children: ReactNode; requireCompany?: boolean }) {
   const queryClient = useQueryClient();
   // Runs with no signal too: loadConfig falls back to the settings saved last time.
@@ -295,7 +298,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
     // A one-business instance: setup steps, or the owner's first account, before the sign-in page.
     return config.data.singleCompany ? <FirstRun><LoginPage notice={linkProblem} /></FirstRun> : <LoginPage notice={linkProblem} />;
   }
-  if (settingPassword) return <SetPasswordPage kind={settingPassword} onDone={() => setSettingPassword(null)} onSignOut={signOut} />;
+  if (settingPassword) return <SetPasswordPage kind={settingPassword} onDone={() => setSettingPassword(null)} onSignOut={signOut} onSignOutElsewhere={signOutElsewhere} />;
   if (me.error) {
     return (
       <SetupGate>

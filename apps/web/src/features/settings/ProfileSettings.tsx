@@ -11,6 +11,7 @@ import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
 import { toast } from "@/lib/toast";
 import { CalendarFeedCard } from "./CalendarFeedCard";
 import { NotificationSettings } from "./NotificationSettings";
+import { SpareKeysCard } from "./SpareKeysCard";
 
 const COLORS = ["#0f2a35", "#3b7d23", "#3474d4", "#c9852a", "#d2445c", "#8b5cf6", "#0e7490", "#57534e"];
 
@@ -75,6 +76,7 @@ export function ProfileSettings() {
       <CalendarFeedCard />
       {/* Whatever their role: the assistants they've connected, and Allow changes for each. */}
       <ConnectedAssistants inProfile />
+      <SpareKeysCard />
       <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>
         <strong>Change password</strong>
         <Field label="New password" hint="At least 8 characters."><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} /></Field>

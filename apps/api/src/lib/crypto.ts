@@ -111,6 +111,16 @@ export async function instanceFingerprint(env: Env): Promise<string> {
 
 export const randomId = (bytes = 16) => toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
 
+/**
+ * HMAC-SHA256 of text with the server's signing key, as hex. For secrets the database only needs to
+ * recognize (spare keys): a copy of the database alone can't be searched for them.
+ */
+export async function keyedHash(env: Env, text: string): Promise<string> {
+  const key = await deriveKey(env, "sign");
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(text)));
+  return Array.from(mac, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Constant-time comparison for shared secrets. */
 export function safeEqual(a: string, b: string): boolean {
   const x = encoder.encode(a);

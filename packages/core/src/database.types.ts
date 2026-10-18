@@ -72,7 +72,7 @@ isOneToOne: false
                     "allow_changes"?: boolean,"client_id"?: string,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
-
+                    
                   ]
                 },"attachments": {
                   Row: {
@@ -1867,6 +1867,15 @@ isOneToOne: false
 { Args: { "p_company": string,"p_limit"?: number,"p_query": string }; Returns: {
               "acknowledged": boolean,"body_text": string,"category": string,"id": string,"rank": number,"required": boolean,"revision": number,"snippet": string,"title": string
             }[]
+                           },
+"spare_key_use":
+{ Args: { "p_hash": string,"p_user": string }; Returns: boolean
+                           },
+"spare_keys_left":
+{ Args: { "p_user": string }; Returns: number
+                           },
+"spare_keys_replace":
+{ Args: { "p_hashes": (string)[],"p_user": string }; Returns: number
                            },
 "start_automation_run":
 { Args: { "p_id": number,"p_token": string }; Returns: boolean

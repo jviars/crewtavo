@@ -1,14 +1,15 @@
 /** Sign in (password, emailed link or Google), create an account, reset a password, or set a new one. */
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api, loadConfig, supabase } from "@/lib/api";
+import { KEY_FILE_NAME, readKeyFile } from "@/lib/keyFile";
 import styles from "./auth.module.css";
 import { BrandLockup } from "@/components/shell/BrandMark";
 
-type Mode = "sign_in" | "sign_up" | "magic_link" | "forgot";
+type Mode = "sign_in" | "sign_up" | "magic_link" | "forgot" | "recover";
 
 /** Which sign-in methods the Supabase project has turned on. */
 function useAuthSettings() {
@@ -95,6 +96,11 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<null | { kind: "link" | "confirm" | "reset"; email: string }>(null);
   const [cooldown, setCooldown] = useState(0);
+  const [emailOff, setEmailOff] = useState(false);
+  const [code, setCode] = useState("");
+  // Recovering: upload the key file, or (no file) type one key from a printout.
+  const [typingKey, setTypingKey] = useState(false);
+  const keyFileInput = useRef<HTMLInputElement>(null);
   const [confirming, setConfirming] = useState<{ email: string; password: string } | null>(null);
   useSignInWhenConfirmed(confirming);
   const google = settings.data?.external?.google ?? false;
@@ -108,6 +114,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
 
   const switchTo = (next: Mode) => {
     setMode(next);
+    setTypingKey(false);
     setError(null);
   };
 
@@ -117,7 +124,9 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
       if (error) throw error;
     } else {
       // Sent by the API from the company's own mailbox, so it reaches people Supabase's mailer won't.
-      await api.post("/auth/email-link", { email: email.trim(), kind: kind === "link" ? "magiclink" : "recovery" });
+      const result = await api.post<{ sent: boolean }>("/auth/email-link", { email: email.trim(), kind: kind === "link" ? "magiclink" : "recovery" });
+      // This Crewtavo can't send email at all (the same answer for every address).
+      if (!result.sent) return setEmailOff(true);
     }
     setSent({ kind, email: email.trim() });
     setCooldown(60);
@@ -141,12 +150,41 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
           setConfirming({ email: email.trim(), password });
           setCooldown(60);
         }
+      } else if (mode === "recover") {
+        // The owner's way back in without email: a spare key (apps/api/src/routes/recovery.ts).
+        const { link } = await api.post<{ link: string }>("/auth/recover", { email: email.trim(), code });
+        window.location.assign(link);
+        return;
       } else {
         await send(mode === "magic_link" ? "link" : "reset");
       }
     } catch (err) {
       setError(authMessage(err as { message: string }));
     } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The owner's key file (lib/keyFile.ts): its email and keys go to the API, which uses the first unused key. */
+  async function submitKeyFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // so picking the same file again still counts
+    if (!file) return;
+    setError(null);
+    const notAKeyFile = `That doesn't look like your key file. It's called ${KEY_FILE_NAME}.`;
+    if (file.size > 20_000) return setError(notAKeyFile);
+    const { email: account, keys } = readKeyFile(await file.text());
+    if (!keys.length) return setError(notAKeyFile);
+    if (!account) {
+      setTypingKey(true);
+      return setError("Enter your email, then one of the keys from the file.");
+    }
+    setBusy("form");
+    try {
+      const { link } = await api.post<{ link: string }>("/auth/recover", { email: account, keys });
+      window.location.assign(link);
+    } catch (err) {
+      setError(authMessage(err as { message: string }));
       setBusy(false);
     }
   }
@@ -160,6 +198,22 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
       setBusy(false);
     }
   }
+
+  if (emailOff)
+    return (
+      <AuthLayout>
+        <div className={`card card-pad ${styles.card}`} style={{ padding: 28 }}>
+          <h1 className={styles.title} style={{ fontSize: 22 }}>We can't email you a link</h1>
+          <p className="muted" style={{ margin: 0 }}>This Crewtavo isn't set up to send email yet, so here's how to get back in:</p>
+          <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 10, lineHeight: 1.5 }}>
+            <li><strong>On a team?</strong> Ask the owner or an admin for a reset link. They make one under <strong>Settings → People</strong>, next to your name.</li>
+            <li><strong>The owner?</strong> Upload the key file you saved when you set up Crewtavo.</li>
+          </ul>
+          <Button variant="primary" icon="lock" onClick={() => { setEmailOff(false); switchTo("recover"); }}>I'm the owner: use my key file</Button>
+          <Button variant="ghost" icon="arrowLeft" onClick={() => { setEmailOff(false); switchTo("sign_in"); }}>Back to sign in</Button>
+        </div>
+      </AuthLayout>
+    );
 
   if (sent)
     return (
@@ -201,7 +255,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
       </AuthLayout>
     );
 
-  const heading = { sign_in: "Sign in", sign_up: "Create your account", magic_link: "Sign in with email", forgot: "Reset your password" }[mode];
+  const heading = { sign_in: "Sign in", sign_up: "Create your account", magic_link: "Sign in with email", forgot: "Reset your password", recover: typingKey ? "Type a spare key" : "Use your key file" }[mode];
 
   return (
     <AuthLayout>
@@ -209,10 +263,27 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
         <h1 className={styles.title}>{heading}</h1>
         {notice && mode === "sign_in" && <div className="callout callout-warning" role="status" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{notice}</span></div>}
 
+        {mode === "recover" && !typingKey && (
+          <>
+            <p style={{ margin: 0, lineHeight: 1.5 }}>Upload the key file you saved when you set up Crewtavo. It's called <strong>{KEY_FILE_NAME}</strong>.</p>
+            <input ref={keyFileInput} type="file" accept=".txt,text/plain" hidden onChange={submitKeyFile} />
+            <Button variant="primary" size="lg" icon="upload" loading={busy === "form"} onClick={() => keyFileInput.current?.click()}>Upload key file</Button>
+          </>
+        )}
+        {mode === "recover" && typingKey && (
+          <p className="muted small" style={{ margin: 0, lineHeight: 1.5 }}>
+            Enter your email and one of the keys from your key file or printout. Each key works once.
+          </p>
+        )}
         {mode === "sign_up" && (
           <Field label="Your name"><input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" required minLength={2} maxLength={120} autoFocus /></Field>
         )}
-        <Field label="Email"><input className="input" type="email" value={email} onChange={(e) => { setEmail(e.target.value); setError(null); }} autoComplete="email" required autoFocus={mode !== "sign_up"} inputMode="email" /></Field>
+        {!(mode === "recover" && !typingKey) && <Field label="Email"><input className="input" type="email" value={email} onChange={(e) => { setEmail(e.target.value); setError(null); }} autoComplete="email" required autoFocus={mode !== "sign_up"} inputMode="email" /></Field>}
+        {mode === "recover" && typingKey && (
+          <Field label="Spare key" hint="Like 7K4M-PQ2X-9DRF. Dashes and capitals don't matter.">
+            <input className="input" value={code} onChange={(e) => { setCode(e.target.value); setError(null); }} autoComplete="off" autoCapitalize="characters" spellCheck={false} required minLength={12} maxLength={500} style={{ fontFamily: "ui-monospace, Menlo, Consolas, monospace", letterSpacing: "0.04em" }} />
+          </Field>
+        )}
         {(mode === "sign_in" || mode === "sign_up") && (
           <div style={{ position: "relative" }}>
           {mode === "sign_in" && <button type="button" className="link-btn small" style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }} onClick={() => switchTo("forgot")}>Forgot password?</button>}
@@ -227,9 +298,16 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
 
         {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}
 
-        <Button type="submit" variant="primary" size="lg" loading={busy === "form"} disabled={Boolean(busy)}>
-          {{ sign_in: "Sign in", sign_up: "Create account", magic_link: "Email me a link", forgot: "Send reset link" }[mode]}
-        </Button>
+        {!(mode === "recover" && !typingKey) && (
+          <Button type="submit" variant="primary" size="lg" loading={busy === "form"} disabled={Boolean(busy)}>
+            {{ sign_in: "Sign in", sign_up: "Create account", magic_link: "Email me a link", forgot: "Send reset link", recover: "Continue" }[mode]}
+          </Button>
+        )}
+        {mode === "recover" && (
+          <button type="button" className="link-btn small" style={{ justifySelf: "center" }} onClick={() => { setTypingKey(!typingKey); setError(null); }}>
+            {typingKey ? "Upload the key file instead" : "No file? Type a key from your printout"}
+          </button>
+        )}
 
         {(mode === "sign_in" || (mode === "sign_up" && google)) && (
           <>
@@ -255,7 +333,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
  * After a password-reset or invitation link: choose a password, then carry on into the app.
  * `onSignOut` is the session's, which leaves nothing of theirs on the phone; true once signed out.
  */
-export function SetPasswordPage({ kind, onDone, onSignOut }: { kind: "recovery" | "invite"; onDone: () => void; onSignOut: () => Promise<boolean> }) {
+export function SetPasswordPage({ kind, onDone, onSignOut, onSignOutElsewhere }: { kind: "recovery" | "invite"; onDone: () => void; onSignOut: () => Promise<boolean>; onSignOutElsewhere: () => Promise<void> }) {
   const [password, setPassword] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [show, setShow] = useState(false);
@@ -268,9 +346,14 @@ export function SetPasswordPage({ kind, onDone, onSignOut }: { kind: "recovery" 
     if (password !== confirmPw) return setError("Those passwords don't match.");
     setBusy(true);
     const { error } = await supabase().auth.updateUser({ password });
+    if (error) {
+      setBusy(false);
+      return setError(authMessage(error));
+    }
+    // A reset may follow a lost phone or a leaked password: sign out everywhere else.
+    if (kind === "recovery") await onSignOutElsewhere();
     setBusy(false);
-    if (error) setError(authMessage(error));
-    else onDone();
+    onDone();
   }
   return (
     <AuthLayout>

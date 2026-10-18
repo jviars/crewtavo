@@ -32,6 +32,7 @@ import { closeAfterUnreadBodies } from "./lib/connection";
 import { cronMatches } from "./lib/cron";
 import { gateway } from "./lib/gateway";
 import { reportError } from "./lib/monitoring";
+import { describeRecovery } from "./lib/recovery";
 import { startMonitoring } from "./lib/monitoring-node";
 import { stackServices, withStack } from "./lib/stack";
 import { setStartup, startup, type Startup } from "./lib/startup";
@@ -181,6 +182,7 @@ function scheduleNext() {
 }
 
 void migrate().then(() => {
+  void describeRecovery(env).then((line) => line && console.log(line), () => undefined);
   if (startup()?.state === "failed" || process.env.CREWTAVO_SCHEDULER === "off") return;
   scheduleNext();
   console.log("Background tasks: running in this process");
