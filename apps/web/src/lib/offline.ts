@@ -215,6 +215,8 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
 export function forgetOfflineCache(userId: string) {
   stopSaving(userId);
   remove(storageKey(userId));
+  // Who they are and their companies, kept by lib/session.tsx for opening the app with no signal.
+  remove(`crewtavo.me.${userId}`);
 }
 
 /**

@@ -184,9 +184,9 @@ type DbResult = { data: unknown; error: { message: string; code?: string; detail
  * keeps its 502, 503 or 504, so a queued field action waits for it instead of failing (lib/offline.ts).
  */
 function dbFailure(result: DbResult): ApiError {
-  const error = friendlyDbError(result.error!);
-  if (isRestarting(result.status)) error.status = result.status!;
-  return error;
+  // The server restarting isn't a database fault to report (a field action retries through it).
+  if (isRestarting(result.status)) return new ApiError("Crewtavo is restarting. Try again in a moment.", result.status!, "restarting");
+  return friendlyDbError(result.error!);
 }
 
 /** Unwrap a supabase-js result in a react-query function; errors become friendly ApiErrors. */
