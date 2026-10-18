@@ -301,6 +301,51 @@ describe("weak signal", () => {
     stop();
   });
 
+  it("an action that fails again while a check is out (the signal flickering) doesn't put the next check off", async () => {
+    const qc = newClient();
+    let reachable = true;
+    const sent: unknown[] = [];
+    qc.setMutationDefaults(["visit-status"], {
+      mutationFn: async (v: unknown) => {
+        if (!reachable) throw new ApiError(OFFLINE, 0, "network");
+        sent.push(v);
+      },
+    });
+    // Each check takes 5 seconds to fail (or get through).
+    const checks: number[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        checks.push(Date.now());
+        await new Promise((r) => setTimeout(r, 5_000));
+        if (!reachable) throw new TypeError("Failed to fetch");
+        return new Response("{}");
+      }),
+    );
+    const stop = startOfflineCache(qc, "u11", true);
+    // One goes out, so the checks start from the shortest wait; then the signal goes.
+    await expect(tap(qc, "visit-status", { visitId: "v1", status: "en_route", at: "2026-10-17T13:00:00.000Z" })).resolves.toBe("sent");
+    reachable = false;
+    const failed = Date.now();
+    const result = tap(qc, "visit-status", { visitId: "v1", status: "in_progress", at: "2026-10-17T13:20:00.000Z" });
+    await settle(2_100);
+    expect(checks).toEqual([failed + 2_000]);
+
+    // While that check is out, the phone says it has signal again: the action goes, and fails again.
+    onlineManager.setOnline(true);
+    await settle(100);
+    expect(onlineManager.isOnline()).toBe(false);
+    // The check fails 5 seconds in, and the next is 4 seconds after that, as with no flicker.
+    await settle(9_000);
+    expect(checks).toEqual([failed + 2_000, failed + 11_000]);
+
+    reachable = true;
+    await settle(31_000);
+    await expect(result).resolves.toBe("sent");
+    expect(sent).toHaveLength(2);
+    stop();
+  });
+
   it("a refusal from the server still fails, isn't retried, and what the screen showed ahead of it is undone", async () => {
     const qc = newClient();
     let calls = 0;
@@ -530,6 +575,84 @@ describe("closed with updates waiting", () => {
     page.dispatchEvent(new Event("visibilitychange"));
     await settle();
     expect(register).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("with signal, an update on its way isn't waiting: no wake-up or notice for it, even if the app is put away meanwhile", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const show = (state: DocumentVisibilityState) => {
+      page.visibilityState = state;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const { register, waiting, caches } = phone({ backgroundSync: true });
+    const qc = newClient();
+    const sent: string[] = [];
+    // A slow connection: each takes 3 seconds to go out.
+    qc.setMutationDefaults(["visit-notes"], {
+      mutationFn: async (v: { notes: string }) => {
+        await new Promise((r) => setTimeout(r, 3_000));
+        sent.push(v.notes);
+      },
+    });
+    const stop = startOfflineCache(qc, "u34", true);
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    await settle(); // past the save delay, still on its way
+    show("hidden");
+    await settle(100);
+    // Saved, in case the app is closed before it's sent, but nothing to tell the worker.
+    expect(saved("u34")!.mutations).toHaveLength(1);
+    expect(register).not.toHaveBeenCalled();
+    expect(waiting()).toEqual({});
+    const sw = loadServiceWorker({ caches });
+    await sw.dispatch("sync", { tag: SYNC_TAG });
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    await settle(3_000);
+    expect(sent).toEqual(["Gate was open"]);
+    expect(register).not.toHaveBeenCalled();
+
+    // Two at once: the one behind hasn't left the phone, so it counts until its turn comes.
+    show("visible");
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Dog in the yard" });
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Side gate" });
+    await settle();
+    expect(waiting()).toEqual({ "/waiting/u34": "1" });
+    await settle(6_000);
+    expect(sent).toEqual(["Gate was open", "Dog in the yard", "Side gate"]);
+    expect(waiting()).toEqual({});
+    stop();
+  });
+
+  it("put away right after an update couldn't get through, the worker already knows it's waiting", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const show = (state: DocumentVisibilityState) => {
+      page.visibilityState = state;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const { register, waiting } = phone({ backgroundSync: true });
+    let reachable = false;
+    vi.stubGlobal("fetch", vi.fn(async () => (reachable ? new Response("{}") : Promise.reject(new TypeError("Failed to fetch")))));
+    const qc = newClient();
+    qc.setMutationDefaults(["visit-status"], {
+      mutationFn: async () => {
+        if (!reachable) throw new ApiError(OFFLINE, 0, "network");
+      },
+    });
+    const stop = startOfflineCache(qc, "u35", true);
+    const result = tap(qc, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    await settle(10);
+    // Into the pocket while it waits to try again.
+    show("hidden");
+    await settle(10);
+    expect(register).toHaveBeenCalledWith(SYNC_TAG);
+    expect(waiting()).toEqual({ "/waiting/u35": "1" });
+
+    reachable = true;
+    show("visible");
+    await settle(2_000);
+    await expect(result).resolves.toBe("sent");
+    expect(waiting()).toEqual({});
     stop();
   });
 
