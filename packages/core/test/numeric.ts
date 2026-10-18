@@ -103,7 +103,8 @@ export function sqlQuoteTotals(lines: SqlLine[], q: { discount_amount: string; t
   }
   const vDiscount = least(discountAmount, greatest(vSub, ZERO));
   const share = cmp(vBase, ZERO) > 0 ? div(mul(vDiscount, vBaseTaxable), vBase) : ZERO;
-  const tax = round(mul(greatest(sub(vTaxable, share), ZERO), num(q.tax_rate, 4)), 2);
+  // tax_rate is numeric(8, 6) (20261019001000_tax_rate_precision.sql).
+  const tax = round(mul(greatest(sub(vTaxable, share), ZERO), num(q.tax_rate, 6)), 2);
   const total = add(greatest(sub(vSub, vDiscount), ZERO), tax);
   return { subtotal: cents(vSub), discount: cents(vDiscount), tax: cents(tax), total: cents(total) };
 }

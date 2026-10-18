@@ -10,6 +10,14 @@
     <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Added to an iPhone's Home Screen: its name there, and the status bar above the page rather than over it (a see-through one has white text, lost on the light theme). -->
+    <meta name="apple-mobile-web-app-title" content="Crewtavo" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- The page's own color (--page in src/styles/tokens.css) from the first paint, so opening the app never flashes white in dark mode. -->
+    <style>
+      html { background: #ffffff; }
+      html.dark { background: #111110; color-scheme: dark; }
+    </style>
     <script>
       // Light or dark before first paint (src/lib/theme.ts keeps it up to date). Client pages stay light.
       try {

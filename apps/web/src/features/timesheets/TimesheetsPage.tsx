@@ -35,7 +35,6 @@ interface Entry {
   approved_at: string | null;
   /** The clock was left running and stopped by Crewtavo: the end time is a guess. */
   auto_stopped_at: string | null;
-  labor_rate: number | null;
   notes: string | null;
   visit: { title: string } | null;
   job: { title: string } | null;
@@ -61,7 +60,7 @@ export function TimesheetsPage() {
       const [rows, team] = await Promise.all([
         supabase()
           .from("time_entries")
-          .select("id, user_id, category, started_at, ended_at, approved_at, auto_stopped_at, labor_rate, notes, visit:visits(title), job:jobs(title)")
+          .select("id, user_id, category, started_at, ended_at, approved_at, auto_stopped_at, notes, visit:visits(title), job:jobs(title)")
           .eq("company_id", session.company.id)
           .gte("started_at", zonedTimeToUtc(week, "00:00", tz).toISOString())
           .lt("started_at", zonedTimeToUtc(addDaysIso(week, 7), "00:00", tz).toISOString())

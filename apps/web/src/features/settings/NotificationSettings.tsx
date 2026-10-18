@@ -1,6 +1,7 @@
 /**
  * How I hear about things outside the app: per kind of notification, by email, text, or a push to
- * this phone. The bell in the app always shows everything.
+ * this phone. The bell in the app always shows everything. Above it, where the browser offers it,
+ * installing Crewtavo as an app on this device (lib/install.ts).
  */
 import { DEFAULT_NOTIFICATION_PREFS, NOTIFICATION_TOPICS, type NotificationChannel, type NotificationTopic } from "@crewtavo/core/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,9 +10,11 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { api, supabase, unwrap } from "@/lib/api";
+import { useInstallHint } from "@/lib/install";
 import { disablePush, enablePush, pushState } from "@/lib/push";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { InstallAppButton } from "../field/InstallAppCard";
 
 type Prefs = Record<NotificationChannel, NotificationTopic[]>;
 
@@ -33,6 +36,8 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
     },
   });
   const push = useQuery({ queryKey: ["push-state"], queryFn: pushState, staleTime: 0 });
+  // On an iPhone, adding Crewtavo to the Home Screen is explained where notifications are turned on (PushRow).
+  const canInstall = useInstallHint() === "prompt";
 
   const save = useMutation({
     mutationFn: async (next: Prefs) =>
@@ -64,6 +69,14 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
     channel === "email" ? session.config.features.email : channel === "sms" ? session.config.features.sms && Boolean(phone) : true;
 
   return (
+    <>
+    {canInstall && (
+      <div className="card card-pad stack-sm">
+        <strong>Crewtavo app</strong>
+        <span className="muted small">Install Crewtavo on this device. It opens in its own window, from your home screen or app list, like any other app.</span>
+        <InstallAppButton style={{ justifySelf: "start" }} />
+      </div>
+    )}
     <div className="card card-pad stack-sm">
       <strong>Notifications</strong>
       <span className="muted small">The bell shows everything. Choose what also reaches you when you're not in Crewtavo.</span>
@@ -115,6 +128,7 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
       {!session.config.features.email && <span className="muted small">Email needs the company's email connected (Settings → Email).</span>}
       <FormError error={save.error} />
     </div>
+    </>
   );
 }
 

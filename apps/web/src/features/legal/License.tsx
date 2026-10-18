@@ -11,7 +11,7 @@ import { FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { AuthLayout } from "@/features/auth/LoginPage";
 import authStyles from "@/features/auth/auth.module.css";
-import { api, supabase } from "@/lib/api";
+import { api } from "@/lib/api";
 import LICENSE_TEXT from "../../../../../LICENSE?raw";
 import styles from "./legal.module.css";
 
@@ -63,8 +63,11 @@ export function TermsAgreement({ agreed, onChange, error }: { agreed: boolean; o
 
 export const TERMS_REQUIRED = "Agree to the Crewtavo License to continue.";
 
-/** An owner or admin of a business that hasn't agreed to this version of the license: agree once to go on. */
-export function TermsPage({ companyName, onAccepted }: { companyName: string; onAccepted: () => void }) {
+/**
+ * An owner or admin of a business that hasn't agreed to this version of the license: agree once to
+ * go on. `onSignOut` is the session's, which leaves nothing of theirs on the phone.
+ */
+export function TermsPage({ companyName, onAccepted, onSignOut }: { companyName: string; onAccepted: () => void; onSignOut: () => void }) {
   const [agreed, setAgreed] = useState(false);
   const [touched, setTouched] = useState(false);
   const accept = useMutation({
@@ -91,7 +94,7 @@ export function TermsPage({ companyName, onAccepted }: { companyName: string; on
         <TermsAgreement agreed={agreed} onChange={setAgreed} error={touched && !agreed ? TERMS_REQUIRED : null} />
         <FormError error={accept.error} />
         <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-          <Button variant="ghost" icon="logout" onClick={() => supabase().auth.signOut()}>Sign out</Button>
+          <Button variant="ghost" icon="logout" onClick={() => onSignOut()}>Sign out</Button>
           <Button type="submit" variant="primary" size="lg" loading={accept.isPending}>Agree and continue</Button>
         </div>
       </form>

@@ -6,6 +6,8 @@
  * The rest of this file turns invoices into Stripe line items and back. It's pure, so it's tested
  * directly (apps/api/test/stripe.test.ts).
  */
+import { taxPercent } from "@crewtavo/core";
+import { providerTimeout } from "../integrations/registry";
 import { hmacSha256Hex, safeEqual } from "../lib/crypto";
 
 export const STRIPE_VERSION = "2024-06-20";
@@ -41,8 +43,10 @@ export function stripeForm(params: Record<string, Param>, prefix = "", out = new
 }
 
 /**
- * One API call. Rate limits and Stripe's own errors are retried twice for reads and for writes
- * that carry an idempotency key (Stripe replays the first result instead of doing it again).
+ * One API call, given up on after the time other providers get. Rate limits, Stripe's own errors
+ * and no answer (or none in time) are retried twice for reads and for writes that carry an
+ * idempotency key (Stripe replays the first result instead of doing it again). Other writes aren't
+ * sent again, since Stripe may have done them anyway.
  */
 export async function stripeApi<T>(
   key: string,
@@ -56,13 +60,33 @@ export async function stripeApi<T>(
   const headers: Record<string, string> = { Authorization: `Bearer ${key}`, "Stripe-Version": STRIPE_VERSION };
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
+  const repeatable = method === "GET" || Boolean(options.idempotencyKey);
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, { method, headers, body: method === "POST" ? form : undefined });
-    const json = (await response.json().catch(() => ({}))) as { error?: { message?: string; code?: string; param?: string } };
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetch(url, { method, headers, body: method === "POST" ? form : undefined, signal: providerTimeout() });
+      text = await response.text();
+    } catch (error) {
+      // Stripe couldn't be reached, or stopped answering partway: the same as Stripe being down.
+      if (!repeatable || attempt >= 2) throw new StripeError(`Stripe didn't answer (${error instanceof Error ? error.message : String(error)})`, 0);
+      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      continue;
+    }
+    const json = readJson(text) as { error?: { message?: string; code?: string; param?: string } };
     if (response.ok) return json as T;
-    const retry = (response.status === 429 || response.status >= 500) && attempt < 2 && (method === "GET" || Boolean(options.idempotencyKey));
+    const retry = (response.status === 429 || response.status >= 500) && attempt < 2 && repeatable;
     if (!retry) throw new StripeError(json.error?.message ?? `Stripe returned ${response.status}`, response.status, json.error?.code, json.error?.param);
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+  }
+}
+
+/** A body that isn't JSON (a proxy's error page, say) reads as empty. */
+function readJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
   }
 }
 
@@ -95,6 +119,8 @@ export async function verifyStripeSignature(payload: string, header: string | un
 export interface StripeEvent {
   id: string;
   type: string;
+  /** When it happened (seconds). */
+  created?: number;
   data: { object: Record<string, any> };
 }
 
@@ -148,6 +174,10 @@ export interface StripeInvoice {
   total: number;
   amount_due: number;
   amount_paid: number;
+  /** The customer's balance in Stripe when it was finalized: credit (negative) or owed from before. */
+  starting_balance: number;
+  /** Credit notes issued while it was open, which took that much off amount_due. */
+  pre_payment_credit_notes_amount: number;
   tax: number | null;
   total_discount_amounts: Array<{ amount: number }> | null;
   due_date: number | null;
@@ -176,6 +206,13 @@ export interface StripePayout {
 
 /** Dollars (numeric columns arrive as numbers or strings) to cents. */
 export const cents = (amount: number | string | null | undefined) => Math.round(Number(amount ?? 0) * 100);
+
+/**
+ * The least Stripe charges, in cents (50 in most currencies). Stripe marks an invoice for less as
+ * paid without charging anything, and adds the amount to the customer's next invoice there.
+ */
+const MINIMUM_CHARGE: Record<string, number> = { aed: 200, bgn: 100, czk: 1500, dkk: 250, gbp: 30, hkd: 400, huf: 17500, mxn: 1000, myr: 200, nok: 300, pln: 200, ron: 200, sek: 300, thb: 1000 };
+export const minimumCharge = (currency: string) => MINIMUM_CHARGE[currency.toLowerCase()] ?? 50;
 
 /** How the client paid, in our payment methods. */
 export function paymentMethod(charge: StripeCharge | null | undefined): "card" | "ach" | "other" {
@@ -231,7 +268,7 @@ export function stripeLineItems(invoice: BillableInvoice, tipCents = 0, currency
   }
   const discount = Math.min(Number(invoice.discount_amount), Math.max(Number(invoice.subtotal), 0));
   if (discount > 0) items.push({ description: invoice.promo?.code ? `Discount (${invoice.promo.code})` : "Discount", amount: -cents(discount) });
-  if (cents(invoice.tax_amount)) items.push({ description: `Tax (${Number((Number(invoice.tax_rate) * 100).toFixed(3))}%)`, amount: cents(invoice.tax_amount) });
+  if (cents(invoice.tax_amount)) items.push({ description: `Tax (${taxPercent(invoice.tax_rate)}%)`, amount: cents(invoice.tax_amount) });
   if (cents(invoice.retainage_amount)) items.push({ description: `Retainage held (${Number(invoice.retainage_pct)}%), billed later`, amount: -cents(invoice.retainage_amount) });
   if (cents(invoice.amount_paid)) items.push({ description: "Already paid", amount: -cents(invoice.amount_paid) });
   if (tipCents > 0) items.push({ description: "Tip for the crew", amount: tipCents });

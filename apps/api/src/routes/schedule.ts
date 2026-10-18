@@ -194,15 +194,25 @@ schedule.get("/schedule", requireUser, requireCompany(), async (c) => {
   if (!isoDate.safeParse(from).success || !isoDate.safeParse(to).success) throw new HttpError(400, "from and to must be YYYY-MM-DD");
   if (to! < from! || addDays(from!, 62) < to!) throw new HttpError(400, "Ask for at most two months at a time.");
 
-  let visits = c.var.db.from("visits").select(VISIT_FIELDS).eq("company_id", c.var.companyId).gte("scheduled_on", from!).lte("scheduled_on", to!);
-  if (crew) visits = visits.eq("crew_id", crew);
+  const page = (offset: number) => {
+    let visits = c.var.db.from("visits").select(VISIT_FIELDS).eq("company_id", c.var.companyId).gte("scheduled_on", from!).lte("scheduled_on", to!);
+    if (crew) visits = visits.eq("crew_id", crew);
+    // id breaks ties, so pages don't overlap or skip visits.
+    return visits.order("scheduled_on").order("starts_at", { nullsFirst: false }).order("route_order", { nullsFirst: false }).order("id").range(offset, offset + 999);
+  };
+  // Supabase returns at most 1,000 rows per request, and a busy month has more, so read a page at a time.
+  const allScheduled = async () => {
+    const rows = must(await page(0));
+    for (let offset = 1000; rows.length === offset; offset += 1000) rows.push(...must(await page(offset)));
+    return rows;
+  };
   const [scheduled, unscheduled, crews, events] = await Promise.all([
-    visits.order("scheduled_on").order("starts_at", { nullsFirst: false }).order("route_order", { nullsFirst: false }),
+    allScheduled(),
     c.var.db.from("visits").select(VISIT_FIELDS).eq("company_id", c.var.companyId).eq("status", "unscheduled").limit(200),
     c.var.db.from("crews").select("id, name, color").eq("company_id", c.var.companyId).eq("active", true).order("name"),
     calendarEvents(c, from!, to!, crew),
   ]);
-  return c.json({ visits: must(scheduled), unscheduled: must(unscheduled), crews: must(crews), events });
+  return c.json({ visits: scheduled, unscheduled: must(unscheduled), crews: must(crews), events });
 });
 
 /** The steps a crew takes a visit through, in order. */

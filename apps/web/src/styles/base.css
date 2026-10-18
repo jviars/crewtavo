@@ -26,6 +26,8 @@ img, svg { flex-shrink: 0; }
   width: var(--sidebar-width); flex: none; background: var(--ground); border-right: 1px solid var(--ground-border);
   padding: 16px 12px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
   scrollbar-width: thin;
+  /* Clear of a phone's notch and home indicator, sideways (a big phone is wider than 900px then). */
+  padding-left: max(12px, env(safe-area-inset-left)); padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 .brand { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px 8px; color: var(--brand-ink); font-weight: 800; font-size: 19px; letter-spacing: -0.03em; }
 .brand:hover { color: var(--brand-ink); }
@@ -54,7 +56,7 @@ img, svg { flex-shrink: 0; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar {
   position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 6px; min-height: var(--topbar-height);
-  padding: 10px 24px 10px 40px; background: color-mix(in srgb, var(--page) 86%, transparent); backdrop-filter: saturate(1.6) blur(10px);
+  padding: 10px max(24px, env(safe-area-inset-right)) 10px 40px; background: color-mix(in srgb, var(--page) 86%, transparent); backdrop-filter: saturate(1.6) blur(10px);
   -webkit-backdrop-filter: saturate(1.6) blur(10px); border-bottom: 1px solid transparent; transition: border-color var(--dur);
 }
 .topbar[data-scrolled] { border-bottom-color: var(--divider); }
@@ -83,7 +85,7 @@ select.business-name:hover { background: var(--fill-2); }
   color: #fff; font-size: 10px; font-weight: 800; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--page); animation: pop-in var(--dur) var(--ease-spring);
 }
 
-.content { padding: 20px 48px 56px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
+.content { padding: 20px max(48px, env(safe-area-inset-right)) 56px 48px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
 .content-narrow { max-width: 880px; }
 
 /* Main navigation cross-fades between screens (React Router's viewTransition, see AppShell). */
@@ -152,15 +154,19 @@ select.business-name:hover { background: var(--fill-2); }
   .sidebar { display: none; }
   .mobile-only { display: grid !important; }
   .hide-mobile { display: none !important; }
-  .topbar { padding: 8px 12px 8px 16px; }
+  .topbar { padding: 8px max(12px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); }
   .search { display: none; }
-  .content { padding: 12px 16px calc(var(--mobile-nav-height) + 28px); gap: 20px; }
+  /* Clear of the bottom bar, the home indicator under it, and a notch when the phone is sideways. */
+  .content {
+    padding: 12px max(16px, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + 28px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    gap: 20px;
+  }
   .page-title { font-size: 26px; flex-basis: 100%; }
   .page-meta { margin-top: -10px; }
   .back-link { margin-bottom: -10px; }
   .mobile-nav {
     display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; inset: auto 0 0 0; height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom); background: color-mix(in srgb, var(--page) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: color-mix(in srgb, var(--page) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     border-top: 1px solid var(--border); z-index: 20;
   }
   .mobile-nav a, .mobile-nav button {

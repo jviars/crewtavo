@@ -1,3 +1,4 @@
+import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -27,7 +28,7 @@ export function CompanySettings() {
     setF({
       name: d.name, phone: d.phone ?? "", email: d.email ?? "", website: d.website ?? "",
       line1: a.line1 ?? "", city: a.city ?? "", region: a.region ?? "", postal_code: a.postal_code ?? "",
-      timezone: d.timezone, payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(Math.round(Number(s.default_tax_rate ?? 0) * 100000) / 1000),
+      timezone: d.timezone, payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(taxPercent(s.default_tax_rate ?? 0)),
       quote_valid_days: String(s.quote_valid_days ?? 30), hours_start: s.working_hours?.start ?? "07:00", hours_end: s.working_hours?.end ?? "18:00",
       color: s.branding?.color ?? "#0f2a35",
       hub_tips: s.hub_tips ? "1" : "",
@@ -38,8 +39,9 @@ export function CompanySettings() {
     meta: { inline: true, success: (r: { located: boolean | null }) => (r.located === false ? "Saved. We couldn't find the shop address on the map; route planning will start from the first stop." : "Company settings saved") },
     mutationFn: async () => {
       const v = f!;
-      const tax = Number(v.default_tax_rate);
-      if (!(tax >= 0 && tax < 100)) throw new Error("Sales tax must be between 0 and 100%.");
+      // Kept to 0.0001%, as quotes and invoices keep it (8.875% stays 8.875%).
+      const tax = taxRateFromPercent(v.default_tax_rate);
+      if (!(Number(v.default_tax_rate) >= 0 && tax < 1)) throw new Error("Sales tax must be between 0 and 100%.");
       if (v.hours_end <= v.hours_start) throw new Error("The workday has to end after it starts.");
       if (v.website && !/^https?:\/\//.test(v.website)) v.website = `https://${v.website}`;
       const previous = (details.data?.settings ?? {}) as Record<string, any>;
@@ -55,7 +57,7 @@ export function CompanySettings() {
       const settings = {
         ...previous,
         payment_terms_days: Math.max(0, Math.round(Number(v.payment_terms_days) || 0)),
-        default_tax_rate: tax / 100,
+        default_tax_rate: tax,
         quote_valid_days: Math.max(1, Math.round(Number(v.quote_valid_days) || 30)),
         working_hours: { start: v.hours_start, end: v.hours_end },
         branding: { ...(previous.branding ?? {}), color: v.color },

@@ -43,6 +43,16 @@ describe("client import", () => {
     expect(parseCsv('Name,Note\n"Acme, Inc.","Line one\nsaid ""hi"""\n"",x')).toEqual([["Name", "Note"], ["Acme, Inc.", 'Line one\nsaid "hi"'], ["", "x"]]);
   });
 
+  it("reads a quoted field after the comma's space without shifting the columns after it", () => {
+    expect(parseCsv('Name, Note, City\nAcme, "12 Main St, Unit 4", Roanoke\nBeta,  "said ""hi""",x')).toEqual([
+      ["Name", " Note", " City"],
+      ["Acme", "12 Main St, Unit 4", " Roanoke"],
+      ["Beta", 'said "hi"', "x"],
+    ]);
+    // A quote after anything but spaces is still just a character.
+    expect(parseCsv('Name,Note\nAcme, 12" curb, x\nBeta,two')).toEqual([["Name", "Note"], ["Acme", ' 12" curb', " x"], ["Beta", "two"]]);
+  });
+
   it("matches plain spreadsheets too", () => {
     const clients = read(["Name,Email,Phone,Address,City,State,Zip", "Priya Shah,PRIYA@EXAMPLE.COM,540-555-0163,9 Hillcrest Ct,Roanoke,VA,24018"].join("\n"));
     expect(clients[0]).toMatchObject({ display_name: "Priya Shah", email: "priya@example.com", properties: [{ line1: "9 Hillcrest Ct", region: "VA", postal_code: "24018" }] });

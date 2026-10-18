@@ -84,11 +84,11 @@ async function api(who, method, path, body) {
   return { status: res.status, body: json };
 }
 // Rate limits on public endpoints are kept in Postgres per visitor IP, so reruns within a few
-// minutes would trip them. Each run comes from its own documentation-range address (the header
-// Railway's edge sets in production).
+// minutes would trip them. Each run comes from its own documentation-range address, passed on the
+// way a web server in front of the API would (it believes X-Forwarded-For from this machine).
 const visitorIp = `198.51.100.${1 + Math.floor(Math.random() * 254)}`;
 async function publicApi(method, path, body) {
-  const headers = { "X-Real-IP": visitorIp, ...(body ? { "Content-Type": "application/json" } : {}) };
+  const headers = { "X-Forwarded-For": visitorIp, ...(body ? { "Content-Type": "application/json" } : {}) };
   const res = await fetch(`${API}/api${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
@@ -417,8 +417,14 @@ step("12. Who sees the money afterwards");
   check(opsDash.status === 200 && Number(opsDash.body.workflow?.invoices?.awaiting_value ?? 0) === 0 && Number(opsDash.body.month?.collected ?? 0) === 0, "the operations manager's dashboard shows no money figures", opsDash.body.month);
   const empPay = must(await employee.db.from("payments").select("id").eq("invoice_id", invoiceId), "employee payments");
   check(empPay.length === 0, "the employee sees no payments");
-  const costs = must(await ops.db.from("time_entries").select("labor_rate").eq("job_id", jobId), "ops costs");
-  check(costs.length >= 1, "the operations manager sees labor on the job (job costs area on)");
+  const costs = await api(ops, "POST", "/time/rates", { job_ids: [jobId] });
+  check(costs.status === 200 && Object.values(costs.body).some((rate) => Number(rate) > 0), "the operations manager sees labor on the job (job costs area on)", costs.body);
+  for (const [who, name] of [[foreman, "foreman"], [employee, "employee"]]) {
+    const rates = await who.db.from("time_entries").select("labor_rate").eq("job_id", jobId);
+    check(Boolean(rates.error), `the ${name} can't read pay rates on time entries`, rates.error?.message ?? rates.data);
+    const served = await api(who, "POST", "/time/rates", { job_ids: [jobId] });
+    check(served.status === 403, `and the server won't give them to the ${name}`, served.body);
+  }
 }
 
 step("13. A refund made in Stripe");

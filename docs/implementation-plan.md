@@ -176,6 +176,16 @@ base writes, team management, other people's expenses), and the API and screens 
 Members without a custom role get every area their level allows. New companies start with General manager,
 Operations manager, Foreman and Employee.
 
+Policies are written with `private.has_role()`, `has_perm()` and `is_member()` on the row's `company_id` (and the crew
+helpers `assigned_to_visit()`, `works_visit()`, `crew_sees_*()`, `schedules_crew()`, `manages_equipment()`,
+`on_my_crew()`), and `private.fold_member_checks()` (end any migration that adds policies with it) rewrites them to
+check the row against the person's companies, the visits, clients, jobs, properties and requests they reach, or the
+people on their crews (for crew leads' time and the people they put on visits), looked up once per query: called for
+each row, the lookups made a list of 20,000 invoices take 1.5 s, and a crew lead's 20,000 time entries 4.6 s. One check
+still looks one thing up per row, cheaply: a visit's crew (`visit_crew()`, for crew members' checklists and crew leads'
+visit equipment and assignees). `private.folded_helpers()` lists the body each folded helper had when its list was
+written; a test fails if one changes without its list.
+
 | Data | Read | Write |
 | --- | --- | --- |
 | Clients, properties, jobs, visits, SOPs | Any member | Office and up (crew leads can update visits) |

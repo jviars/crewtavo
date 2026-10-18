@@ -89,14 +89,6 @@ export function param(c: Context<AppEnv>, name: string): string {
 }
 
 /** Public base URL for links in emails and OAuth redirects. */
-/**
- * The visitor's address, for rate limits and approval records. Railway's edge sets X-Real-IP; a
- * client can't choose it there, unlike headers the edge passes through untouched.
- */
-export function clientIp(c: Context<AppEnv>): string {
-  return c.req.header("x-real-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-}
-
 export function appUrl(c: Context<AppEnv>): string {
   return (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
 }

@@ -104,8 +104,10 @@ docker compose --env-file .env.instance down -v    # delete the instance and all
 
 1. Point a DNS record for your domain (say `ops.example.com`) at the server.
 2. In `.env.instance`, set `APP_URL=https://ops.example.com`, then run `npm run instance` again.
-3. Put a web server with HTTPS in front of port 8080. With [Caddy](https://caddyserver.com), this
-   whole `Caddyfile` gets a certificate and forwards everything:
+3. Put a web server with HTTPS in front of port 8080, on the same server. With [Caddy](https://caddyserver.com), this
+   whole `Caddyfile` gets a certificate and forwards everything (Caddy passes on each visitor's
+   address in `X-Forwarded-For`, which Crewtavo's rate limits go by; see
+   [docs/deploy.md](docs/deploy.md#visitors-addresses) for other web servers):
 
    ```
    ops.example.com {
@@ -113,8 +115,9 @@ docker compose --env-file .env.instance down -v    # delete the instance and all
    }
    ```
 
-Only the `crewtavo` container is published (port `CREWTAVO_PORT`, default 8080). It forwards
-sign-in, data and files to the other containers over Docker's private network.
+Only the `crewtavo` container is published, and only on the server itself (port `CREWTAVO_PORT`,
+default 8080, on `CREWTAVO_BIND`, default `127.0.0.1`), so visitors come in through the web server.
+It forwards sign-in, data and files to the other containers over Docker's private network.
 
 **Backups:** the data lives in two Docker volumes, `crewtavo-instance_db-data` (the database) and
 `crewtavo-instance_storage-data` (photos and documents). Back up both, along with `.env.instance`.
@@ -196,8 +199,9 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
     </td>
     <td width="34%" valign="top">
       <p><strong>In the field.</strong> <em>My day</em> on any phone: on my way, start and finish,
-      gate codes, checklists with signatures, photos, materials used and a crew clock. It keeps
-      working with no signal and catches up when the connection is back.</p>
+      gate codes, checklists with signatures, photos, materials used and a crew clock. It installs
+      like an app on Android and iPhone, keeps working with no signal and catches up when the
+      connection is back.</p>
       <p><strong>For your clients.</strong> The Client Hub, with no account to create: approve
       quotes, pay invoices (with an optional tip), see the next visit, ask for changes, request
       work and message the office.</p>
@@ -219,7 +223,8 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
 - **Automations and marketing:** rules like "when a quote is sent, wait 3 days, then email the
   client", campaigns, promo codes, Google review requests and referrals.
 - **Claude and ChatGPT:** a built-in connector. Each person signs in with their own account, an
-  assistant can only do what that person's role allows, and every call is logged.
+  assistant only reads until that person allows it to make changes (and never does more than their
+  role allows), and every call is logged.
 - **Every trade:** trade presets ([`packages/core/src/presets`](packages/core/src/presets)) load
   starter services, quote formulas, checklists, booking forms and SOP categories when a company
   signs up: lawn and exterior maintenance, paving and sitework, roofing and exteriors, or a general

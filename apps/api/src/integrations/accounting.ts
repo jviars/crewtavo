@@ -1,4 +1,4 @@
-import { lineTotal } from "@crewtavo/core";
+import { lineTotal, toCents } from "@crewtavo/core";
 import type { Db } from "../lib/supabase";
 /**
  * Accounting sync: push clients, invoices and payments to QuickBooks Online or Zoho Books.
@@ -32,17 +32,29 @@ async function one<R extends { data: unknown; error: { message: string } | null 
   return data as NonNullable<R["data"]>;
 }
 
+/** A lookup that fails isn't "never sent": carrying on as if it were would send the record twice. */
 async function linked(ctx: Ctx, entity: Entity, localId: string): Promise<string | null> {
-  const { data } = await ctx.admin
+  const { data, error } = await ctx.admin
     .from("sync_links")
     .select("external_id")
     .match({ company_id: ctx.companyId, provider: ctx.provider, entity, local_id: localId })
     .maybeSingle();
+  if (error) throw new IntegrationError(error.message);
   return data?.external_id ?? null;
 }
 
+/** The provider took the record but the link to it wasn't saved. Retrying the job would send it again. */
+export class SentButUnrecorded extends IntegrationError {
+  override name = "SentButUnrecorded";
+}
+
+/**
+ * Once the provider has the record, sending it again makes a copy in the books. So a link that
+ * couldn't be saved is tried once more here, then fails the job for good (not to be retried),
+ * naming the provider's record so it can be checked there.
+ */
 async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: string, syncToken?: string) {
-  await ctx.admin.from("sync_links").upsert({
+  const link = {
     company_id: ctx.companyId,
     provider: ctx.provider,
     entity,
@@ -50,12 +62,31 @@ async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: s
     external_id: externalId,
     sync_token: syncToken ?? null,
     synced_at: new Date().toISOString(),
-  });
+  };
+  let { error } = await ctx.admin.from("sync_links").upsert(link);
+  if (error) ({ error } = await ctx.admin.from("sync_links").upsert(link));
+  if (error) throw new SentButUnrecorded(`Sent ${entity} ${externalId} but couldn't record it: ${error.message}`);
+}
+
+/** The provider's record is already the copy of another of ours, so it isn't this one's. */
+async function linkedElsewhere(ctx: Ctx, entity: Entity, externalId: string, localId: string): Promise<boolean> {
+  const { data, error } = await ctx.admin
+    .from("sync_links")
+    .select("local_id")
+    .match({ company_id: ctx.companyId, provider: ctx.provider, entity, external_id: externalId });
+  if (error) throw new IntegrationError(error.message);
+  return (data ?? []).some((link) => link.local_id !== localId);
 }
 
 // ---------------------------------------------------------------------------------------------
 // Provider HTTP
 // ---------------------------------------------------------------------------------------------
+//
+// A create we stopped waiting for (the timeout, or a dropped connection) may still go through at
+// the provider, and the outbox then tries the job again. So before making an invoice or payment we
+// look for the one we sent: the same customer, number or reference, date and amount. Our number
+// alone isn't enough, since the books can have an invoice of their own with it. QuickBooks' request
+// ids aren't used: a repeated one gets the first answer, which may be a refusal fixed since.
 
 async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknown) {
   const realm = ctx.integration.external_account_id;
@@ -148,11 +179,23 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
   const customerId = await pushClient(ctx, invoice.client_id);
   const lines = [...(invoice.invoice_line_items ?? [])].sort((a: any, b: any) => a.sort - b.sort);
   const discount = Number(invoice.discount_amount ?? 0);
+  // The lines' amounts in cents, before the discount and tax: with the date, what tells the one we
+  // sent from an invoice of theirs with our number.
+  const charged = lines.reduce((sum: number, line: any) => sum + toCents(lineTotal(line.quantity, line.unit_price)), 0);
 
   if (ctx.provider === "quickbooks") {
+    // Sent already: QuickBooks has an invoice with our number for this customer, dated as ours and
+    // with our lines' amounts (not our total: QuickBooks may work the tax out itself).
+    const query = encodeURIComponent(`select * from Invoice where DocNumber = '${String(invoice.number).replace(/'/g, "\\'")}'`);
+    const sent = ((await qbo(ctx, "GET", `query?query=${query}`)).QueryResponse?.Invoice ?? []).find(
+      (i: any) =>
+        i.CustomerRef?.value === customerId &&
+        i.TxnDate === invoice.issued_on &&
+        (i.Line ?? []).filter((l: any) => l.DetailType === "SalesItemLineDetail").reduce((sum: number, l: any) => sum + toCents(l.Amount), 0) === charged,
+    );
     const itemMap = (ctx.integration.settings.item_map ?? {}) as Record<string, string>;
     const defaultItem = String(ctx.integration.settings.default_item_id ?? "1");
-    const created = (await qbo(ctx, "POST", "invoice", {
+    const created = sent ?? (await qbo(ctx, "POST", "invoice", {
       CustomerRef: { value: customerId },
       DocNumber: String(invoice.number),
       TxnDate: invoice.issued_on,
@@ -179,9 +222,14 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
     return created.Id;
   }
 
-  const created = (await zoho(ctx, "POST", "invoices", {
+  // Sent already: Zoho has an invoice for this customer with our number as its reference, dated as
+  // ours and coming to what we send (no tax goes to Zoho, so the lines less the discount).
+  const reference = String(invoice.number);
+  const sent = ((await zoho(ctx, "GET", `invoices?reference_number=${encodeURIComponent(reference)}&customer_id=${encodeURIComponent(customerId)}`)).invoices ?? [])
+    .find((i: any) => i.reference_number === reference && i.customer_id === customerId && i.date === invoice.issued_on && toCents(i.total) === charged - toCents(invoice.discount_amount));
+  const created = sent ?? (await zoho(ctx, "POST", "invoices", {
     customer_id: customerId,
-    reference_number: String(invoice.number),
+    reference_number: reference,
     date: invoice.issued_on,
     due_date: invoice.due_on ?? undefined,
     line_items: lines.map((line: any) => ({
@@ -203,13 +251,29 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
     ctx.admin.from("payments").select("id, client_id, invoice_id, amount, method, received_at").eq("company_id", ctx.companyId).eq("id", paymentId).maybeSingle(),
     "Payment",
   );
-  if (Number(payment.amount) <= 0) return null; // refunds are recorded in the books by hand for now
+  // Refunds are recorded in the books by hand for now. Tips aren't sent: they aren't on the invoice
+  // in the books, and sent with the payment they'd sit there as the customer's credit. So a payment
+  // that was only a tip (Stripe charged just the tip) has nothing to send; QuickBooks and Zoho
+  // refuse a payment of nothing anyway.
+  if (Number(payment.amount) <= 0) return null;
   const customerId = await pushClient(ctx, payment.client_id);
   const invoiceExternal = payment.invoice_id ? await pushInvoice(ctx, payment.invoice_id) : null;
   const date = String(payment.received_at).slice(0, 10);
 
   if (ctx.provider === "quickbooks") {
-    const created = (await qbo(ctx, "POST", "payment", {
+    // Sent already: QuickBooks has a payment from this customer that day for our amount, on our
+    // invoice (or none), that isn't the copy of another of ours: two the same can come in one day.
+    // (Its reference number takes 21 characters, too few for our id.)
+    const query = encodeURIComponent(`select * from Payment where CustomerRef = '${customerId.replace(/'/g, "\\'")}' and TxnDate = '${date}'`);
+    const applied = (p: any) => (p.Line ?? []).flatMap((l: any) => l.LinkedTxn ?? []).map((t: any) => t.TxnId).join();
+    let sent: any;
+    for (const p of (await qbo(ctx, "GET", `query?query=${query}`)).QueryResponse?.Payment ?? []) {
+      if (toCents(p.TotalAmt) !== toCents(payment.amount) || applied(p) !== (invoiceExternal ?? "")) continue;
+      if (await linkedElsewhere(ctx, "payment", p.Id, paymentId)) continue;
+      sent = p;
+      break;
+    }
+    const created = sent ?? (await qbo(ctx, "POST", "payment", {
       CustomerRef: { value: customerId },
       TotalAmt: Number(payment.amount),
       TxnDate: date,
@@ -219,11 +283,15 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
     return created.Id;
   }
 
-  const created = (await zoho(ctx, "POST", "customerpayments", {
+  // Sent already: Zoho has a payment with our id as its reference.
+  const sent = ((await zoho(ctx, "GET", `customerpayments?reference_number=${encodeURIComponent(paymentId)}`)).customerpayments ?? [])
+    .find((p: any) => p.reference_number === paymentId);
+  const created = sent ?? (await zoho(ctx, "POST", "customerpayments", {
     customer_id: customerId,
     payment_mode: payment.method === "ach" ? "Bank Transfer" : payment.method === "card" ? "Credit Card" : payment.method,
     amount: Number(payment.amount),
     date,
+    reference_number: paymentId,
     invoices: invoiceExternal ? [{ invoice_id: invoiceExternal, amount_applied: Number(payment.amount) }] : [],
   })).payment;
   await remember(ctx, "payment", paymentId, created.payment_id);
@@ -232,7 +300,7 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
 
 /** Run one outbox row. Throws on failure so the caller can schedule a retry. */
 export async function runAccountingJob(env: Env, admin: Db, row: { company_id: string; topic: string; payload: Record<string, string> }) {
-  const { data: integration } = await admin
+  const { data: integration, error } = await admin
     .from("integrations")
     .select("provider, external_account_id, settings")
     .eq("company_id", row.company_id)
@@ -240,7 +308,9 @@ export async function runAccountingJob(env: Env, admin: Db, row: { company_id: s
     .eq("status", "connected")
     .limit(1)
     .maybeSingle();
-  if (!integration) return; // disconnected since it was queued; nothing to do
+  if (error) throw new IntegrationError(error.message);
+  // Disconnected or waiting to be reconnected since it was queued: fail, so it's retried rather than dropped.
+  if (!integration) throw new IntegrationError("The accounting app isn't connected. Reconnect it on the Apps page.");
 
   const ctx: Ctx = {
     env,
@@ -253,9 +323,11 @@ export async function runAccountingJob(env: Env, admin: Db, row: { company_id: s
   else if (row.topic === "accounting.payment") await pushPayment(ctx, row.payload.payment_id);
   else throw new IntegrationError(`Unknown topic ${row.topic}`);
 
+  // last_error stays: it's about a change that never went through (see drainOutbox in tasks.ts),
+  // which this one going through doesn't fix. Reconnecting or disconnecting clears it.
   await admin
     .from("integrations")
-    .update({ last_sync_at: new Date().toISOString(), last_error: null, status: "connected" })
+    .update({ last_sync_at: new Date().toISOString(), status: "connected" })
     .match({ company_id: row.company_id, provider: integration.provider });
 }
 

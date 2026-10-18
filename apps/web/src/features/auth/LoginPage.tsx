@@ -251,8 +251,11 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
   );
 }
 
-/** After a password-reset or invitation link: choose a password, then carry on into the app. */
-export function SetPasswordPage({ kind, onDone }: { kind: "recovery" | "invite"; onDone: () => void }) {
+/**
+ * After a password-reset or invitation link: choose a password, then carry on into the app.
+ * `onSignOut` is the session's, which leaves nothing of theirs on the phone; true once signed out.
+ */
+export function SetPasswordPage({ kind, onDone, onSignOut }: { kind: "recovery" | "invite"; onDone: () => void; onSignOut: () => Promise<boolean> }) {
   const [password, setPassword] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [show, setShow] = useState(false);
@@ -282,7 +285,7 @@ export function SetPasswordPage({ kind, onDone }: { kind: "recovery" | "invite";
         <Field label="Confirm password"><input className="input" type={show ? "text" : "password"} value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} autoComplete="new-password" required /></Field>
         {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}
         <Button type="submit" variant="primary" size="lg" loading={busy}>Save password</Button>
-        {kind === "invite" ? <Button variant="ghost" onClick={onDone}>Skip for now</Button> : <Button variant="ghost" icon="arrowLeft" onClick={() => supabase().auth.signOut().finally(onDone)}>Back to sign in</Button>}
+        {kind === "invite" ? <Button variant="ghost" onClick={onDone}>Skip for now</Button> : <Button variant="ghost" icon="arrowLeft" onClick={() => onSignOut().then((signedOut) => signedOut && onDone())}>Back to sign in</Button>}
       </form>
     </AuthLayout>
   );

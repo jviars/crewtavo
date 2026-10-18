@@ -345,17 +345,29 @@ interface RunRow {
   subject_type: string | null;
   subject_id: string | null;
   result: unknown;
+  /** The batch's claim (claim_automation_runs): this worker holds the run while it still matches. */
+  claim_token: string | null;
 }
 
+/** The claim couldn't be checked, so the run is left as it is; it's retried once the claim runs out. */
+class ClaimUnchecked extends Error {}
+
+/** Records how the run went if this worker still holds it; "lost" when another worker has it now. */
 async function finish(admin: Db, run: RunRow, status: "done" | "skipped" | "failed", result: ActionResult[], error: string | null) {
-  await admin
-    .from("automation_runs")
-    .update({ status, result: result as unknown as never, error: error?.slice(0, 1000) ?? null, finished_at: new Date().toISOString(), locked_until: null })
-    .eq("id", run.id);
-  return status;
+  const { data: held, error: finishError } = await admin.rpc("finish_automation_run", {
+    p_id: run.id, p_token: run.claim_token!, p_status: status, p_result: result as unknown as never, p_error: error ?? undefined,
+  });
+  return !finishError && !held ? "lost" : status;
 }
 
-export async function executeRun(env: Env, admin: Db, run: RunRow, baseUrl: string | null): Promise<"done" | "skipped" | "failed"> {
+/** Five more minutes on this worker's claim, keeping the actions done so far; false once it's another's. */
+async function renew(admin: Db, run: RunRow, results: ActionResult[]) {
+  const { data, error } = await admin.rpc("renew_automation_run", { p_id: run.id, p_token: run.claim_token!, p_result: results as unknown as never });
+  if (error) throw new ClaimUnchecked(error.message);
+  return data === true;
+}
+
+export async function executeRun(env: Env, admin: Db, run: RunRow, baseUrl: string | null): Promise<"done" | "skipped" | "failed" | "lost"> {
   try {
     const { data: rule } = await admin.from("automation_rules").select("id, name, enabled, conditions, actions, run_count").eq("id", run.rule_id).maybeSingle();
     if (!rule || !rule.enabled) return finish(admin, run, "skipped", [], "The rule was turned off or deleted.");
@@ -369,11 +381,17 @@ export async function executeRun(env: Env, admin: Db, run: RunRow, baseUrl: stri
     const prior = Array.isArray(run.result) ? (run.result as ActionResult[]) : [];
     const results: ActionResult[] = [];
     const actions = (rule.actions ?? []) as unknown as Action[];
+    let acted = false;
     for (const [i, action] of actions.entries()) {
       if (prior[i]?.ok && prior[i].type === action.type) {
         results.push(prior[i]);
         continue;
       }
+      // An email can take a few minutes (lib/smtp.ts), so the claim is renewed before each action
+      // after the first, with what's done so far. If another worker has the run by then, this one
+      // stops there: that worker does the rest, skipping what this one did.
+      if (acted && !(await renew(admin, run, results))) return "lost";
+      acted = true;
       try {
         results.push({ type: action.type, ok: true, detail: await performAction(env, admin, ctx, action, rule.name, baseUrl) });
       } catch (error) {
@@ -381,12 +399,20 @@ export async function executeRun(env: Env, admin: Db, run: RunRow, baseUrl: stri
       }
     }
     const failure = results.find((r) => !r.ok);
-    await admin.from("automation_rules").update({ run_count: (rule.run_count ?? 0) + 1, last_run_at: new Date().toISOString() }).eq("id", rule.id);
-    return finish(admin, run, failure ? "failed" : "done", results, failure ? failure.detail : null);
+    const outcome = await finish(admin, run, failure ? "failed" : "done", results, failure ? failure.detail : null);
+    // Counted by the worker that finished the run, not by one whose claim had gone.
+    if (outcome !== "lost") await admin.from("automation_rules").update({ run_count: (rule.run_count ?? 0) + 1, last_run_at: new Date().toISOString() }).eq("id", rule.id);
+    return outcome;
   } catch (error) {
+    if (error instanceof ClaimUnchecked) throw error;
     console.error("Automation run failed", run.id, error);
     return finish(admin, run, "failed", [], error instanceof Error ? error.message : String(error));
   }
+}
+
+/** Runs this worker claimed but never started go back to waiting, without using an attempt. */
+async function release(admin: Db, runs: RunRow[]) {
+  if (runs.length) await admin.rpc("release_automation_runs", { p_token: runs[0]!.claim_token!, p_ids: runs.map((r) => r.id) });
 }
 
 export async function processAutomations(env: Env, options: { companyId?: string; limit?: number; baseUrl?: string | null } = {}) {
@@ -394,7 +420,28 @@ export async function processAutomations(env: Env, options: { companyId?: string
   const baseUrl = options.baseUrl ?? env.APP_URL ?? null;
   const { data: runs, error } = await admin.rpc("claim_automation_runs", { p_limit: options.limit ?? 25, ...(options.companyId ? { p_company: options.companyId } : {}) });
   if (error) throw new Error(error.message);
-  const tally = { claimed: runs?.length ?? 0, done: 0, skipped: 0, failed: 0 };
-  for (const run of runs ?? []) tally[await executeRun(env, admin, run, baseUrl)]++;
+  const claimed = runs ?? [];
+  const tally = { claimed: claimed.length, done: 0, skipped: 0, failed: 0, lost: 0 };
+  let next = 0; // the first run not started yet
+  try {
+    for (const [index, run] of claimed.entries()) {
+      next = index;
+      // A batch is claimed for five minutes and a slow one can outlast that, so confirm (and extend)
+      // this run's claim right before doing it, which is also when the attempt counts. If that fails,
+      // another worker has claimed the run since.
+      const { data: held, error: startError } = await admin.rpc("start_automation_run", { p_id: run.id, p_token: run.claim_token! });
+      if (startError) throw new Error(startError.message);
+      next = index + 1;
+      if (!held) {
+        tally.lost++;
+        continue;
+      }
+      tally[await executeRun(env, admin, run, baseUrl)]++;
+    }
+  } finally {
+    // A batch that stops early (the database didn't answer) leaves the runs it didn't get to for the
+    // next one right away, instead of until the claim runs out.
+    await release(admin, claimed.slice(next));
+  }
   return tally;
 }

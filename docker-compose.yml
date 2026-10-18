@@ -3,8 +3,9 @@
 #
 #   npm run instance          generates .env.instance (secrets) once, then docker compose up
 #
-# and open http://localhost:8080. Only the crewtavo service is reachable from outside; it forwards
-# to the others, the way it does on Railway. Data lives in the db-data and storage-data volumes.
+# and open http://localhost:8080. Only the crewtavo service is published, on this computer alone (a
+# web server here puts it online); it forwards to the others, the way it does on Railway. Data lives
+# in the db-data and storage-data volumes.
 
 name: crewtavo-instance
 
@@ -101,8 +102,11 @@ services:
     build: .
     restart: unless-stopped
     depends_on: { db: { condition: service_healthy } }
+    # Only on this computer (CREWTAVO_BIND), for the web server in front to forward to: Crewtavo
+    # believes X-Forwarded-For from Docker's network, and on every address Docker would hand some
+    # outside connections over from there too (docs/deploy.md, Visitors' addresses).
     ports:
-      - "${CREWTAVO_PORT:-8080}:8080"
+      - "${CREWTAVO_BIND:-127.0.0.1}:${CREWTAVO_PORT:-8080}:8080"
     # Optional features (email, texting, payments, maps...): add them to .env.instance.
     env_file:
       - path: .env.instance

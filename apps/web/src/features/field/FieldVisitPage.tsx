@@ -18,7 +18,7 @@ import { toast } from "@/lib/toast";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
-import { pendingVisitStatus, saveChecklist, saveVisitNotes, setVisitStatus, showVisitStatus, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
+import { pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl, formatDuration } from "./fieldData";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { SignaturePad } from "./SignaturePad";
@@ -60,13 +60,14 @@ export function FieldVisitPage() {
   const refresh = () => {
     for (const k of [["field-visit", id], ["field"], ["schedule"], ["running-timer"], ["dashboard"], ["checklist", id]]) queryClient.invalidateQueries({ queryKey: k });
   };
-  // These work offline: saved on the phone and sent, in order, when there's signal.
+  // These work offline: saved on the phone and sent, in order, when there's signal. Each is sent by
+  // the action registered for it (fieldActions.ts), not a mutationFn here: lib/offline.ts notes when
+  // it's on its way, for the count of updates waiting.
   const queued = () => !onlineManager.isOnline() && toast.info("Saved on this phone. It'll send when you have signal.");
   const statusMutation = useMutation({
     mutationKey: ["visit-status"],
     scope: FIELD_SCOPE,
-    meta: { success: (_: unknown, change: VisitStatusChange) => (change.status === "en_route" ? "On your way" : change.status === "in_progress" ? "Visit started. Your clock is running." : "Visit complete. Nice work!") },
-    mutationFn: setVisitStatus,
+    meta: { success: statusSaved },
     onMutate: (change: VisitStatusChange) => {
       queued();
       showVisitStatus(queryClient, change);
@@ -83,8 +84,7 @@ export function FieldVisitPage() {
     mutationKey: ["visit-notes"],
     scope: FIELD_SCOPE,
     meta: { success: "Notes saved" },
-    mutationFn: saveVisitNotes,
-    onMutate: (change: { visitId: string; notes: string | null }) => {
+    onMutate: (change: { visitId: string; notes: string | null; companyId?: string }) => {
       queued();
       queryClient.setQueryData<typeof visit.data>(["field-visit", id], (old) => old && { ...old, notes: change.notes });
     },
@@ -223,11 +223,11 @@ function Checklist({ visitId }: { visitId: string }) {
 
   // Made here so saving twice with no signal updates one checklist instead of adding two.
   const [newId] = useState(() => crypto.randomUUID());
+  // Sent by the action registered for it, like the visit's own (no mutationFn here).
   const saveMutation = useMutation({
     mutationKey: ["checklist-save"],
     scope: FIELD_SCOPE,
     meta: { success: (_: unknown, v: ChecklistSave) => (v.completedAt ? "Checklist done" : "Checklist saved") },
-    mutationFn: saveChecklist,
     onMutate: (v: ChecklistSave) => {
       if (!onlineManager.isOnline()) toast.info("Saved on this phone. It'll send when you have signal.");
       setDirty(false);

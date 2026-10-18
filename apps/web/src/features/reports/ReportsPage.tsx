@@ -42,6 +42,11 @@ async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ dat
   return out;
 }
 
+type Rates = Record<string, number>;
+/** The pay rate approved time was costed at, by entry, for people with job costs (only the server reads it). */
+const timeRates = (costs: boolean, filter: { job_ids: string[] } | { from: string; to: string }): Promise<Rates> =>
+  costs ? api.post<Rates>("/time/rates", filter) : Promise.resolve({});
+
 const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
 const hrs = (n: number) => (n > 0 && n < 1 ? `${Math.max(1, Math.round(n * 60))} min` : `${formatNumber(n, n < 10 && n % 1 ? 1 : 0)} h`);
 const sum = <T,>(rows: T[], f: (r: T) => number) => rows.reduce((s, r) => s + (f(r) || 0), 0);
@@ -450,15 +455,16 @@ function Work({ range }: { range: Range }) {
         db.from("companies").select("settings").eq("id", cid).single(),
       ]);
       const ids = jobs.map((j) => j.id);
-      const [time, expenses] = ids.length
+      const [time, expenses, rates] = ids.length
         ? await Promise.all([
-            fetchAll((a, b) => db.from("time_entries").select("job_id, started_at, ended_at, labor_rate").in("job_id", ids.slice(0, 300)).range(a, b)),
+            fetchAll((a, b) => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", ids.slice(0, 300)).range(a, b)),
             fetchAll((a, b) => db.from("expenses").select("job_id, amount").in("job_id", ids.slice(0, 300)).range(a, b)),
+            timeRates(costs, { job_ids: ids.slice(0, 300) }),
           ])
-        : [[], []];
+        : [[], [], {} as Rates];
       const target = Number(((unwrap(settings).settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
       const costed = jobs.map((j) => {
-        const labor = sum(time.filter((t) => t.job_id === j.id), (t) => hoursBetween(t.started_at, t.ended_at) * Number(t.labor_rate ?? 0));
+        const labor = sum(time.filter((t) => t.job_id === j.id), (t) => hoursBetween(t.started_at, t.ended_at) * Number(rates[t.id] ?? 0));
         const spent = sum(expenses.filter((e) => e.job_id === j.id), (e) => Number(e.amount));
         const materials = sum(j.lines, (l) => Number(l.quantity) * Number(l.unit_cost ?? 0));
         const revenue = Number(j.financials?.contract_total ?? 0);
@@ -649,10 +655,13 @@ function Team({ range }: { range: Range }) {
     queryKey: ["reports", cid, "team", range.from, range.to],
     placeholderData: keepPreviousData,
     queryFn: async () => {
-      const rows = await fetchAll((a, b) => supabase().from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at, labor_rate").eq("company_id", cid).gte("started_at", range.start).lt("started_at", range.end).range(a, b));
+      const [rows, rates] = await Promise.all([
+        fetchAll((a, b) => supabase().from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("company_id", cid).gte("started_at", range.start).lt("started_at", range.end).range(a, b)),
+        timeRates(can(session, "job_costs"), { from: range.start, to: range.end }),
+      ]);
       // A running timer counts up to now.
       const now = new Date().toISOString();
-      return rows.map((e) => ({ ...e, running: !e.ended_at, ended_at: e.ended_at ?? now }));
+      return rows.map((e) => ({ ...e, labor_rate: rates[e.id] ?? null, running: !e.ended_at, ended_at: e.ended_at ?? now }));
     },
   });
   const buckets = bucketsFor(range);

@@ -3,6 +3,7 @@
  * Edge, Firefox and Safari; on an iPhone, only after Crewtavo is added to the Home Screen.
  */
 import { api } from "./api";
+import { isIos, isStandalone } from "./install";
 
 const fromBase64Url = (text: string) => {
   const b64 = text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4);
@@ -31,12 +32,9 @@ export function registerServiceWorker() {
 
 export type PushState = "unsupported" | "needs-install" | "blocked" | "off" | "on";
 
-const isIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-const standalone = () => window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
-
 export async function pushState(): Promise<PushState> {
   if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-    return isIos() && !standalone() ? "needs-install" : "unsupported";
+    return isIos() && !isStandalone() ? "needs-install" : "unsupported";
   }
   if (Notification.permission === "denied") return "blocked";
   const registration = await navigator.serviceWorker.getRegistration();

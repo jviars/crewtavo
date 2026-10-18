@@ -1,4 +1,5 @@
 import type { TablesUpdate } from "@crewtavo/core/database";
+import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -15,13 +16,14 @@ import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { addDaysIso, formatDate, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
+import { addDaysIso, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
 import { SendDialog } from "../quotes/SendDialog";
 import { refundable } from "./refunds";
+import { bankPayment, bankPaymentNote, paidInStripe, paymentAmount, RECORD_IN_STRIPE } from "./stripeInvoices";
 
 const METHODS: Record<string, string> = { check: "Check", cash: "Cash", card: "Card", ach: "Bank transfer", other: "Other" };
 
@@ -45,7 +47,7 @@ function InvoicePageScreen() {
       unwrapOne(
         await supabase()
           .from("invoices")
-          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone), job:jobs(id, number, title, po_number), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at)")
+          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone), job:jobs(id, number, title, po_number), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at, detached_at, processing_at)")
           .eq("id", id)
           .order("sort", { referencedTable: "invoice_line_items" })
           .order("received_at", { referencedTable: "payments" })
@@ -97,9 +99,13 @@ function InvoicePageScreen() {
   const lastPayment = inv.payments.at(-1);
   // The Stripe invoice that matters now: the live one, else the latest.
   const stripe = inv.stripe.find((s) => s.status === "open" || s.status === "processing") ?? inv.stripe.find((s) => s.stripe_id);
-  const processing = stripe?.status === "processing";
+  const bank = bankPayment(inv.stripe);
+  // Said next to Record payment, and asked about before recording one.
+  const bankNote = bank && balance > 0 ? bankPaymentNote(bank, session.company.timezone) : null;
   // Made in Stripe: paid as Stripe billed it, so its total changes there, not here.
   const fromStripe = inv.stripe.some((s) => s.origin === "stripe");
+  // And while it's open there, so do its payments.
+  const paysInStripe = paidInStripe(inv.stripe);
 
   return (
     <>
@@ -109,7 +115,7 @@ function InvoicePageScreen() {
         actions={
           <>
             {!isVoid && <Button icon="send" variant={draft ? "primary" : "secondary"} disabled={!inv.lines.length} title={!inv.lines.length ? "Add a line item first" : undefined} onClick={() => setDialog("send")}>{draft ? "Send invoice" : "Resend"}</Button>}
-            {!draft && !isVoid && balance > 0 && <Button variant="primary" icon="dollar" onClick={() => setDialog("payment")}>Record payment</Button>}
+            {!draft && !isVoid && balance > 0 && <Button variant="primary" icon="dollar" disabled={paysInStripe} title={paysInStripe ? "Made in Stripe: record its payments there" : (bankNote ?? undefined)} onClick={() => setDialog("payment")}>Record payment</Button>}
             <Menu
               items={[
                 { label: "Preview as client", icon: "eye", onSelect: () => openClientView.mutate(false) },
@@ -153,13 +159,10 @@ function InvoicePageScreen() {
 
       {isVoid && <div className="callout"><Icon name="x" size={18} /><div className="grow">This invoice is void and isn't owed.</div></div>}
       {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
-      {processing && balance > 0 && (
-        <div className="callout callout-info">
-          <Icon name="clock" size={18} />
-          <div className="grow">A bank payment of {formatMoneyCents(stripe.amount_due)} is on its way through Stripe. It usually clears in a few business days, and shows up here when it does.</div>
-        </div>
-      )}
-      {daysLate > 0 && !processing && (
+      {bankNote && <div className="callout callout-info"><Icon name="clock" size={18} /><div className="grow">{bankNote}</div></div>}
+      {/* Up front, rather than refused once someone has filled in a payment. */}
+      {paysInStripe && !bank && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">{RECORD_IN_STRIPE}</div></div>}
+      {daysLate > 0 && !bank && (
         <div className="callout callout-danger">
           <Icon name="alert" size={18} />
           <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.</div>
@@ -178,33 +181,36 @@ function InvoicePageScreen() {
             <h2 className="section-title">Payments</h2>
             <div className="card">
               {inv.payments.length === 0 && <EmptyState compact icon="dollar" title="No payments yet" />}
-              {inv.payments.map((p) => (
-                <div key={p.id} className="card-row">
-                  <span className="n-icon" style={{ width: 32, height: 32, borderRadius: 9, display: "grid", placeItems: "center", background: Number(p.amount) < 0 ? "var(--danger-tint)" : "var(--green-tint)", color: Number(p.amount) < 0 ? "var(--danger)" : "var(--green-dark)", flex: "none" }}><Icon name="dollar" size={15} /></span>
-                  <span className="grow">
-                    <strong className="tabular">{formatMoneyCents(p.amount)}</strong>
-                    {Number(p.tip_amount) > 0 && <span className="muted"> + {formatMoneyCents(p.tip_amount)} tip</span>}
-                    <span className="muted small" style={{ display: "block" }}>
-                      {METHODS[p.method] ?? p.method}{p.processor ? ` via ${p.processor === "stripe" ? "Stripe" : p.processor}` : ""}{p.notes ? ` · ${p.notes}` : ""}
-                      {Number(p.fee_amount) > 0 && ` · ${formatMoneyCents(p.fee_amount)} fee`}
-                      {p.payout && ` · ${p.payout.status === "paid" ? "deposited" : "arrives"} ${formatDate(p.payout.arrival_on)}`}
+              {inv.payments.map((p) => {
+                const shown = paymentAmount(p);
+                return (
+                  <div key={p.id} className="card-row">
+                    <span className="n-icon" style={{ width: 32, height: 32, borderRadius: 9, display: "grid", placeItems: "center", background: shown.back ? "var(--danger-tint)" : "var(--green-tint)", color: shown.back ? "var(--danger)" : "var(--green-dark)", flex: "none" }}><Icon name="dollar" size={15} /></span>
+                    <span className="grow">
+                      <strong className="tabular">{shown.amount}</strong>
+                      {shown.tip && <span className="muted"> {shown.tip}</span>}
+                      <span className="muted small" style={{ display: "block" }}>
+                        {METHODS[p.method] ?? p.method}{p.processor ? ` via ${p.processor === "stripe" ? "Stripe" : p.processor}` : ""}{p.notes ? ` · ${p.notes}` : ""}
+                        {Number(p.fee_amount) > 0 && ` · ${formatMoneyCents(p.fee_amount)} fee`}
+                        {p.payout && ` · ${p.payout.status === "paid" ? "deposited" : "arrives"} ${formatDate(p.payout.arrival_on)}`}
+                      </span>
                     </span>
-                  </span>
-                  <span className="muted small">{formatDate(p.received_at)}</span>
-                  {/* Online payments are refunded in Stripe, and the refund shows up here on its own. */}
-                  {!p.processor && (
-                    <Menu
-                      triggerClassName="btn btn-sm btn-ghost btn-icon"
-                      label="Payment actions"
-                      items={[
-                        // Hidden once it's all been refunded.
-                        { label: "Record a refund", icon: "undo", hidden: refundable(p, inv.payments) <= 0, onSelect: () => setRefunding({ id: p.id, amount: Number(p.amount), method: p.method }) },
-                        { label: "Remove payment", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Remove this payment?", body: "Use this to fix a mistake. The invoice balance goes back up.", confirmLabel: "Remove", danger: true })) && removePayment.mutate(p.id) },
-                      ]}
-                    />
-                  )}
-                </div>
-              ))}
+                    <span className="muted small">{formatDate(p.received_at)}</span>
+                    {/* Online payments are refunded in Stripe, and the refund shows up here on its own. */}
+                    {!p.processor && (
+                      <Menu
+                        triggerClassName="btn btn-sm btn-ghost btn-icon"
+                        label="Payment actions"
+                        items={[
+                          // Hidden once it's all been refunded.
+                          { label: "Record a refund", icon: "undo", hidden: refundable(p, inv.payments) <= 0, onSelect: () => setRefunding({ id: p.id, amount: Number(p.amount), method: p.method }) },
+                          { label: "Remove payment", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Remove this payment?", body: "Use this to fix a mistake. The invoice balance goes back up.", confirmLabel: "Remove", danger: true })) && removePayment.mutate(p.id) },
+                        ]}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </section>
         </div>
@@ -223,8 +229,8 @@ function InvoicePageScreen() {
               onChanged={refresh}
             />
             <div className="line">
-              <span>Tax {draft ? "" : `(${formatNumber(Number(inv.tax_rate) * 100, 2)}%)`}</span>
-              {draft ? <MoneyInput percent label="Tax rate" value={Math.round(Number(inv.tax_rate) * 10000) / 100} max={99.99} onSave={(v) => update.mutate({ tax_rate: v / 100 })} /> : <span>{formatMoneyCents(inv.tax_amount)}</span>}
+              <span>Tax {draft ? "" : `(${formatTaxRate(inv.tax_rate)})`}</span>
+              {draft ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => update.mutate({ tax_rate: taxRateFromPercent(v) })} /> : <span>{formatMoneyCents(inv.tax_amount)}</span>}
             </div>
             {draft && <div className="line"><span>Tax amount</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
             <div className="line grand"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
@@ -259,7 +265,7 @@ function InvoicePageScreen() {
       </div>
 
       {dialog === "send" && <SendDialog kind="invoice" id={inv.id} number={inv.number} email={inv.client?.email ?? null} phone={inv.client?.phone ?? null} onClose={() => setDialog(null)} onSent={refresh} />}
-      {dialog === "payment" && <PaymentDialog invoice={{ id: inv.id, client_id: inv.client_id, balance, draft }} onClose={() => setDialog(null)} onSaved={refresh} />}
+      {dialog === "payment" && <PaymentDialog invoice={{ id: inv.id, client_id: inv.client_id, balance, draft }} bank={bankNote} onClose={() => setDialog(null)} onSaved={refresh} />}
       {refunding && <RefundDialog invoice={{ id: inv.id, client_id: inv.client_id }} payment={refunding} left={refundable(refunding, inv.payments)} onClose={() => setRefunding(null)} onSaved={refresh} />}
     </>
   );
@@ -315,7 +321,8 @@ function NotesCard({ value, editable, onSave }: { value: string | null; editable
   );
 }
 
-function PaymentDialog({ invoice, onClose, onSaved }: { invoice: { id: string; client_id: string; balance: number; draft: boolean }; onClose: () => void; onSaved: () => void }) {
+/** `bank` says a bank payment is on its way, so recording another is confirmed first (it isn't refused: it can bounce). */
+function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: string; client_id: string; balance: number; draft: boolean }; bank: string | null; onClose: () => void; onSaved: () => void }) {
   const session = useSession();
   const [amount, setAmount] = useState(invoice.balance > 0 ? invoice.balance.toFixed(2) : "");
   const [tip, setTip] = useState("");
@@ -350,7 +357,13 @@ function PaymentDialog({ invoice, onClose, onSaved }: { invoice: { id: string; c
   });
   return (
     <Dialog open onClose={onClose} title="Record payment" description={`Balance due ${formatMoneyCents(invoice.balance)}`}>
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+      <form
+        onSubmit={async (e: FormEvent) => {
+          e.preventDefault();
+          if (bank && !(await confirm({ title: "A bank payment is still clearing", body: bank, confirmLabel: "Record it anyway" }))) return;
+          save.mutate();
+        }}
+      >
         <div className="form-grid">
           <Field label="Amount" error={tooMuch ? `More than the ${formatMoneyCents(invoice.balance)} balance` : null}>
             <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>

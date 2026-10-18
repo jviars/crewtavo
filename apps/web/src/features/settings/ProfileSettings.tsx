@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { initials } from "@/components/shell/AppShell";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { ConnectedAssistants } from "@/features/apps/AssistantAccess";
 import { api, supabase } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
@@ -72,6 +73,8 @@ export function ProfileSettings() {
       <NotificationSettings phone={session.profile.phone} />
       <Appearance />
       <CalendarFeedCard />
+      {/* Whatever their role: the assistants they've connected, and Allow changes for each. */}
+      <ConnectedAssistants inProfile />
       <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>
         <strong>Change password</strong>
         <Field label="New password" hint="At least 8 characters."><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} /></Field>
