@@ -1,4 +1,5 @@
 import type { TablesUpdate } from "@crewtavo/core/database";
+import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -14,7 +15,7 @@ import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, formatMoneyCents, formatNumber, timeAgo, todayIn } from "@/lib/format";
+import { addressLine, formatDate, formatMoneyCents, formatNumber, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { LineItems } from "./LineItems";
@@ -233,8 +234,8 @@ export function QuotePage() {
               onChanged={refresh}
             />
             <div className="line">
-              <span>Tax {editable ? "" : `(${formatNumber(Number(q.tax_rate) * 100, 2)}%)`}</span>
-              {editable ? <MoneyInput percent label="Tax rate" value={Math.round(Number(q.tax_rate) * 10000) / 100} max={99.99} onSave={(v) => update.mutate({ tax_rate: v / 100 })} /> : <span>{formatMoneyCents(q.tax_amount)}</span>}
+              <span>Tax {editable ? "" : `(${formatTaxRate(q.tax_rate)})`}</span>
+              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => update.mutate({ tax_rate: taxRateFromPercent(v) })} /> : <span>{formatMoneyCents(q.tax_amount)}</span>}
             </div>
             {editable && <div className="line"><span>Tax amount</span><span>{formatMoneyCents(q.tax_amount)}</span></div>}
             <div className="line grand"><span>Total</span><span>{formatMoneyCents(q.total)}</span></div>

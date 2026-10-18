@@ -87,6 +87,22 @@ export function toCents(value: Amount): number {
 }
 
 /**
+ * Decimals a tax rate keeps as a fraction, as quotes.tax_rate and invoices.tax_rate do
+ * (numeric(8, 6)): steps of 0.0001%, so New York City's 8.875% is 0.08875.
+ */
+const TAX_RATE_DECIMALS = 6;
+
+/** A tax rate (a fraction, as stored) as a percent, exactly: 0.08875 is 8.875. */
+export function taxPercent(rate: Amount): number {
+  return Number(toUnits(rate, TAX_RATE_DECIMALS)) / 10 ** (TAX_RATE_DECIMALS - 2);
+}
+
+/** A percent as the tax rate to store, rounded as the column rounds it: 8.875 is 0.08875. */
+export function taxRateFromPercent(percent: Amount): number {
+  return Number(toUnits(percent, TAX_RATE_DECIMALS - 2)) / 10 ** TAX_RATE_DECIMALS;
+}
+
+/**
  * A quote's totals, step for step as private.quote_totals() works them out: each line rounded to
  * the cent; a promo code's discount figured on the charges (lines with a positive price); the
  * discount spread over taxable and untaxed charges before tax; tax rounded to the cent.
@@ -121,13 +137,13 @@ export function quoteTotals(lines: TotalsLine[], opts: { taxRate: Amount; discou
   const discount = min(offered, max(sub, 0n));
 
   // round(greatest(taxable - discount * base_taxable / base, 0) * tax_rate, 2)
-  const rate = toUnits(opts.taxRate, 4);
+  const rate = toUnits(opts.taxRate, TAX_RATE_DECIMALS);
   let tax: bigint;
   if (base > 0n) {
     const [share, scale] = pgDivide(discount * baseTaxable, 4, base, 2);
-    tax = divRound(max(taxable * pow10(scale - 2) - share, 0n) * rate, pow10(scale + 2));
+    tax = divRound(max(taxable * pow10(scale - 2) - share, 0n) * rate, pow10(scale + TAX_RATE_DECIMALS - 2));
   } else {
-    tax = divRound(max(taxable, 0n) * rate, 10000n);
+    tax = divRound(max(taxable, 0n) * rate, pow10(TAX_RATE_DECIMALS));
   }
   const total = max(sub - discount, 0n) + tax;
   return { subtotal: toDollars(sub), discount: toDollars(discount), tax: toDollars(tax), total: toDollars(total) };

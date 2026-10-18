@@ -70,6 +70,15 @@ describe("stripe line items", () => {
     expect(total(items)).toBe(9614 + 1500);
   });
 
+  it("names the tax rate as it's kept, to 0.0001%", () => {
+    const tax = (tax_rate: number) =>
+      stripeLineItems(invoice({ tax_rate, tax_amount: 14.2, balance_due: 174.2 })).find((i) => i.description.startsWith("Tax"))?.description;
+    expect(tax(0.08875)).toBe("Tax (8.875%)");
+    expect(tax(0.088755)).toBe("Tax (8.8755%)");
+    expect(tax(0.047125)).toBe("Tax (4.7125%)");
+    expect(tax(0.1)).toBe("Tax (10%)");
+  });
+
   it("evens out any rounding so Stripe asks for exactly what's owed", () => {
     const items = stripeLineItems(invoice({ lines: [{ name: "Mulch", quantity: 3, unit: "yd", unit_price: 33.335, sort: 1 }], subtotal: 100.01, balance_due: 100.01 }));
     expect(total(items)).toBe(10001);

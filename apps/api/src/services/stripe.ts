@@ -6,6 +6,7 @@
  * The rest of this file turns invoices into Stripe line items and back. It's pure, so it's tested
  * directly (apps/api/test/stripe.test.ts).
  */
+import { taxPercent } from "@crewtavo/core";
 import { providerTimeout } from "../integrations/registry";
 import { hmacSha256Hex, safeEqual } from "../lib/crypto";
 
@@ -265,7 +266,7 @@ export function stripeLineItems(invoice: BillableInvoice, tipCents = 0, currency
   }
   const discount = Math.min(Number(invoice.discount_amount), Math.max(Number(invoice.subtotal), 0));
   if (discount > 0) items.push({ description: invoice.promo?.code ? `Discount (${invoice.promo.code})` : "Discount", amount: -cents(discount) });
-  if (cents(invoice.tax_amount)) items.push({ description: `Tax (${Number((Number(invoice.tax_rate) * 100).toFixed(3))}%)`, amount: cents(invoice.tax_amount) });
+  if (cents(invoice.tax_amount)) items.push({ description: `Tax (${taxPercent(invoice.tax_rate)}%)`, amount: cents(invoice.tax_amount) });
   if (cents(invoice.retainage_amount)) items.push({ description: `Retainage held (${Number(invoice.retainage_pct)}%), billed later`, amount: -cents(invoice.retainage_amount) });
   if (cents(invoice.amount_paid)) items.push({ description: "Already paid", amount: -cents(invoice.amount_paid) });
   if (tipCents > 0) items.push({ description: "Tip for the crew", amount: tipCents });
