@@ -1,6 +1,6 @@
 -- Database tests for automation run claims: a worker extends its claim on a run right before doing
--- it, and can't once another worker has claimed the run since. Run with scripts/test-db.sh (plain
--- Postgres + prelude.sql). Any failed check stops with an error.
+-- it, and can't once another worker has claimed the run since; only runs started count as attempts.
+-- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
 \o /dev/null
@@ -47,14 +47,35 @@ select locked_until as other_claim from public.automation_runs where id = :'othe
 select t25.check(public.extend_automation_run(:'other_run', :'other_claim'), 'a worker whose claim ran out still gets the run if nobody claimed it since');
 select locked_until as stale_claim from public.automation_runs where id = :'run' \gset
 select locked_until as second_claim from public.claim_automation_runs(5, :'co') where id = :'run' \gset
-select t25.check((select status = 'running' and attempts = 2 and locked_until = :'second_claim' from public.automation_runs where id = :'run'),
-  'another worker claims a run whose claim ran out');
+select t25.check((select status = 'running' and attempts = 1 and locked_until = :'second_claim' from public.automation_runs where id = :'run'),
+  'another worker claims a run whose claim ran out (claiming it isn''t an attempt; starting it was)');
 select t25.check(not public.extend_automation_run(:'run', :'stale_claim'), 'then the first worker can''t take it back, so the run isn''t done twice');
 select t25.check(public.extend_automation_run(:'run', :'second_claim'), 'while the second worker can');
 
 -- ===== Finished runs can't be revived ==========================================================
 update public.automation_runs set status = 'done', locked_until = null, finished_at = now() where id = :'run';
 select t25.check(not public.extend_automation_run(:'run', :'second_claim'), 'a finished run can''t be picked up again');
+reset role;
+
+-- ===== Waiting out a claim doesn't use up attempts =============================================
+-- A run tried twice is claimed a third time, and the claim runs out before its turn in the batch.
+update public.automation_runs set status = 'pending', attempts = 2, locked_until = null where id = :'other_run';
+set role service_role;
+select locked_until as waited_claim from public.claim_automation_runs(5, :'co') where id = :'other_run' \gset
+reset role;
+update public.automation_runs set locked_until = now() - interval '1 second' where id = :'other_run';
+set role service_role;
+select t25.check((select count(*) = 1 from public.claim_automation_runs(5, :'co') where id = :'other_run'),
+  'a run whose claim ran out before it was started is claimed again, not stopped after 3 attempts');
+select locked_until as next_claim from public.automation_runs where id = :'other_run' \gset
+select t25.check(not public.extend_automation_run(:'other_run', :'waited_claim'), 'the worker that waited too long leaves it');
+select t25.check(public.extend_automation_run(:'other_run', :'next_claim'), 'and the one that has it now starts it');
+select t25.check((select attempts = 3 from public.automation_runs where id = :'other_run'), 'which is its third attempt');
+reset role;
+update public.automation_runs set locked_until = now() - interval '1 second' where id = :'other_run';
+set role service_role;
+select t25.check((select count(*) = 0 from public.claim_automation_runs(5, :'co') where id = :'other_run'), 'a run started three times that never finished isn''t claimed again');
+select t25.check((select status = 'failed' and error = 'Stopped after 3 attempts' from public.automation_runs where id = :'other_run'), 'it''s stopped');
 reset role;
 
 begin;

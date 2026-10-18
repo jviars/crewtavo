@@ -4,7 +4,7 @@
  */
 import { addDays, jobWeatherRules, localDate, occurrenceDates, weatherRisks, zonedTimeToUtc } from "@crewtavo/core";
 import type { Env } from "./env";
-import { runAccountingJob } from "./integrations/accounting";
+import { runAccountingJob, SentButUnrecorded } from "./integrations/accounting";
 import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
 import { syncStripeInvoice } from "./integrations/stripe";
 import { reportError } from "./lib/monitoring";
@@ -71,7 +71,8 @@ async function drainOutbox(env: Env) {
     } catch (err) {
       failed++;
       const message = err instanceof Error ? err.message : String(err);
-      const giveUp = row.attempts >= 8;
+      // Sent but not recorded: another try would put a second copy in the books.
+      const giveUp = row.attempts >= 8 || err instanceof SentButUnrecorded;
       await admin
         .from("outbox")
         .update({

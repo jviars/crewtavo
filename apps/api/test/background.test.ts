@@ -2,7 +2,7 @@ import { addDays } from "@crewtavo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
-import { runAccountingJob } from "../src/integrations/accounting";
+import { runAccountingJob, SentButUnrecorded } from "../src/integrations/accounting";
 import { accessToken } from "../src/integrations/tokens";
 import { encryptJson } from "../src/lib/crypto";
 import type { Db } from "../src/lib/supabase";
@@ -210,39 +210,88 @@ describe("accounting sync", () => {
     expect(marked.calls).toContainEqual(["eq", "status", "connected"]);
   });
 
+  it("keeps that note after the next record syncs", async () => {
+    const rows = [
+      { id: 8, company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-gone" }, attempts: 8 },
+      { id: 9, company_id: COMPANY, topic: "accounting.payment", payload: { payment_id: "refund-1" }, attempts: 1 },
+    ];
+    const { queries } = fakeDb(
+      (q) => {
+        if (q.table === "integrations" && verb(q) === "select") return { data: { provider: "quickbooks", external_account_id: "realm-1", settings: {} } };
+        // A refund goes through without calling QuickBooks (they're entered by hand for now).
+        if (q.table === "payments") return { data: { id: "refund-1", client_id: "client-1", invoice_id: null, amount: -20, method: "card", received_at: "2026-10-17T15:00:00Z" } };
+        return { data: null };
+      },
+      (fn) => (fn === "claim_outbox" ? { data: rows } : {}),
+    );
+    expect(await runTask("outbox", env)).toEqual({ claimed: 2, done: 1, failed: 1 });
+    expect(integrationWrites(queries)).toEqual([{ last_error: "Invoice not found" }, { last_sync_at: expect.any(String), status: "connected" }]);
+  });
+
   describe("sending an invoice", () => {
     const connected = { provider: "quickbooks", external_account_id: "realm-1", settings: {} };
     const invoice = {
       id: "inv-1", number: 1042, client_id: "client-1", issued_on: "2026-10-17", due_on: null, subject: null, tax_rate: 0, tax_amount: 0, discount_amount: 0,
       invoice_line_items: [{ name: "Mowing", description: null, quantity: 1, unit_price: 45, taxable: false, service_id: null, sort: 0 }],
     };
-    const answers = (ciphertext: string, links: (entity: string) => Answer, saveLink: Answer) => (q: Query): Answer => {
+    const answers = (ciphertext: string, links: (entity: string) => Answer, saveLink: () => Answer) => (q: Query): Answer => {
       if (q.table === "integrations") return verb(q) === "select" ? { data: connected } : {};
       if (q.table === "integration_secrets") return { data: { ciphertext } };
       if (q.table === "invoices") return { data: invoice };
-      if (q.table === "sync_links") return verb(q) === "upsert" ? saveLink : links(call(q, "match")![1].entity);
+      if (q.table === "sync_links") return verb(q) === "upsert" ? saveLink() : links(call(q, "match")![1].entity);
       return { data: null };
     };
-
-    it("fails when QuickBooks took it but the link couldn't be saved", async () => {
-      const ciphertext = await encryptJson(env, { access_token: "token", refresh_token: "refresh-1", expires_at: Date.now() + 3_600_000 });
+    const clientLinked = (entity: string): Answer => ({ data: entity === "client" ? { external_id: "cust-1" } : null });
+    const quickbooksTakesIt = () => {
       const sent: string[] = [];
       vi.stubGlobal("fetch", async (url: string) => {
         sent.push(url);
         return Response.json({ Invoice: { Id: "qbo-77", SyncToken: "0" } });
       });
-      const { db } = fakeDb(answers(ciphertext, (entity) => ({ data: entity === "client" ? { external_id: "cust-1" } : null }), { error: { message: "connection reset" } }));
-      await expect(runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" } })).rejects.toThrow(
-        "Sent invoice qbo-77 but couldn't record it: connection reset",
-      );
+      return sent;
+    };
+    const saves = (queries: Query[]) => queries.filter((q) => q.table === "sync_links" && verb(q) === "upsert").length;
+
+    it("fails for good when QuickBooks took it but the link couldn't be saved", async () => {
+      const ciphertext = await encryptJson(env, { access_token: "token", refresh_token: "refresh-1", expires_at: Date.now() + 3_600_000 });
+      const sent = quickbooksTakesIt();
+      const { db, queries } = fakeDb(answers(ciphertext, clientLinked, () => ({ error: { message: "connection reset" } })));
+      const job = runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" } });
+      await expect(job).rejects.toThrow("Sent invoice qbo-77 but couldn't record it: connection reset");
+      await expect(job).rejects.toBeInstanceOf(SentButUnrecorded);
       expect(sent).toHaveLength(1);
+      expect(saves(queries)).toBe(2); // tried once more first
+    });
+
+    it("saves the link on a second try rather than sending the invoice again", async () => {
+      const ciphertext = await encryptJson(env, { access_token: "token", expires_at: Date.now() + 3_600_000 });
+      const sent = quickbooksTakesIt();
+      let tries = 0;
+      const { db, queries } = fakeDb(answers(ciphertext, clientLinked, () => (++tries === 1 ? { error: { message: "connection reset" } } : {})));
+      await runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" } });
+      expect(sent).toHaveLength(1);
+      expect(saves(queries)).toBe(2);
+    });
+
+    it("isn't retried once QuickBooks took it, so the books don't get a copy", async () => {
+      const ciphertext = await encryptJson(env, { access_token: "token", expires_at: Date.now() + 3_600_000 });
+      const sent = quickbooksTakesIt();
+      const row = { id: 10, company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" }, attempts: 1 };
+      const { queries } = fakeDb(
+        answers(ciphertext, clientLinked, () => ({ error: { message: "connection reset" } })),
+        (fn) => (fn === "claim_outbox" ? { data: [row] } : {}),
+      );
+      expect(await runTask("outbox", env)).toEqual({ claimed: 1, done: 0, failed: 1 });
+      expect(sent).toHaveLength(1);
+      expect(call(queries.find((q) => q.table === "outbox")!, "update")![1]).toMatchObject({ dead_at: expect.any(String), last_error: expect.stringContaining("Sent invoice qbo-77") });
+      expect(integrationWrites(queries)).toEqual([{ last_error: "Sent invoice qbo-77 but couldn't record it: connection reset" }]);
     });
 
     it("doesn't send it when it can't tell whether it was sent already", async () => {
       const ciphertext = await encryptJson(env, { access_token: "token", expires_at: Date.now() + 3_600_000 });
       const fetch = vi.fn();
       vi.stubGlobal("fetch", fetch);
-      const { db } = fakeDb(answers(ciphertext, () => ({ error: { message: "connection reset" } }), {}));
+      const { db } = fakeDb(answers(ciphertext, () => ({ error: { message: "connection reset" } }), () => ({})));
       await expect(runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" } })).rejects.toThrow("connection reset");
       expect(fetch).not.toHaveBeenCalled();
     });
@@ -250,8 +299,9 @@ describe("accounting sync", () => {
 });
 
 describe("automation runs", () => {
+  const run = (id: number, locked_until: string) => ({ id, company_id: COMPANY, rule_id: `rule-${id}`, subject_type: "client", subject_id: "client-1", result: [], status: "running", attempts: 1, locked_until });
+
   it("are skipped once another worker has claimed them", async () => {
-    const run = (id: number, locked_until: string) => ({ id, company_id: COMPANY, rule_id: `rule-${id}`, subject_type: "client", subject_id: "client-1", result: [], status: "running", attempts: 1, locked_until });
     const runs = [run(1, "2026-10-17T15:05:00.123456+00:00"), run(2, "2026-10-17T15:05:00.123456+00:00")];
     // The batch took so long that, by run 2, another worker had claimed it.
     const { queries, rpcs } = fakeDb(
@@ -266,5 +316,19 @@ describe("automation runs", () => {
     ]);
     expect(queries.filter((q) => q.table === "automation_rules").map((q) => call(q, "eq"))).toEqual([["eq", "id", "rule-1"]]);
     expect(queries.filter((q) => q.table === "automation_runs").map((q) => call(q, "eq"))).toEqual([["eq", "id", 1]]);
+  });
+
+  it("aren't done, or quietly skipped, when the claim can't be checked", async () => {
+    const { queries } = fakeDb(
+      () => ({ data: null }),
+      (fn) =>
+        fn === "claim_automation_runs"
+          ? { data: [run(1, "2026-10-17T15:05:00.123456+00:00")] }
+          : fn === "extend_automation_run"
+            ? { error: { message: "Could not find the function public.extend_automation_run in the schema cache" } }
+            : {},
+    );
+    await expect(processAutomations(env, { limit: 50 })).rejects.toThrow("schema cache");
+    expect(queries.filter((q) => q.table === "automation_rules")).toEqual([]);
   });
 });
