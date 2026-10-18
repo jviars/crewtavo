@@ -16,6 +16,8 @@ export interface AppConfig {
   supabaseKey: string;
   /** One business per instance: no sign-up; the first person to open it creates the owner account. */
   singleCompany?: boolean;
+  /** Where the instance runs: on Railway, setup offers to connect it (features/setup/RailwaySetupPage). */
+  platform?: "railway" | "compose" | "server";
   mapsBrowserKey: string | null;
   turnstileSiteKey: string | null;
   /** Error reporting (Sentry or GlitchTip), when the deployment sets CREWTAVO_SENTRY_DSN. */

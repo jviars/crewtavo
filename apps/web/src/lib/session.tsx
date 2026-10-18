@@ -17,6 +17,7 @@ import { OnboardingPage } from "@/features/auth/OnboardingPage";
 import { FirstRun, SetupGate } from "@/features/setup/SetupPage";
 import { registerFieldActions } from "@/features/field/fieldActions";
 import { TermsPage } from "@/features/legal/License";
+import { RailwaySetupPage } from "@/features/setup/RailwaySetupPage";
 import { api, ApiError, loadConfig, setActiveCompany, supabase, type AppConfig } from "./api";
 import { forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache } from "./offline";
 import { setSessionExpiredHandler } from "./queryClient";
@@ -314,6 +315,10 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   // Only false from the server counts: an account saved for working offline may predate it.
   if (membership.terms_accepted === false && (membership.role === "owner" || membership.role === "admin")) {
     return <TermsPage companyName={membership.company.name} onAccepted={() => me.refetch()} onSignOut={signOut} />;
+  }
+  // Just set up on Railway: offer to connect it and pick a web address (skippable).
+  if (requireCompany && membership.role === "owner" && config.data.platform === "railway" && membership.company.settings?.railway_setup === "pending") {
+    return <RailwaySetupPage companyName={membership.company.name} onDone={() => me.refetch()} onSignOut={signOut} />;
   }
   if (!value) return <ShellSkeleton />;
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
