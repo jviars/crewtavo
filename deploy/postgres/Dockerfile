@@ -1,7 +1,10 @@
 # The database service for one Crewtavo instance (Railway template or docker compose): Supabase's
 # Postgres image, plus the setup Supabase's own docker setup mounts in (role passwords and JWT
 # expiry). See deploy/README.md.
-FROM public.ecr.aws/supabase/postgres:17.11.0.004
+#
+# From Docker Hub: anonymous pulls from public.ecr.aws fail on GitHub's runners ("Data limit
+# exceeded"), and the release workflow builds this image there. It's the same image on both.
+FROM supabase/postgres:17.11.0.004
 
 # Railway volumes have a lost+found folder at their root, which initdb refuses, so the data lives
 # one level down. Mount the volume at /var/lib/postgresql/data.

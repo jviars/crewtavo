@@ -50,10 +50,12 @@ within several hours, with no downtime: the new version starts next to the old o
 database, and takes over only once it's working; if something goes wrong, the old one keeps
 running. Railway notifies the workspace's admins after each update. The `db` service gets a new
 version only when its setup changes, overnight (02:00–06:00 UTC), and is down for about a minute
-while it restarts. A version that needs something from you doesn't install itself; its release
-notes say what to do, and you move to it in the service's **Settings → Source**. To see which
-version you're running, open `https://your-address/api/health`. To change when updates install, or to turn them
-off, open the service's **Settings → Source → Configure auto updates**.
+while it restarts. Every new version installs itself, big ones included. The one exception is a
+move to a new major version of Postgres, the database, which has to convert your data first; its
+release notes say what to do. To see which version you're running, open
+`https://your-address/api/health`. To change when updates install, or to turn them off, open the
+service's **Settings → Source → Configure auto updates**. To stay on one version, change the image
+there from `ghcr.io/jviars/crewtavo:latest` to that version, such as `ghcr.io/jviars/crewtavo:0.2.0`.
 
 **Making the template** (once, by whoever publishes Crewtavo): see [deploy/README.md](../deploy/README.md).
 
