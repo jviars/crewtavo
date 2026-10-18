@@ -50,20 +50,25 @@ const DAY = 86_400_000;
 const MAX_REPEATS = 1500;
 /** Hourly at most: calendars repeat a few times a day (BYHOUR=9,17), and every minute or second isn't an event. */
 const MAX_PER_DAY = 24;
-/** Longer than anything on a schedule; DURATION:P99999999W would run past the last date there is. */
-const MAX_LENGTH = 5 * 366 * DAY;
+/** The last moment there is here (years have four digits). DURATION:P99999999W ends there instead of past it. */
 const END_OF_TIME = Date.UTC(9999, 11, 31, 23, 59, 59);
+/** A repeat that steps further than a century at a time isn't one (INTERVAL=999999999999). */
+const MAX_STEP = 100 * 366 * DAY;
 /** Different time zones one file may use; real calendars use a handful. */
 const MAX_ZONES = 1000;
 
 /**
- * Work allowed for repeats, roughly in microseconds: for a whole file, for one event's repeats and
- * for one VTIMEZONE rule. Real calendars use a small part of it. A file built to keep the server
- * busy runs out, and keeps what was found by then.
+ * Work allowed for repeats, roughly in microseconds: for a whole file's events, for one event's
+ * repeats, for a whole file's VTIMEZONE rules and for one of them. Zones have their own, so an
+ * event's times don't depend on how many repeats came before it. Real calendars use a small part
+ * of it. A file built to keep the server busy runs out, and keeps what was found by then.
  */
 const FILE_WORK = 300_000;
 const SERIES_WORK = 50_000;
+const ZONE_WORK = 300_000;
 const OBSERVANCE_WORK = 20_000;
+/** Setting up a walk through a rule costs about as much as a period of it. */
+const WALK_COST = 5;
 
 interface Work {
   left: number;
@@ -168,13 +173,28 @@ function clip(value: string, max: number): string {
   return value.slice(0, /[\ud800-\udbff]/.test(value[max - 1]!) ? max - 1 : max);
 }
 
+/** Spaces and escaped line breaks, which trimming removes once unescaped. */
+const BLANK = /(?:\s|\\[nN])*/y;
+/** Where the blanks starting at `from` end. */
+function blankTo(value: string, from: number): number {
+  BLANK.lastIndex = from;
+  return BLANK.exec(value) ? BLANK.lastIndex : from;
+}
+
 function text(c: Component, name: string, max: number): string | null {
   const prop = first(c, name);
   if (!prop) return null;
-  // Only the start is kept, so only the start is unescaped (an escape is two characters).
-  const lead = /^(?:\s|\\[nN])*/.exec(prop.value)![0].length;
-  const value = unescapeText(prop.value.slice(lead, lead + 2 * max + 2)).trim();
-  return value ? clip(value, max) : null;
+  const raw = prop.value;
+  // Only the start is kept, so only the start is unescaped (an escape is two characters, and one
+  // cut in half is taken whole). Its end is trimmed only when nothing but blanks come after it.
+  const lead = blankTo(raw, 0);
+  let end = Math.min(raw.length, lead + 2 * max + 2);
+  let slashes = 0;
+  while (end - slashes > lead && raw[end - slashes - 1] === "\\") slashes++;
+  if (slashes % 2) end++;
+  const value = unescapeText(raw.slice(lead, end));
+  const trimmed = end >= raw.length || blankTo(raw, end) === raw.length ? value.trimEnd() : value;
+  return trimmed ? clip(trimmed, max) : null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -225,18 +245,6 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const dateMs = (date: string) => Date.parse(`${date}T00:00:00Z`);
 const yearOf = (ms: number) => new Date(ms).getUTCFullYear();
 const yearStart = (year: number) => new Date(0).setUTCFullYear(year, 0, 1);
-
-/** The last of `sorted` at or before `limit`. */
-function lastUpTo(sorted: number[], limit: number): number | null {
-  let lo = 0;
-  let hi = sorted.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (sorted[mid]! <= limit) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo ? sorted[lo - 1]! : null;
-}
 
 // ---------------------------------------------------------------------------------------------
 // Time zones
@@ -370,6 +378,34 @@ interface Observance {
   work: Work;
 }
 
+/**
+ * An onset, at the moment it falls when looking by wall time or by UTC instant. `rank` is its
+ * place in the file (an observance's DTSTART and RDATEs, then its rule), which settles ties.
+ */
+interface Change {
+  at: number;
+  to: number;
+  rank: number;
+}
+
+/** In order of time; of changes at the same moment, the one first in the file goes last. */
+const inOrder = (changes: Change[]) => changes.sort((a, b) => a.at - b.at || b.rank - a.rank);
+
+/** The last change at or before `moment`, from a list in order. */
+function changeAt(changes: Change[], moment: number): Change | null {
+  let lo = 0;
+  let hi = changes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (changes[mid]!.at <= moment) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo ? changes[lo - 1]! : null;
+}
+
+/** The later of two changes; of two at the same moment, the one first in the file. */
+const later = (a: Change | null, b: Change | null) => (!a || (b && (b.at > a.at || (b.at === a.at && b.rank < a.rank))) ? b : a);
+
 /** A zone from the file's own VTIMEZONE: the latest STANDARD or DAYLIGHT onset decides the offset. */
 function vtimezone(component: Component, work: Work): Zone | null {
   const observances: Observance[] = [];
@@ -390,59 +426,110 @@ function vtimezone(component: Component, work: Work): Zone | null {
       else rule = { ...rule, count: null, until: onsets.length === rule.count ? onsets[onsets.length - 1]! : rule.until };
     }
     const dates = readStamps(all(c, "RDATE")).map((s) => (s.kind === "local" ? s.wall : s.kind === "utc" ? s.ms + from : dateMs(s.date)));
-    observances.push({ start: wall, from, to, rule, fixed: [wall, ...dates].sort((a, b) => a - b), years: new Map(), work: own });
+    // In order, they go into the zone's list of changes quickly. A zone changes a few times a year,
+    // so more than an event's repeats is a file built to be slow: the latest are kept.
+    observances.push({ start: wall, from, to, rule, fixed: [wall, ...dates].sort((a, b) => a - b).slice(-MAX_REPEATS), years: new Map(), work: own });
   }
   if (!observances.length) return null;
   const earliest = observances.reduce((a, b) => (b.start < a.start ? b : a));
+  const ruled = observances.flatMap((o, i) => (o.rule ? [{ o, rule: o.rule, rank: 2 * i + 1 }] : []));
+  const firstYear = ruled.reduce((year, { rule }) => Math.min(year, yearOf(rule.dtstart)), Infinity) - 1;
+
+  /** A rule's onsets in a year (wall times), or null when the work ran out before the year was done. */
+  const onsetsIn = (o: Observance, rule: Rule, year: number): number[] | null => {
+    let onsets = o.years.get(year);
+    if (!onsets) {
+      if (o.work.left <= 0 || work.left <= 0) return null;
+      onsets = expand(rule, yearStart(year), yearStart(year + 1) - 1, Infinity, work, o.work);
+      if (o.work.left <= 0 || work.left <= 0) return null;
+      o.years.set(year, onsets);
+    }
+    return onsets;
+  };
 
   /**
-   * The rule's latest onset at or before `limit`, from a table of each year's onsets: that year's,
-   * or failing that an earlier year's. (Outlook's rules start in 1601; walking from there for each
-   * event's hour took seconds.)
+   * The offset in force at a moment, looking by wall time (shift 0) or by UTC instant (an onset's
+   * UTC instant is its wall time minus the offset before it). Every observance's onsets go in one
+   * list, so a lookup is one search however many there are. Rules go on forever, so theirs are
+   * worked out a year at a time, the first time a year is needed. (Outlook's rules start in 1601;
+   * walking from there for each event's hour took seconds.)
    */
-  const latestRuled = (o: Observance, rule: Rule, limit: number): number | null => {
-    const end = rule.until === null ? limit : Math.min(limit, rule.until);
-    for (let year = yearOf(end); year >= yearOf(rule.dtstart); year--) {
-      let onsets = o.years.get(year);
-      if (!onsets) {
-        if (o.work.left <= 0 || work.left <= 0) return null;
-        onsets = expand(rule, yearStart(year), yearStart(year + 1) - 1, Infinity, work, o.work).sort((a, b) => a - b);
-        o.years.set(year, onsets);
+  const offsets = (shift: (o: Observance) => number) => {
+    const fixed = inOrder(observances.flatMap((o, i) => o.fixed.map((onset) => ({ at: onset - shift(o), to: o.to, rank: 2 * i }))));
+    const years = new Map<number, Change[] | null>();
+    /** The rules' changes that fall in a year, or null once the work has run out. */
+    const changesIn = (year: number): Change[] | null => {
+      let changes = years.get(year);
+      if (changes !== undefined) return changes;
+      // Each rule is looked at, whether or not it has onsets then.
+      work.left -= 3 * ruled.length;
+      changes = work.left > 0 ? [] : null;
+      const lo = yearStart(year);
+      const hi = yearStart(year + 1);
+      for (const { o, rule, rank } of ruled) {
+        // An onset falls a few hours either side of its wall time, so it can be in the year before or after.
+        for (let y = year - 1; y <= year + 1 && changes; y++) {
+          const onsets = onsetsIn(o, rule, y);
+          if (!onsets) changes = null;
+          else
+            for (const onset of onsets) {
+              const at = onset - shift(o);
+              if (at >= lo && at < hi) changes.push({ at, to: o.to, rank });
+            }
+        }
       }
-      const onset = lastUpTo(onsets, end);
-      if (onset !== null) return onset;
-    }
-    return null;
-  };
-
-  /** Offset in force at a moment: the latest onset at or before it wins. */
-  const offsetAt = (moment: number, shift: (o: Observance) => number) => {
-    let best: { at: number; to: number } | null = null;
-    for (const o of observances) {
-      const limit = moment + shift(o);
-      for (const onset of [lastUpTo(o.fixed, limit), o.rule ? latestRuled(o, o.rule, limit) : null]) {
-        if (onset === null) continue;
-        const at = onset - shift(o);
-        if (!best || at > best.at) best = { at, to: o.to };
+      if (!changes) work.short = true;
+      years.set(year, changes && inOrder(changes));
+      return changes;
+    };
+    /** The rules' latest change before the end of a year, remembered for each year looked at. */
+    const latest = new Map<number, Change | null>();
+    const latestBy = (year: number): Change | null => {
+      const passed: number[] = [];
+      let change: Change | null = null;
+      for (let y = year; y >= firstYear; y--) {
+        const known = latest.get(y);
+        if (known !== undefined) {
+          change = known;
+          break;
+        }
+        const changes = changesIn(y);
+        if (!changes) return null;
+        passed.push(y);
+        if (changes.length) {
+          change = changes[changes.length - 1]!;
+          break;
+        }
       }
-    }
-    return best ? best.to : earliest.from;
+      for (const y of passed) latest.set(y, change);
+      return change;
+    };
+    return (moment: number) => {
+      let change = changeAt(fixed, moment);
+      if (ruled.length) {
+        const year = yearOf(moment);
+        const now = changesIn(year);
+        change = later(change, (now && changeAt(now, moment)) ?? latestBy(year - 1));
+      }
+      return change ? change.to : earliest.from;
+    };
   };
+  const byWall = offsets(() => 0);
+  const byUtc = offsets((o) => o.from);
   const cache = new Map<string, number>();
-  const memo = (kind: string, moment: number, shift: (o: Observance) => number) => {
+  const memo = (kind: string, moment: number, offsetAt: (moment: number) => number) => {
     const k = `${kind}${Math.floor(moment / 3_600_000)}`;
     let v = cache.get(k);
     if (v === undefined) {
-      v = offsetAt(moment, shift);
+      v = offsetAt(moment);
       if (cache.size > 5000) cache.clear();
       cache.set(k, v);
     }
     return v;
   };
   return {
-    toUtc: (wall) => wall - memo("w", wall, () => 0),
-    // An onset's UTC instant is its wall time minus the offset before it.
-    toWall: (utc) => utc + memo("u", utc, (o) => o.from),
+    toUtc: (wall) => wall - memo("w", wall, byWall),
+    toWall: (utc) => utc + memo("u", utc, byUtc),
   };
 }
 
@@ -464,7 +551,9 @@ function zoneResolver(components: Component[], fallback: string, work: Work) {
     const id = tzid.trim();
     const definition = definitions.get(id);
     const location = definition && first(definition, "X-LIC-LOCATION")?.value.trim();
-    const pattern = /([A-Za-z]+\/[A-Za-z_+-]+(?:\/[A-Za-z_+-]+)?)$/.exec(id)?.[1];
+    // A name ending in one ("/mozilla.org/20050126_1/America/New_York"). The match never starts
+    // just after a letter, and saying so keeps a long run of letters from taking ages.
+    const pattern = /(?<![A-Za-z])([A-Za-z]+\/[A-Za-z_+-]+(?:\/[A-Za-z_+-]+)?)$/.exec(id)?.[1];
     let zone: Zone | null = null;
     if (isIanaZone(id)) zone = iana(id);
     else if (WINDOWS_ZONES[id]) zone = iana(WINDOWS_ZONES[id]!);
@@ -508,8 +597,11 @@ interface Rule {
   count: number | null;
   dtstart: number;
   until: number | null;
-  /** The most instances it can have in a day: one for each BYHOUR, BYMINUTE and BYSECOND together. */
-  perDay: number;
+  /** The most instances a period can have, and the fewest each has after the first (0 when one can have none). */
+  most: number;
+  least: number;
+  /** Roughly what stepping through one period costs, in the same units as the work allowed. */
+  cost: number;
 }
 
 /**
@@ -542,6 +634,7 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
   }
   const { freq, interval = 1, count = null } = options;
   if (freq === undefined || !(freq <= RRule.DAILY) || !Number.isInteger(interval) || interval < 1) return null;
+  if (interval * PERIODS[freq]!.shortest * DAY > MAX_STEP) return null;
   if (count !== null && !(Number.isInteger(count) && count >= 0)) return null;
   const lists = options as Record<string, unknown>;
   for (const [name, [min, max]] of LIST_RANGES) {
@@ -558,13 +651,49 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
     }
     options.byweekday = [...days.values()];
   }
-  const size = (list: unknown) => (Array.isArray(list) ? list.length : 1);
-  const perDay = size(options.byhour) * size(options.byminute) * size(options.bysecond);
+  const size = (list: unknown) => (list === undefined || list === null ? 0 : Array.isArray(list) ? list.length : 1);
+  // One instance for each BYHOUR, BYMINUTE and BYSECOND together on each day it falls on.
+  const perDay = (size(options.byhour) || 1) * (size(options.byminute) || 1) * (size(options.bysecond) || 1);
   if (perDay > MAX_PER_DAY) return null;
-  return { options, freq, interval, count, dtstart: dtstartWall, until: untilWall, perDay };
+
+  // The days a period can have one on. Each list narrows it down; with none, it's DTSTART's day.
+  // (BYDAY=2TU is one day a month, or a year in a yearly rule without BYMONTH; daily and weekly rules ignore the 2.)
+  const weekdays = (options.byweekday ?? []) as Weekday[];
+  const nth = freq <= RRule.MONTHLY ? weekdays.filter((d) => d.n).length : 0;
+  const plain = new Set(weekdays.filter((d) => !d.n || freq > RRule.MONTHLY).map((d) => d.weekday)).size;
+  const months = size(options.bymonth);
+  const { longest, shortest, cost } = PERIODS[freq]!;
+  let days = 1;
+  if (freq === RRule.WEEKLY) days = plain || 1;
+  else if (freq !== RRule.DAILY) {
+    const yearly = freq === RRule.YEARLY;
+    const narrowed = [
+      size(options.bymonthday) * (yearly ? months || 12 : 1),
+      size(options.byyearday),
+      7 * size(options.byweekno),
+      weekdays.length && plain * (!yearly ? 5 : months ? 5 * months : 53) + nth * (yearly ? months || 1 : 1),
+    ].filter((n) => n > 0);
+    days = narrowed.length ? Math.min(...narrowed, longest) : yearly ? months || 1 : 1;
+  }
+  const most = Math.min(days * perDay, size(options.bysetpos) || Infinity);
+  // A plain daily or weekly rule has the same number in every period after the first.
+  const even = freq === RRule.WEEKLY || (freq === RRule.DAILY && !weekdays.length);
+  const least = even && !["bymonth", "bymonthday", "byyearday", "byweekno", "bysetpos"].some((name) => size(lists[name])) ? days * perDay : 0;
+
+  // On top of a period's base cost: each day is looked up in the lists, each BYDAY like 2TU is
+  // placed again in each month, BYSETPOS goes through the period's days once for each position,
+  // and a daily or weekly step moves the date a month at a time.
+  const setpos = size(options.bysetpos);
+  const periodCost =
+    cost +
+    ((months + size(options.bymonthday) + weekdays.length + 2 * size(options.byyearday)) * longest) / 1000 +
+    (nth * (freq === RRule.YEARLY ? months || 1 : 1) + size(options.byweekno)) / 8 +
+    setpos * (0.3 + (longest + setpos) / 1000) +
+    (freq >= RRule.WEEKLY ? (interval * shortest) / 300 : 0);
+  return { options, freq, interval, count, dtstart: dtstartWall, until: untilWall, most, least, cost: periodCost };
 }
 
-/** Days in the longest and the shortest of each kind of period, and roughly what stepping through one costs. */
+/** Days in the longest and the shortest of each kind of period, and roughly what stepping through a plain one costs. */
 const PERIODS: Record<number, { longest: number; shortest: number; cost: number }> = {
   [RRule.YEARLY]: { longest: 366, shortest: 365, cost: 25 },
   [RRule.MONTHLY]: { longest: 31, shortest: 28, cost: 5 },
@@ -602,26 +731,29 @@ function alignedStart(rule: Rule, target: number): number {
 function expand(rule: Rule, lo: number, hi: number, max: number, file: Work, own: Work): number[] {
   const found: number[] = [];
   if (hi < rule.dtstart || (rule.until !== null && rule.until < lo) || max <= 0) return found;
-  const period = PERIODS[rule.freq]!;
-  const periods = (from: number) => Math.floor((hi - from) / (rule.interval * period.shortest * DAY)) + 4;
-  // A COUNT counts from DTSTART, so the walk has to start there, unless it can't run out by hi.
-  const count = rule.count !== null && rule.count < periods(rule.dtstart) * period.longest * rule.perDay ? rule.count : null;
+  const step = rule.interval * PERIODS[rule.freq]!.shortest * DAY;
+  const periods = (from: number) => Math.floor((hi - from) / step) + 4;
+  // A COUNT counts from DTSTART, so the walk has to start there, unless it can't run out by hi...
+  const count = rule.count !== null && rule.count < periods(rule.dtstart) * rule.most ? rule.count : null;
+  // ...or it surely ran out before lo: a plain rule's period n ends before n + 1 steps from DTSTART.
+  if (count !== null && rule.least && rule.dtstart + (Math.ceil(count / rule.least) + 1) * step < lo) return found;
   // Instances before the walk's start are left out, and they're all before lo. A weekly walk's
   // first week only begins at its start, which BYSETPOS would count from, so it starts a week early.
   const start = count === null ? alignedStart(rule, rule.freq === RRule.WEEKLY ? lo - 7 * DAY : lo) : rule.dtstart;
-  let units = Math.min(file.left, own.left);
-  if (units <= 0) {
+  const allowed = Math.min(file.left, own.left);
+  if (allowed <= 0) {
     file.short = true;
     return found;
   }
-  const allowed = units;
+  let units = allowed - WALK_COST;
   const walk = new RRule({ ...rule.options, dtstart: new Date(start), until: rule.until === null ? null : new Date(rule.until), count, tzid: null }, true);
   // Past hi only a later instance ends a walk, and a rule that never matches (February 30th) has
   // none: rrule would step through every day to the year 9999. It reads the interval each time it
-  // steps to the next period, and an interval of 0 is its own way out, so the steps are counted there.
+  // steps to the next period, and an interval of 0 is its own way out, so the steps are counted
+  // and paid for there, before rrule takes them.
   let steps = 4 * periods(start); // two reads a period, for twice as many periods as reaching hi takes
   const interval = walk.options.interval;
-  Object.defineProperty(walk.options, "interval", { get: () => (steps-- > 0 && (units -= period.cost / 2) > 0 ? interval : 0) });
+  Object.defineProperty(walk.options, "interval", { get: () => (steps-- > 0 && (units -= rule.cost / 2) > 0 ? interval : 0) });
   walk.all((date) => {
     const at = date.getTime();
     if (at > hi || --units <= 0) return false;
@@ -702,9 +834,10 @@ function identity(stamp: Stamp, zoneOf: (tzid: string | null) => Zone): number {
 
 export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
   const work: Work = { left: FILE_WORK };
+  const zoneWork: Work = { left: ZONE_WORK };
   const components = parseComponents(input);
   const calendar = components.find((c) => c.type === "VCALENDAR") ?? { type: "VCALENDAR", props: [], children: components };
-  const zoneOf = zoneResolver(calendar.children, options.zone, work);
+  const zoneOf = zoneResolver(calendar.children, options.zone, zoneWork);
   const floating = zoneOf(null);
   const from = options.from.getTime();
   const to = options.to.getTime();
@@ -727,6 +860,8 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
 
   const inWindow = (i: Instance) =>
     i.allDay ? dayOf(i.end) > fromDay && dayOf(i.start) <= toDay : (i.end > from && i.start < to) || (i.start === i.end && i.start >= from && i.start < to);
+  /** The start of the last instance that can still be kept (see below). */
+  let latest = to;
 
   const known = new Map<Component, Details>();
   const details = (event: Component): Details => {
@@ -774,7 +909,7 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     if (start.kind === "date") {
       const s = dateMs(start.date);
       const e = end?.kind === "date" ? dateMs(end.date) : duration !== null ? s + Math.max(DAY, Math.round(duration / DAY) * DAY) : s + DAY;
-      const length = Math.min(Math.max(e, s + DAY) - s, MAX_LENGTH);
+      const length = Math.min(Math.max(e, s + DAY), END_OF_TIME) - s;
       return { allDay: true, start: s, end: s + length, zone: UTC_ZONE, startWall: s, length };
     }
     const zone = start.kind === "utc" ? UTC_ZONE : zoneOf(start.tzid);
@@ -783,8 +918,8 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     if (end && end.kind !== "date") endWall = zone.toWall(identity(end, zoneOf));
     else if (end?.kind === "date") endWall = dateMs(end.date);
     else if (duration !== null) endWall = startWall + duration;
-    const length = Math.min(Math.max(0, endWall - startWall), MAX_LENGTH);
-    return { allDay: false, start: zone.toUtc(startWall), end: zone.toUtc(startWall + length), zone, startWall, length };
+    const length = Math.max(0, Math.min(endWall, END_OF_TIME) - startWall);
+    return { allDay: false, start: zone.toUtc(startWall), end: Math.min(zone.toUtc(startWall + length), END_OF_TIME), zone, startWall, length };
   };
 
   /** A series' instances in the window: its repeats, less exclusions, with moved ones in their new place. */
@@ -828,9 +963,10 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
       if (ex.kind === "date") skip.add(`d${ex.date}`); // a date EXDATE on a timed series removes that day
     }
 
-    // Repeats that could overlap the window; the others can't show (moved ones are seen to below).
+    // Repeats that could overlap the window, or start before the latest that can still be kept; the
+    // others can't show (moved ones are seen to below).
     const lo = base.zone.toWall(from) - base.length - 2 * DAY;
-    const hi = base.zone.toWall(to) + 2 * DAY;
+    const hi = base.zone.toWall(Math.min(to, latest)) + 2 * DAY;
     const walls = new Set<number>([base.startWall]);
     if (rule) for (const wall of expand(rule, lo, hi, MAX_REPEATS, work, { left: SERIES_WORK })) walls.add(wall);
     let dates = 0;
@@ -841,9 +977,10 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
 
     const emitted = new Set<string>();
     for (const wall of [...walls].sort((a, b) => a - b)) {
+      const end = Math.min(wall + base.length, END_OF_TIME);
       const instance: Instance = base.allDay
-        ? { allDay: true, start: wall, end: wall + base.length }
-        : { allDay: false, start: base.zone.toUtc(wall), end: base.zone.toUtc(wall + base.length) };
+        ? { allDay: true, start: wall, end }
+        : { allDay: false, start: base.zone.toUtc(wall), end: Math.min(base.zone.toUtc(end), END_OF_TIME) };
       const key = base.allDay ? isoDate(wall) : String(instance.start);
       if (skip.has(key) || (!base.allDay && skip.size && skip.has(`d${isoDate(wall)}`))) continue;
       emitted.add(key);
@@ -856,7 +993,8 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     return out;
   };
 
-  // Only the earliest `limit` are kept, so a long list is trimmed to them as it grows.
+  // Only the earliest `limit` are kept, so a long list is trimmed to them as it grows. Once it has
+  // been, nothing starting after the last one kept can make it in either.
   const found: Found[] = [];
   let dropped = false;
   const byStart = (a: Found, b: Found) => a.at - b.at;
@@ -873,6 +1011,7 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
         found.sort(byStart);
         found.length = Math.max(limit, 0);
         dropped = true;
+        if (found.length) latest = Math.min(latest, found[found.length - 1]!.at);
       }
     }
   }
@@ -881,7 +1020,7 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
   return {
     name: text(calendar, "X-WR-CALNAME", 80),
     events: found.slice(0, limit).map(describe),
-    truncated: dropped || found.length > limit || work.short === true,
+    truncated: dropped || found.length > limit || work.short === true || zoneWork.short === true,
   };
 }
 
