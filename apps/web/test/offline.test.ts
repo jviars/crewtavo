@@ -187,6 +187,7 @@ describe("restoring the saved queue", () => {
 
   it("forgets everything when the person signs out, even with a save due", async () => {
     const qc = newClient();
+    store.set("crewtavo.me.u3", JSON.stringify({ email: "u3@example.com", companies: [] }));
     startOfflineCache(qc, "u3", true);
     qc.setQueryData(["field-visit", "v1"], { id: "v1", status: "scheduled" });
     await settle();
