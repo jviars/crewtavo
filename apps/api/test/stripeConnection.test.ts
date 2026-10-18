@@ -596,6 +596,22 @@ describe("Hub Pay", () => {
     for (let i = 0; i < 11; i++) await app.request(`/api/hub/${t}/promo`, { method: "DELETE" }, from("203.0.113.9"));
     expect(db.rpcs.filter((r) => r.fn === "remove_promo_code")).toHaveLength(10);
   });
+
+  it("lists what was paid against the total, not a payment that was only a tip", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    // Pat's credit in Stripe paid the invoice, and Stripe charged the $15 tip, then refunded it.
+    Object.assign(db.tables.invoices!.find((i) => i.id === INV)!, {
+      status: "paid", amount_paid: 160, balance_due: 0, issued_on: "2026-10-01", total: 160,
+      payments: [
+        { amount: 160, tip_amount: 0, received_at: "2026-10-03T15:00:00Z" },
+        { amount: 0, tip_amount: 15, received_at: "2026-10-03T15:00:00Z" },
+        { amount: 0, tip_amount: -15, received_at: "2026-10-05T15:00:00Z" },
+      ],
+    });
+    const res = await app.request(`/api/hub/${await token()}`, {}, env);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { invoice: { payments: unknown[] } }).invoice.payments).toEqual([{ amount: 160, tip_amount: 0, received_at: "2026-10-03T15:00:00Z" }]);
+  });
 });
 
 describe("money Stripe reports", () => {
@@ -769,6 +785,80 @@ describe("money Stripe reports", () => {
     expect([sum(paidIn(INV), "amount"), sum(paidIn(INV), "tip_amount"), sum(paidIn(INV2), "amount"), sum(paidIn(null), "amount")]).toEqual([0, 0, 0, 0]);
   });
 
+  it("records a charge of only the tip when the client's credit in Stripe paid the invoice, with its deposit and refunds", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    // Pat has $160 of credit in Stripe, all the invoice, and adds a $15 tip in the Hub.
+    side(key).customers.push({ id: "cus_pat", email: "pat@example.com", balance: -16000 });
+    await stripeCheckout(env, db.db, CO, INV, 1500);
+    const [made] = rowsFor(INV);
+    expect(stripeInvoice(made!.stripe_id)).toMatchObject({ status: "open", total: 17500, amount_due: 1500 });
+    payInStripe(made!.stripe_id);
+    await event("invoice.paid", { id: made!.stripe_id });
+    const intent = `pi_${made!.stripe_id}`;
+    expect(paidIn(INV)).toEqual([
+      expect.objectContaining({ amount: 0, tip_amount: 15, method: "card", processor: "stripe", processor_ref: intent }),
+      expect.objectContaining({ amount: 160, tip_amount: 0, method: "other", processor: null, notes: "Account credit in Stripe" }),
+    ]);
+
+    // The $15 reaches the bank: it's in the deposit, with its fee.
+    side(key).payouts.push({ id: "po_1", amount: 1426, currency: "usd", arrival_date: 1_760_400_000, status: "paid", automatic: true, failure_message: null });
+    side(key).transactions.push({ id: "txn_1", payout: "po_1", type: "charge", amount: 1500, fee: 74, net: 1426, source: { id: "ch_1", object: "charge", payment_intent: intent } });
+    await event("payout.paid", { id: "po_1" });
+    expect(paidIn(INV).find((p) => p.processor_ref === intent)).toMatchObject({ fee_amount: 0.74, payout_id: db.tables.payouts![0]!.id });
+
+    // Refunded in two goes (and Stripe says the last twice), it's the tip that goes back.
+    for (const refunded of [500, 1500, 1500]) await event("charge.refunded", { id: "ch_1", payment_intent: intent, amount_refunded: refunded });
+    expect(paidIn(INV).filter((p) => p.amount <= 0 && p.tip_amount < 0).map((p) => [p.amount || 0, p.tip_amount, p.notes])).toEqual([[0, -5, "Refunded in Stripe"], [0, -10, "Refunded in Stripe"]]);
+  });
+
+  it("takes a lost dispute of a charge of only the tip back from the tip", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    side(key).customers.push({ id: "cus_pat", email: "pat@example.com", balance: -16000 });
+    await stripeCheckout(env, db.db, CO, INV, 1500);
+    payInStripe(rowsFor(INV)[0]!.stripe_id);
+    await event("invoice.paid", { id: rowsFor(INV)[0]!.stripe_id });
+    const intent = `pi_${rowsFor(INV)[0]!.stripe_id}`;
+    // Stripe says so twice.
+    await event("charge.dispute.closed", dispute(intent, 1500, "lost"));
+    await event("charge.dispute.closed", dispute(intent, 1500, "lost"));
+    expect(paidIn(INV).filter((p) => p.notes === "Dispute lost in Stripe").map((p) => [p.amount || 0, p.tip_amount, p.processor_ref])).toEqual([[0, -15, `${intent}:dispute:dp_1`]]);
+    expect(db.tables.messages).toContainEqual(expect.objectContaining({ subject: "Dispute lost", body: expect.stringContaining("It was a tip, so the invoice is still paid.") }));
+  });
+
+  it("books the part of the tip Stripe's credit paid with the credit", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    // $170 of credit pays the $160 invoice and $10 of the $15 tip, so the card pays $5.
+    const pat = { id: "cus_pat", email: "pat@example.com", balance: -17000 };
+    side(key).customers.push(pat);
+    await stripeCheckout(env, db.db, CO, INV, 1500);
+    payInStripe(rowsFor(INV)[0]!.stripe_id);
+    await event("invoice.paid", { id: rowsFor(INV)[0]!.stripe_id });
+    expect(paidIn(INV).map((p) => [p.amount, p.tip_amount, p.method])).toEqual([[0, 5, "card"], [160, 10, "other"]]);
+    // $200 pays it all, so Stripe charges nothing and marks it paid at once.
+    pat.balance = -20000;
+    await stripeCheckout(env, db.db, CO, INV2, 1500);
+    expect(stripeInvoice(rowsFor(INV2)[0]!.stripe_id)).toMatchObject({ status: "paid", amount_paid: 0 });
+    expect(paidIn(INV2).map((p) => [p.amount, p.tip_amount, p.notes])).toEqual([[160, 15, "Account credit in Stripe"]]);
+  });
+
+  it("books a credit note on an invoice made in Stripe, which is how the office records part of a payment there", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    // Made in Stripe for $160: the office took a $50 check off with a credit note, and Pat paid the rest there.
+    side(key).invoices.set("in_made", {
+      id: "in_made", status: "paid", livemode: true, customer: "cus_pat", customer_name: "Pat Client", customer_email: "pat@example.com", customer_phone: null, customer_address: null,
+      metadata: {}, number: "S-0001", hosted_invoice_url: null, description: null, currency: "usd", total: 16000, amount_due: 11000, amount_paid: 11000, starting_balance: 0,
+      pre_payment_credit_notes_amount: 5000, tax: null, total_discount_amounts: [], due_date: null, created: 1_760_000_000, paid_out_of_band: false, payment_intent: "pi_made", charge: null,
+      status_transitions: { finalized_at: 1_760_000_000, paid_at: 1_760_000_500 }, lines: { data: [{ id: "il_1", amount: 16000, description: "Spring cleanup", quantity: 1 }], has_more: false },
+    });
+    await event("invoice.paid", { id: "in_made" });
+    // supabase/tests/stripe_office_test.sql covers what the database makes of it.
+    expect(db.rpcs.find((r) => r.fn === "stripe_import_invoice")!.args.p_data.payment).toMatchObject({ amount: 110, processor_ref: "pi_made", credited: 50 });
+  });
+
   it("books a credit note issued in Stripe before it was paid", async () => {
     await connect(stripeKey("sk_live_A", "acct_A"));
     for (const id of [INV, INV2]) await syncStripeInvoice(env, db.db, CO, id);
@@ -805,6 +895,15 @@ describe("keeping Stripe in step", () => {
     expect(made).toMatchObject({ status: "open" });
     expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("voided");
     expect(stripeInvoice(made!.stripe_id)!.status).toBe("void");
+  });
+
+  it("notes when a bank payment started, for the office", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    await syncStripeInvoice(env, db.db, CO, INV);
+    const [made] = rowsFor(INV);
+    // Stripe's event says when it happened (Oct 3, 10am in Chicago).
+    await handleStripeEvent(env, db.db, { companyId: CO }, { id: "evt_bank", type: "payment_intent.processing", created: 1_791_039_600, data: { object: { id: "pi_bank", invoice: made!.stripe_id } } });
+    expect(rowsFor(INV)[0]).toMatchObject({ status: "processing", processing_at: "2026-10-03T15:00:00.000Z" });
   });
 
   it("catches up once a bank payment it waited for bounces", async () => {

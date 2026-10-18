@@ -228,6 +228,22 @@ describe("accounting sync", () => {
     expect(integrationWrites(queries)).toEqual([{ last_error: "Invoice not found" }, { last_sync_at: expect.any(String), status: "connected" }]);
   });
 
+  it.each(["quickbooks", "zoho_books"])("sends %s nothing for a payment that was only a tip", async (provider) => {
+    // The client's credit in Stripe paid the invoice, and Stripe charged only the tip. Tips aren't
+    // sent (they aren't on the invoice in the books), and a payment of nothing is refused there.
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const { db, queries } = fakeDb((q) => {
+      if (q.table === "integrations" && verb(q) === "select") return { data: { provider, external_account_id: "books-1", settings: {} } };
+      if (q.table === "payments") return { data: { id: "tip-1", client_id: "client-1", invoice_id: "inv-1", amount: 0, tip_amount: 15, method: "card", received_at: "2026-10-17T15:00:00Z" } };
+      return { data: null };
+    });
+    await runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.payment", payload: { payment_id: "tip-1" } });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(queries.filter((q) => q.table === "sync_links" && verb(q) === "upsert")).toEqual([]);
+    expect(integrationWrites(queries)).toEqual([{ last_sync_at: expect.any(String), status: "connected" }]);
+  });
+
   describe("sending an invoice", () => {
     const connected = { provider: "quickbooks", external_account_id: "realm-1", settings: {} };
     const invoice = {

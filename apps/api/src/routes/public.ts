@@ -94,6 +94,9 @@ publicRoutes.get("/hub/:token", async (c) => {
   );
   if ((invoice.status === "draft" && !l.pv) || invoice.status === "void") throw new HttpError(404, invoice.status === "void" ? "This invoice was cancelled. Contact us with any questions." : "This invoice isn't ready yet.");
   (invoice.lines as Array<{ sort: number }>).sort((a, b) => a.sort - b.sort);
+  // The Hub lists what was paid and refunded against the total. A payment that was only a tip (or
+  // the refund of one) doesn't change what's owed, so it isn't among them.
+  invoice.payments = invoice.payments.filter((p) => Number(p.amount) !== 0);
   const online = await hubPayment(c.env, admin, l.c, invoice.id);
   // Invoices made in Stripe are paid exactly as Stripe billed them, so no tip.
   const tips = (company as { hub_tips?: unknown }).hub_tips === true && !online.imported;
