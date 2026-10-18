@@ -17,6 +17,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import type { Server as HttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { app } from "./app";
 import { readEnv } from "./env";
+import { closeAfterUnreadBodies } from "./lib/connection";
 import { cronMatches } from "./lib/cron";
 import { reportError } from "./lib/monitoring";
 import { startMonitoring } from "./lib/monitoring-node";
@@ -120,6 +122,7 @@ server.get("*", (c) => {
 const listener = serve({ fetch: server.fetch, port, hostname: "0.0.0.0" }, () => {
   console.log(`Crewtavo listening on port ${port}${env.APP_URL ? ` (${env.APP_URL})` : ""}`);
 });
+closeAfterUnreadBodies(listener as HttpServer);
 
 // ---------------------------------------------------------------------------------------------
 // Migrations, as a separate process (scripts/migrate.mjs, next to this file in the build) so a
