@@ -6,6 +6,13 @@
 import { MAIL_PRESETS, mailPreset, type MailPreset } from "@crewtavo/core/email";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import gmailLogo from "@/assets/apps/gmail.svg";
+import googleLogo from "@/assets/apps/google.svg";
+import icloudLogo from "@/assets/apps/icloud.svg";
+import outlookLogo from "@/assets/apps/outlook.svg";
+import resendLogo from "@/assets/apps/resend.svg";
+import yahooLogo from "@/assets/apps/yahoo.svg";
+import zohoLogo from "@/assets/apps/zoho.svg";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
@@ -34,7 +41,29 @@ interface Mailbox {
 }
 interface EmailState { mailbox: Mailbox | null; fallback: "server" | "dev" | null }
 
-const MARKS: Record<string, string> = { gmail: "G", google_workspace: "G", zoho: "Z", microsoft: "M", yahoo: "Y", icloud: "", other: "@", resend: "R" };
+/** Each provider's own logo on a white tile, like the Apps page (see assets/apps/README.md). */
+const LOGOS: Partial<Record<MailPreset["id"], string>> = {
+  gmail: gmailLogo,
+  google_workspace: googleLogo,
+  zoho: zohoLogo,
+  microsoft: outlookLogo,
+  yahoo: yahooLogo,
+  icloud: icloudLogo,
+  resend: resendLogo,
+};
+/** Wordmark-shaped logos get more width. */
+const WIDE = new Set<MailPreset["id"]>(["zoho"]);
+
+/** The provider's logo, or the mail icon for any other server. Decorative: its name is right beside it. */
+export function ProviderMark({ preset }: { preset: MailPreset["id"] }) {
+  const logo = LOGOS[preset];
+  if (!logo) return <span className={styles.mark} aria-hidden="true"><Icon name="mail" size={15} /></span>;
+  return (
+    <span className={`${styles.mark} ${styles.logo}`} data-wide={WIDE.has(preset) || undefined} aria-hidden="true">
+      <img src={logo} alt="" />
+    </span>
+  );
+}
 
 export function EmailSettings() {
   const session = useSession();
@@ -77,7 +106,7 @@ export function EmailSettings() {
       {mailbox && !editing ? (
         <div className="card card-pad stack">
           <div className={styles.status}>
-            <span className={styles.mark} aria-hidden="true">{MARKS[mailbox.preset] || <Icon name="mail" size={15} />}</span>
+            <ProviderMark preset={mailbox.preset} />
             <div className="grow">
               <div className={styles.address}>{mailbox.from_email}</div>
               <span className="muted small">{preset?.label ?? "Email"}{mailbox.kind === "smtp" ? ` · ${mailbox.host}` : ""}{mailbox.connected_at ? ` · connected ${timeAgo(mailbox.connected_at)}` : ""}</span>
@@ -173,7 +202,7 @@ function ConnectForm({ existing, onSaved, onCancel }: { existing: Mailbox | null
         <div className={styles.providers} role="group" aria-labelledby="provider-label">
           {MAIL_PRESETS.map((p) => (
             <button key={p.id} type="button" className={styles.provider} aria-pressed={presetId === p.id} onClick={() => choose(p)}>
-              <span className={styles.mark} aria-hidden="true">{MARKS[p.id] || <Icon name="mail" size={15} />}</span>
+              <ProviderMark preset={p.id} />
               <span>{p.label}{p.id === "resend" && <small>For large campaigns</small>}{p.id === "other" && <small>Any SMTP server</small>}</span>
             </button>
           ))}
