@@ -69,12 +69,33 @@ describe("saving a measurement", () => {
   });
 
   it("refuses a pitch that isn't a roof", async () => {
-    for (const roof_pitch of ["abcdeg", "90deg"]) {
+    // Just short of upright used to save more squares than the column holds, so a 500.
+    for (const roof_pitch of ["abcdeg", "90deg", "89.99999deg", "1e9/1"]) {
       const res = await post("/measurements", { geojson: shapes({ type: "Polygon", coordinates: [RECT] }), roof_pitch });
       expect(res.status, roof_pitch).toBe(400);
       expect((await res.json()).error).toBe("Roof pitch should look like 7/12.");
     }
     expect(state.writes).toEqual([]);
+  });
+
+  it("refuses a measurement too large to save", async () => {
+    // Totals past numeric(14, 2), or squares past numeric(10, 2), used to fail in the database (a 500).
+    const huge = [
+      { geojson: shapes({ type: "Polygon", coordinates: [[[-100, 30], [-80, 30], [-80, 40], [-100, 40], [-100, 30]]] }) },
+      { geojson: { type: "FeatureCollection", features: [{ type: "Feature", properties: { manual_value: 1e13 }, geometry: { type: "Polygon", coordinates: [RECT] } }] } },
+      { geojson: { type: "FeatureCollection", features: [{ type: "Feature", properties: { manual_value: 1e12 }, geometry: { type: "LineString", coordinates: RECT } }] } },
+      { geojson: { type: "FeatureCollection", features: [{ type: "Feature", properties: { manual_value: 1e10 }, geometry: { type: "Polygon", coordinates: [RECT] } }] }, roof_pitch: "12/12" },
+    ];
+    for (const body of huge) {
+      const res = await post("/measurements", body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect((await res.json()).error).toBe("This measurement is too large to save. Check the shapes and measured values.");
+    }
+    expect(state.writes).toEqual([]);
+    // A big job still fits.
+    const res = await post("/measurements", { geojson: { type: "FeatureCollection", features: [{ type: "Feature", properties: { manual_value: 5e6 }, geometry: { type: "Polygon", coordinates: [RECT] } }] }, roof_pitch: "12/12", waste_pct: 15 });
+    expect(res.status).toBe(201);
+    expect((await res.json()).roofing_squares).toBe(81317.28);
   });
 });
 
