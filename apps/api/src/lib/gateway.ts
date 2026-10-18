@@ -6,6 +6,7 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
+import { guardAssistant } from "./assistants";
 import { guardSignIn, isGuessable } from "./signInGuard";
 import type { Stack } from "./stack";
 import { connectionOf, visitorIp } from "./visitor";
@@ -15,13 +16,15 @@ type Gateway = { Bindings: HttpBindings };
 export function gateway(env: Env, stack: Stack) {
   const routes = new Hono<Gateway>();
   const visitor = (c: Context<Gateway>) => visitorIp(env, c.req.raw.headers, connectionOf(c.env));
+  // An AI assistant's token only reads here unless the person allowed it to change things, and never
+  // changes their sign-in (lib/assistants.ts).
   routes.all("/auth/v1/*", (c) => {
     const address = visitor(c);
     const send = (request: Request) => forward(request, stack.auth, "/auth/v1", address);
-    return isGuessable(c.req.method, new URL(c.req.url), "/auth/v1") ? guardSignIn(env, c.req.raw, send) : send(c.req.raw);
+    return guardAssistant(env, c.req.raw, "/auth/v1", (request) => (isGuessable(request.method, new URL(request.url), "/auth/v1") ? guardSignIn(env, request, send) : send(request)));
   });
-  routes.all("/rest/v1/*", (c) => forward(c.req.raw, stack.rest, "/rest/v1", visitor(c)));
-  routes.all("/storage/v1/*", (c) => forward(c.req.raw, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" }));
+  routes.all("/rest/v1/*", (c) => guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c))));
+  routes.all("/storage/v1/*", (c) => guardAssistant(env, c.req.raw, "/storage/v1", (request) => forward(request, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" })));
   return routes;
 }
 

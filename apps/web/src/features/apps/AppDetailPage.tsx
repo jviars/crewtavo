@@ -18,7 +18,7 @@ import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { AppIcon, AppTile } from "./AppIcon";
-import { AssistantAccess } from "./AssistantAccess";
+import { AssistantAccess, ConnectedAssistants } from "./AssistantAccess";
 import { CalendarRow, GoogleCalendarPanel, LinkCalendarsPanel, AddCalendarForm, useCalendars } from "./CalendarPanels";
 import { CATEGORY_LABELS, infoFor, MORE_LABELS, useApps, type AppRow } from "./catalog";
 import { StripePanel } from "./StripePanel";
@@ -266,6 +266,7 @@ function ConnectorCard({ app, mcpUrl }: { app: AppRow; mcpUrl: string }) {
         <Button icon="copy" onClick={() => copyText(mcpUrl, "Connector link copied")}>Copy</Button>
       </div>
       {steps.length > 0 && <ol className="app-steps">{steps.map((s) => <li key={s}>{s}</li>)}</ol>}
+      <ConnectedAssistants />
       <AssistantAccess />
     </section>
   );

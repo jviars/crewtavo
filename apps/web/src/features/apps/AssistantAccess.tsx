@@ -1,9 +1,16 @@
-/** Owner and admin controls for AI assistants (Claude, ChatGPT): on or off, read-only, and what they did. */
-import { useMutation, useQuery } from "@tanstack/react-query";
+/**
+ * AI assistants (Claude, ChatGPT): the ones you've connected, each only reading until you let it
+ * change things; and owner and admin controls for the company: on or off, read-only, and what
+ * they did.
+ */
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/Button";
+import { confirm } from "@/components/ui/Confirm";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { disconnect, loadConnections, setAllowChanges, type AssistantConnection } from "./assistantConnections";
 
 const TOOL_LABELS: Record<string, string> = {
   search_clients: "Searched clients",
@@ -72,6 +79,86 @@ export function AssistantAccess() {
           </div>
         )}
       </details>
+    </div>
+  );
+}
+
+/** The assistants this person has connected. Each one only reads until they turn on Allow changes. */
+export function ConnectedAssistants() {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const key = ["assistant-connections", session.userId];
+  const settings = (session.company.settings ?? {}) as { assistants?: { enabled?: boolean; read_only?: boolean } };
+  // The company's own setting comes first (AssistantAccess below).
+  const companyNote =
+    settings.assistants?.enabled === false
+      ? `AI assistants are turned off for ${session.company.name} for now.`
+      : settings.assistants?.read_only === true
+        ? `For now ${session.company.name} only lets assistants look things up, however this is set.`
+        : null;
+  const connections = useQuery({ queryKey: key, queryFn: () => loadConnections(supabase()) });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: key });
+  const toggle = useMutation({
+    meta: { success: (_: never, v: { allow: boolean }) => (v.allow ? "It can make changes now" : "It can only read now") },
+    mutationFn: (v: { clientId: string; allow: boolean }) => setAllowChanges(supabase(), session.userId, v.clientId, v.allow),
+    onSettled: refresh,
+  });
+  const remove = useMutation({
+    meta: { success: "Disconnected" },
+    mutationFn: (clientId: string) => disconnect(supabase(), clientId),
+    onSettled: refresh,
+  });
+  const askDisconnect = async (c: AssistantConnection) => {
+    const body = "It stops working with Crewtavo. You can connect it again any time, and it starts out only reading.";
+    if (await confirm({ title: `Disconnect ${c.name}?`, body, confirmLabel: "Disconnect", danger: true })) remove.mutate(c.clientId);
+  };
+
+  return (
+    <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
+      <strong>Your connected assistants</strong>
+      <span className="muted small">
+        An assistant you connect can look things up, but can't add or change anything until you turn on Allow changes for it. Assistants connected before this switch
+        was added can only read too, until you turn it on.
+      </span>
+      {connections.isPending ? (
+        <Skeleton height={52} radius={8} />
+      ) : connections.error ? (
+        <span className="muted small">{(connections.error as Error).message}</span>
+      ) : !connections.data.length ? (
+        <span className="muted small">None yet. Once you connect one with the steps above, it shows up here.</span>
+      ) : (
+        <div className="card" style={{ boxShadow: "none" }}>
+          {connections.data.map((c) => (
+            <div key={c.clientId} className="card-row" style={{ gap: 10, flexWrap: "wrap" }}>
+              <span className="app-icon" data-size="sm" aria-hidden="true">
+                {c.logo ? <img src={c.logo} alt="" /> : <span className="app-icon-letter">{c.name.slice(0, 1)}</span>}
+              </span>
+              <span className="grow" style={{ minWidth: 0 }}>
+                <strong>{c.name}</strong>
+                <span className="muted small" style={{ display: "block" }}>
+                  Connected {timeAgo(c.connectedAt)} · {c.allowChanges ? "can make changes" : "can only read"}
+                </span>
+              </span>
+              <label className="switch-row small">
+                <input
+                  type="checkbox"
+                  className="switch"
+                  // Shows the new setting while it saves.
+                  checked={toggle.isPending && toggle.variables.clientId === c.clientId ? toggle.variables.allow : c.allowChanges}
+                  disabled={toggle.isPending || remove.isPending}
+                  onChange={(e) => toggle.mutate({ clientId: c.clientId, allow: e.target.checked })}
+                  aria-label={`Allow changes for ${c.name}`}
+                />
+                Allow changes
+              </label>
+              <Button size="sm" variant="ghost" loading={remove.isPending && remove.variables === c.clientId} disabled={remove.isPending} onClick={() => askDisconnect(c)}>
+                Disconnect
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {companyNote && <span className="muted small">{companyNote}</span>}
     </div>
   );
 }

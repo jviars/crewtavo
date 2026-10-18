@@ -1,6 +1,7 @@
 /**
  * Consent screen for Supabase's OAuth 2.1 server, shown when Claude, ChatGPT or another MCP client
- * asks to connect. Configure this path (/oauth/consent) under Authentication > OAuth Server.
+ * asks to connect. Configure this path (/oauth/consent) under Authentication > OAuth Server. A new
+ * connection only reads until the person turns on Allow changes for it (Settings → Apps).
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -83,10 +84,11 @@ export function OAuthConsentPage() {
         <h1 className={styles.title} style={{ fontSize: 22 }}>Connect {client.name}?</h1>
         <p className="muted" style={{ margin: 0 }}>Signed in as <strong style={{ color: "var(--ink)" }}>{user.email}</strong></p>
       </div>
-      <span className="muted small strong" style={{ marginBottom: -10 }}>Access to</span>
-      <ul className={styles.scopes} aria-label="Access to">
+      <span className="muted small strong" style={{ marginBottom: -10 }}>Can look at</span>
+      <ul className={styles.scopes} aria-label="Can look at">
         {CAN.map((c) => <li key={c}><Icon name="check" size={15} strokeWidth={2.6} />{c}</li>)}
       </ul>
+      <span className="muted small" style={{ marginTop: -8 }}>It can't add or change anything until you turn on Allow changes for it in Crewtavo.</span>
       {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}
       <div className="stack-sm" style={{ gap: 8 }}>
         <Button variant="primary" size="lg" loading={busy === "allow"} disabled={busy !== null} onClick={() => decide(true)}>Allow access</Button>

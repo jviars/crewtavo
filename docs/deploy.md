@@ -297,5 +297,9 @@ Instances come with this turned on. Open **Apps** in Crewtavo and copy the conne
 - **Claude**: Settings > Connectors > Add custom connector.
 - **ChatGPT**: Settings > Apps and connectors > Add (developer mode).
 
-Each person signs in to Crewtavo and approves access on `/oauth/consent`. The assistant then has
-exactly that person's permissions.
+Each person signs in to Crewtavo and approves access on `/oauth/consent`. The assistant can then
+look up whatever that person can see, but can't add or change anything until they turn on **Allow
+changes** for it (Settings > Apps, then Claude or ChatGPT, under "Your connected assistants"); connections
+made before that switch existed only read too. It never gets more than the person's own permissions,
+and it can't change their sign-in. The database holds it to reading as well, through PostgREST's
+pre-request setting (`pgrst.db_pre_request` on the `authenticator` role, which the migrations set).
