@@ -2,13 +2,15 @@ name: Release
 
 # Publishes the images every Crewtavo instance on Railway runs, when a version tag is pushed:
 #
-#   git tag v0.1.1 && git push origin v0.1.1
+#   git tag v0.1.2 && git push origin v0.1.2
 #
-#   ghcr.io/jviars/crewtavo:0.1.1      the crewtavo service (the root Dockerfile)
-#   ghcr.io/jviars/crewtavo-db:0.1.1   the db service (deploy/postgres), only when it changed
+#   ghcr.io/jviars/crewtavo:0.1.2, and :latest       the crewtavo service (the root Dockerfile)
+#   ghcr.io/jviars/crewtavo-db:0.1.2, and :pg17      the db service (deploy/postgres), only when it changed
 #
-# Instances check for new tags and update themselves to the next patch version (0.1.1 → 0.1.2); a
-# new minor or major version (0.2.0, 1.0.0) waits for the owner. See deploy/README.md, "Updates".
+# Instances run the moving tags (latest, and pg17 for the db's Postgres version), so every release
+# installs itself whatever its number, 0.2.0 and 1.0.0 included. The moving tags only go to the
+# highest version, so a fix released for an older line (0.1.9 after 0.2.0) doesn't take instances
+# back. See deploy/README.md, "Updates".
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -24,23 +26,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Version
-        id: version
-        run: |
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          # A new database image restarts every instance's database, so publish one only when
-          # deploy/postgres changed since the previous release (or there's none yet).
-          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "$GITHUB_REF_NAME^" 2>/dev/null || true)
-          if [ -z "$previous" ] || ! git diff --quiet "$previous" "$GITHUB_REF_NAME" -- deploy/postgres; then
-            echo "db=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "Previous release: ${previous:-none}"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Version
+        id: version
+        env:
+          DB_IMAGE: ghcr.io/${{ github.repository }}-db
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # The db's moving tag names its Postgres major version: an instance can't move to a new one
+          # unattended (its data has to be upgraded), so a new major gets a new tag (pg18).
+          postgres=$(sed -nE 's/^FROM .*postgres:([0-9]+)\..*/\1/p' deploy/postgres/Dockerfile)
+          if [ -z "$postgres" ]; then
+            echo "No Postgres version in the FROM line of deploy/postgres/Dockerfile" >&2
+            exit 1
+          fi
+          echo "db_tag=pg$postgres" >> "$GITHUB_OUTPUT"
+          # A new database image restarts every instance's database, so publish one only when
+          # deploy/postgres changed since the previous release (or there's none yet), or when its
+          # moving tag doesn't exist yet.
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          if [ -z "$previous" ] || ! git diff --quiet "$previous" "$GITHUB_REF_NAME" -- deploy/postgres \
+            || ! docker buildx imagetools inspect "$DB_IMAGE:pg$postgres" > /dev/null 2>&1; then
+            echo "db=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Previous release: ${previous:-none}"
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -63,3 +77,21 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
+      - name: Move the moving tags
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DB: ${{ steps.version.outputs.db }}
+          DB_TAG: ${{ steps.version.outputs.db_tag }}
+        run: |
+          # Checked now rather than at the start, in case a higher version was pushed during the build.
+          git fetch --tags --force --quiet
+          highest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$highest" != "$GITHUB_REF_NAME" ]; then
+            echo "$highest is a higher version, so the moving tags stay where they are."
+            exit 0
+          fi
+          docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:$VERSION"
+          if [ -n "$DB" ]; then
+            docker buildx imagetools create --tag "$IMAGE-db:$DB_TAG" "$IMAGE-db:$VERSION"
+          fi

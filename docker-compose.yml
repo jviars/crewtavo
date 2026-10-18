@@ -28,8 +28,11 @@ services:
       timeout: 5s
       retries: 20
 
+  # auth, rest and storage come from Docker Hub: anonymous pulls from public.ecr.aws, where the
+  # Railway template takes them, fail on GitHub's runners ("Data limit exceeded"). Same images, same
+  # digests.
   auth:
-    image: public.ecr.aws/supabase/gotrue:v2.197.0
+    image: supabase/gotrue:v2.197.0
     restart: unless-stopped
     depends_on: { db: { condition: service_healthy } }
     environment:
@@ -58,7 +61,7 @@ services:
       GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION: "true"
 
   rest:
-    image: public.ecr.aws/supabase/postgrest:v16.4
+    image: postgrest/postgrest:v16.4
     restart: unless-stopped
     depends_on: { db: { condition: service_healthy } }
     environment:
@@ -73,7 +76,7 @@ services:
       PGRST_SERVER_HOST: "*"
 
   storage:
-    image: public.ecr.aws/supabase/storage-api:v1.82.1
+    image: supabase/storage-api:v1.82.1
     restart: unless-stopped
     depends_on: { db: { condition: service_healthy } }
     environment:
