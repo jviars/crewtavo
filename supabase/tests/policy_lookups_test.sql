@@ -1,6 +1,7 @@
--- Database tests for 20261018000990_policy_lookups.sql: policies check each row against the
--- person's companies, visits and what those reach, looked up once per query, and give the same
--- answers as the per-row checks they replaced.
+-- Database tests for 20261018000990_policy_lookups.sql and 20261019001030_crew_time_folds.sql:
+-- policies check each row against the person's companies, visits and what those reach, and their
+-- crews' people, looked up once per query, and give the same answers as the per-row checks they
+-- replaced.
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -13,6 +14,11 @@ begin
   if not coalesce(p_ok, false) then raise exception 'FAIL: %', p_what; end if;
   raise notice 'ok - %', p_what;
 end $$;
+create function t60.expect_error(p_sql text, p_what text) returns void language plpgsql as $$
+begin
+  begin execute p_sql; exception when others then raise notice 'ok - % (%)', p_what, sqlerrm; return; end;
+  raise exception 'FAIL (expected an error): %', p_what;
+end $$;
 grant execute on all functions in schema t60 to authenticated, service_role;
 
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -23,7 +29,8 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('b6000000-0000-0000-0000-000000000005', 'gone@lima.test', '{"full_name": "Gone Away"}'),
   ('b6000000-0000-0000-0000-000000000006', 'lead@lima.test', '{"full_name": "Lee Lead"}'),
   ('b6000000-0000-0000-0000-000000000007', 'crew@lima.test', '{"full_name": "Cree Crew"}'),
-  ('b6000000-0000-0000-0000-000000000008', 'helper@lima.test', '{"full_name": "Hal Helper"}');
+  ('b6000000-0000-0000-0000-000000000008', 'helper@lima.test', '{"full_name": "Hal Helper"}'),
+  ('b6000000-0000-0000-0000-000000000009', 'hedges@lima.test', '{"full_name": "Ivy Hedges"}');
 
 begin;
 set local role authenticated;
@@ -37,12 +44,16 @@ insert into public.memberships (company_id, user_id, role, role_id) values
   (:'lima', 'b6000000-0000-0000-0000-000000000005', 'office', null),
   (:'lima', 'b6000000-0000-0000-0000-000000000006', 'crew_lead', :'kit_role'),
   (:'lima', 'b6000000-0000-0000-0000-000000000007', 'field_crew', null),
-  (:'lima', 'b6000000-0000-0000-0000-000000000008', 'field_crew', null);
+  (:'lima', 'b6000000-0000-0000-0000-000000000008', 'field_crew', null),
+  (:'lima', 'b6000000-0000-0000-0000-000000000009', 'field_crew', null);
 update public.memberships set active = false where company_id = :'lima' and user_id = 'b6000000-0000-0000-0000-000000000005';
 insert into public.crews (company_id, name, lead_user_id) values (:'lima', 'Mowing', 'b6000000-0000-0000-0000-000000000006') returning id as crew1 \gset
 insert into public.crews (company_id, name) values (:'lima', 'Trees') returning id as crew2 \gset
+-- The crew lead leads a second crew too.
+insert into public.crews (company_id, name, lead_user_id) values (:'lima', 'Hedges', 'b6000000-0000-0000-0000-000000000006') returning id as crew3 \gset
 insert into public.crew_members (company_id, crew_id, user_id) values
-  (:'lima', :'crew1', 'b6000000-0000-0000-0000-000000000007'), (:'lima', :'crew1', 'b6000000-0000-0000-0000-000000000008');
+  (:'lima', :'crew1', 'b6000000-0000-0000-0000-000000000007'), (:'lima', :'crew1', 'b6000000-0000-0000-0000-000000000008'),
+  (:'lima', :'crew3', 'b6000000-0000-0000-0000-000000000009');
 insert into public.clients (company_id, display_name) values (:'lima', 'Lima client') returning id as c1 \gset
 insert into public.clients (company_id, display_name) values (:'lima', 'Request client') returning id as c2 \gset
 insert into public.clients (company_id, display_name) values (:'lima', 'Property client') returning id as c3 \gset
@@ -65,8 +76,12 @@ insert into public.visit_assignees (company_id, visit_id, user_id) values
 insert into public.invoices (company_id, client_id, status, total, balance_due) values (:'lima', :'c1', 'sent', 100, 100);
 select set_config('request.jwt.claims', '{"sub": "b6000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 select public.create_company('Mike Mowing', 'general') as mike \gset
-insert into public.memberships (company_id, user_id, role) values (:'mike', 'b6000000-0000-0000-0000-000000000003', 'field_crew');
-insert into public.crews (company_id, name, lead_user_id) values (:'mike', 'Mike crew', 'b6000000-0000-0000-0000-000000000003');
+-- Lima's crew lead is a crew lead in Mike too, without a crew there, and someone on their crew in
+-- Lima is on a crew in Mike.
+insert into public.memberships (company_id, user_id, role) values (:'mike', 'b6000000-0000-0000-0000-000000000003', 'field_crew'),
+  (:'mike', 'b6000000-0000-0000-0000-000000000006', 'crew_lead'), (:'mike', 'b6000000-0000-0000-0000-000000000007', 'field_crew');
+insert into public.crews (company_id, name, lead_user_id) values (:'mike', 'Mike crew', 'b6000000-0000-0000-0000-000000000003') returning id as crew4 \gset
+insert into public.crew_members (company_id, crew_id, user_id) values (:'mike', :'crew4', 'b6000000-0000-0000-0000-000000000007');
 commit;
 
 \o
@@ -74,9 +89,9 @@ commit;
 \o /dev/null
 
 -- The lists give the same answer as the per-row checks, for every person and every company,
--- level, area, crew, visit, client, job, property and request.
+-- level, area, crew, visit, client, job, property and request, and every company and person.
 begin;
-create temp table t60_answers (who uuid, about uuid, what text, per_row boolean, listed boolean);
+create temp table t60_answers (who uuid, about uuid, what text, per_row boolean, listed boolean, company uuid);
 create temp table t60_people as select id from auth.users where id::text like 'b6000000-%';
 create temp table t60_things as
   select 'company' as kind, id, null::uuid as crew from public.companies union all select 'company', null, null
@@ -92,6 +107,8 @@ declare
   t record;
   r public.member_role[];
   a text;
+  c uuid;
+  v uuid;
 begin
   for u in select id from t60_people loop
     perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
@@ -126,11 +143,35 @@ begin
       end case;
     end loop;
   end loop;
+  -- Is this person on my crew, in this company? For every company and person, and none, asked by
+  -- everyone, and by nobody signed in. on_my_crew answers NULL about no one, and to nobody signed
+  -- in, and so must its list.
+  for u in select id from t60_people union all select null loop
+    perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+    for c in select id from t60_things where kind = 'company' loop
+      for v in select id from t60_people union all select null loop
+        insert into t60_answers values (u, v, 'on_my_crew', private.on_my_crew(c, v),
+          v = auth.uid() or coalesce((c, v) in (select p.company_id, p.user_id from private.my_crew_people() p), false), c);
+      end loop;
+    end loop;
+  end loop;
 end $$;
 reset role;
-select t60.check((select count(distinct who) from t60_answers) = 8, 'every person was asked');
-select t60.check(not exists (select 1 from t60_answers where per_row is distinct from coalesce(listed, false)),
-  'the lists answer exactly as the per-row checks do' || coalesce(': ' || (select string_agg(distinct what, ', ') from t60_answers where per_row is distinct from coalesce(listed, false)), ''));
+select t60.check((select count(distinct who) from t60_answers) = 9, 'every person was asked');
+select t60.check(not exists (select 1 from t60_answers where what <> 'on_my_crew' and per_row is distinct from coalesce(listed, false)),
+  'the lists answer exactly as the per-row checks do' || coalesce(': ' || (select string_agg(distinct what, ', ') from t60_answers where what <> 'on_my_crew' and per_row is distinct from coalesce(listed, false)), ''));
+select t60.check(not exists (select 1 from t60_answers where what = 'on_my_crew' and per_row is distinct from listed)
+  and exists (select 1 from t60_answers where what = 'on_my_crew' and per_row is null),
+  'and so does the crew list, NULL about no one included' || coalesce(': ' || (select string_agg(format('%s about %s in %s', who, about, company), ', ')
+    from t60_answers where what = 'on_my_crew' and per_row is distinct from listed), ''));
+select t60.check((select array_agg(about order by about) from t60_answers where what = 'on_my_crew' and per_row and who = 'b6000000-0000-0000-0000-000000000006' and company = :'lima')
+  = '{b6000000-0000-0000-0000-000000000006,b6000000-0000-0000-0000-000000000007,b6000000-0000-0000-0000-000000000008,b6000000-0000-0000-0000-000000000009}',
+  'a crew lead of two crews has both crews'' people');
+select t60.check((select array_agg(about order by about) from t60_answers where what = 'on_my_crew' and per_row and who = 'b6000000-0000-0000-0000-000000000006' and company = :'mike')
+  = '{b6000000-0000-0000-0000-000000000006}'
+  and (select array_agg(about order by about) from t60_answers where what = 'on_my_crew' and per_row and who = 'b6000000-0000-0000-0000-000000000003' and company = :'mike')
+  = '{b6000000-0000-0000-0000-000000000003,b6000000-0000-0000-0000-000000000007}',
+  'in that company only: their crew''s person on a crew in another company counts there for that crew''s lead, not them');
 select t60.check(not exists (select 1 from t60_answers where what <> 'nothing' group by what having not bool_or(per_row)),
   'every kind of check says yes to someone' || coalesce(': not ' || (select string_agg(w, ', ') from (select what as w from t60_answers where what <> 'nothing' group by what having not bool_or(per_row)) x), ''));
 select t60.check(not exists (select 1 from t60_answers group by what having bool_and(per_row)), 'and no to someone');
@@ -145,7 +186,7 @@ select t60.check(not exists (
   select 1 from pg_policy p join pg_class t on t.oid = p.polrelid join pg_namespace n on n.oid = t.relnamespace
   where n.nspname in ('public', 'storage')
     and concat(pg_get_expr(p.polqual, p.polrelid), ' ', pg_get_expr(p.polwithcheck, p.polrelid))
-        ~ '(^|[^''])private\.(has_role|has_perm|is_member|manages_equipment|schedules_crew|assigned_to_visit|works_visit|crew_sees_[a-z]+)\('),
+        ~ '(^|[^''])private\.(has_role|has_perm|is_member|manages_equipment|schedules_crew|assigned_to_visit|works_visit|crew_sees_[a-z]+|on_my_crew)\('),
   'no policy checks each row with has_role, has_perm, is_member or a crew helper (end a migration that adds one with select private.fold_member_checks())');
 select t60.check(private.fold_member_checks() = 0, 'running the rewrite again changes nothing');
 select t60.check(not exists (select from private.member_fold_changes()), 'and nothing is left for scripts/migrate.mjs to rewrite');
@@ -155,6 +196,12 @@ select t60.check(current_setting('lock_timeout') = '0', 'the rewrite leaves the 
 select t60.check(e ~ 'private\.visit_crew\(visit_id\) IN \( SELECT p\.crew_id' and e ~ 'visit_id IN \( SELECT private\.my_assigned_visits',
   'a crew member''s checklist looks up the visit''s crew, not every visit of the crew: ' || e)
 from (select pg_get_expr(polqual, polrelid) as e from pg_policy where polname = 'checklist_responses_read') x;
+select t60.check(e ~ '\(company_id, user_id\) IN \( SELECT p\.company_id,\s+p\.user_id\s+FROM private\.my_crew_people\(\)' and e !~ 'COALESCE\(\(\(company_id, user_id\)',
+  'a crew lead''s time is checked against their crews'' people, looked up once, plainly as neither column can be NULL: ' || e)
+from (select pg_get_expr(polqual, polrelid) as e from pg_policy where polname = 'time_entries_read') x;
+select t60.check(private.fold_member_expr('private.on_my_crew(company_id, who)', '{company_id}')
+  = '((who = (SELECT auth.uid())) OR (COALESCE(((company_id, who) IN (SELECT p.company_id, p.user_id FROM private.my_crew_people() p)), false)))',
+  'and wrapped where the person can be missing, keeping on_my_crew''s own NULL for that row');
 
 -- A helper that has changed isn't folded into policies (its list no longer says the same).
 begin;
@@ -174,6 +221,24 @@ $$;
 select t60.check(private.fold_member_expr('private.manages_equipment(company_id)', '{company_id}') = 'private.manages_equipment(company_id)'
   and private.fold_member_expr('private.schedules_crew(company_id, crew_id)', '{company_id}') = 'private.schedules_crew(company_id, crew_id)',
   'helpers folded into has_role''s list are left too when has_role changes');
+rollback;
+begin;
+create or replace function private.on_my_crew(p_company uuid, p_user uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select p_user = (select auth.uid()) or exists (select 1 from public.crews c where c.company_id = p_company and c.lead_user_id = p_user)
+$$;
+select t60.check((select array_agg(h) from private.changed_folded_helpers() h) = '{"private.on_my_crew(uuid,uuid)"}'
+  and private.fold_member_expr('private.on_my_crew(company_id, user_id)', '{company_id,user_id}') = 'private.on_my_crew(company_id, user_id)',
+  'a changed on_my_crew is left checking each row');
+rollback;
+begin;
+create or replace function private.my_crews(p_company uuid) returns setof uuid
+language sql stable security definer set search_path = '' as $$
+  select c.id from public.crews c where c.company_id = p_company and c.lead_user_id = (select auth.uid()) and c.active
+$$;
+select t60.check(private.fold_member_expr('private.on_my_crew(company_id, user_id)', '{company_id,user_id}') = 'private.on_my_crew(company_id, user_id)'
+  and private.fold_member_expr('private.schedules_crew(company_id, crew_id)', '{company_id}') = 'private.schedules_crew(company_id, crew_id)',
+  'and so are the checks that go through my_crews when it changes');
 rollback;
 
 -- A policy added the old way is rewritten, and still lets in exactly who it did: a NOT over a check
@@ -214,6 +279,84 @@ select set_config('request.jwt.claims', '{"sub": "b6000000-0000-0000-0000-000000
 select t60.check((select array_agg(label) from public.t60_notes) = '{Mike Mowing}', 'an owner reads their own company''s');
 rollback;
 drop table public.t60_notes;
+
+-- A crew check on a person who can be missing is rewritten too, and still lets in exactly who it
+-- did: on_my_crew says NULL, not no, about a row with nobody's name, so a NOT over it still keeps
+-- that row out.
+create table public.t60_crew_notes (id serial primary key, company_id uuid not null, who uuid, label text);
+alter table public.t60_crew_notes enable row level security;
+grant select on public.t60_crew_notes to authenticated;
+create policy t60_crew_notes_read on public.t60_crew_notes for select to authenticated
+  using (private.is_member(company_id) and not private.on_my_crew(company_id, who));
+insert into public.t60_crew_notes (company_id, who, label)
+  select co.id, w.who, co.name || ': ' || w.label from public.companies co cross join (values
+    ('b6000000-0000-0000-0000-000000000003'::uuid, 'office'), ('b6000000-0000-0000-0000-000000000006', 'lead'),
+    ('b6000000-0000-0000-0000-000000000007', 'crew'), ('b6000000-0000-0000-0000-000000000009', 'hedges'), (null, 'nobody')) as w(who, label)
+  where co.id in (:'lima', :'mike');
+create temp table t60_seen (who uuid, folded boolean, labels text[]);
+grant all on t60_seen to authenticated;
+create function t60.read_crew_notes(p_folded boolean) returns void language plpgsql as $$
+declare
+  u uuid;
+begin
+  for u in select ('b6000000-0000-0000-0000-' || lpad(g::text, 12, '0'))::uuid from generate_series(1, 9) g loop
+    perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+    insert into t60_seen select u, p_folded, array(select label from public.t60_crew_notes order by label);
+  end loop;
+end $$;
+grant execute on function t60.read_crew_notes(boolean) to authenticated;
+begin;
+set local role authenticated;
+select t60.read_crew_notes(false);
+commit;
+select t60.check(private.fold_member_checks('public.t60_crew_notes') = 1, 'a crew check added the old way is rewritten');
+begin;
+set local role authenticated;
+select t60.read_crew_notes(true);
+commit;
+select t60.check((select count(*) from t60_seen) = 18
+  and not exists (select 1 from t60_seen b join t60_seen a on a.who = b.who and a.folded and not b.folded where a.labels is distinct from b.labels),
+  'and everyone reads the same rows as before');
+select t60.check((select labels from t60_seen where folded and who = 'b6000000-0000-0000-0000-000000000006')
+  = '{"Lima Lawn: office","Mike Mowing: crew","Mike Mowing: hedges","Mike Mowing: office"}',
+  'a crew lead reads the rows about people off their crews in each company, not the ones about nobody');
+select t60.check(e ~ 'COALESCE\(\(\(company_id, who\) IN' and e !~ 'on_my_crew', 'written NULL-safe on the person: ' || e)
+from (select pg_get_expr(polqual, polrelid) as e from pg_policy where polname = 't60_crew_notes_read') x;
+drop function t60.read_crew_notes(boolean);
+drop table t60_seen;
+drop table public.t60_crew_notes;
+
+-- A crew lead's time entries through the rewritten policies: their own and both their crews'
+-- people's, in their company only, and only the unapproved ones to change.
+begin;
+insert into public.time_entries (company_id, user_id, category, started_at, ended_at, notes, approved_at)
+  select w.co, w.who, 'shop', now() - interval '3 hours', now() - interval '2 hours', w.label, w.approved from (values
+    (:'lima'::uuid, 'b6000000-0000-0000-0000-000000000006'::uuid, 'Lima: lead', null::timestamptz),
+    (:'lima', 'b6000000-0000-0000-0000-000000000007', 'Lima: crew', null), (:'lima', 'b6000000-0000-0000-0000-000000000007', 'Lima: crew approved', now()),
+    (:'lima', 'b6000000-0000-0000-0000-000000000008', 'Lima: helper', null), (:'lima', 'b6000000-0000-0000-0000-000000000009', 'Lima: hedges', null),
+    (:'lima', 'b6000000-0000-0000-0000-000000000003', 'Lima: office', null), (:'lima', 'b6000000-0000-0000-0000-000000000004', 'Lima: admin', null),
+    (:'mike', 'b6000000-0000-0000-0000-000000000007', 'Mike: crew', null), (:'mike', 'b6000000-0000-0000-0000-000000000003', 'Mike: lead', null)
+  ) as w(co, who, label, approved);
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "b6000000-0000-0000-0000-000000000006", "role": "authenticated"}', true);
+select t60.check((select array_agg(notes order by notes) from public.time_entries where company_id in (:'lima', :'mike'))
+  = '{"Lima: crew","Lima: crew approved","Lima: hedges","Lima: helper","Lima: lead"}',
+  'a crew lead reads their own time and both their crews'', not the office''s, nor another company''s');
+insert into public.time_entries (company_id, user_id, category, started_at, ended_at, notes)
+  values (:'lima', 'b6000000-0000-0000-0000-000000000009', 'shop', now() - interval '5 hours', now() - interval '4 hours', 'Lima: hedges, by the lead');
+select t60.check((select count(*) from public.time_entries where notes = 'Lima: hedges, by the lead') = 1, 'adds time for someone on their second crew');
+select t60.expect_error(format('insert into public.time_entries (company_id, user_id, category, started_at) values (%L, %L, ''shop'', now())', :'lima', 'b6000000-0000-0000-0000-000000000003'),
+  'but not for someone off their crews');
+select t60.expect_error(format('insert into public.time_entries (company_id, user_id, category, started_at) values (%L, %L, ''shop'', now())', :'mike', 'b6000000-0000-0000-0000-000000000007'),
+  'nor in another company, for someone on their crew here');
+with x as (update public.time_entries set notes = notes || ' (fixed)' where company_id = :'lima' and notes in ('Lima: helper', 'Lima: office', 'Lima: crew approved') returning notes)
+select t60.check((select array_agg(notes) from x) = '{"Lima: helper (fixed)"}', 'changes their crew''s unapproved time, not someone else''s or approved time');
+with x as (delete from public.time_entries where company_id = :'lima' and notes in ('Lima: hedges', 'Lima: admin', 'Lima: crew approved') returning notes)
+select t60.check((select array_agg(notes) from x) = '{"Lima: hedges"}', 'and deletes the same');
+select set_config('request.jwt.claims', '{"sub": "b6000000-0000-0000-0000-000000000007", "role": "authenticated"}', true);
+select t60.check((select array_agg(notes order by notes) from public.time_entries where company_id in (:'lima', :'mike'))
+  = '{"Lima: crew","Lima: crew approved","Mike: crew"}', 'someone on the crew reads only their own time, in both companies');
+rollback;
 
 -- What crews read through the rewritten policies.
 begin;
