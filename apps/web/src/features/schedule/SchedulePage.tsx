@@ -3,6 +3,7 @@
  * to move it (mouse or finger), drag its bottom edge to change its length, click an open spot to
  * book it, and drag visits in and out of the unscheduled list. Every change can be undone.
  * Also: rain-day shifts, a visit for many jobs at once, and route order for anytime stops.
+ * Events from other calendars (added on the Apps page) show alongside, and can be hidden.
  */
 import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,7 +20,8 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { clock, lengthOf, minutesOf, TimeGrid, type GridColumn } from "./TimeGrid";
+import { CalendarEventDialog, type CalendarEvent } from "./CalendarEventDialog";
+import { clock, lengthOf, minutesOf, TimeGrid, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
 import { VisitDialog, type VisitInput } from "./VisitDialog";
 import { useSchedulingRights } from "./myCrews";
@@ -47,6 +49,8 @@ interface ScheduleData {
   visits: Visit[];
   unscheduled: Visit[];
   crews: Array<{ id: string; name: string; color: string | null }>;
+  /** Other calendars' events (people who see the whole schedule). */
+  events?: CalendarEvent[];
 }
 type View = "day" | "week" | "month";
 type Patch = Partial<Pick<Visit, "scheduled_on" | "starts_at" | "ends_at" | "crew_id" | "status">>;
@@ -96,6 +100,8 @@ export function SchedulePage() {
   const [editing, setEditing] = useState<VisitInput | null>(null);
   const [dialog, setDialog] = useState<null | "shift" | "bulk">(null);
   const [panel, setPanelState] = useState<boolean | null>(() => (readPref("crewtavo.schedule.panel") === "closed" ? false : null));
+  const [showCalendars, setShowCalendarsState] = useState(() => readPref("crewtavo.schedule.calendars") !== "hidden");
+  const [viewing, setViewing] = useState<CalendarEvent | null>(null);
   const rights = useSchedulingRights();
   const { canDispatch, wholeTeam } = rights;
   const canMove = (v: { crew_id: string | null }) => rights.canChange(v.crew_id);
@@ -116,6 +122,10 @@ export function SchedulePage() {
   const setPanel = (open: boolean) => {
     setPanelState(open);
     writePref("crewtavo.schedule.panel", open ? "open" : "closed");
+  };
+  const setShowCalendars = (on: boolean) => {
+    setShowCalendarsState(on);
+    writePref("crewtavo.schedule.calendars", on ? "shown" : "hidden");
   };
 
   const range = useMemo(() => {
@@ -152,6 +162,38 @@ export function SchedulePage() {
       .filter((v) => v.scheduled_on === date)
       .sort((a, b) => (a.starts_at && b.starts_at ? a.starts_at.localeCompare(b.starts_at) : a.starts_at ? -1 : b.starts_at ? 1 : (a.route_order ?? 99) - (b.route_order ?? 99)));
   const open = (v: Visit) => setEditing({ ...v, job_id: v.job?.id ?? null, property_id: v.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id), context: v.job ? { label: `Job #${v.job.number}${v.job.client ? ` · ${v.job.client.display_name}` : ""}`, to: `/jobs/${v.job.id}` } : null });
+
+  // ---- Other calendars ---------------------------------------------------------------------------
+  const allEvents = schedule.data?.events ?? [];
+  const events = showCalendars ? allEvents : [];
+  const calendarsShown = [...new Map(allEvents.filter((e) => e.source).map((e) => [e.source!.id, e.source!])).values()];
+  const eventById = new Map(allEvents.map((e) => [e.id, e]));
+  /** An event as one day's column shows it: timed if it fits in the day, otherwise in Anytime. */
+  const onDay = (e: CalendarEvent, date: string): GridExternal => {
+    const fits = !e.all_day && e.starts_at && e.ends_at && e.starts_on === e.ends_on;
+    return {
+      id: `${e.id}:${date}`,
+      title: e.title,
+      starts_at: fits ? e.starts_at : null,
+      ends_at: fits ? e.ends_at : null,
+      color: e.source?.color ?? null,
+      busy: e.busy,
+      calendar: e.source?.name ?? "Calendar",
+      // A crew's own busy time marks its visits double-booked.
+      crew_id: e.busy && e.source?.blocks_time ? e.source.crew_id : null,
+    };
+  };
+  const eventsOn = (date: string) => events.filter((e) => e.starts_on <= date && e.ends_on >= date);
+  const ownCrew = (e: CalendarEvent) => (e.source?.crew_id && crews.some((c) => c.id === e.source!.crew_id) ? e.source.crew_id : null);
+  /** Day view: a crew's calendars in its lane, the whole team's in "No crew" (or the one lane when filtered). */
+  const externalFor = (col: GridColumn) =>
+    eventsOn(col.date)
+      .filter((e) => col.crew === undefined || Boolean(crewId) || (col.crew ? ownCrew(e) === col.crew : !ownCrew(e)))
+      .map((e) => onDay(e, col.date));
+  const openExternal = (g: GridExternal) => {
+    const e = eventById.get(g.id.split(":")[0]!);
+    if (e) setViewing(e);
+  };
 
   // ---- Changes from dragging, with undo ----------------------------------------------------------
   const update = useMutation({
@@ -243,14 +285,15 @@ export function SchedulePage() {
   const span = useMemo(() => {
     let lo = workStart - 60;
     let hi = workEnd + 60;
-    for (const v of schedule.data?.visits ?? []) {
+    const timed = [...(schedule.data?.visits ?? []), ...(showCalendars ? (schedule.data?.events ?? []).filter((e) => !e.all_day && e.starts_on === e.ends_on) : [])];
+    for (const v of timed) {
       if (!v.starts_at) continue;
       const s = minutesOf(v.starts_at, tz);
       lo = Math.min(lo, s);
       hi = Math.max(hi, s + lengthOf(v));
     }
     return { startMin: Math.max(0, Math.floor(lo / 60) * 60), endMin: Math.min(24 * 60, Math.ceil(hi / 60) * 60) };
-  }, [schedule.data, tz, workStart, workEnd]);
+  }, [schedule.data, tz, workStart, workEnd, showCalendars]);
 
   const content = (v: Visit, size: "tiny" | "short" | "full") => {
     const who = v.job?.client?.display_name ?? v.property?.line1;
@@ -327,6 +370,8 @@ export function SchedulePage() {
     onCreate: newAt,
     content,
     visitsFor: laneVisits,
+    externalFor,
+    onOpenExternal: openExternal,
     stale: schedule.isPlaceholderData,
   };
 
@@ -361,6 +406,11 @@ export function SchedulePage() {
         {(canDispatch || unscheduled.length > 0) && !showPanel && (
           <Button size="sm" icon="inbox" onClick={() => setPanel(true)}>Unscheduled{unscheduled.length ? ` · ${unscheduled.length}` : ""}</Button>
         )}
+        {(allEvents.length > 0 || !showCalendars) && (
+          <Button size="sm" icon="calendar" title={showCalendars ? "Hide events from other calendars" : "Show events from other calendars"} onClick={() => setShowCalendars(!showCalendars)}>
+            {showCalendars ? "Hide calendars" : "Show calendars"}
+          </Button>
+        )}
         {crews.length > 1 && (
           <select className="select" style={{ width: "auto" }} value={crewId} onChange={(e) => setCrewId(e.target.value)} aria-label="Filter by crew">
             <option value="">All crews</option>
@@ -371,9 +421,10 @@ export function SchedulePage() {
           {(["day", "week", "month"] as const).map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>)}
         </div>
       </div>
-      {crews.length > 0 && view !== "day" && (
+      {((crews.length > 0 && view !== "day") || (showCalendars && calendarsShown.length > 0)) && (
         <div className="crew-legend">
-          {crews.map((c) => <span key={c.id}><i style={{ ["--c" as string]: c.color ?? "var(--text-4)" }} />{c.name}</span>)}
+          {view !== "day" && crews.map((c) => <span key={c.id}><i style={{ ["--c" as string]: c.color ?? "var(--text-4)" }} />{c.name}</span>)}
+          {showCalendars && calendarsShown.map((s) => <span key={s.id} title="Another calendar"><i data-calendar style={{ ["--c" as string]: s.color ?? "var(--text-4)" }} />{s.name}</span>)}
         </div>
       )}
 
@@ -391,6 +442,9 @@ export function SchedulePage() {
                 {days.map((date) => {
                   const visits = byDay(date);
                   const shown = visits.slice(0, 3);
+                  const dayEvents = eventsOn(date);
+                  const shownEvents = dayEvents.slice(0, Math.max(0, 3 - shown.length));
+                  const more = visits.length + dayEvents.length - shown.length - shownEvents.length;
                   return (
                     <div
                       key={date}
@@ -419,7 +473,12 @@ export function SchedulePage() {
                           {v.starts_at ? `${timeOf(v.starts_at)} ` : ""}{v.title}
                         </button>
                       ))}
-                      {visits.length > 3 && <button type="button" className="month-more" onClick={() => { setAnchor(date); setView("day"); }}>+{visits.length - 3} more</button>}
+                      {shownEvents.map((e) => (
+                        <button key={e.id} type="button" className="month-chip" data-external data-free={!e.busy || undefined} style={{ ["--cal" as string]: e.source?.color ?? undefined }} title={`${e.title} · ${e.source?.name ?? "Calendar"}`} onClick={() => setViewing(e)}>
+                          {!e.all_day && e.starts_at && e.starts_on === date ? `${formatTime(e.starts_at)} ` : ""}{e.title}
+                        </button>
+                      ))}
+                      {more > 0 && <button type="button" className="month-more" onClick={() => { setAnchor(date); setView("day"); }}>+{more} more</button>}
                     </div>
                   );
                 })}
@@ -464,6 +523,15 @@ export function SchedulePage() {
       )}
 
       {editing && <VisitDialog visit={editing} onClose={() => setEditing(null)} />}
+      {viewing && (
+        <CalendarEventDialog
+          event={viewing}
+          tz={tz}
+          onClose={() => setViewing(null)}
+          // "Add to schedule": a new visit with the event's time and words, ready to adjust.
+          onAddVisit={canDispatch ? (input) => { setViewing(null); setEditing(input); } : undefined}
+        />
+      )}
       {dialog === "shift" && <ShiftDialog defaultDate={view === "day" ? anchor : today} crews={wholeTeam ? crews : crews.filter((c) => rights.myCrews.includes(c.id))} allCrews={wholeTeam} onClose={() => setDialog(null)} />}
       {dialog === "bulk" && <BulkVisitsDialog defaultDate={view === "day" ? anchor : addDaysIso(today, 1)} crews={crews} onClose={() => setDialog(null)} />}
     </>

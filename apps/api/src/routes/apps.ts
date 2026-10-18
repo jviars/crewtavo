@@ -5,12 +5,13 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import type { AppEnv, Env } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
+import { runInBackground } from "../lib/background";
 import { randomId, signToken, verifyToken } from "../lib/crypto";
 import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
-import { deleteVisitsCalendar, describeGoogleAccount } from "../integrations/calendars";
+import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
 import { exchangeCode, loadSecret, revoke, saveSecret } from "../integrations/tokens";
 
@@ -104,6 +105,9 @@ apps.get("/apps/:provider/callback", async (c) => {
     });
     if (error) throw new Error(error.message);
     await saveSecret(c.env, admin, state.company, provider, secret);
+    // Reconnected while visits go to Google: changes made while it needed reconnecting weren't
+    // queued, so send the upcoming visits again.
+    if (provider === "google_calendar") runInBackground(c, pushUpcomingVisits(c.env, admin, state.company));
     return done("connected");
   } catch (error) {
     console.error("OAuth callback failed", provider, error);

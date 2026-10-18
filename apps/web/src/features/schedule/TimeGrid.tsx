@@ -2,10 +2,13 @@
  * The schedule's time grid: hours down the side, one column per day (week) or per crew (day).
  * Visits sit at their time and length; side-by-side when they overlap, marked when a crew is
  * double-booked. Anytime visits sit in a row above the hours. Click an empty spot to book it,
- * drag a visit to move it, drag its bottom edge to change its length.
+ * drag a visit to move it, drag its bottom edge to change its length. Events from other calendars
+ * (Zoho, Outlook, Google...) sit among the visits, hatched in their calendar's color; they can be
+ * opened but not moved.
  */
 import { localTime } from "@crewtavo/core/time";
 import { useEffect, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { Icon } from "@/components/ui/Icon";
 import type { DragState } from "./useVisitDrag";
 
 export interface GridVisit {
@@ -17,6 +20,20 @@ export interface GridVisit {
   ends_at: string | null;
   crew_id: string | null;
   hold_reason?: string | null;
+}
+
+/** An event from another calendar, as the grid shows it. */
+export interface GridExternal {
+  id: string;
+  title: string;
+  /** Timed events that fit in the day; others go in the Anytime row. */
+  starts_at: string | null;
+  ends_at: string | null;
+  color: string | null;
+  busy: boolean;
+  calendar: string;
+  /** The crew whose calendar it is, when its busy time should mark that crew double-booked. */
+  crew_id: string | null;
 }
 
 export interface GridColumn {
@@ -53,16 +70,20 @@ interface Placed<V> {
   end: number;
   lane: number;
   lanes: number;
-  conflict: boolean;
+  conflict: false | "visit" | "calendar";
 }
 
-/** Side-by-side lanes for overlapping visits, and which ones double-book a crew. */
-export function place<V extends GridVisit>(visits: V[], tz: string): Placed<V>[] {
+/** A grid item: a visit, or another calendar's event dressed as one for placing. */
+type Item<V> = V | (GridVisit & { ext: GridExternal });
+const isExternal = <V,>(item: Item<V>): item is GridVisit & { ext: GridExternal } => typeof item === "object" && item !== null && "ext" in item;
+
+/** Side-by-side lanes for overlapping visits, and which ones double-book a crew (with a visit or its own calendar). */
+export function place<V extends GridVisit>(visits: Item<V>[], tz: string): Placed<Item<V>>[] {
   const timed = visits
     .filter((v) => v.starts_at && v.status !== "cancelled")
     .map((v) => {
       const start = minutesOf(v.starts_at!, tz);
-      return { v, start, end: Math.min(24 * 60, start + lengthOf(v)), lane: 0, lanes: 1, conflict: false };
+      return { v, start, end: Math.min(24 * 60, start + lengthOf(v)), lane: 0, lanes: 1, conflict: false as Placed<V>["conflict"] };
     })
     .sort((a, b) => a.start - b.start || b.end - a.end);
   let cluster: typeof timed = [];
@@ -85,10 +106,14 @@ export function place<V extends GridVisit>(visits: V[], tz: string): Placed<V>[]
   // Both visits of a double booking are marked. Work that's done or called off can't clash.
   const open = (p: (typeof timed)[number]) => p.v.status !== "completed" && p.v.status !== "cancelled";
   for (const a of timed) {
-    a.conflict = Boolean(a.v.crew_id) && open(a) && timed.some((b) => b !== a && open(b) && b.v.crew_id === a.v.crew_id && b.start < a.end && a.start < b.end);
+    if (!a.v.crew_id || isExternal(a.v) || !open(a)) continue;
+    const clash = timed.filter((b) => b !== a && open(b) && b.v.crew_id === a.v.crew_id && b.start < a.end && a.start < b.end);
+    a.conflict = clash.some((b) => !isExternal(b.v)) ? "visit" : clash.length ? "calendar" : false;
   }
   return timed;
 }
+
+const asItem = (e: GridExternal): GridVisit & { ext: GridExternal } => ({ id: `ext-${e.id}`, title: e.title, kind: "external", status: "scheduled", starts_at: e.starts_at, ends_at: e.ends_at, crew_id: e.crew_id, ext: e });
 
 function useNowMinutes(tz: string) {
   const [now, setNow] = useState(() => minutesOf(new Date().toISOString(), tz));
@@ -115,9 +140,14 @@ export function TimeGrid<V extends GridVisit>({
   onCreate,
   content,
   stale,
+  externalFor,
+  onOpenExternal,
 }: {
   columns: GridColumn[];
   visitsFor: (column: GridColumn) => V[];
+  /** Other calendars' events in a column: timed ones are placed, the rest go in the Anytime row. */
+  externalFor?: (column: GridColumn) => GridExternal[];
+  onOpenExternal?: (event: GridExternal) => void;
   tz: string;
   startMin: number;
   endMin: number;
@@ -165,6 +195,7 @@ export function TimeGrid<V extends GridVisit>({
           <div className="tg-gutter tg-gutter-label" role="rowheader">Anytime</div>
           {columns.map((col) => {
             const items = visitsFor(col).filter((v) => !v.starts_at);
+            const allDay = (externalFor?.(col) ?? []).filter((e) => !e.starts_at);
             const over = drag?.target?.type === "anytime" && targets(col, drag.target);
             return (
               <div key={col.key} className="tg-anycell" role="gridcell" data-drop="anytime" data-date={col.date} data-crew={col.crew} data-over={over || undefined} data-past={col.past || undefined}>
@@ -183,6 +214,11 @@ export function TimeGrid<V extends GridVisit>({
                     {content(v, "tiny")}
                   </button>
                 ))}
+                {allDay.map((e) => (
+                  <button key={e.id} type="button" className="tg-chip" data-external data-free={!e.busy || undefined} style={{ "--cal": e.color ?? undefined } as CSSProperties} title={`${e.title} · ${e.calendar}`} onClick={() => onOpenExternal?.(e)}>
+                    {e.title}
+                  </button>
+                ))}
                 {canDispatch && !items.length && <button type="button" className="tg-anyadd" aria-label="Add an anytime visit" onClick={() => onCreate(col, null)}>+</button>}
               </div>
             );
@@ -194,7 +230,8 @@ export function TimeGrid<V extends GridVisit>({
             {hours.map((m) => <span key={m} style={{ top: (m - startMin) * PPM }}>{clock(m)}</span>)}
           </div>
           {columns.map((col) => {
-            const placed = place(visitsFor(col), tz);
+            const timedExternal = (externalFor?.(col) ?? []).filter((e) => e.starts_at).map(asItem);
+            const placed = place<V>([...visitsFor(col), ...timedExternal], tz);
             const ghost = drag?.target?.type === "slot" && targets(col, drag.target) ? drag.target : null;
             return (
               <div
@@ -212,9 +249,21 @@ export function TimeGrid<V extends GridVisit>({
                 style={{ height }}
                 onClick={createAt(col)}
               >
-                {placed.map(({ v, start, end, lane, lanes, conflict }) => {
+                {placed.map(({ v: item, start, end, lane, lanes, conflict }) => {
                   const h = Math.max(MIN_HEIGHT, (end - start) * PPM - 2);
                   const size = h < 34 ? "tiny" : h < 60 ? "short" : "full";
+                  const box = { top: (start - startMin) * PPM + 1, height: h, left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)` };
+                  if (isExternal(item)) {
+                    const e = item.ext;
+                    return (
+                      <button key={item.id} type="button" className="tg-event tg-ext" data-free={!e.busy || undefined} title={`${e.title} · ${e.calendar}`} style={{ ...box, "--cal": e.color ?? undefined } as CSSProperties} onClick={() => onOpenExternal?.(e)}>
+                        {size !== "tiny" && <span className="tg-t">{clock(start)} – {clock(end)}</span>}
+                        <span className="tg-n" style={size === "tiny" ? { WebkitLineClamp: 1 } : undefined}>{e.title}</span>
+                        {size === "full" && <span className="tg-m"><Icon name="calendar" size={11} /> {e.calendar}</span>}
+                      </button>
+                    );
+                  }
+                  const v = item as V;
                   return (
                     <button
                       key={v.id}
@@ -224,14 +273,8 @@ export function TimeGrid<V extends GridVisit>({
                       data-kind={v.kind}
                       data-conflict={conflict || undefined}
                       data-dragging={drag?.visit.id === v.id || undefined}
-                      title={conflict ? "This crew is booked for another visit at the same time" : undefined}
-                      style={{
-                        top: (start - startMin) * PPM + 1,
-                        height: h,
-                        left: `calc(${(lane / lanes) * 100}% + 2px)`,
-                        width: `calc(${100 / lanes}% - 4px)`,
-                        "--crew": (v as GridVisit & { crewColor?: string }).crewColor,
-                      } as CSSProperties}
+                      title={conflict === "visit" ? "This crew is booked for another visit at the same time" : conflict === "calendar" ? "This crew's calendar shows them busy at this time" : undefined}
+                      style={{ ...box, "--crew": (v as GridVisit & { crewColor?: string }).crewColor } as CSSProperties}
                       onPointerDown={draggable(v) ? startDrag(v, "move") : undefined}
                       onClick={() => !wasDragging() && onOpen(v)}
                     >

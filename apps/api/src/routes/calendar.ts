@@ -267,8 +267,9 @@ calendar.post("/calendars", ...manage, async (c) => {
   // Read it once now, so a wrong link is caught here rather than in 15 minutes.
   const text = await readable(() => fetchIcs(url));
   const own = looksLikeIcs(text) ? parseIcs(text, { from: new Date(), to: new Date(), zone: "UTC", limit: 1 }).name : null;
+  // A name when neither the person nor the calendar gave one: "Zoho calendar", "Outlook calendar"...
   const entry = catalogEntry(body.app);
-  const fallback = body.app === "ics_calendar" || !entry ? "Calendar" : `${entry.name} calendar`;
+  const fallback = body.app === "ics_calendar" || !entry ? "Calendar" : `${entry.name.replace(/ Calendar$/, "")} calendar`;
   const { data: source, error } = await admin
     .from("calendar_sources")
     .insert({
