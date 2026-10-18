@@ -51,7 +51,7 @@ export default defineRailway(() => {
     // Public networking: generate a *.up.railway.app domain for this service (port 8080) in the dashboard.
     env: {
       PORT: "8080",
-      // The address people use. Switching to your own domain means changing just this.
+      // The address people use. Settings → Web address changes it (and redeploys auth) for the owner.
       APP_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
       JWT_SECRET: preserve(),
       SUPABASE_DB_URL: `postgres://postgres:${dbPassword}@${dbHost}:5432/postgres`,

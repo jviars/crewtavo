@@ -1,0 +1,35 @@
+.page { max-width: 760px; }
+.title { font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.address { justify-self: start; font-size: 16px; font-weight: 800; overflow-wrap: anywhere; }
+.steps, .list { margin: 0; padding-left: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.list { gap: 6px; }
+.inline { font-size: 13px; padding: 1px 5px; border-radius: 5px; background: var(--fill); overflow-wrap: anywhere; }
+.copy { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.code { margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--fill); border: 1px solid var(--border); font-size: 13px; line-height: 1.5; overflow-x: auto; }
+.panel { padding: 14px; border-radius: 10px; background: var(--fill); }
+.divided { padding-top: 16px; border-top: 1px solid var(--divider); }
+
+/* Where it stands: a ring per step, filled once it's done. */
+.progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.progress li { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: var(--text-3); }
+.progress li[data-state="done"], .progress li[data-state="current"], .progress li[data-state="failed"] { color: var(--ink); }
+.mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-strong); color: var(--on-solid); }
+[data-state="done"] > .mark { background: var(--green-solid); border-color: var(--green-solid); }
+[data-state="current"] > .mark { border-color: var(--green); border-style: dashed; }
+[data-state="failed"] > .mark { background: var(--danger); border-color: var(--danger); }
+
+/* DNS records: what to type, with copy buttons, and whether it's in place yet. */
+.records { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.record { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
+.record[data-status="ok"] { background: var(--fill); }
+.fields { margin: 0; display: grid; gap: 8px; }
+.fields > div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; align-items: center; }
+.fields dt { font-size: 13px; font-weight: 600; color: var(--text-3); }
+.fields dd { margin: 0; min-width: 0; }
+@media (max-width: 520px) { .fields > div { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+
+.details > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-weight: 700; color: var(--text-2); }
+.details > summary::-webkit-details-marker { display: none; }
+.details > summary::before { content: ""; width: 7px; height: 7px; margin-right: 4px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-fast); }
+.details[open] > summary { margin-bottom: 12px; }
+.details[open] > summary::before { transform: rotate(45deg); }

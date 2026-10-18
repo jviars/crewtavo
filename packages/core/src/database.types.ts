@@ -1624,6 +1624,26 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"web_address": {
+                  Row: {
+                    "automatic": boolean,"certificate": string | null,"company_id": string,"domain": string,"error": string | null,"finished_at": string | null,"from_url": string | null,"previous_urls": (string)[],"railway_domain_id": string | null,"records": NonNullable<Json>,"started_at": string,"started_by": string | null,"status": string,"switching_at": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "automatic"?: boolean,"certificate"?: string | null,"company_id": string,"domain": string,"error"?: string | null,"finished_at"?: string | null,"from_url"?: string | null,"previous_urls"?: (string)[],"railway_domain_id"?: string | null,"records"?: NonNullable<Json>,"started_at"?: string,"started_by"?: string | null,"status"?: string,"switching_at"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "automatic"?: boolean,"certificate"?: string | null,"company_id"?: string,"domain"?: string,"error"?: string | null,"finished_at"?: string | null,"from_url"?: string | null,"previous_urls"?: (string)[],"railway_domain_id"?: string | null,"records"?: NonNullable<Json>,"started_at"?: string,"started_by"?: string | null,"status"?: string,"switching_at"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "web_address_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: true
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 }
           }
           Views: {

@@ -43,7 +43,7 @@ function keyMaterial(env: Env): { raw: Uint8Array; salt: string } {
   throw new HttpError(500, "Crewtavo isn't fully set up yet (missing the database secret key). Ask whoever installed it to finish setup.");
 }
 
-function deriveKey(env: Env, purpose: "encrypt" | "sign"): Promise<CryptoKey> {
+function deriveKey(env: Env, purpose: "encrypt" | "sign" | "instance"): Promise<CryptoKey> {
   const { raw, salt } = keyMaterial(env);
   const cacheKey = `${purpose}:${salt}:${toBase64Url(raw)}`;
   let key = keyCache.get(cacheKey);
@@ -97,6 +97,16 @@ export async function verifyToken<T extends { exp: number }>(env: Env, token: st
   if (!ok) return null;
   const payload = JSON.parse(decoder.decode(fromBase64Url(body))) as T;
   return payload.exp > Date.now() / 1000 ? payload : null;
+}
+
+/**
+ * Names this instance without saying anything secret, from its own key: a new web address that
+ * answers with the same value reaches this Crewtavo (lib/address.ts).
+ */
+export async function instanceFingerprint(env: Env): Promise<string> {
+  const key = await deriveKey(env, "instance");
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode("crewtavo/instance")));
+  return toBase64Url(mac.slice(0, 18));
 }
 
 export const randomId = (bytes = 16) => toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));

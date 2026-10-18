@@ -10,6 +10,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv, Env } from "../env";
+import { platformOf } from "../lib/address";
 import { clientIp, HttpError, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
 import { startup, type MigrationProblem } from "../lib/startup";
@@ -26,7 +27,6 @@ const singleCompany = (env: Env) => env.CREWTAVO_SINGLE_COMPANY === "1";
 
 setup.get("/setup", async (c) => {
   const env = c.env;
-  const vars = env as unknown as Record<string, unknown>;
   const connected = Boolean(env.SUPABASE_URL && (env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY) && (env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY));
   const run = startup();
   let migration: { problem?: MigrationProblem; detail?: string } | null = null;
@@ -41,7 +41,7 @@ setup.get("/setup", async (c) => {
   return c.json(
     {
       ready,
-      platform: (vars.RAILWAY_PROJECT_ID || vars.RAILWAY_PUBLIC_DOMAIN ? "railway" : vars.CREWTAVO_PLATFORM === "compose" ? "compose" : "server") satisfies Platform,
+      platform: platformOf(env) satisfies Platform,
       database,
       migration,
       /** No account yet: the first visitor creates the owner's (POST /api/setup/owner). */

@@ -15,8 +15,9 @@ import { PriceList } from "./PriceList";
 import { ProfileSettings } from "./ProfileSettings";
 import { RolesSettings } from "./RolesSettings";
 import { TeamSettings } from "./TeamSettings";
+import { WebAddressSettings } from "./WebAddressSettings";
 
-type Tab = "profile" | "company" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "license";
+type Tab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "license";
 type Item = { label: string; icon: IconName; hint?: string } & ({ tab: Tab } | { to: string });
 
 export function SettingsPage() {
@@ -35,6 +36,7 @@ export function SettingsPage() {
       title: "Business",
       items: [
         ...(isAdmin ? [{ tab: "company", label: "Company", icon: "home" } as Item] : []),
+        ...(isAdmin && session.config.singleCompany ? [{ tab: "address", label: "Web address", icon: "globe" } as Item] : []),
         ...(canSell ? [{ tab: "prices", label: "Price list", icon: "list" } as Item] : []),
         ...(managesSettings ? [{ to: "/booking", label: "Online booking", icon: "globe" } as Item] : []),
       ],
@@ -89,6 +91,7 @@ export function SettingsPage() {
         <div className="settings-body">
           {tab === "profile" && <ProfileSettings />}
           {tab === "company" && <CompanySettings />}
+          {tab === "address" && <WebAddressSettings />}
           {tab === "team" && <TeamSettings />}
           {tab === "roles" && <RolesSettings />}
           {tab === "crews" && <CrewSettings />}

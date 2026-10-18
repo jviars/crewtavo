@@ -6,6 +6,7 @@ import { SALES } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
+import { addressHistory } from "../lib/address";
 import { kickAutomations } from "../lib/background";
 import { requireCompany, requireUser } from "../lib/auth";
 import { safeEqual } from "../lib/crypto";
@@ -73,9 +74,12 @@ messages.post("/webhooks/twilio", async (c) => {
   const token = c.env.TWILIO_AUTH_TOKEN;
   if (!token) throw new HttpError(501, "Texting isn't configured.");
   const form = Object.fromEntries((await c.req.formData()).entries()) as Record<string, string>;
-  const url = `${appUrl(c)}/api/webhooks/twilio`;
-  const expected = await twilioSignature(token, url, form);
-  if (!safeEqual(expected, c.req.header("x-twilio-signature") ?? "")) throw new HttpError(403, "Bad signature.");
+  // Twilio signs the exact address it posts to: APP_URL, or one this instance had before a switch.
+  const signature = c.req.header("x-twilio-signature") ?? "";
+  const signedFor = async (base: string) => safeEqual(await twilioSignature(token, `${base}/api/webhooks/twilio`, form), signature);
+  let signed = await signedFor(appUrl(c));
+  for (const base of signed ? [] : (await addressHistory(c.env)).origins) if (await signedFor(base)) signed = true;
+  if (!signed) throw new HttpError(403, "Bad signature.");
 
   const from = digits(form.From ?? "");
   const body = (form.Body ?? "").slice(0, 10_000);
