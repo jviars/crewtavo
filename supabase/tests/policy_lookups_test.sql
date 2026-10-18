@@ -110,10 +110,11 @@ begin
       when 'crew' then
         insert into t60_answers values (u, t.crew, 'schedules_crew', private.schedules_crew(t.id, t.crew),
           (t.id = any (private.role_companies('{owner,admin,office,estimator,crew_lead}')) and t.id = any (private.perm_companies('schedule')))
-          or (t.id = any (private.role_companies('{crew_lead}')) and private.leads_crew(t.id, t.crew)));
+          or (t.id = any (private.role_companies('{crew_lead}')) and coalesce((t.id, t.crew) in (select p.company_id, p.crew_id from private.my_crew_pairs() p), false)));
       when 'visit' then
         insert into t60_answers values (u, t.id, 'assigned_to_visit', private.assigned_to_visit(t.id), t.id in (select private.my_assigned_visits()));
-        insert into t60_answers values (u, t.id, 'works_visit', private.works_visit(t.id), t.id in (select private.my_worked_visits()));
+        insert into t60_answers values (u, t.id, 'works_visit', private.works_visit(t.id),
+          t.id in (select private.my_assigned_visits()) or coalesce(private.visit_crew(t.id) in (select p.crew_id from private.my_crew_pairs() p), false));
       when 'client' then
         insert into t60_answers values (u, t.id, 'crew_sees_client', private.crew_sees_client(t.id), t.id in (select private.crew_clients()));
       when 'job' then
@@ -135,6 +136,10 @@ select t60.check(not exists (select 1 from t60_answers where what <> 'nothing' g
 select t60.check(not exists (select 1 from t60_answers group by what having bool_and(per_row)), 'and no to someone');
 rollback;
 
+-- Every helper still has the body its list mirrors: one that changes needs its list changed too.
+select t60.check(not exists (select private.changed_folded_helpers()),
+  'the folded helpers are unchanged' || coalesce(': ' || (select string_agg(h, ', ') from private.changed_folded_helpers() h), ''));
+
 -- No policy is left checking each row with a security definer function.
 select t60.check(not exists (
   select 1 from pg_policy p join pg_class t on t.oid = p.polrelid join pg_namespace n on n.oid = t.relnamespace
@@ -146,6 +151,20 @@ select t60.check(private.fold_member_checks() = 0, 'running the rewrite again ch
 select t60.check(pg_get_expr(polqual, polrelid) !~ 'COALESCE', 'a check on a column that can''t be NULL is written plainly, so its index can be used')
 from pg_policy where polname = 'invoices_area';
 select t60.check(current_setting('lock_timeout') = '0', 'the rewrite leaves the lock timeout as it found it');
+select t60.check(e ~ 'private\.visit_crew\(visit_id\) IN \( SELECT p\.crew_id' and e ~ 'visit_id IN \( SELECT private\.my_assigned_visits',
+  'a crew member''s checklist looks up the visit''s crew, not every visit of the crew: ' || e)
+from (select pg_get_expr(polqual, polrelid) as e from pg_policy where polname = 'checklist_responses_read') x;
+
+-- A helper that has changed isn't folded into policies (its list no longer says the same).
+begin;
+create or replace function private.crew_sees_job(p_job uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from private.my_visits() v where v.job_id = p_job and v.status <> 'cancelled')
+$$;
+select t60.check((select array_agg(h) from private.changed_folded_helpers() h) = '{private.crew_sees_job(uuid)}', 'a changed helper is noticed');
+select t60.check(private.fold_member_expr('(private.crew_sees_job(job_id) OR private.is_member(company_id))', '{job_id,company_id}')
+  = '(private.crew_sees_job(job_id) OR (company_id = ANY ((SELECT private.member_companies())::uuid[])))', 'and left checking each row');
+rollback;
 
 -- A policy added the old way is rewritten, and still lets in exactly who it did: a NOT over a check
 -- on a column that can be NULL still lets a row with no value in, and a check named inside a string
