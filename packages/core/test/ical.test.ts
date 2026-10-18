@@ -480,15 +480,109 @@ describe("parseIcs on feeds built to be slow, or just broken", () => {
       ["20050327T090000Z", "FREQ=YEARLY;BYMONTH=3,10;BYDAY=-1SU;COUNT=44"],
       ["20170102T090000Z", "FREQ=YEARLY;BYWEEKNO=1,20,40;BYDAY=MO;COUNT=30"],
       ["20150101T090000Z", "FREQ=YEARLY;BYYEARDAY=1,100,-1;COUNT=40"],
+      // Every weekday (as Thunderbird writes it), Mondays, Wednesdays and Fridays every third day,
+      // Thursdays every other week, and every other week's Tuesdays and Thursdays at two times; then
+      // monthly and yearly ones that ran out years ago.
+      ["20160104T090000Z", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR;COUNT=3000"],
+      ["20160104T090000Z", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR;COUNT=2830"],
+      ["20160105T170000Z", "FREQ=DAILY;INTERVAL=3;BYDAY=MO,WE,FR;BYHOUR=9,17;COUNT=1300"],
+      ["20160107T090000Z", "FREQ=DAILY;INTERVAL=14;BYDAY=TH,FR;COUNT=290"],
+      ["20160105T090000Z", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;BYHOUR=17,9;COUNT=1150"],
+      ["20120110T090000Z", "FREQ=MONTHLY;BYDAY=2TU;COUNT=100"],
+      ["20180115T090000Z", "FREQ=MONTHLY;BYMONTHDAY=15;COUNT=106"],
+      ["20120601T090000Z", "FREQ=YEARLY;BYMONTH=6;BYMONTHDAY=1;COUNT=10"],
+      // Odd ones: a week has every day when BYMONTHDAY picks them, rrule gives the one day of a
+      // month twice for BYSETPOS=-2,1, and once a day for BYSETPOS=1,2.
+      ["20100104T090000Z", "FREQ=WEEKLY;BYMONTHDAY=1,2,3,4,5,6,7,8,9,10;COUNT=1950"],
+      ["20160120T090000Z", "FREQ=MONTHLY;BYSETPOS=-2,1;COUNT=250"],
+      ["20050514T090000Z", "FREQ=DAILY;BYSETPOS=1,2;COUNT=11493"],
     ];
     for (const [dtstart, rule] of rules) {
       const from = Date.UTC(Number(dtstart.slice(0, 4)), Number(dtstart.slice(4, 6)) - 1, Number(dtstart.slice(6, 8)), Number(dtstart.slice(9, 11)));
-      const expected = new RRule({ ...RRule.parseString(rule), dtstart: new Date(from) })
+      const all = new RRule({ ...RRule.parseString(rule), dtstart: new Date(from) })
         .all()
         .filter((d) => d.getTime() + 3_600_000 > sync.from.getTime() && d < sync.to)
         .map((d) => d.toISOString());
+      // rrule gives a day's times in the order BYHOUR has them, and some twice; a calendar has each once, in order.
+      const expected = [...new Set(all)].sort();
       const got = parseIcs(ics(...vevent("x", `DTSTART:${dtstart}`, "DURATION:PT1H", `RRULE:${rule}`)), sync).events.map((e) => e.start);
       expect([rule, got]).toEqual([rule, expected]);
+    }
+  });
+
+  it("counts a COUNT rather than walking it from years ago, and skips ones that ran out", () => {
+    const two = (n: number) => String(n).padStart(2, "0");
+    // Every weekday since 2016 for 3000 days (still going), one shift for each hour: each was walked
+    // a day at a time from 2016, and the work ran out with the last four shifts' repeats left out.
+    const shifts = Array.from({ length: 16 }, (_, i) => vevent(`shift-${i}`, `DTSTART;TZID=America/Chicago:201601${two(4 + (i % 5))}T${two(6 + i)}0000`, "DURATION:PT1H", "RRULE:FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR;COUNT=3000"));
+    // A calendar kept for years: 2000 series that ran out after a COUNT, as Google, Outlook and
+    // Thunderbird write them, then live ones. Before, the live ones lost their repeats.
+    const shapes = ["FREQ=MONTHLY;BYDAY=2TU", "FREQ=MONTHLY;BYMONTHDAY=15", "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", "FREQ=YEARLY;BYMONTH=6;BYMONTHDAY=1", "FREQ=YEARLY", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR"];
+    const history = [
+      ...Array.from({ length: 2000 }, (_, i) => vevent(`old-${i}`, `DTSTART;TZID=America/Chicago:${2010 + (i % 7)}${two((i % 12) + 1)}${two((i % 28) + 1)}T090000`, "DURATION:PT1H", `RRULE:${shapes[i % 6]};COUNT=${[10, 20, 52, 100][i % 4]}`)),
+      ...Array.from({ length: 50 }, (_, i) => vevent(`live-${i}`, `DTSTART;TZID=America/Chicago:2024${two((i % 12) + 1)}01T${two(7 + (i % 10))}0000`, "DURATION:PT1H", i % 2 ? "RRULE:FREQ=WEEKLY;BYDAY=MO,TH" : "RRULE:FREQ=MONTHLY;BYDAY=1FR")),
+    ];
+    for (const groups of [shifts, history]) {
+      const result = timed(ics(...groups.flat()));
+      expect(result.ms).toBeLessThan(1000);
+      expect(result.truncated).toBe(false);
+      // The same as reading them twenty at a time, which is well within the work allowed.
+      const twenties = Array.from({ length: Math.ceil(groups.length / 20) }, (_, i) => groups.slice(20 * i, 20 * i + 20).flat());
+      expect(result.events).toEqual(twenties.flatMap((some) => parseIcs(ics(...some), sync).events).sort((a, b) => Date.parse(a.start) - Date.parse(b.start)));
+      if (groups === shifts) expect(result.events).toHaveLength(16 * 150);
+      else expect(result.events.filter((e) => e.key.startsWith("live-")).length).toBeGreaterThan(1500);
+    }
+  });
+
+  it("reads many of Outlook's zones, with years of events in each, without running out", () => {
+    // 100 "Customized Time Zone"s with US Eastern rules. In the first file each differs a little (a
+    // TZNAME), and has meetings since 2005; in the second they're all the same, each with a weekly
+    // series since 2005 that skips a week each year. Every year since was worked out for each zone,
+    // the work ran out, and the last zones' meetings came out an hour off.
+    const zone = (z: number, named: boolean) => outlookZone(`Customized Time Zone ${z}`).flatMap((l) => (named && l === "BEGIN:STANDARD" ? [l, `TZNAME:Zone ${z}`] : [l]));
+    const meetings = (tzid: (z: number) => string) =>
+      Array.from({ length: 100 }, (_, z) => Array.from({ length: 30 }, (_, i) => vevent(`z${z}-${i}`, `DTSTART;TZID="${tzid(z)}":${stamp(Date.UTC(2005, 0, 4, 8 + (z % 10)) + (i * 274 + z) * DAY)}`, "DURATION:PT1H")).flat()).flat();
+    const weekly = (tzid: (z: number) => string) =>
+      Array.from({ length: 100 }, (_, z) => vevent(`w${z}`, `DTSTART;TZID="${tzid(z)}":${stamp(Date.UTC(2005, 0, 4 + 7 * z, 10))}`, "DURATION:PT1H", "RRULE:FREQ=WEEKLY", ...Array.from({ length: 21 }, (_, y) => `EXDATE;TZID="${tzid(z)}":${stamp(Date.UTC(2005, 0, 4 + 7 * z + 364 * y, 10))}`))).flat();
+    const custom = (z: number) => `Customized Time Zone ${z}`;
+    const year = { ...sync, from: new Date("2026-01-01T00:00:00Z"), limit: 10_000 };
+    for (const [named, events] of [[true, meetings], [false, weekly]] as const) {
+      const result = timed(ics(...Array.from({ length: 100 }, (_, z) => zone(z, named)).flat(), ...events(custom)), year);
+      expect(result.ms).toBeLessThan(1000);
+      expect(result.truncated).toBe(false);
+      expect(result.events.length).toBeGreaterThan(named ? 100 : 3000);
+      expect(result.events).toEqual(parseIcs(ics(...events(() => "America/New_York")), year).events);
+    }
+  });
+
+  it("keeps dates before the year 100 to ones Postgres takes, and repeats from them as before", () => {
+    const zones = ["America/Chicago", "Europe/Berlin", "Asia/Tokyo", "Pacific/Kiritimati", "UTC"];
+    const text = ics(
+      ...plain,
+      // There's no year 0 in Postgres, and a time just after 0100-01-01 west of UTC came out in the year -3501.
+      ...vevent("year-0", "DTSTART;VALUE=DATE:00000101", "DTEND;VALUE=DATE:20270101"),
+      ...vevent("year-100", "DTSTART;TZID=America/Chicago:01000101T000000", "DTEND;TZID=America/Chicago:20270101T000000"),
+      ...vevent("year-100-floating", "DTSTART:01000101T000000", "DTEND:20270101T000000"),
+    );
+    for (const zone of zones) {
+      const { events } = parseIcs(text, { ...sync, zone });
+      expect(events).toHaveLength(4);
+      for (const e of events) {
+        const days = eventDays(e, zone);
+        for (const day of [days.starts_on, days.ends_on, e.start.slice(0, 10)]) expect(day >= "0001-01-01" && /^\d{4}-\d{2}-\d{2}$/.test(day)).toBe(true);
+        expect(days.starts_on <= days.ends_on).toBe(true);
+      }
+    }
+    const chicago = parseIcs(text, sync).events;
+    expect(chicago.find((e) => e.key === "year-0")!.start).toBe("0001-01-01");
+    // Chicago's local mean time, 5:50:36 behind.
+    expect(chicago.filter((e) => e.key.startsWith("year-100")).map((e) => [e.start, eventDays(e, "America/Chicago").starts_on])).toEqual([
+      ["0100-01-01T05:50:36.000Z", "0100-01-01"],
+      ["0100-01-01T05:50:36.000Z", "0100-01-01"],
+    ]);
+    // A birthday written without its year, as the year 0 or 1, repeats as it did.
+    for (const year of ["0000", "0001", "0050", "1604"]) {
+      expect(parseIcs(ics(...vevent("b", `DTSTART;VALUE=DATE:${year}0415`, "RRULE:FREQ=YEARLY")), sync).events.map((e) => e.start)).toEqual(["2027-04-15"]);
     }
   });
 
@@ -566,12 +660,16 @@ describe("parseIcs on feeds built to be slow, or just broken", () => {
       ...vevent("bad-6", "DTSTART:20200101T150000Z", "DURATION:P99999999W"),
       ...vevent("bad-7", "DTSTART:20261021T150000Z", "DTEND:99991231T000000Z"),
       ...vevent("bad-8", "DTSTART;TZID=Pacific/Kiritimati:20261021T090000", "DURATION:P99999999W", "RRULE:FREQ=WEEKLY;BYDAY=WE"),
+      ...vevent("bad-9", "DTSTART;TZID=America/New_York:20261021T150000", "DTEND:99991231T235959Z"),
     );
     for (const options of [sync, nameOnly]) {
       const { events } = parseIcs(text, options);
-      // Postgres takes four-digit years only.
-      for (const e of events) expect(e.end <= (e.allDay ? "9999-12-31" : "9999-12-31T23:59:59.000Z") && e.end >= e.start).toBe(true);
-      if (options === sync) expect(events.map((e) => e.key)).toContain("plain");
+      // Postgres takes four-digit years only, and a company east of UTC saw the year 10000 ("+010000-01").
+      for (const e of events) {
+        expect(e.end <= (e.allDay ? "9999-12-31" : "9999-12-31T23:59:59.000Z") && e.end >= e.start).toBe(true);
+        for (const zone of ["America/Chicago", "Europe/Berlin", "Asia/Tokyo", "Pacific/Kiritimati"]) expect(eventDays(e, zone).ends_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      }
+      if (options === sync) expect(events.map((e) => e.key)).toEqual(expect.arrayContaining(["plain", "bad-1", "bad-9"]));
     }
     // A lease and a secondment that began years before the window are still on now.
     const long = ics(
@@ -600,6 +698,8 @@ describe("calendar helpers", () => {
     expect(eventDays({ allDay: true, start: "2026-10-01", end: "2026-10-04" }, "UTC")).toEqual({ starts_on: "2026-10-01", ends_on: "2026-10-03" });
     // 11pm to midnight in Chicago stays on the 1st.
     expect(eventDays({ allDay: false, start: "2026-10-02T04:00:00Z", end: "2026-10-02T05:00:00Z" }, "America/Chicago")).toEqual({ starts_on: "2026-10-01", ends_on: "2026-10-01" });
+    // Only days Postgres takes, however far a time is.
+    expect(eventDays({ allDay: false, start: "2026-10-21T15:00:00.000Z", end: "9999-12-31T23:59:59.000Z" }, "Asia/Tokyo")).toEqual({ starts_on: "2026-10-22", ends_on: "9999-12-31" });
   });
 
   it("recognizes calendar files and plain text", () => {
