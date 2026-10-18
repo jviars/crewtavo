@@ -13,8 +13,14 @@ export async function clockVisit(companyId: string, userId: string, visit: { id:
   const db = supabase();
   const open = unwrap(await db.from("time_entries").select("id, visit_id, started_at").eq("user_id", userId).eq("company_id", companyId).is("ended_at", null));
   const now = at;
+  if (action === "start") {
+    if (open.some((entry) => entry.visit_id === visit.id)) return;
+    // Their own Start sent again after they finished (the app closed before it heard back): their
+    // time for it is already there.
+    const recorded = unwrap(await db.from("time_entries").select("id").eq("user_id", userId).eq("company_id", companyId).eq("visit_id", visit.id).lte("started_at", now).gt("ended_at", now).limit(1));
+    if (recorded.length) return;
+  }
   for (const entry of open) {
-    if (action === "start" && entry.visit_id === visit.id) return;
     // A clock started after `at` (another queued action ran first) can't end before it began.
     if (entry.started_at >= now) continue;
     unwrap(await db.from("time_entries").update({ ended_at: now }).eq("id", entry.id));
