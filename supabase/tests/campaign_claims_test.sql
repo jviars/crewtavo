@@ -1,6 +1,6 @@
 -- Database tests for campaign sending claims: runs that overlap (Send, the every-minute task, a
 -- second server) each claim their own recipients, so nobody gets the same email twice; a crashed
--- run's claims are retried after the timeout; only the server can claim.
+-- run's claims are retried once they run out; only the server can claim.
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -55,15 +55,16 @@ select tcamp.dblink_disconnect('other');
 insert into tcamp.claims select 'third', id from public.claim_campaign_recipients(:'camp', 25);
 select tcamp.check((select count(*) from tcamp.claims where claimer = 'third') = 10, 'the next run gets the rest');
 select tcamp.check((select count(distinct id) from tcamp.claims) = 30, 'none of them claimed before');
-select tcamp.check((select count(*) from public.claim_campaign_recipients(:'camp', 25)) = 0, 'claimed recipients aren''t handed out again within the timeout');
-select tcamp.check((select bool_and(status = 'sending' and claimed_at is not null) from public.campaign_recipients where campaign_id = :'camp'), 'claimed recipients are marked as being sent, with the time');
+select tcamp.check((select count(*) from public.claim_campaign_recipients(:'camp', 25)) = 0, 'claimed recipients aren''t handed out again while the claim lasts');
+select tcamp.check((select bool_and(status = 'sending' and claimed_at is not null and locked_until > now()) from public.campaign_recipients where campaign_id = :'camp'), 'claimed recipients are marked as being sent, with the time');
 
--- Sent ones are done; a run that crashed mid-batch leaves claims that are retried after the timeout.
+-- Sent ones are done; a run that crashed mid-batch leaves claims that are retried once they run out.
 update public.campaign_recipients set status = 'sent', sent_at = now() where id in (select id from tcamp.claims where claimer = 'this');
-update public.campaign_recipients set claimed_at = now() - interval '31 minutes' where id in (select id from tcamp.claims where claimer = 'other');
-select tcamp.check((select count(*) from public.claim_campaign_recipients(:'camp', 25, 3600)) = 0, 'a claim younger than the timeout is left alone');
+update public.campaign_recipients set locked_until = now() + interval '1 minute' where id in (select id from tcamp.claims where claimer = 'other');
+select tcamp.check((select count(*) from public.claim_campaign_recipients(:'camp', 25)) = 0, 'a claim that hasn''t run out is left alone');
+update public.campaign_recipients set locked_until = now() - interval '1 second' where id in (select id from tcamp.claims where claimer = 'other');
 select array_agg(id order by id) = (select array_agg(id order by id) from tcamp.claims where claimer = 'other') as retried from public.claim_campaign_recipients(:'camp', 25) \gset
-select tcamp.check(:'retried', 'a crashed run''s claims are retried after the timeout');
+select tcamp.check(:'retried', 'a crashed run''s claims are retried once they run out');
 select tcamp.check((select count(*) from public.claim_campaign_recipients(:'camp', 25)) = 0, 'and then held by the run that took them');
 select tcamp.check((select count(*) from public.campaign_recipients where campaign_id = :'camp' and status = 'sent') = 10, 'sent recipients are never claimed again');
 
