@@ -17,6 +17,7 @@ import {
   cents,
   chargeOf,
   importedLines,
+  minimumCharge,
   paymentMethod,
   STRIPE_VERSION,
   stripeApi,
@@ -380,7 +381,8 @@ async function customerFor(ctx: Ctx, clientId: string, again = false): Promise<s
 /**
  * Make the Stripe invoice for what's owed now (plus a tip), finalized but not emailed by Stripe:
  * Crewtavo sends the invoice, and the Client Hub's Pay button opens Stripe's page for it.
- * Returns null when another request is already making one.
+ * Returns null when another request is already making one. Callers keep it to at least what
+ * Stripe can charge (minimumCharge).
  */
 async function createStripeInvoice(ctx: Ctx, invoice: Billable, tipCents: number): Promise<Linked | null> {
   const amount = cents(invoice.balance_due) + tipCents;
@@ -397,6 +399,8 @@ async function createStripeInvoice(ctx: Ctx, invoice: Billable, tipCents: number
   if (!row) return null;
 
   let stripeId: string | null = null;
+  let final: StripeInvoice;
+  let done: { status: string; number: string | null; hosted_url: string | null };
   try {
     const params = (customer: string) => ({
       customer,
@@ -425,16 +429,20 @@ async function createStripeInvoice(ctx: Ctx, invoice: Billable, tipCents: number
     for (const [i, item] of stripeLineItems(invoice, tipCents, ctx.currency.toUpperCase()).entries()) {
       await stripeApi(ctx.key, "POST", "/v1/invoiceitems", { customer, invoice: draft.id, currency: ctx.currency, amount: item.amount, description: item.description }, { idempotencyKey: `crewtavo-item-${row.id}-${i}` });
     }
-    const final = await stripeApi<StripeInvoice>(ctx.key, "POST", `/v1/invoices/${draft.id}/finalize`, { auto_advance: false }, { idempotencyKey: `crewtavo-finalize-${row.id}` });
-    const done = { status: "open", number: final.number, hosted_url: final.hosted_invoice_url };
+    final = await stripeApi<StripeInvoice>(ctx.key, "POST", `/v1/invoices/${draft.id}/finalize`, { auto_advance: false }, { idempotencyKey: `crewtavo-finalize-${row.id}` });
+    // Finalizing puts the client's balance in Stripe on it, so Stripe can ask for more or less than
+    // was sent (recordPayment books each part where it belongs). Credit that covers it all, or leaves
+    // less than Stripe charges, has it paid at once.
+    done = { status: final.status === "paid" ? "paid" : "open", number: final.number, hosted_url: final.hosted_invoice_url };
     fail((await ctx.admin.from("stripe_invoices").update(done).eq("id", row.id)).error);
-    return { ...row, ...done, stripe_id: final.id };
   } catch (error) {
     // Leave nothing half made. Drafts can be deleted outright.
     if (stripeId) await stripeApi(ctx.key, "DELETE", `/v1/invoices/${stripeId}`).catch(() => undefined);
     await ctx.admin.from("stripe_invoices").delete().eq("id", row.id);
     throw error;
   }
+  if (final.status === "paid") await recordPayment(ctx, final);
+  return { ...row, ...done, stripe_id: final.id };
 }
 
 const fetchInvoice = (key: string, id: string) => stripeApi<StripeInvoice>(key, "GET", `/v1/invoices/${id}`, { expand: ["charge.balance_transaction"] });
@@ -485,6 +493,9 @@ export async function syncStripeInvoice(env: Env, admin: Db, companyId: string, 
   if (live && !(await voidStripeInvoice(ctx, live))) return "paid in Stripe";
   // Ones made in Stripe stay Stripe's. Ours go to Stripe when sent, for companies with their own key.
   if (imported || !owed || !ctx.own) return live ? "voided" : "nothing to do";
+  // A few cents left (after a check, say) are less than Stripe charges: Stripe would mark them paid
+  // and put them on the client's next invoice there. They're paid some other way.
+  if (cents(invoice.balance_due) < minimumCharge(ctx.currency)) return "too small for Stripe";
   await createStripeInvoice(ctx, invoice, 0);
   return "created";
 }
@@ -535,6 +546,8 @@ export async function stripeCheckout(env: Env, admin: Db, companyId: string, inv
       if (await stillThere(ctx, live)) return live.hosted_url;
       continue;
     }
+    // Less than Stripe charges (see syncStripeInvoice), unless the tip makes it enough.
+    if (cents(invoice.balance_due) + tipCents < minimumCharge(ctx.currency)) throw new HttpError(409, "What's left on this invoice is too small to pay online. Contact us to pay it.");
     if (live) {
       // Each new tip voids the Stripe invoice and makes another, numbered in Stripe, so only a few an hour.
       const tipOnly = cents(live.amount_due) - cents(live.tip_amount) === cents(invoice.balance_due);
@@ -587,37 +600,49 @@ async function settleOwnInvoice(ctx: Ctx, invoice: StripeInvoice) {
   if (row && status && row.status !== status) await ctx.admin.from("stripe_invoices").update({ status }).eq("id", row.id);
 }
 
-/** A payment on one of our Stripe invoices, as a Crewtavo payment (with its tip and fee). */
+/**
+ * A payment on one of our Stripe invoices, as a Crewtavo payment (with its tip and fee). Stripe puts
+ * the client's balance there on the invoice when it's finalized: credit they had pays part of it,
+ * and what they owed from before is added to what they're charged. Only the invoice's own money is
+ * booked to it; what was owed from before is the client's, without an invoice.
+ */
 async function recordPayment(ctx: Ctx, invoice: StripeInvoice) {
   const meta = invoice.metadata ?? {};
   const { data: target } = await ctx.admin.from("invoices").select("id, number, client_id, status").eq("company_id", ctx.companyId).eq("id", meta.crewtavo_invoice_id!).maybeSingle();
   if (!target) return;
   const tip = Math.max(0, Number(meta.tip_cents) || 0);
-  const payments: Array<{ amount: number; tip_amount?: number; method: string; processor: string | null; processor_ref: string; fee_amount?: number; notes?: string }> = [];
+  const balance = invoice.starting_balance ?? 0;
+  // Paid in Stripe, or marked paid in the Stripe dashboard for money that came some other way.
+  const received = invoice.paid_out_of_band ? invoice.amount_due : invoice.amount_paid;
+  const before = Math.min(Math.max(balance, 0), received);
+  const credit = Math.min(Math.max(-balance, 0), invoice.total - tip);
+  const owedBefore = `Owed from before in Stripe, paid with invoice #${target.number}`;
+  const payments: Array<{ amount: number; tip_amount?: number; method: string; processor: string | null; processor_ref: string; fee_amount?: number; notes?: string; invoice_id?: null }> = [];
   if (invoice.paid_out_of_band) {
-    // Marked paid in the Stripe dashboard: money that came some other way, so it stays editable.
-    payments.push({ amount: (invoice.amount_due - tip) / 100, method: "other", processor: null, processor_ref: `${invoice.id}:paid`, notes: "Marked paid in Stripe" });
+    // Money that came some other way, so it stays editable.
+    if (received - before - tip > 0) payments.push({ amount: (received - before - tip) / 100, method: "other", processor: null, processor_ref: `${invoice.id}:paid`, notes: "Marked paid in Stripe" });
+    if (before > 0) payments.push({ amount: before / 100, method: "other", processor: null, processor_ref: `${invoice.id}:before`, invoice_id: null, notes: `Marked paid in Stripe. ${owedBefore}` });
   } else {
     const { charge, fee } = chargeOf(invoice);
-    if (invoice.amount_paid - tip > 0) {
+    if (received - before - tip > 0) {
       payments.push({
-        amount: (invoice.amount_paid - tip) / 100, tip_amount: tip / 100, method: paymentMethod(charge), processor: "stripe",
+        amount: (received - before - tip) / 100, tip_amount: tip / 100, method: paymentMethod(charge), processor: "stripe",
         processor_ref: invoice.payment_intent ?? charge?.id ?? `${invoice.id}:paid`, fee_amount: fee / 100,
       });
     }
-    // Credit the customer had in Stripe covered part of it.
-    const credit = invoice.total - invoice.amount_due;
-    if (credit > 0) payments.push({ amount: credit / 100, method: "other", processor: null, processor_ref: `${invoice.id}:credit`, notes: "Account credit in Stripe" });
+    if (before > 0) payments.push({ amount: before / 100, method: paymentMethod(charge), processor: "stripe", processor_ref: `${invoice.id}:before`, invoice_id: null, notes: owedBefore });
   }
+  if (credit > 0) payments.push({ amount: credit / 100, method: "other", processor: null, processor_ref: `${invoice.id}:credit`, notes: "Account credit in Stripe" });
   if (!payments.length) return;
   // Paid after it was voided here (a bank payment that was already on its way): a void invoice
-  // stays void, so the money is the client's, with a note saying which invoice it was for.
+  // stays void, so the money is the client's, with a note saying which invoice it was for. (What
+  // was owed from before says so already.)
   const voided = target.status === "void";
   for (const payment of payments) {
     // processor_ref is unique, so Stripe repeating an event can't record a payment twice.
     const { error } = await ctx.admin.from("payments").insert({
       company_id: ctx.companyId, invoice_id: voided ? null : target.id, client_id: target.client_id, received_at: isoAt(invoice.status_transitions.paid_at), recorded_by: null, ...payment,
-      ...(voided ? { notes: [payment.notes, `For invoice #${target.number}, which is void`].filter(Boolean).join(". ") } : {}),
+      ...(voided && payment.invoice_id !== null ? { notes: [payment.notes, `For invoice #${target.number}, which is void`].filter(Boolean).join(". ") } : {}),
     });
     if (error && error.code !== "23505") fail(error);
   }
@@ -827,7 +852,7 @@ interface Dispute {
 /** A client disputed a card payment with their bank: tell the office, and take it back if it's lost. */
 async function disputed(admin: Db, route: WebhookRoute, type: string, dispute: Dispute) {
   const ref = dispute.payment_intent ?? dispute.charge;
-  const { data: original } = await admin.from("payments").select("company_id, client_id, invoice_id, method, invoice:invoices(number)").eq("processor_ref", ref).maybeSingle();
+  const { data: original } = await admin.from("payments").select("company_id, client_id, invoice_id, method, amount, tip_amount, invoice:invoices(number)").eq("processor_ref", ref).maybeSingle();
   if (!original || (route.companyId && original.company_id !== route.companyId)) return null;
   const number = (original.invoice as unknown as { number: number } | null)?.number;
   const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(dispute.amount / 100);
@@ -839,13 +864,23 @@ async function disputed(admin: Db, route: WebhookRoute, type: string, dispute: D
     const due = dispute.evidence_details?.due_by ? ` by ${new Date(dispute.evidence_details.due_by * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : "";
     await note("opened", "Payment disputed", `The client disputed the ${amount} payment${on} with their bank (${dispute.reason.replace(/_/g, " ")}). Stripe holds the money until it's settled. Respond in Stripe${due} to keep it.`);
   } else if (dispute.status === "lost") {
-    const { error } = await admin.from("payments").insert({
-      company_id: original.company_id, client_id: original.client_id, invoice_id: original.invoice_id, method: original.method,
-      amount: -dispute.amount / 100, processor: "stripe", processor_ref: `${ref}:dispute:${dispute.id}`, notes: "Dispute lost in Stripe", recorded_by: null,
-    });
-    if (error && error.code !== "23505") fail(error);
+    // Stripe's amount includes the tip, which the payment keeps apart: like a refund, what the bank
+    // took back comes off the invoice first, then the tip, out of what refunds left of the payment.
+    const { data: back } = await admin.from("payments").select("amount, tip_amount").like("processor_ref", `${ref}:%`);
+    const backAmount = -(back ?? []).reduce((sum, p) => sum + cents(p.amount), 0);
+    const backTip = -(back ?? []).reduce((sum, p) => sum + cents(p.tip_amount), 0);
+    const fromInvoice = Math.min(dispute.amount, cents(original.amount) - backAmount);
+    const fromTip = Math.max(0, Math.min(dispute.amount - fromInvoice, cents(original.tip_amount) - backTip));
+    if (fromInvoice > 0) {
+      const { error } = await admin.from("payments").insert({
+        company_id: original.company_id, client_id: original.client_id, invoice_id: original.invoice_id, method: original.method,
+        amount: -fromInvoice / 100, tip_amount: -fromTip / 100, processor: "stripe", processor_ref: `${ref}:dispute:${dispute.id}`, notes: "Dispute lost in Stripe", recorded_by: null,
+      });
+      if (error && error.code !== "23505") fail(error);
+    }
     await note("lost", "Dispute lost", `The bank sided with the client on the ${amount} payment${on}, so that money went back to them. The invoice is owed again.`);
   } else if (dispute.status === "won") {
+    // Nothing was taken off when it was opened, so there's nothing to put back.
     await note("won", "Dispute won", `The bank sided with you on the ${amount} payment${on}. The money stays with you.`);
   }
   return original.company_id;

@@ -181,12 +181,17 @@ Then:
   emails or texts the client as before; Stripe doesn't. The **Pay** button in the Client Hub opens
   Stripe's page for that invoice. A client can't pay it twice, a bank payment shows as on its way
   until it clears (no reminders meanwhile), and a check you record replaces the Stripe invoice with
-  one for what's still owed.
+  one for what's still owed. A few cents left, less than Stripe can charge (50¢ in dollars), aren't
+  put in Stripe: collect them another way. A sent invoice moved back to draft can be deleted once
+  its Stripe invoice is voided, a few minutes later.
 - **Invoices you make in Stripe** (a one-off or a big job you'd rather bill by hand) come into
   Crewtavo on their own, matched to the client by email or added as a new client, and their
-  payments are recorded when they're paid.
+  payments are recorded when they're paid. Stripe asks the client for what it billed, so record a
+  payment on one by marking it paid in Stripe, not in Crewtavo.
 - **Payments** record the fee Stripe kept, and **Invoices → Stripe deposits** shows each payout to
   your bank with the payments in it. Refunds, failed bank payments and disputes show up on their own.
+  A client's balance in Stripe goes on their next Stripe invoice: credit they had is recorded on
+  that invoice, and money they owed from before as a payment from them that isn't on the invoice.
 - **Bring in your Stripe history** on the Stripe card imports past invoices, their clients and
   payments, and deposits, from a date you choose. History comes in quietly: no automations,
   reminders or notifications. Running it again only updates what's already there. On the
