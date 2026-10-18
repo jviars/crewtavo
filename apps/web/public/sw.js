@@ -17,6 +17,11 @@ const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/favicon.svg"];
 // Shared with src/lib/offline.ts (SYNC_TAG, WAITING_CACHE).
 const SYNC_TAG = "crewtavo-field-sync";
 const WAITING = "crewtavo-waiting";
+/** Pages for clients (Client Hub, booking forms, referrals): they don't run the crew's app. */
+const CLIENT_PAGES = /^\/(hub|book|u|refer)(\/|$)/;
+const ours = (w) => new URL(w.url).origin === self.location.origin;
+/** A window running Crewtavo itself, which sends the crew's queued updates. */
+const appWindow = (w) => ours(w) && !CLIENT_PAGES.test(new URL(w.url).pathname);
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -124,12 +129,18 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
-      if (open) {
-        await open.focus();
+      if (event.notification.tag === SYNC_TAG) {
         // Updates waiting go out once Crewtavo is back on the screen, whatever it shows. Loading My day
         // instead would lose what's only on that screen (a note typed, checklist answers not saved).
-        if (event.notification.tag !== SYNC_TAG && "navigate" in open) await open.navigate(link).catch(() => undefined);
+        const app = windows.find(appWindow);
+        if (app) await app.focus();
+        else await self.clients.openWindow(link);
+        return;
+      }
+      const open = windows.find(ours);
+      if (open) {
+        await open.focus();
+        if ("navigate" in open) await open.navigate(link).catch(() => undefined);
         return;
       }
       await self.clients.openWindow(link);
@@ -151,7 +162,7 @@ self.addEventListener("sync", (event) => {
       const waiting = await waitingUpdates();
       if (!waiting || self.Notification?.permission !== "granted") return;
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const onScreen = (w) => new URL(w.url).origin === self.location.origin && (w.visibilityState === "visible" || w.focused);
+      const onScreen = (w) => appWindow(w) && (w.visibilityState === "visible" || w.focused);
       if (windows.some(onScreen)) {
         if (event.lastChance) return;
         throw new Error("Crewtavo is open on the screen: it sends them itself.");
