@@ -48,6 +48,15 @@ set role service_role;
 select t29.check((select count(*) = 2 from public.claim_outbox(25)), 'once it''s reconnected, everything queued goes');
 reset role;
 
+-- ===== Only accounting waits ===================================================================
+-- While QuickBooks waits to be reconnected, the company's calendar and Stripe work still goes.
+update public.integrations set status = 'error' where company_id = :'co';
+insert into public.outbox (company_id, topic, payload) values (:'co', 'calendar.visit', '{"visit_id": "00000000-0000-0000-0000-000000000000"}');
+set role service_role;
+select t29.check((select array_agg(topic) = '{calendar.visit}' from public.claim_outbox(25)), 'calendar work in the queue goes while accounting waits');
+reset role;
+delete from public.outbox where company_id = :'co' and topic = 'calendar.visit';
+
 -- ===== Another app connected alongside =========================================================
 update public.integrations set status = 'error' where company_id = :'co';
 insert into public.integrations (company_id, provider, status) values (:'co', 'zoho_books', 'connected');
@@ -55,6 +64,14 @@ insert into public.payments (company_id, client_id, amount, method) values (:'co
 set role service_role;
 select t29.check((select count(*) = 1 from public.claim_outbox(25)), 'with another accounting app connected, the queue doesn''t wait');
 reset role;
+
+-- ===== Quiet ===================================================================================
+-- Work done with crewtavo.quiet on (see 20261018000300_stripe.sql) isn't queued for the books.
+begin;
+set local crewtavo.quiet = 'on';
+insert into public.payments (company_id, client_id, amount, method) values (:'co', :'client', 5, 'check') returning id as quiet_payment \gset
+select t29.check((select count(*) = 0 from public.outbox where payload ->> 'payment_id' = :'quiet_payment'), 'nothing is queued while quiet');
+rollback;
 
 -- ===== Disconnected ============================================================================
 update public.integrations set status = 'disconnected' where company_id = :'co';
