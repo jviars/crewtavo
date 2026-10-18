@@ -3,54 +3,72 @@ import type { Socket } from "node:net";
 
 /** How long the rest of an unread upload is read (and dropped) after answering it, at most. */
 const LINGER_MS = 2_000;
-/** Less than this, Node reads what's left of the body itself and the connection stays usable. */
+/**
+ * A smaller body comes in with the request and Node reads what's left of it itself, so the
+ * connection stays usable. (A body whose length isn't given counts as large.)
+ */
 const SMALL_BODY = 64 * 1024;
 
+type Request = (req: IncomingMessage, res: ServerResponse) => void;
+type Closing = Socket & { crewtavoClosing?: boolean; crewtavoLingering?: boolean };
+
 /**
- * Answers sent before the request's body has arrived (a 404, 401 or 413 to a large upload) close
- * the connection. Node can't keep it once it gives up on the unread body, and it would otherwise
- * have told the client to keep it: the next request sent on it, the browser's or Railway's proxy's
+ * Answers sent before a large request body has arrived (a 404, 401 or 413 to an upload) close the
+ * connection. Node can't keep it once it gives up on the unread body, and it would otherwise have
+ * told the client to keep it: the next request sent on it, the browser's or Railway's proxy's
  * (which can be someone else's), then fails with a reset.
  *
- * The connection is closed gently: the answer is sent and the rest of the upload is read and
- * dropped for a moment. Closing with unread bytes waiting resets the connection, and a client
- * still sending its upload then loses the answer too.
+ * It's closed gently: once the answer is sent the rest of the upload is read and dropped, for a
+ * moment at most, before the socket closes. Closing with unread bytes waiting resets the
+ * connection, and a client still sending its upload then loses the answer too. Requests sent
+ * behind it on the same connection aren't run: the client was told it closes, and sends them again.
  */
 export function closeAfterUnreadBodies(server: Server) {
-  server.prependListener("request", (req: IncomingMessage, res: ServerResponse) => {
+  const handlers = server.listeners("request") as Request[];
+  server.removeAllListeners("request");
+  server.on("request", (req: IncomingMessage, res: ServerResponse) => {
+    const socket = req.socket as Closing;
+    if (socket.crewtavoClosing) {
+      req.resume();
+      return;
+    }
     const writeHead = res.writeHead;
     res.writeHead = function (this: ServerResponse, ...args: unknown[]) {
       if (!res.headersSent && unread(req)) {
         res.setHeader("Connection", "close");
-        lingerOnClose(req);
+        socket.crewtavoClosing = true;
+        lingerOnClose(req, socket);
       }
       return (writeHead as (...a: unknown[]) => ServerResponse).apply(this, args);
     } as typeof res.writeHead;
+    for (const handle of handlers) handle.call(server, req, res);
   });
 }
 
 function unread(req: IncomingMessage) {
   const length = Number(req.headers["content-length"] ?? 0);
-  if (req.headers["transfer-encoding"] === undefined && !(length > SMALL_BODY)) return false;
-  // A body that's all here but not read yet (an answer given straight away) has arrived.
-  return !req.complete && !(length > 0 && req.readableLength >= length);
+  return (req.headers["transfer-encoding"] !== undefined || length > SMALL_BODY) && !req.complete;
 }
 
 /** Once the answer is sent, Node closes the socket with destroySoon: close it gently instead. */
-function lingerOnClose(req: IncomingMessage) {
-  const socket = req.socket as Socket & { crewtavoLingering?: boolean };
-  socket.destroySoon = function (this: typeof socket) {
+function lingerOnClose(req: IncomingMessage, socket: Closing) {
+  socket.destroySoon = function (this: Closing) {
     if (this.crewtavoLingering) return;
     this.crewtavoLingering = true;
-    const done = () => {
+    const close = () => {
       clearTimeout(timer);
       this.destroy();
     };
-    const timer = setTimeout(done, LINGER_MS);
-    this.once("end", done);
+    const timer = setTimeout(close, LINGER_MS);
     this.once("close", () => clearTimeout(timer));
-    // Finish sending (the client sees the end of the answer) and keep reading what it still sends.
+    this.once("end", close);
+    // Finish sending (the client sees the end of the answer), then drop the rest of the upload:
+    // whatever was reading it (the app's view of the body) is detached, as Node does with a body
+    // nobody reads, and the socket closes once it's all in.
     this.end();
+    if (req.complete) return close();
+    req.removeAllListeners("data");
+    req.once("end", close);
     req.resume();
     this.resume();
   };
