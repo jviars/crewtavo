@@ -215,14 +215,24 @@ async function fakeStripe(input: string | URL, init: RequestInit = {}): Promise<
   if (path.startsWith("/v1/webhook_endpoints")) {
     if (!k.webhooks) return json({ error: { type: "permission_error", message: "The provided key does not have the required permissions for this endpoint" } }, 403);
     if (method === "GET") return json({ data: [...s.webhooks.values()].map(({ id, url }) => ({ id, url })), has_more: false });
-    if (method === "POST") {
+    const noEndpoint = json({ error: { message: "No such webhook endpoint", code: "resource_missing" } }, 404);
+    if (path === "/v1/webhook_endpoints") {
+      // Stripe allows 16 in each mode of an account.
+      if (s.webhooks.size >= 16) return json({ error: { type: "invalid_request_error", message: "You have reached the maximum of 16 webhook endpoints." } }, 400);
       const id = `we_${++stripe.n}`;
       const endpoint = { id, url: body.get("url"), secret: `whsec_${id}` };
       s.webhooks.set(id, endpoint);
       return json(endpoint);
     }
     const id = path.split("/").pop()!;
-    return s.webhooks.delete(id) ? json({ id, deleted: true }) : json({ error: { message: "No such webhook endpoint", code: "resource_missing" } }, 404);
+    if (method === "POST") {
+      // An update: it keeps its secret, and Stripe doesn't send it again.
+      const endpoint = s.webhooks.get(id);
+      if (!endpoint) return noEndpoint;
+      endpoint.url = body.get("url") ?? endpoint.url;
+      return json({ id, url: endpoint.url });
+    }
+    return s.webhooks.delete(id) ? json({ id, deleted: true }) : noEndpoint;
   }
   if (path === "/v1/customers" && method === "GET") return json({ data: s.customers.filter((c) => c.email === url.searchParams.get("email")), has_more: false });
   if (path === "/v1/customers") {
@@ -424,6 +434,13 @@ describe("switching to another Stripe account", () => {
     await expect(stripeCheckout(env, db.db, CO, INV, 0)).rejects.toMatchObject({ status: 409, message: PROCESSING_MESSAGE });
     // The one paid in the old account meanwhile is recorded.
     expect(db.tables.payments).toEqual([expect.objectContaining({ invoice_id: INV2, amount: 160, processor_ref: `pi_${paid!.stripe_id}` })]);
+
+    // Crewtavo doesn't hear if it bounces there. Long after any bank payment clears, the client
+    // can pay online again (the office was told to record it once it cleared).
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("busy");
+    clearing!.detached_at = new Date(Date.now() - 31 * 24 * 60 * 60_000).toISOString();
+    expect((await hubPayment(env, db.db, CO, INV)).processing).toBe(false);
+    expect(await stripeCheckout(env, db.db, CO, INV, 0)).toContain("acct_B_live_");
   });
 
   it("checks Stripe invoices from before accounts were noted, and doesn't fail on one this key can't find", async () => {
@@ -462,6 +479,32 @@ describe("switching to another Stripe account", () => {
     expect(await stripeCheckout(env, db.db, CO, INV, 0)).toBe(url);
     // One webhook at Crewtavo's address: the new one.
     expect([...side(a).webhooks.values()]).toEqual([expect.objectContaining({ id: (await loadSecret(env, db.db, CO, "stripe"))!.extra!.webhook_id })]);
+  });
+
+  it("keeps the webhook in use for a key rolled in the same account when Stripe has no room for another", async () => {
+    const a = stripeKey("sk_live_A", "acct_A");
+    const rolled = stripeKey("sk_live_A2", "acct_A");
+    const other = stripeKey("sk_live_B", "acct_B");
+    await connect(a);
+    const [working] = side(a).webhooks.keys();
+    // The business has 15 webhooks of its own, so the account is at Stripe's limit.
+    for (let i = 0; i < 15; i++) side(a).webhooks.set(`we_own_${i}`, { id: `we_own_${i}`, url: `https://elsewhere.example.com/${i}`, secret: "whsec_own" });
+    for (let i = 0; i < 16; i++) side(other).webhooks.set(`we_b_${i}`, { id: `we_b_${i}`, url: `https://elsewhere.example.com/${i}`, secret: "whsec_b" });
+
+    // A key for another account at its limit still can't take over.
+    const refused = await connectStripe(env, db.db, { companyId: CO, userId: USER, key: other, baseUrl: BASE }).catch((error: Error) => error);
+    expect(refused).toMatchObject({ status: 400, message: "Stripe wouldn't add the webhook: You have reached the maximum of 16 webhook endpoints. Stripe stays connected as it was." });
+    // (It asks Stripe about the webhook in use, which isn't in its account.)
+    expect(stripe.calls).toContain(`sk_live_B POST /v1/webhook_endpoints/${working}`);
+    expect(await loadSecret(env, db.db, CO, "stripe")).toMatchObject({ api_key: a, extra: { webhook_id: working } });
+    expect(side(other).webhooks.size).toBe(16);
+
+    // The rolled key takes over the webhook in use, which keeps its secret.
+    expect(await connect(rolled)).toMatchObject({ webhook: true });
+    expect(stripe.calls).toContain(`sk_live_A2 POST /v1/webhook_endpoints/${working}`);
+    expect(await loadSecret(env, db.db, CO, "stripe")).toMatchObject({ api_key: rolled, extra: { webhook_id: working, webhook_secret: `whsec_${working}`, account_id: "acct_A" } });
+    expect(side(a).webhooks.has(working!)).toBe(true);
+    expect(side(a).webhooks.size).toBe(16);
   });
 
   it("disconnecting voids the open invoices with the company's key, and the server's account takes over", async () => {
@@ -530,6 +573,25 @@ describe("Hub Pay", () => {
     const last = (await (await pay(t, 20)).json()) as { url: string };
     expect(last.url).toBe(rowsFor(INV).find((r) => r.status === "open")!.hosted_url);
     expect(side(key).invoices.size).toBe(5);
+  });
+
+  it("counts every Stripe invoice made in the hour, whatever changed, and limits taking a promo code off", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    const t = await token();
+    // A promo code put on and taken off between tries changes what's owed each time.
+    const statuses: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      Object.assign(db.tables.invoices!.find((inv) => inv.id === INV)!, { balance_due: i % 2 ? 144 : 160 });
+      statuses.push((await pay(t, i)).status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 429, 429, 429]);
+    expect(side(key).invoices.size).toBe(5);
+    const res = await pay(t, 0);
+    expect(((await res.json()) as { error: string }).error).toBe("This invoice just changed, so its payment page is being updated. Try again in a few minutes.");
+
+    for (let i = 0; i < 11; i++) await app.request(`/api/hub/${t}/promo`, { method: "DELETE", headers: { "X-Real-IP": "203.0.113.9" } }, env);
+    expect(db.rpcs.filter((r) => r.fn === "remove_promo_code")).toHaveLength(10);
   });
 });
 
@@ -675,6 +737,33 @@ describe("money Stripe reports", () => {
     ]);
     // Pat got back all they paid, and so is recorded as paying nothing.
     expect(db.tables.payments!.reduce((sum, p) => sum + p.amount, 0)).toBe(0);
+  });
+
+  it("refunds what a lost dispute left of a charge, not what the bank already took back", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    // The first is paid in the Hub with a $15 tip ($175). For the second, Pat owed $25 in Stripe
+    // from before ($185).
+    await stripeCheckout(env, db.db, CO, INV, 1500);
+    side(key).customers.find((c) => c.email === "pat@example.com")!.balance = 2500;
+    await syncStripeInvoice(env, db.db, CO, INV2);
+    for (const id of [INV, INV2]) {
+      payInStripe(rowsFor(id)[0]!.stripe_id);
+      await event("invoice.paid", { id: rowsFor(id)[0]!.stripe_id });
+    }
+    const [tipped, owing] = [INV, INV2].map((id) => `pi_${rowsFor(id)[0]!.stripe_id}`);
+
+    // The bank takes back $100 of each, and the rest is refunded.
+    for (const [intent, rest] of [[tipped!, 7500], [owing!, 8500]] as const) {
+      await event("charge.dispute.closed", dispute(intent, 10000, "lost", `dp_${intent}`));
+      await event("charge.refunded", { id: `ch_${intent}`, payment_intent: intent, amount_refunded: rest });
+    }
+    const sum = (rows: Row[], k: string) => Math.round(rows.reduce((s, p) => s + Number(p[k]) * 100, 0)) / 100;
+    // Nothing's left paid on either, the tip went back too, and so did what was owed from before.
+    expect(paidIn(INV).map((p) => [p.amount, p.tip_amount || 0])).toEqual([[160, 15], [-100, 0], [-60, -15]]);
+    expect(paidIn(INV2).map((p) => p.amount)).toEqual([160, -100, -60]);
+    expect(paidIn(null).map((p) => [p.amount, p.processor_ref])).toEqual([[25, `${owing}:before`], [-25, `${owing}:refund:8500:before`]]);
+    expect([sum(paidIn(INV), "amount"), sum(paidIn(INV), "tip_amount"), sum(paidIn(INV2), "amount"), sum(paidIn(null), "amount")]).toEqual([0, 0, 0, 0]);
   });
 
   it("books a credit note issued in Stripe before it was paid", async () => {
