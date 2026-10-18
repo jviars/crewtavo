@@ -13,7 +13,7 @@ import { complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
-import { beginStripeImport, connectStripe, IMPORT_STALE_MS, importFromStripe, removeStripeWebhook, stripeAccess, type ImportState } from "../integrations/stripe";
+import { beginStripeImport, canImportStripe, connectStripe, disconnectStripe, IMPORT_STALE_MS, importFromStripe, SHARED_STRIPE_IMPORT, stripeAccess, type ImportState } from "../integrations/stripe";
 import { exchangeCode, loadSecret, revoke, saveSecret } from "../integrations/tokens";
 
 export const apps = new Hono<AppEnv>();
@@ -65,7 +65,9 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
 apps.post("/apps/stripe/import", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const body = await readJson(c, z.object({ since: isoDate.nullable().default(null) }));
   const admin = adminClient(c.env);
-  if (!(await stripeAccess(c.env, admin, c.var.companyId))) throw new HttpError(400, "Connect Stripe first.");
+  const access = await stripeAccess(c.env, admin, c.var.companyId);
+  if (!access) throw new HttpError(400, "Connect Stripe first.");
+  if (!(await canImportStripe(c.env, admin, c.var.companyId, access))) throw new HttpError(400, SHARED_STRIPE_IMPORT);
   const { data: row } = await admin.from("integrations").select("settings").match({ company_id: c.var.companyId, provider: "stripe" }).maybeSingle();
   const running = (row?.settings as { import?: ImportState } | undefined)?.import;
   if (running?.status === "running" && Date.now() - Date.parse(running.started_at) < IMPORT_STALE_MS) throw new HttpError(409, "An import is already running.");
@@ -163,7 +165,9 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
     await admin.from("outbox").update({ done_at: new Date().toISOString() }).match({ company_id: c.var.companyId, topic: "calendar.visit" }).is("done_at", null);
   }
   const secret = await loadSecret(c.env, admin, c.var.companyId, provider).catch(() => null);
-  if (secret) await (provider === "stripe" ? removeStripeWebhook(secret) : revoke(c.env, provider, secret));
+  // Stripe's open invoices are voided with the old key, which can finish after the response.
+  if (secret && provider === "stripe") runInBackground(c, (await disconnectStripe(c.env, admin, c.var.companyId, secret)).settled);
+  else if (secret) await revoke(c.env, provider, secret);
   await admin.from("integration_secrets").delete().match({ company_id: c.var.companyId, provider });
   const { error } = await admin
     .from("integrations")
@@ -181,7 +185,8 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   const body = await readJson(c, z.object({ api_key: z.string().trim().min(10).max(500) }));
   const admin = adminClient(c.env);
   if (provider === "stripe") {
-    const connected = await connectStripe(c.env, admin, { companyId: c.var.companyId, userId: c.var.userId, key: body.api_key, baseUrl: appUrl(c) });
+    const { settled, ...connected } = await connectStripe(c.env, admin, { companyId: c.var.companyId, userId: c.var.userId, key: body.api_key, baseUrl: appUrl(c) });
+    runInBackground(c, settled);
     return c.json({ provider, status: "connected", ...connected });
   }
   const { error } = await admin.from("integrations").upsert({

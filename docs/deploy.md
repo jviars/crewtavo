@@ -115,7 +115,7 @@ lists them all).
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_ENVIRONMENT` | QuickBooks Online. Create an app at developer.intuit.com; the redirect URI is shown on the Apps page. |
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books. Create a server-based client at api-console.zoho.com. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar: show a company's Google calendars on the schedule and put visits on a Google calendar Crewtavo makes. In Google Cloud, turn on the Google Calendar API, set up the OAuth consent screen with the scopes `calendar.calendarlist.readonly`, `calendar.events.readonly` and `calendar.app.created`, and create a Web application client whose redirect URI is the one shown on the Google Calendar app page (`https://your-domain/api/apps/google_calendar/callback`). Without these, calendars can still be added by their ICS link. |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Not needed for most businesses: connect Stripe on the **Apps** page instead (see [Connecting Stripe](#connecting-stripe)). These share one Stripe account with every company on the server that hasn't connected its own. Point a webhook at `/api/webhooks/stripe` with API version `2024-06-20` and the events in `STRIPE_EVENTS` (`apps/api/src/integrations/stripe.ts`): `invoice.*` (finalized, paid, payment_failed, voided, marked_uncollectible), `payment_intent.processing`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`, `payout.*` (created, updated, paid, failed, canceled) and `checkout.session.*` (completed, async_payment_succeeded, async_payment_failed). |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Not needed for most businesses: connect Stripe on the **Apps** page instead (see [Connecting Stripe](#connecting-stripe)). These share one Stripe account with every company on the server that hasn't connected its own (so **Bring in your Stripe history** works with it only on a one-company server). Point a webhook at `/api/webhooks/stripe` with API version `2024-06-20` and the events in `STRIPE_EVENTS` (`apps/api/src/integrations/stripe.ts`): `invoice.*` (finalized, paid, payment_failed, voided, marked_uncollectible), `payment_intent.processing`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`, `payout.*` (created, updated, paid, failed, canceled) and `checkout.session.*` (completed, async_payment_succeeded, async_payment_failed). |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email through [Resend](https://resend.com). **Needed on Railway's trial and Hobby plans**, which block outgoing mail servers (SMTP). On Railway Pro or when self-hosting, the business can instead connect its own mailbox under **Settings → Email**, and these only give it a default sender until then. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages. For two-way texting, set the number's **Messaging > A message comes in** webhook to `https://your-domain/api/webhooks/twilio` (HTTP POST). Replies appear in Messages and notify the office. `APP_URL` must match that address exactly, because Twilio signs the full URL. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
@@ -189,7 +189,17 @@ Then:
   your bank with the payments in it. Refunds, failed bank payments and disputes show up on their own.
 - **Bring in your Stripe history** on the Stripe card imports past invoices, their clients and
   payments, and deposits, from a date you choose. History comes in quietly: no automations,
-  reminders or notifications. Running it again only updates what's already there.
+  reminders or notifications. Running it again only updates what's already there. On the
+  server's own Stripe account (`STRIPE_SECRET_KEY`) it only runs when the server has one company,
+  since that account is shared.
+
+**Replacing the key** (**Replace key** on Stripe's page in **Apps**) only takes over once Crewtavo has added
+the webhook with the new key; if it can't, Stripe stays connected as it was. When the new key is
+for another Stripe account, or it's your live key after a test one, Crewtavo stops using the old
+account: its open invoices are voided there (any paid meanwhile are recorded), and clients get a
+new Stripe invoice in the new account when they pay. **Disconnecting** does the same. A bank
+payment still clearing in the old account is left alone, so the client isn't asked to pay twice;
+a note on the client reminds you to record it once it clears there.
 
 Stripe only sends webhooks to a public `https` address, so on a local copy the key is saved
 without one. Run `stripe listen --forward-to localhost:8787/api/webhooks/stripe` and use the

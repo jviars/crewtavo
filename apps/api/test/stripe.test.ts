@@ -16,6 +16,13 @@ import {
   type StripeCharge,
 } from "../src/services/stripe";
 
+// Provider calls normally get 15 seconds; a test can make that shorter.
+const timeout = vi.hoisted(() => ({ ms: 15_000 }));
+vi.mock("../src/integrations/registry", async (original) => ({
+  ...(await original<typeof import("../src/integrations/registry")>()),
+  providerTimeout: () => AbortSignal.timeout(timeout.ms),
+}));
+
 const invoice = (patch: Partial<BillableInvoice> = {}): BillableInvoice => ({
   number: 42,
   subject: "May mowing",
@@ -115,7 +122,10 @@ describe("payment methods", () => {
 });
 
 describe("stripe api", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    timeout.ms = 15_000;
+  });
 
   it("pins the API version, sends idempotency keys and reads Stripe's errors", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: "No such customer: 'cus_x'", code: "resource_missing", param: "customer" } }), { status: 400 }));
@@ -127,6 +137,34 @@ describe("stripe api", () => {
     expect(url).toBe("https://api.stripe.com/v1/invoices");
     expect(init.headers).toMatchObject({ "Stripe-Version": STRIPE_VERSION, "Idempotency-Key": "k1", Authorization: "Bearer sk_test_1" });
     expect(init.body).toBe("customer=cus_x");
+  });
+
+  it("gives up on a call Stripe doesn't answer, and tries again only when that's safe", async () => {
+    // Hangs until the call's own time limit (shortened here) runs out.
+    const fetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(init.signal!.reason))));
+    vi.stubGlobal("fetch", fetch);
+    timeout.ms = 20;
+    const error = await stripeApi("sk_test_1", "POST", "/v1/invoices", { customer: "cus_1" }, { idempotencyKey: "k1" }).catch((e) => e);
+    expect(error).toBeInstanceOf(StripeError);
+    expect(error).toMatchObject({ status: 0 });
+    // Tried three times with the same idempotency key, so Stripe does it at most once.
+    expect(fetch.mock.calls.map(([, init]) => (init.headers as Record<string, string>)["Idempotency-Key"])).toEqual(["k1", "k1", "k1"]);
+
+    fetch.mockClear();
+    expect(await stripeApi("sk_test_1", "POST", "/v1/customers", { email: "pat@example.com" }).catch((e) => e)).toBeInstanceOf(StripeError);
+    // No idempotency key: it may have gone through, so it isn't sent again.
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a read that timed out", async () => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("The operation was aborted due to timeout", "TimeoutError"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "in_1" })));
+    vi.stubGlobal("fetch", fetch);
+    expect(await stripeApi("sk_test_1", "GET", "/v1/invoices/in_1")).toEqual({ id: "in_1" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].signal).toBeInstanceOf(AbortSignal);
   });
 
   it("pages through lists", async () => {
