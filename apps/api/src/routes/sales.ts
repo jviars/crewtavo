@@ -16,7 +16,10 @@ import {
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
+import { syncStripeInvoice } from "../integrations/stripe";
 import { requireCompany, requireUser } from "../lib/auth";
+import { runInBackground } from "../lib/background";
+import { adminClient } from "../lib/supabase";
 import { appUrl, asJson, dbError, HttpError, must, param, readJson, requireEnv, uuid } from "../lib/http";
 import { firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink } from "../lib/links";
@@ -237,8 +240,15 @@ sales.post("/invoices/remind", requireUser, requireCompany(OFFICE, "invoices"), 
   );
   let sent = 0;
   const skipped: Array<{ number: number | null; reason: string }> = [];
+  // Don't ask again while a bank payment is on its way.
+  const { data: paying } = await c.var.db.from("stripe_invoices").select("invoice_id").eq("company_id", c.var.companyId).eq("status", "processing").in("invoice_id", invoices.map((i) => i.id));
+  const processing = new Set((paying ?? []).map((row) => row.invoice_id));
   for (const invoice of invoices) {
     if (Number(invoice.balance_due) <= 0) continue;
+    if (processing.has(invoice.id)) {
+      skipped.push({ number: invoice.number, reason: "A bank payment is on its way" });
+      continue;
+    }
     const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(invoice.balance_due));
     const due = invoice.due_on ? new Date(`${invoice.due_on}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : null;
     try {
@@ -282,7 +292,11 @@ sales.post("/invoices/:id/send", requireUser, requireCompany(OFFICE, "invoices")
   if (invoice.status === "void") throw new HttpError(400, "This invoice is void.");
   if (!invoice.lines.length) throw new HttpError(400, "Add at least one line item before sending.");
   const result = await deliver(c, "invoice", invoice, body);
-  if (invoice.status === "draft" && (result.sent || body.channel === "link")) await c.var.db.from("invoices").update({ status: "sent" }).eq("id", id);
+  if (invoice.status === "draft" && (result.sent || body.channel === "link")) {
+    await c.var.db.from("invoices").update({ status: "sent" }).eq("id", id);
+    // Put it in Stripe now rather than at the next outbox run, so the client's Pay button is ready.
+    runInBackground(c, syncStripeInvoice(c.env, adminClient(c.env), c.var.companyId, id));
+  }
   return c.json(result);
 });
 

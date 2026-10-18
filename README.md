@@ -202,8 +202,9 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
 **And also:**
 
 - **Jobs and invoicing:** one-off and recurring jobs, multi-day work, change orders the client
-  approves, batch invoicing, payment reminders, deposits, progress billing and retainage. Card and
-  bank payments through Stripe, refunds, expenses and job costing, timesheets.
+  approves, batch invoicing, payment reminders, deposits, progress billing and retainage. Invoices
+  go through Stripe for card and bank payments; invoices made in Stripe come in too, with the fees
+  and bank deposits behind every payment. Refunds, expenses and job costing, timesheets.
 - **People and roles:** General manager, Office manager, Operations manager, Foreman and Employee
   to start with, renamable, plus your own. A foreman runs their crew and never sees prices. The
   database enforces every rule, not just the screens.
@@ -256,7 +257,7 @@ Everything an instance needs is generated. These optional settings turn on extra
 | `ENCRYPTION_KEY` | A separate key for app tokens and client links (32+ characters). Keep it stable once set: changing it disconnects every app and invalidates links already sent. |
 | `ANTHROPIC_API_KEY`, `AI_MODEL` | AI rewriting and answers from your SOPs. Companies can also add their own key on the Apps page. |
 | `GOOGLE_MAPS_BROWSER_KEY`, `GOOGLE_MAPS_SERVER_KEY` | Measuring on satellite imagery, and roof pitch suggestions (Solar API). |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Online payments by card and US bank account. |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | A Stripe account shared by every company on the server. Usually not needed: each business connects its own Stripe on the Apps page. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages, and two-way texting. |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email through Resend. Needed on Railway's trial and Hobby plans, which block SMTP; elsewhere, a default sender until the business connects its own mailbox. |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online sync. |

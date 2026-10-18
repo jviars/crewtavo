@@ -45,6 +45,10 @@ interface InvoiceView {
   home: string | null;
   company: Company;
   can_pay: boolean;
+  /** A bank payment through Stripe is on its way; asking again would charge twice. */
+  processing?: boolean;
+  /** Made in Stripe, so it's paid exactly as billed there (no promo codes). */
+  from_stripe?: boolean;
   tips: boolean;
   invoice: { id: string; number: number; status: string; subject: string | null; notes: string | null; issued_on: string; due_on: string | null; subtotal: number; discount_amount: number; tax_amount: number; total: number; retainage_amount: number; amount_paid: number; balance_due: number; promo: HubPromoInfo; client: { display_name: string } | null; lines: HubLine[]; payments: Array<{ amount: number; tip_amount: number; received_at: string }> };
 }
@@ -307,7 +311,7 @@ function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceVi
             token={token}
             promo={inv.promo}
             discount={Math.min(Number(inv.discount_amount), Math.max(Number(inv.subtotal), 0))}
-            canChange={!data.preview && balance > 0 && inv.payments.length === 0}
+            canChange={!data.preview && !data.from_stripe && balance > 0 && inv.payments.length === 0}
             onChanged={onChanged}
           />
           {Number(inv.tax_amount) > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
@@ -325,7 +329,9 @@ function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceVi
       </section>
       {inv.notes && <section className="card card-pad pre-wrap">{inv.notes}</section>}
       {balance > 0 && !data.preview && (
-        data.can_pay ? (
+        data.processing ? (
+          <div className="card card-pad muted no-print" role="status">Your bank payment is on its way. It usually takes a few business days to clear, and this page updates when it does.</div>
+        ) : data.can_pay ? (
           <div className="stack no-print">
             {data.tips && (
               <section className="card card-pad stack-sm">

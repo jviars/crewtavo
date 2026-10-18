@@ -89,7 +89,7 @@ The API also forwards the user's token, so RLS still applies to its queries.
 | Recurrence | `rrule` (RFC 5545) | Standard rules; same format Google Calendar uses |
 | SOP editor | TipTap (MIT) | Rich text stored as JSON, rendered to HTML for reading and search |
 | Maps | Google Maps JS + Terra Draw + Turf | Google's own drawing library is gone; Terra Draw replaces it |
-| Payments | Stripe (Checkout + webhooks) | Card and ACH; Stripe Connect for the hosted version |
+| Payments | Stripe (Invoicing + webhooks) | Card and ACH; Stripe Connect for the hosted version |
 | Email / SMS | Resend / Twilio | Simple REST APIs that work from Workers |
 | AI | Anthropic SDK (Claude) | Rewrite messages, draft quotes, answer from SOPs |
 | Validation | zod | Request bodies and preset files |
@@ -259,8 +259,10 @@ restricted to the Solar API. Swapping in Mapbox or Esri later only changes the m
 
 - Crewtavo owns **quotes, invoices, payments and balances**: deposits, progress invoices with
   retainage, partial payments, tips, refunds (as negative payments) and tax on taxable lines.
-- **Stripe** collects card and ACH payments through Checkout links on invoices and in the Client
-  Hub. A webhook records the payment; the payment trigger updates the invoice balance and status.
+- **Stripe** is where money moves. A sent invoice gets a matching Stripe invoice (kept in step by
+  the outbox: replaced when the balance changes, voided once nothing is owed), and the Client Hub's
+  Pay button opens it. Invoices made in Stripe are imported. Webhooks record payments with their
+  fees, bank payments in progress, refunds, disputes and payouts (`stripe_invoices`, `payouts`).
 - **QuickBooks Online, Zoho Books (and later Xero)** are the books. When an invoice is sent or a
   payment recorded, a trigger adds an outbox row; a task pushes the customer, invoice or payment
   and remembers the external ID in `sync_links`.
@@ -276,7 +278,7 @@ restricted to the Solar API. Swapping in Mapbox or Esri later only changes the m
 | Zoho Books | OAuth 2.0 with data-center aware URLs | Implemented, untested |
 | Google Calendar | OAuth 2.0 | Calendars on the schedule, visits pushed to a Crewtavo calendar; untested against a live account |
 | Zoho Calendar, Outlook, Apple, any ICS link | Calendar link (ICS), stored encrypted | Implemented |
-| Stripe | Platform keys (env) | Checkout + webhook |
+| Stripe | A company's own secret key (webhook added for it), or platform keys (env) | Invoices both ways, payments, fees, payouts, history import |
 | Twilio, Resend | Platform keys (env) or per-company keys | Send helpers |
 | Anthropic / OpenAI | Platform key, or a company's own key | Claude implemented |
 | Xero | OAuth 2.0 | Planned |

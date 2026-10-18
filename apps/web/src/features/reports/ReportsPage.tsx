@@ -557,7 +557,7 @@ function Money({ range }: { range: Range }) {
       const db = supabase();
       const [invoices, payments, open] = await Promise.all([
         fetchAll((a, b) => db.from("invoices").select("total, tax_amount, issued_on").eq("company_id", cid).not("status", "in", "(draft,void)").gte("issued_on", range.from).lte("issued_on", range.to).range(a, b)),
-        fetchAll((a, b) => db.from("payments").select("amount, tip_amount, method, received_at").eq("company_id", cid).gte("received_at", range.start).lt("received_at", range.end).range(a, b)),
+        fetchAll((a, b) => db.from("payments").select("amount, tip_amount, fee_amount, method, received_at").eq("company_id", cid).gte("received_at", range.start).lt("received_at", range.end).range(a, b)),
         fetchAll((a, b) => db.from("invoices").select("balance_due, due_on, client:clients(id, display_name)").eq("company_id", cid).in("status", ["sent", "partially_paid", "overdue"]).range(a, b)),
       ]);
       return { invoices, payments, open };
@@ -569,6 +569,7 @@ function Money({ range }: { range: Range }) {
       {(d) => {
         const today = todayIn(company.timezone);
         const overdue = d.open.filter((i) => i.due_on && i.due_on < today);
+        const fees = sum(d.payments, (p) => Number(p.fee_amount ?? 0));
         const methods = new Map<string, number>();
         for (const p of d.payments) methods.set(p.method, (methods.get(p.method) ?? 0) + Number(p.amount));
         const balances = new Map<string, { id: string; name: string; count: number; balance: number; oldest: string | null }>();
@@ -586,6 +587,7 @@ function Money({ range }: { range: Range }) {
               <Stat label="Invoiced" value={formatMoney(sum(d.invoices, (i) => Number(i.total)))} hint={`${d.invoices.length} ${d.invoices.length === 1 ? "invoice" : "invoices"}`} />
               <Stat label="Collected" value={formatMoney(sum(d.payments, (p) => Number(p.amount)))} hint={`${d.payments.length} ${d.payments.length === 1 ? "payment" : "payments"}`} />
               <Stat label="Tips" value={formatMoney(sum(d.payments, (p) => Number(p.tip_amount ?? 0)))} />
+              {fees > 0 && <Stat label="Stripe fees" value={formatMoney(fees)} hint={<Link to="/payouts">See deposits</Link>} />}
               <Stat label="Sales tax billed" value={formatMoney(sum(d.invoices, (i) => Number(i.tax_amount)))} />
               <Stat label="Outstanding now" value={formatMoney(sum(d.open, (i) => Number(i.balance_due)))} />
               <Stat label="Past due now" value={formatMoney(sum(overdue, (i) => Number(i.balance_due)))} hint={`${overdue.length} ${overdue.length === 1 ? "invoice" : "invoices"}`} tone={overdue.length ? "bad" : undefined} />

@@ -21,6 +21,7 @@ import { AppIcon, AppTile } from "./AppIcon";
 import { AssistantAccess } from "./AssistantAccess";
 import { CalendarRow, GoogleCalendarPanel, LinkCalendarsPanel, AddCalendarForm, useCalendars } from "./CalendarPanels";
 import { CATEGORY_LABELS, infoFor, MORE_LABELS, useApps, type AppRow } from "./catalog";
+import { StripePanel } from "./StripePanel";
 
 /** Where each assistant keeps its connector settings. */
 const CONNECTOR_STEPS: Record<string, string[]> = {
@@ -94,7 +95,9 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
     const body =
       app.id === "google_calendar"
         ? "Its calendars come off the schedule, and the visits calendar Crewtavo made is removed from your Google account. Calendars added by link stay. You can reconnect any time."
-        : "Syncing stops right away. Nothing already synced is deleted, and you can reconnect any time.";
+        : app.id === "stripe"
+          ? "Crewtavo's webhook comes out of your Stripe account, and new invoices and payments stop showing up here. Nothing already recorded is deleted, and you can reconnect any time."
+          : "Syncing stops right away. Nothing already synced is deleted, and you can reconnect any time.";
     if (await confirm({ title: `Disconnect ${app.name}?`, body, confirmLabel: "Disconnect", danger: true })) disconnect.mutate();
   };
 
@@ -107,6 +110,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       : <Button className="app-get" variant="primary" icon={app.status === "error" ? "refresh" : undefined} loading={connect.isPending} onClick={() => connect.mutate()}>{app.status === "error" ? "Reconnect" : "Connect"}</Button>;
   } else if (app.auth === "link") action = <Button className="app-get" variant="primary" icon="plus" onClick={() => scrollTo(`${app.id}-add`)}>{app.calendars ? "Add another" : "Add a calendar"}</Button>;
   else if (app.auth === "connector" || app.id === "anthropic") action = <Button className="app-get" variant="primary" icon="copy" onClick={() => copyText(mcpUrl, "Connector link copied")}>Copy link</Button>;
+  else if (app.id === "stripe") action = <Button className="app-get" variant={app.stripe?.own ? "secondary" : "primary"} onClick={() => scrollTo("app-setup")}>{app.stripe?.own ? "Replace key" : "Connect"}</Button>;
   else action = <Button className="app-get" variant={app.status === "connected" ? "secondary" : "primary"} onClick={() => scrollTo("app-setup")}>{app.status === "connected" ? "Replace key" : "Add key"}</Button>;
 
   const others = all.filter((a) => a.category === app.category && a.id !== app.id);
@@ -164,6 +168,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       {app.auth === "link" && <LinkCalendarsPanel app={app.id} appName={app.name} steps={info.steps} />}
       {app.auth === "connector" && <ConnectorCard app={app} mcpUrl={mcpUrl} />}
       {app.id === "anthropic" && <ConnectorCard app={app} mcpUrl={mcpUrl} />}
+      {app.id === "stripe" && app.stripe && <StripePanel app={app} disconnecting={disconnect.isPending} onDisconnect={askDisconnect} onChanged={refresh} />}
       {app.auth === "api_key" && (app.available ? <KeyCard app={app} onSaved={refresh} /> : <NotAvailable app={app} />)}
 
       {/* ---- What it does ---- */}
@@ -270,8 +275,9 @@ function ConnectorCard({ app, mcpUrl }: { app: AppRow; mcpUrl: string }) {
 function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
   const [key, setKey] = useState("");
   const [show, setShow] = useState(false);
+  const stripe = app.id === "stripe";
   const save = useMutation({
-    meta: { inline: true, success: `${app.name} key saved` },
+    meta: { inline: true, success: stripe ? "Stripe connected" : `${app.name} key saved` },
     mutationFn: () => api.put(`/apps/${app.id}/key`, { api_key: key.trim() }),
     onSuccess: () => {
       setKey("");
@@ -284,17 +290,20 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
   };
   return (
     <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="key-title" style={{ gap: 10 }}>
-      <h2 id="key-title" className="section-title" style={{ fontSize: 17 }}>{app.id === "anthropic" ? "Your own Anthropic key (optional)" : `${app.name} key`}</h2>
+      <h2 id="key-title" className="section-title" style={{ fontSize: 17 }}>
+        {app.id === "anthropic" ? "Your own Anthropic key (optional)" : stripe ? (app.stripe && !app.stripe.own ? "Use your own Stripe account" : "Stripe secret key") : `${app.name} key`}
+      </h2>
       <span className="muted small">
         {app.id === "anthropic" ? "Crewtavo's writing help and answers from your guides use this key when you add one. " : null}
-        {app.status === "connected" && app.account_label ? `Saved: ${app.account_label}.` : "It's stored encrypted and never shown again."}
+        {stripe ? "From Stripe: Developers, then API keys, then the secret key (it starts with sk_live_). Crewtavo adds the webhook it needs to your Stripe account. " : null}
+        {app.status === "connected" && app.account_label && (!stripe || app.stripe?.own) ? `Saved: ${app.account_label}.` : "It's stored encrypted and never shown again."}
       </span>
       <form className="row" style={{ gap: 8 }} onSubmit={submit}>
         <div className="input-group grow">
-          <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} placeholder={app.status === "connected" ? "Paste a new key to replace it" : "Paste your key"} value={key} onChange={(e) => { setKey(e.target.value); save.reset(); }} aria-label={`${app.name} API key`} style={{ paddingLeft: 12, paddingRight: 36 }} />
+          <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} placeholder={(stripe ? app.stripe?.own : app.status === "connected") ? "Paste a new key to replace it" : stripe ? "sk_live_…" : "Paste your key"} value={key} onChange={(e) => { setKey(e.target.value); save.reset(); }} aria-label={`${app.name} ${stripe ? "secret key" : "API key"}`} style={{ paddingLeft: 12, paddingRight: 36 }} />
           <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide key" : "Show key"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={15} /></button>
         </div>
-        <Button type="submit" loading={save.isPending} disabled={key.trim().length < 10}>Save</Button>
+        <Button type="submit" loading={save.isPending} disabled={key.trim().length < 10}>{stripe ? "Connect" : "Save"}</Button>
       </form>
       {save.error && <span className="field-error">{(save.error as Error).message}</span>}
     </section>

@@ -24,7 +24,21 @@ export interface AppRow {
   /** Calendar apps: how many calendars were added from this app, and how many have a problem. */
   calendars?: number;
   calendar_errors?: number;
+  /** Stripe only, once it's set up: the company's own key or the server's, and the last import. */
+  stripe?: { own: boolean; webhook: boolean; livemode: boolean; import: StripeImport | null };
 }
+
+export interface StripeImport {
+  status: "running" | "done" | "failed";
+  since: string | null;
+  started_at: string;
+  finished_at?: string;
+  error?: string;
+  counts: { invoices: number; payments: number; clients: number; payouts: number };
+}
+
+/** An import that hasn't reported in this long died with its server (IMPORT_STALE_MS on the API). */
+export const importRunning = (state: StripeImport | null | undefined) => state?.status === "running" && Date.now() - Date.parse(state.started_at) < 30 * 60_000;
 
 export interface AppsData {
   mcp_url: string;
@@ -35,7 +49,13 @@ export interface AppsData {
 export function useApps() {
   const session = useSession();
   const allowed = hasRole(session, "admin") && can(session, "apps");
-  const query = useQuery({ queryKey: ["apps", session.company.id], enabled: allowed, queryFn: () => api.get<AppsData>("/apps") });
+  const query = useQuery({
+    queryKey: ["apps", session.company.id],
+    enabled: allowed,
+    queryFn: () => api.get<AppsData>("/apps"),
+    // Follow a Stripe import while it runs.
+    refetchInterval: (q) => (q.state.data?.apps.some((a) => importRunning(a.stripe?.import)) ? 3000 : false),
+  });
   return { allowed, ...query };
 }
 
@@ -229,15 +249,20 @@ export const APP_INFO: Record<string, AppInfo> = {
   },
   stripe: {
     developer: "Stripe",
-    tagline: "Get paid by card or bank",
-    about: "Clients pay invoices by card or bank transfer (ACH) from the link you send or their client portal, and the payment is recorded on the invoice by itself.",
+    tagline: "Invoices, payments and deposits, in step with Stripe",
+    about:
+      "Invoices you send from Crewtavo go to Stripe too, and clients pay them by card or bank from their link or client portal, once. Invoices you make in Stripe, like a big job you'd rather bill by hand, come into Crewtavo by themselves. Every payment shows the fee Stripe kept and the bank deposit it arrived in, and your past invoices can come in from Stripe without anyone being emailed.",
     highlights: [
-      { icon: "dollar", title: "Card and bank", text: "Clients choose how to pay; you see it on the invoice." },
-      { icon: "globe", title: "From anywhere", text: "Pay from the emailed link or the client portal." },
-      { icon: "check", title: "Recorded for you", text: "Payments mark invoices paid, with no typing." },
+      { icon: "invoice", title: "Both ways", text: "Sent invoices appear in Stripe; invoices made in Stripe come in here." },
+      { icon: "dollar", title: "Paid once", text: "Card or bank. A bank payment shows as on its way until it clears." },
+      { icon: "receipt", title: "Fees and deposits", text: "See what Stripe kept and which deposit each payment arrived in." },
     ],
-    access: ["Start payments for invoices", "See when a payment succeeds"],
-    connectsWith: "API key",
+    access: [
+      "Add customers, invoices and invoice items, and void invoices it made",
+      "Read invoices, payments, refunds, disputes and deposits",
+      "Add one webhook to your account so payments show up right away",
+    ],
+    connectsWith: "Secret key",
     website: "https://stripe.com/",
   },
   twilio: {

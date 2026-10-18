@@ -6,6 +6,7 @@ import { addDays, localDate, occurrenceDates, weatherRisks, zonedTimeToUtc, type
 import type { Env } from "./env";
 import { runAccountingJob } from "./integrations/accounting";
 import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
+import { syncStripeInvoice } from "./integrations/stripe";
 import { adminClient, type Db } from "./lib/supabase";
 import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
@@ -47,8 +48,8 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
 }
 
 /**
- * Push queued accounting changes and visit changes for Google Calendar; failures retry with
- * exponential backoff, up to 8 attempts.
+ * Push queued accounting changes and visit changes for Google Calendar, and keep Stripe invoices
+ * in step; failures retry with exponential backoff, up to 8 attempts.
  */
 async function drainOutbox(env: Env) {
   const admin = adminClient(env);
@@ -59,9 +60,11 @@ async function drainOutbox(env: Env) {
   let failed = 0;
   for (const row of rows ?? []) {
     const calendar = row.topic.startsWith("calendar.");
+    const stripe = row.topic.startsWith("stripe.");
     try {
       const job = { ...row, payload: row.payload as Record<string, string> };
-      await (calendar ? runCalendarJob(env, admin, job) : runAccountingJob(env, admin, job));
+      if (stripe) await syncStripeInvoice(env, admin, row.company_id, job.payload.invoice_id!);
+      else await (calendar ? runCalendarJob(env, admin, job) : runAccountingJob(env, admin, job));
       await admin.from("outbox").update({ done_at: new Date().toISOString(), locked_until: null, last_error: null }).eq("id", row.id);
       done++;
     } catch (err) {
@@ -78,7 +81,7 @@ async function drainOutbox(env: Env) {
         })
         .eq("id", row.id);
       if (giveUp) {
-        const providers = calendar ? ["google_calendar"] : ["quickbooks", "zoho_books"];
+        const providers = calendar ? ["google_calendar"] : stripe ? ["stripe"] : ["quickbooks", "zoho_books"];
         await admin.from("integrations").update({ status: "error", last_error: message.slice(0, 500) }).eq("company_id", row.company_id).in("provider", providers);
       }
     }
