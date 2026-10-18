@@ -442,9 +442,14 @@ describe("parseIcs on feeds built to be slow, or just broken", () => {
     ];
     // 300 routes every day since 2024, more than the 5000 kept: before, the last were lost from the first days.
     const routes = [...Array.from({ length: 300 }, (_, i) => vevent(`route-${i}`, `DTSTART;TZID=America/Chicago:2024${two((i % 12) + 1)}${two((i % 27) + 1)}T${two(6 + (i % 10))}0000`, "DURATION:PT30M", "RRULE:FREQ=DAILY")), crew];
-    for (const groups of [meetings, routes]) {
+    // 5000 anniversaries since 2000, as Outlook writes them: the last ones lost their repeats.
+    const anniversaries = Array.from({ length: 5000 }, (_, i) =>
+      vevent(`a-${i}`, `DTSTART;TZID="Customized Time Zone":${2000 + (i % 21)}${two((i % 12) + 1)}${two((i % 28) + 1)}T090000`, "DURATION:PT1H", `RRULE:FREQ=YEARLY;BYMONTHDAY=${(i % 28) + 1};BYMONTH=${(i % 12) + 1}`),
+    );
+    for (const groups of [meetings, routes, anniversaries]) {
       const result = timed(ics(...zone, ...groups.flat()));
       expect(result.ms).toBeLessThan(1000);
+      if (groups === anniversaries) expect(result.truncated).toBe(false);
       // The same as reading them twenty at a time, which is well within the work allowed.
       const twenties = Array.from({ length: Math.ceil(groups.length / 20) }, (_, i) => groups.slice(20 * i, 20 * i + 20).flat());
       const apart = twenties.flatMap((some) => parseIcs(ics(...zone, ...some), sync).events).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
@@ -496,6 +501,16 @@ describe("parseIcs on feeds built to be slow, or just broken", () => {
       ["20100104T090000Z", "FREQ=WEEKLY;BYMONTHDAY=1,2,3,4,5,6,7,8,9,10;COUNT=1950"],
       ["20160120T090000Z", "FREQ=MONTHLY;BYSETPOS=-2,1;COUNT=250"],
       ["20050514T090000Z", "FREQ=DAILY;BYSETPOS=1,2;COUNT=11493"],
+      // Daily rules that pick days by month and the like, or a day's times by position, since the
+      // 1990s: each was walked a day at a time from its start, ran out of its work, and lost its repeats.
+      ["19951201T130000Z", "FREQ=DAILY;BYMONTH=12;COUNT=1000"],
+      ["19900103T090000Z", "FREQ=DAILY;BYMONTHDAY=1,15;COUNT=900"],
+      ["19900103T090000Z", "FREQ=DAILY;BYMONTH=1,7;BYDAY=MO,WE;COUNT=1400"],
+      ["19900103T090000Z", "FREQ=DAILY;BYYEARDAY=1,100,300,-1;BYHOUR=9,17;COUNT=300"],
+      ["19900101T090000Z", "FREQ=DAILY;BYWEEKNO=1,20,40;BYDAY=MO;COUNT=110"],
+      ["20050707T230000Z", "FREQ=DAILY;BYSETPOS=1;BYHOUR=9,17;COUNT=7900"],
+      ["20050707T120000Z", "FREQ=DAILY;BYDAY=MO,FR;BYSETPOS=-1,1;BYHOUR=9,17;COUNT=4600"],
+      ["20050707T120000Z", "FREQ=DAILY;INTERVAL=7;BYDAY=TH;BYSETPOS=-3;BYHOUR=9,17;COUNT=1070"],
     ];
     for (const [dtstart, rule] of rules) {
       const from = Date.UTC(Number(dtstart.slice(0, 4)), Number(dtstart.slice(4, 6)) - 1, Number(dtstart.slice(6, 8)), Number(dtstart.slice(9, 11)));
@@ -535,24 +550,35 @@ describe("parseIcs on feeds built to be slow, or just broken", () => {
   });
 
   it("reads many of Outlook's zones, with years of events in each, without running out", () => {
-    // 100 "Customized Time Zone"s with US Eastern rules. In the first file each differs a little (a
-    // TZNAME), and has meetings since 2005; in the second they're all the same, each with a weekly
-    // series since 2005 that skips a week each year. Every year since was worked out for each zone,
-    // the work ran out, and the last zones' meetings came out an hour off.
+    // 100 "Customized Time Zone"s with US Eastern rules, each the same or a little different (a
+    // TZNAME), with meetings since 2005, or a weekly series since 2005 or 1990 that skips a week each
+    // year. Every year since was worked out for each zone, the work ran out, and the last zones'
+    // events came out an hour off, with nothing to say so.
     const zone = (z: number, named: boolean) => outlookZone(`Customized Time Zone ${z}`).flatMap((l) => (named && l === "BEGIN:STANDARD" ? [l, `TZNAME:Zone ${z}`] : [l]));
     const meetings = (tzid: (z: number) => string) =>
       Array.from({ length: 100 }, (_, z) => Array.from({ length: 30 }, (_, i) => vevent(`z${z}-${i}`, `DTSTART;TZID="${tzid(z)}":${stamp(Date.UTC(2005, 0, 4, 8 + (z % 10)) + (i * 274 + z) * DAY)}`, "DURATION:PT1H")).flat()).flat();
-    const weekly = (tzid: (z: number) => string) =>
-      Array.from({ length: 100 }, (_, z) => vevent(`w${z}`, `DTSTART;TZID="${tzid(z)}":${stamp(Date.UTC(2005, 0, 4 + 7 * z, 10))}`, "DURATION:PT1H", "RRULE:FREQ=WEEKLY", ...Array.from({ length: 21 }, (_, y) => `EXDATE;TZID="${tzid(z)}":${stamp(Date.UTC(2005, 0, 4 + 7 * z + 364 * y, 10))}`))).flat();
+    const weekly = (since: number) => (tzid: (z: number) => string) =>
+      Array.from({ length: 100 }, (_, z) =>
+        vevent(`w${z}`, `DTSTART;TZID="${tzid(z)}":${stamp(Date.UTC(since, 0, 4 + 7 * z, 10))}`, "DURATION:PT1H", "RRULE:FREQ=WEEKLY", ...Array.from({ length: 2026 - since }, (_, y) => `EXDATE;TZID="${tzid(z)}":${stamp(Date.UTC(since, 0, 4 + 7 * z + 364 * y, 10))}`)),
+      ).flat();
     const custom = (z: number) => `Customized Time Zone ${z}`;
     const year = { ...sync, from: new Date("2026-01-01T00:00:00Z"), limit: 10_000 };
-    for (const [named, events] of [[true, meetings], [false, weekly]] as const) {
-      const result = timed(ics(...Array.from({ length: 100 }, (_, z) => zone(z, named)).flat(), ...events(custom)), year);
-      expect(result.ms).toBeLessThan(1000);
-      expect(result.truncated).toBe(false);
-      expect(result.events.length).toBeGreaterThan(named ? 100 : 3000);
-      expect(result.events).toEqual(parseIcs(ics(...events(() => "America/New_York")), year).events);
+    for (const [named, events] of [[true, meetings], [false, weekly(2005)], [true, weekly(2005)], [true, weekly(1990)]] as const) {
+      for (const options of [sync, year]) {
+        const result = timed(ics(...Array.from({ length: 100 }, (_, z) => zone(z, named)).flat(), ...events(custom)), options);
+        expect(result.ms).toBeLessThan(1000);
+        expect(result.truncated).toBe(false);
+        expect(result.events.length).toBeGreaterThan(events === meetings ? 10 : 2000);
+        expect(result.events).toEqual(parseIcs(ics(...events(() => "America/New_York")), options).events);
+      }
     }
+    // 1200 of them, more than the zones a file may have: they say the same, so they're read once,
+    // and none is read in the company's zone (6 hours off in Berlin).
+    const berlin = { ...sync, zone: "Europe/Berlin" };
+    const many = (tzid: (z: number) => string) => Array.from({ length: 1200 }, (_, z) => vevent(`m${z}`, `DTSTART;TZID="${tzid(z)}":${stamp(Date.UTC(2026, 9, 1, 9) + z * 3_600_000)}`, "DURATION:PT1H")).flat();
+    const outlook = timed(ics(...Array.from({ length: 1200 }, (_, z) => zone(z, false)).flat(), ...many(custom)), berlin);
+    expect(outlook.ms).toBeLessThan(1000);
+    expect(outlook.events).toEqual(parseIcs(ics(...many(() => "America/New_York")), berlin).events);
   });
 
   it("keeps dates before the year 100 to ones Postgres takes, and repeats from them as before", () => {
@@ -644,9 +670,26 @@ describe("parseIcs on feeds built to be slow, or just broken", () => {
     expect(lone.test(JSON.stringify({ name, events }))).toBe(false);
   });
 
-  it("drops halves of emoji that were in the file already", () => {
+  it("drops halves of emoji, and NULs, that were in the file already", () => {
     const { events } = parseIcs(ics(...vevent("e", "SUMMARY:Bad \ud83c half", "LOCATION:\udf89 here", "DTSTART:20261020T150000Z")), sync);
     expect(events[0]).toMatchObject({ title: "Bad  half", location: "here" });
+    // Postgres won't store a NUL either: one failed its 500-row batch, at every refresh.
+    const text = ics("X-WR-CALNAME:Cal\u0000name", ...vevent("n\u0000uid", "SUMMARY:Bad\u0000title", "LOCATION:a\u0000b", "DESCRIPTION:a\u0000", "URL:https://x.example/\u0000a", "DTSTART:20261020T150000Z"));
+    expect(parseIcs(text, sync)).toMatchObject({ name: "Calname", events: [{ key: "nuid", title: "Badtitle", location: "ab", description: "a", url: "https://x.example/a" }] });
+  });
+
+  it("reads every spelling of a zone alike, and a TZID like constructor in the company's zone", () => {
+    const start = (tzid: string) => parseIcs(ics(...vevent("x", `DTSTART;TZID=${tzid}:20261020T090000`)), sync).events.map((e) => e.start);
+    for (const tzid of ["America/New_York", "america/new_york", "AMERICA/new_YORK", "US/Eastern", "EST5EDT", '"  America/New_York "']) expect(start(tzid)).toEqual(["2026-10-20T13:00:00.000Z"]);
+    // Names Object has: they were taken for Windows names, and the events went missing.
+    for (const tzid of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) expect(start(tzid)).toEqual(["2026-10-20T14:00:00.000Z"]);
+  });
+
+  it("reads a file the same whatever its line breaks, and only the lines it uses", () => {
+    const lines = ["BEGIN:VCALENDAR", "X-WR-CALNAME:Breaks", ...vevent("x", "SUMMARY:Long", " title", "item1.URL:https://x.example/", 'X-ODD;A="a:b";B=1:value', 'DTSTART;TZID="America/Chicago":20261020T090000', "DURATION:PT1H"), "END:VCALENDAR"];
+    const crlf = parseIcs(lines.join("\r\n"), sync);
+    expect(crlf).toMatchObject({ name: "Breaks", events: [{ title: "Longtitle", url: "https://x.example/", start: "2026-10-20T14:00:00.000Z" }] });
+    for (const sep of ["\n", "\r"]) expect(parseIcs(lines.join(sep), sync)).toEqual(crlf);
   });
 
   it("keeps events that last for years, and ends absurd ones at the last date there is instead of failing the calendar", () => {
@@ -684,6 +727,88 @@ describe("parseIcs on feeds built to be slow, or just broken", () => {
       ["secondment", "2021-03-01T14:00:00.000Z", "2028-03-01T22:00:00.000Z"],
       ["term|2021-09-01T13:00:00.000Z", "2021-09-01T13:00:00.000Z", "2031-08-20T13:00:00.000Z"],
     ]);
+  });
+
+  it("reads a VTIMEZONE once, however its TZID is spaced", () => {
+    // A 1 MB zone named by 1000 TZIDs that differ only in spaces: it was read again for each, which
+    // took 4 seconds (45 for 9 MB).
+    const zone = ["BEGIN:VTIMEZONE", "TZID:Z", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0100", "TZOFFSETTO:+0100", ...Array.from({ length: 20_000 }, (_, i) => `X-PAD-${i}:${"a".repeat(40)}`), "END:STANDARD", "END:VTIMEZONE"];
+    const events = Array.from({ length: 1000 }, (_, i) => vevent(`e${i}`, `DTSTART;TZID="${" ".repeat(i % 40)}Z${" ".repeat(Math.floor(i / 40))}":20261020T100000`, "DURATION:PT1H")).flat();
+    for (const options of [sync, nameOnly]) {
+      const result = timed(ics(...zone, ...events), options);
+      expect(result.ms).toBeLessThan(1000);
+      if (options === sync) expect(new Set(result.events.map((e) => e.start))).toEqual(new Set(["2026-10-20T09:00:00.000Z"]));
+    }
+  });
+
+  it("converts only the times that can matter, however many a series has", () => {
+    // Values in a zone on each of 100,000 days long ago: each was converted on its own day, and a
+    // file of them took up to 10 seconds. Only those near the window can matter.
+    const days = Array.from({ length: 100_000 }, (_, i) => stamp(Date.UTC(1700, 0, 1, 9) + i * DAY));
+    const daily = (...lines: string[]) => vevent("s", "DTSTART;TZID=America/Chicago:20261001T090000", "DURATION:PT1H", ...lines);
+    // (Too many lines to pass to ics() one by one.)
+    const starts = (lines: string[]) => {
+      const result = timed(["BEGIN:VCALENDAR", ...lines, "END:VCALENDAR"].join("\r\n"));
+      expect(result.ms).toBeLessThan(1000);
+      expect(result.truncated).toBe(false);
+      return result.events.map((e) => e.start);
+    };
+    // Excluded (the one in the window still is), or added.
+    const excluded = starts(daily("RRULE:FREQ=DAILY", `EXDATE;TZID=America/Chicago:${days.join(",")},20261020T090000`));
+    expect(excluded).toHaveLength(196);
+    expect(excluded).not.toContain("2026-10-20T14:00:00.000Z");
+    expect(starts(daily(`RDATE;TZID=Europe/Berlin:${days.join(",")},20261020T160000`))).toEqual(["2026-10-01T14:00:00.000Z", "2026-10-20T14:00:00.000Z"]);
+    // Moved long ago, and one moved within the window.
+    const moved = starts([
+      ...daily("RRULE:FREQ=DAILY"),
+      ...days.slice(0, 30_000).flatMap((d) => vevent("s", `RECURRENCE-ID;TZID=Europe/Berlin:${d}`, `DTSTART;TZID=Asia/Tokyo:${d}`)),
+      ...vevent("s", "RECURRENCE-ID;TZID=America/Chicago:20261020T090000", "DTSTART;TZID=America/Chicago:20261021T120000", "DURATION:PT1H"),
+    ]);
+    expect(moved).toHaveLength(197);
+    expect(moved).toContain("2026-10-21T17:00:00.000Z");
+    expect(moved).not.toContain("2026-10-20T14:00:00.000Z");
+    // Series that ran out, ended or can't be read, each starting on its own day and ending in another zone.
+    const rules = ["RRULE:FREQ=WEEKLY;COUNT=2", "RRULE:FREQ=DAILY;UNTIL=17000101T000000Z", "RRULE:X"];
+    expect(starts([...days.slice(0, 30_000).flatMap((d, i) => vevent(`e${i}`, `DTSTART;TZID=America/Chicago:${d}`, `DTEND;TZID=Asia/Tokyo:${d}`, rules[i % 3]!)), ...plain])).toEqual(["2026-10-20T15:00:00.000Z"]);
+
+    // The same instance moved twice: the last one written counts, even when it's far from the window.
+    const series = vevent("t", "DTSTART;TZID=America/Chicago:20200101T090000", "DURATION:PT1H", "RRULE:FREQ=DAILY;COUNT=3");
+    const into = vevent("t", "RECURRENCE-ID;TZID=America/Chicago:20200102T090000", "DTSTART;TZID=America/Chicago:20261020T090000", "DURATION:PT1H");
+    const away = vevent("t", "RECURRENCE-ID:20200102T150000Z", "STATUS:CANCELLED", "DTSTART:20200102T150000Z");
+    expect(parseIcs(ics(...series, ...into, ...away), sync).events).toEqual([]);
+    expect(parseIcs(ics(...series, ...away, ...into), sync).events.map((e) => [e.key, e.start])).toEqual([["t|2020-01-02T15:00:00.000Z", "2026-10-20T14:00:00.000Z"]]);
+  });
+
+  it("keeps every key short, whatever the UID", () => {
+    // A 2 MB UID on an hourly series: its 1500 keys of 2 MB each took 13 GB to store, and the
+    // server ran out of memory.
+    const uid = "u".repeat(2_000_000);
+    const hourly = (id: string) => ics(...vevent(id, "DTSTART:20261001T000000Z", `RRULE:FREQ=DAILY;BYHOUR=${hours(24)}`));
+    const result = timed(hourly(uid));
+    expect(result.ms).toBeLessThan(1000);
+    const keys = result.events.map((e) => e.key);
+    expect(keys).toHaveLength(1500);
+    expect(new Set(keys).size).toBe(1500);
+    expect(keys.every((k) => k.startsWith(`${"u".repeat(200)}#`) && k.length < 250)).toBe(true);
+    // The same each time, apart from another UID's, and a UID of 1000 characters is kept as it is.
+    expect(parseIcs(hourly(uid), sync).events[0]!.key).toBe(keys[0]);
+    expect(parseIcs(hourly(`${uid}v`), sync).events[0]!.key).not.toBe(keys[0]);
+    expect(parseIcs(hourly("k".repeat(1000)), sync).events[0]!.key).toBe(`${"k".repeat(1000)}|2026-10-01T00:00:00.000Z`);
+  });
+
+  it("keeps a file's repeats and zones to about the time they're charged", () => {
+    // Every week, day and position of a year, in 130 series and in a VTIMEZONE's 60 parts, with 5000
+    // yearly series in that zone since 1601: BYSETPOS and a zone's onsets were charged a part of
+    // what they take, and this took 1.5 seconds.
+    const weeks = [...Array.from({ length: 53 }, (_, i) => i + 1), ...Array.from({ length: 53 }, (_, i) => -(i + 1))].join(",");
+    const every = `BYWEEKNO=${weeks};BYDAY=MO,TU,WE,TH,FR,SA,SU;BYSETPOS=${[...Array.from({ length: 366 }, (_, i) => i + 1), ...Array.from({ length: 366 }, (_, i) => -(i + 1))].join(",")}`;
+    const series = Array.from({ length: 130 }, (_, i) => vevent(`s${i}`, "DTSTART:20000101T090000Z", "DURATION:PT30M", `RRULE:FREQ=YEARLY;${every}`)).flat();
+    const parts = Array.from({ length: 60 }, (_, p) => ["BEGIN:STANDARD", "DTSTART:16010101T000000", `TZOFFSETFROM:+0${p % 10}00`, `TZOFFSETTO:+0${(p + 1) % 10}00`, `RRULE:FREQ=YEARLY;${every}`, "END:STANDARD"]).flat();
+    const yearly = Array.from({ length: 5000 }, (_, i) => vevent(`y${i}`, `DTSTART;TZID=T:${stamp(Date.UTC(1601 + (i % 400), 0, 1, 9))}`, `DTEND;TZID=T:${stamp(Date.UTC(1601 + (i % 400), 0, 1, 10))}`, "RRULE:FREQ=YEARLY")).flat();
+    const result = timed(ics(...series, "BEGIN:VTIMEZONE", "TZID:T", ...parts, "END:VTIMEZONE", ...yearly, ...plain));
+    expect(result.ms).toBeLessThan(1000);
+    expect(result.truncated).toBe(true);
+    expect(result.events.map((e) => e.key)).toContain("plain");
   });
 
   it("leaves out an event it can't read and keeps the rest", () => {

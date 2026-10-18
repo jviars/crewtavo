@@ -9,8 +9,9 @@
  *
  * A feed is written by someone else and read on the server's only thread, so the work is bounded:
  * rules that repeat more than hourly are ignored, repeats are worked out from just before the
- * window rather than from a start years ago, a file gets a fixed amount of work for its repeats,
- * and an event that can't be read is left out instead of failing the whole calendar.
+ * window rather than from a start years ago, times far from the window aren't converted, a file
+ * gets a fixed amount of work for its repeats and for its time zones, and an event that can't be
+ * read is left out instead of failing the whole calendar.
  */
 import { RRule, type Options, type Weekday } from "rrule";
 import { addDays, zoneOffsetMs } from "./time";
@@ -59,25 +60,28 @@ const FIRST_DAY = new Date(0).setUTCFullYear(1, 0, 1);
 const END_OF_TIME = Date.UTC(9999, 11, 31);
 /** A repeat that steps further than a century at a time isn't one (INTERVAL=999999999999). */
 const MAX_STEP = 100 * 366 * DAY;
-/** Different time zones one file may use; real calendars use a handful. */
+/** Zone names to ask Intl about, and VTIMEZONEs to read, in one file; real calendars use a handful. */
 const MAX_ZONES = 1000;
+/** A UID longer than this (real ones are well under 300) is shortened in keys, once for all its instances. */
+const MAX_UID = 1000;
 
 /**
- * Work allowed for repeats, roughly in microseconds: for a whole file's events, for one event's
- * repeats, for a whole file's VTIMEZONE rules and for one of them. Zones have their own, so an
- * event's times don't depend on how many repeats came before it. Real calendars use a small part
- * of it. A file built to keep the server busy runs out, and keeps what was found by then.
+ * Work allowed, in units that take a microsecond or less: for a whole file's repeats, for one
+ * event's, for a whole file's time zones (offsets looked up, and VTIMEZONE rules) and for one
+ * VTIMEZONE rule. Zones have their own, so an event's times don't depend on how many repeats came
+ * before it. Real calendars use a part of it (5000 series about 300,000; events in 40 zones about
+ * 70,000). A file built to keep the server busy runs out, and keeps what was found by then.
  */
-const FILE_WORK = 300_000;
+const FILE_WORK = 400_000;
 const SERIES_WORK = 50_000;
-const ZONE_WORK = 300_000;
+const ZONE_WORK = 200_000;
 const OBSERVANCE_WORK = 20_000;
 /** Setting up a walk through a rule costs about as much as a period of it. */
 const WALK_COST = 5;
 
 interface Work {
   left: number;
-  /** Some repeats were left out because the work ran out. */
+  /** The work ran out: some repeats were left out, or some times worked out roughly. */
   short?: boolean;
 }
 
@@ -114,7 +118,40 @@ function splitOutsideQuotes(text: string, sep: string): string[] {
 /** Most lines have no parameters; they share this rather than each making an empty one. */
 const NO_PARAMS: Record<string, string> = Object.freeze({});
 
+/** The properties read here. Any other line is left out before its parameters are split up. */
+const KNOWN = new Set([
+  "BEGIN", "END", "UID", "DTSTART", "DTEND", "DURATION", "RRULE", "RDATE", "EXDATE", "RECURRENCE-ID", "SUMMARY", "LOCATION", "DESCRIPTION", "URL",
+  "STATUS", "TRANSP", "X-MICROSOFT-CDO-BUSYSTATUS", "X-WR-CALNAME", "TZID", "X-LIC-LOCATION", "TZOFFSETFROM", "TZOFFSETTO",
+]);
+
+// Apple writes grouped names ("item1.URL"); the group doesn't matter here.
+const propName = (raw: string) => {
+  const name = raw.trim().toUpperCase();
+  return name.includes(".") ? name.replace(/^[^.]*\./, "") : name;
+};
+
 function parseLine(line: string): Prop | null {
+  // With no quote before it, a name ends at the first ";" or ":". A line nothing here reads is left
+  // out there, and one with no parameters (most of them) ends its name at the colon.
+  let named = line.indexOf(":");
+  const semi = line.indexOf(";");
+  if (semi >= 0 && (named < 0 || semi < named)) named = semi;
+  if (named < 1) return null;
+  if (line.lastIndexOf('"', named) < 0) {
+    const name = propName(line.slice(0, named));
+    if (!KNOWN.has(name)) return null;
+    if (line[named] === ":") return { name, params: NO_PARAMS, value: line.slice(named + 1) };
+    // With no quotes, the parameters end at the next colon.
+    const colon = line.indexOf(":", named);
+    if (colon > 0 && line.lastIndexOf('"', colon) < 0) {
+      const params: Record<string, string> = {};
+      for (const p of line.slice(named + 1, colon).split(";")) {
+        const eq = p.indexOf("=");
+        if (eq > 0) params[p.slice(0, eq).trim().toUpperCase()] = p.slice(eq + 1).trim();
+      }
+      return { name, params, value: line.slice(colon + 1) };
+    }
+  }
   let quoted = false;
   let colon = -1;
   for (let i = 0; i < line.length; i++) {
@@ -127,21 +164,24 @@ function parseLine(line: string): Prop | null {
   if (colon < 1) return null;
   const head = line.slice(0, colon);
   const [rawName = "", ...rawParams] = head.includes(";") ? splitOutsideQuotes(head, ";") : [head];
+  const name = propName(rawName);
+  if (!KNOWN.has(name)) return null;
   const params: Record<string, string> = rawParams.length ? {} : NO_PARAMS;
   for (const p of rawParams) {
     const eq = p.indexOf("=");
     if (eq > 0) params[p.slice(0, eq).trim().toUpperCase()] = p.slice(eq + 1).trim().replace(/^"(.*)"$/, "$1");
   }
-  const name = rawName.trim().toUpperCase();
-  // Apple writes grouped names ("item1.URL"); the group doesn't matter here.
-  return { name: name.includes(".") ? name.replace(/^[^.]*\./, "") : name, params, value: line.slice(colon + 1) };
+  return { name, params, value: line.slice(colon + 1) };
 }
 
-/** Half of an emoji (a surrogate pair) on its own: Postgres won't take the JSON it ends up in. */
-const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+/** A NUL, or half of an emoji (a surrogate pair) on its own: Postgres won't take the JSON either ends up in. */
+const UNSTORABLE = /\u0000|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 function parseComponents(text: string): Component[] {
-  const lines = text.replace(LONE_SURROGATE, "").replace(/^﻿/, "").replace(/\r\n|\r/g, "\n").replace(/\n[ \t]/g, "").split("\n");
+  // Every line break as "\n" (split and joined: a regex takes most of a second over millions of them).
+  let unix = text.replace(UNSTORABLE, "").replace(/^﻿/, "");
+  if (unix.includes("\r")) unix = unix.split("\r\n").join("\n").split("\r").join("\n");
+  const lines = unix.replace(/\n[ \t]/g, "").split("\n");
   const root: Component = { type: "ROOT", props: [], children: [] };
   const stack: Component[] = [root];
   for (const line of lines) {
@@ -264,23 +304,29 @@ interface Zone {
 
 const UTC_ZONE: Zone = { toUtc: (w) => w, toWall: (u) => u };
 
-const validZones = new Map<string, boolean>();
-export function isIanaZone(name: string): boolean {
+const zoneNames = new Map<string, string | null>();
+/**
+ * The name Intl gives a zone, or null when it isn't one. Every spelling of a zone has the same
+ * offsets ("america/chicago" is America/Chicago, US/Central too), and going by one name keeps a
+ * file from making a formatter for each of a thousand spellings, kept for good (in time.ts).
+ */
+function zoneName(name: string): string | null {
   // No zone name has a space in it ("Customized Time Zone 12"), and asking Intl about one is slow.
-  if (/\s/.test(name)) return false;
-  let ok = validZones.get(name);
-  if (ok === undefined) {
+  if (/\s/.test(name)) return null;
+  let canonical = zoneNames.get(name);
+  if (canonical === undefined) {
     try {
-      new Intl.DateTimeFormat("en-US", { timeZone: name });
-      ok = true;
+      canonical = new Intl.DateTimeFormat("en-US", { timeZone: name }).resolvedOptions().timeZone;
     } catch {
-      ok = false;
+      canonical = null;
     }
-    if (validZones.size >= 10_000) validZones.clear();
-    validZones.set(name, ok);
+    if (zoneNames.size >= 10_000) zoneNames.clear();
+    zoneNames.set(name, canonical);
   }
-  return ok;
+  return canonical;
 }
+
+export const isIanaZone = (name: string): boolean => zoneName(name) !== null;
 
 /**
  * A zone's offset at an instant. Every zone was on its local mean time until well after 1800, and
@@ -301,22 +347,65 @@ function ianaZone(name: string, offset = (utc: number) => offsetAt(utc, name)): 
   };
 }
 
+/** Looking up an offset in Intl takes about 6 microseconds. */
+const LOOKUP_COST = 6;
+
+/** A day's offsets: the same all day, or a change at a second (`at`), or (twice in a day) null. */
+type DayOffsets = number | { at: number; before: number; after: number } | null;
+
 /**
  * A zone's offset, looked up once a day: it changes a couple of times a year, so a day with the
- * same offset at both ends has it all day. A day with a change in it is looked up exactly.
+ * same offset at its start and the next day's has it all day, and a day with a change in it is
+ * searched once for the second it changes. Each lookup is charged to `work`. Once that has run out
+ * (only a file built to be slow gets there), a day not looked up yet takes the last offset found,
+ * and the file says it left something out.
  */
-function dailyOffsets(name: string): (utc: number) => number {
-  const days = new Map<number, number | null>();
+function dailyOffsets(name: string, work: Work): (utc: number) => number {
+  const days = new Map<number, DayOffsets>();
+  // Midnights, each the end of one day and the start of the next.
+  const midnights = new Map<number, number>();
+  let last = 0;
+  const ask = (utc: number) => {
+    work.left -= LOOKUP_COST;
+    return offsetAt(utc, name);
+  };
+  const midnight = (day: number) => {
+    let offset = midnights.get(day);
+    if (offset === undefined) midnights.set(day, (offset = ask(day * DAY)));
+    return offset;
+  };
   return (utc) => {
     const day = Math.floor(utc / DAY);
-    let offset = days.get(day);
-    if (offset === undefined) {
-      const start = offsetAt(day * DAY, name);
-      offset = start === offsetAt(day * DAY + DAY - 1000, name) ? start : null;
-      if (days.size >= 20_000) days.clear();
-      days.set(day, offset);
+    let known = days.get(day);
+    if (known === undefined) {
+      if (work.left <= 0) {
+        work.short = true;
+        return last;
+      }
+      if (days.size >= 20_000) {
+        days.clear();
+        midnights.clear();
+      }
+      // Intl works in whole seconds, and so does a change.
+      let before = day * DAY;
+      let after = before + DAY;
+      const start = midnight(day);
+      const end = midnight(day + 1);
+      if (start === end) known = start;
+      else {
+        let then = end;
+        while (after - before > 1000) {
+          const mid = before + Math.floor((after - before) / 2000) * 1000;
+          const offset = ask(mid);
+          if (offset === start) before = mid;
+          else [after, then] = [mid, offset];
+        }
+        known = then === end ? { at: after, before: start, after: end } : null;
+      }
+      days.set(day, known);
     }
-    return offset ?? offsetAt(utc, name);
+    last = known === null ? ask(utc) : typeof known === "number" ? known : Math.floor(utc / 1000) * 1000 < known.at ? known.before : known.after;
+    return last;
   };
 }
 
@@ -378,16 +467,50 @@ const WINDOWS_ZONES: Record<string, string> = {
   "New Zealand Standard Time": "Pacific/Auckland",
 };
 
-interface Observance {
+/**
+ * A VTIMEZONE rule's onsets (wall) that can fall in each year, with the days either side: worked
+ * out the first time a year is needed.
+ */
+interface Onsets {
+  rule: Rule | null;
+  years: Map<number, number[]>;
+  work: Work;
+}
+
+/** A file's VTIMEZONE rules: their onsets by rule, start and offset, and their texts as read. */
+interface ZoneRules {
+  onsets: Map<string, Onsets>;
+  texts: RuleTexts;
+}
+
+/**
+ * The same rule from the same start and offset has the same onsets in every zone of a file, and
+ * they're worked out once: Outlook writes the same two rules in each "Customized Time Zone".
+ */
+function ruleOnsets(rules: ZoneRules, rrule: string, wall: number, from: number, work: Work): Onsets {
+  // The offset before only moves a UTC UNTIL.
+  const key = `${wall} ${/UNTIL=/i.test(rrule) ? from : ""} ${rrule}`;
+  let onsets = rules.onsets.get(key);
+  if (!onsets) {
+    let rule = work.left > 0 ? buildRule(rrule, wall, (utc) => utc + from, rules.texts) : null;
+    if (rule && rule.count !== null) {
+      // Where a COUNT runs out is an UNTIL, and with one, onsets are found without walking from DTSTART.
+      const all = expand(rule, rule.dtstart, END_OF_TIME, rule.count, work, { left: OBSERVANCE_WORK });
+      if (!all.length) rule = null;
+      else rule = { ...rule, count: null, until: all.length === rule.count ? all[all.length - 1]! : rule.until };
+    }
+    onsets = { rule, years: new Map(), work: { left: OBSERVANCE_WORK } };
+    rules.onsets.set(key, onsets);
+  }
+  return onsets;
+}
+
+interface Observance extends Onsets {
   start: number; // wall time of the first onset
   from: number;
   to: number;
-  rule: Rule | null;
   /** DTSTART and RDATE onsets (wall), in order. */
   fixed: number[];
-  /** The rule's onsets in each year (wall), worked out the first time a year is needed. */
-  years: Map<number, number[]>;
-  work: Work;
 }
 
 /**
@@ -419,7 +542,7 @@ function changeAt(changes: Change[], moment: number): Change | null {
 const later = (a: Change | null, b: Change | null) => (!a || (b && (b.at > a.at || (b.at === a.at && b.rank < a.rank))) ? b : a);
 
 /** A zone from the file's own VTIMEZONE: the latest STANDARD or DAYLIGHT onset decides the offset. */
-function vtimezone(component: Component, work: Work): Zone | null {
+function vtimezone(component: Component, work: Work, rules: ZoneRules): Zone | null {
   const observances: Observance[] = [];
   for (const c of component.children) {
     if (c.type !== "STANDARD" && c.type !== "DAYLIGHT") continue;
@@ -428,31 +551,27 @@ function vtimezone(component: Component, work: Work): Zone | null {
     const wall = start.kind === "utc" ? start.ms : start.wall;
     const from = readOffset(first(c, "TZOFFSETFROM")?.value);
     const to = readOffset(first(c, "TZOFFSETTO")?.value);
-    const own: Work = { left: OBSERVANCE_WORK };
     const rrule = first(c, "RRULE")?.value;
-    let rule = rrule ? buildRule(rrule, wall, (utc) => utc + from) : null;
-    if (rule && rule.count !== null) {
-      // Where a COUNT runs out is an UNTIL, and with one, onsets are found without walking from DTSTART.
-      const onsets = expand(rule, rule.dtstart, END_OF_TIME, rule.count, work, { left: OBSERVANCE_WORK });
-      if (!onsets.length) rule = null;
-      else rule = { ...rule, count: null, until: onsets.length === rule.count ? onsets[onsets.length - 1]! : rule.until };
-    }
+    const onsets = rrule ? ruleOnsets(rules, rrule, wall, from, work) : { rule: null, years: new Map(), work: { left: 0 } };
     const dates = readStamps(all(c, "RDATE")).map((s) => (s.kind === "local" ? s.wall : s.kind === "utc" ? s.ms + from : dateMs(s.date)));
     // In order, they go into the zone's list of changes quickly. A zone changes a few times a year,
     // so more than an event's repeats is a file built to be slow: the latest are kept.
-    observances.push({ start: wall, from, to, rule, fixed: [wall, ...dates].sort((a, b) => a - b).slice(-MAX_REPEATS), years: new Map(), work: own });
+    observances.push({ ...onsets, start: wall, from, to, fixed: [wall, ...dates].sort((a, b) => a - b).slice(-MAX_REPEATS) });
   }
   if (!observances.length) return null;
   const earliest = observances.reduce((a, b) => (b.start < a.start ? b : a));
   const ruled = observances.flatMap((o, i) => (o.rule ? [{ o, rule: o.rule, rank: 2 * i + 1 }] : []));
   const firstYear = ruled.reduce((year, { rule }) => Math.min(year, yearOf(rule.dtstart)), Infinity) - 1;
 
-  /** A rule's onsets in a year (wall times), or null when the work ran out before the year was done. */
+  /**
+   * A rule's onsets (wall times) that can fall in a year: an onset falls up to 100 hours either side
+   * of its wall time, so those in the days either side too. Null when the work ran out first.
+   */
   const onsetsIn = (o: Observance, rule: Rule, year: number): number[] | null => {
     let onsets = o.years.get(year);
     if (!onsets) {
       if (o.work.left <= 0 || work.left <= 0) return null;
-      onsets = expand(rule, yearStart(year), yearStart(year + 1) - 1, Infinity, work, o.work);
+      onsets = expand(rule, yearStart(year) - 5 * DAY, yearStart(year + 1) + 5 * DAY, Infinity, work, o.work);
       if (o.work.left <= 0 || work.left <= 0) return null;
       o.years.set(year, onsets);
     }
@@ -473,24 +592,26 @@ function vtimezone(component: Component, work: Work): Zone | null {
     const changesIn = (year: number): Change[] | null => {
       let changes = years.get(year);
       if (changes !== undefined) return changes;
-      // Each rule is looked at, whether or not it has onsets then.
+      // Each rule is looked at, whether or not it has onsets then, and so is each onset.
       work.left -= 3 * ruled.length;
       changes = work.left > 0 ? [] : null;
       const lo = yearStart(year);
       const hi = yearStart(year + 1);
       for (const { o, rule, rank } of ruled) {
-        // An onset falls a few hours either side of its wall time, so it can be in the year before or after.
-        for (let y = year - 1; y <= year + 1 && changes; y++) {
-          const onsets = onsetsIn(o, rule, y);
-          if (!onsets) changes = null;
-          else
-            for (const onset of onsets) {
-              const at = onset - shift(o);
-              if (at >= lo && at < hi) changes.push({ at, to: o.to, rank });
-            }
+        const onsets = changes && onsetsIn(o, rule, year);
+        if (!onsets) changes = null;
+        else {
+          work.left -= onsets.length;
+          for (const onset of onsets) {
+            const at = onset - shift(o);
+            if (at >= lo && at < hi) changes!.push({ at, to: o.to, rank });
+          }
+          if (work.left <= 0) changes = null;
         }
       }
-      if (!changes) work.short = true;
+      // Putting them in order takes a while when there are many.
+      if (changes) work.left -= (changes.length * Math.log2(changes.length + 1)) / 4;
+      else work.short = true;
       years.set(year, changes && inOrder(changes));
       return changes;
     };
@@ -545,48 +666,70 @@ function vtimezone(component: Component, work: Work): Zone | null {
   };
 }
 
+/** What a VTIMEZONE says about its offsets, leaving out its names (TZNAME) and notes (X- lines). */
+const zoneContent = (c: Component) =>
+  JSON.stringify(
+    c.children
+      .filter((o) => o.type === "STANDARD" || o.type === "DAYLIGHT")
+      .map((o) => [first(o, "DTSTART")?.value, first(o, "TZOFFSETFROM")?.value, first(o, "TZOFFSETTO")?.value, first(o, "RRULE")?.value, all(o, "RDATE").map((p) => [p.params.VALUE === "PERIOD", p.value])]),
+  );
+
 function zoneResolver(components: Component[], fallback: string, work: Work) {
   const definitions = new Map<string, Component>();
   for (const c of components) if (c.type === "VTIMEZONE") {
     const id = first(c, "TZID")?.value.trim();
     if (id) definitions.set(id, c);
   }
+  // Zones by TZID, by the name Intl gives them, and by what a VTIMEZONE says: Outlook writes the
+  // same zone again and again ("Customized Time Zone 1", "2"...), and each is read once.
   const cache = new Map<string, Zone>();
-  // Outlook writes the same rules again and again ("Customized Time Zone 1", "2"...): they're read once.
+  const named = new Map<string, Zone>();
   const read = new Map<string, Zone | null>();
-  const iana = (name: string) => ianaZone(name, dailyOffsets(name));
-  const fallbackZone = isIanaZone(fallback) ? iana(fallback) : UTC_ZONE;
+  const rules: ZoneRules = { onsets: new Map(), texts: { read: new Map(), work } };
+  const iana = (name: string) => {
+    let zone = named.get(name);
+    if (!zone) named.set(name, (zone = ianaZone(name, dailyOffsets(name, work))));
+    return zone;
+  };
+  // Asking Intl about a name and reading a VTIMEZONE take a while. A file gets MAX_ZONES of them,
+  // more than any real calendar needs; zones past that are read in the company's zone.
+  let asked = 0;
+  const intlName = (name: string | null | undefined) => (!name || /\s/.test(name) ? null : asked++ < MAX_ZONES ? zoneName(name) : null);
+  const readZone = (definition: Component): Zone | null => {
+    const content = zoneContent(definition);
+    let zone = read.get(content);
+    if (zone === undefined) {
+      if (asked++ >= MAX_ZONES) return null;
+      try {
+        zone = vtimezone(definition, work, rules);
+      } catch {
+        zone = null; // read as if the file didn't define it
+      }
+      read.set(content, zone);
+    }
+    return zone;
+  };
+  const fallbackName = zoneName(fallback);
+  const fallbackZone = fallbackName ? iana(fallbackName) : UTC_ZONE;
   return (tzid: string | null): Zone => {
     if (!tzid) return fallbackZone;
-    const known = cache.get(tzid);
-    if (known) return known;
-    // More zones than any real calendar uses: the rest are read in the company's zone.
-    if (cache.size >= MAX_ZONES) return fallbackZone;
+    // TZID="  Z " is Z, however it's spaced.
     const id = tzid.trim();
+    const known = cache.get(id);
+    if (known) return known;
     const definition = definitions.get(id);
     const location = definition && first(definition, "X-LIC-LOCATION")?.value.trim();
-    // A name ending in one ("/mozilla.org/20050126_1/America/New_York"). The match never starts
-    // just after a letter, and saying so keeps a long run of letters from taking ages.
-    const pattern = /(?<![A-Za-z])([A-Za-z]+\/[A-Za-z_+-]+(?:\/[A-Za-z_+-]+)?)$/.exec(id)?.[1];
-    let zone: Zone | null = null;
-    if (isIanaZone(id)) zone = iana(id);
-    else if (WINDOWS_ZONES[id]) zone = iana(WINDOWS_ZONES[id]!);
-    else if (location && isIanaZone(location)) zone = iana(location);
-    else if (definition) {
-      const parts = JSON.stringify(definition.children.map((c) => [c.type, c.props]));
-      if (read.has(parts)) zone = read.get(parts)!;
-      else {
-        try {
-          zone = vtimezone(definition, work);
-        } catch {
-          zone = null; // read as if the file didn't define it
-        }
-        read.set(parts, zone);
-      }
+    // Not WINDOWS_ZONES[id]: TZID=constructor would find Object.
+    const name = intlName(id) ?? (Object.hasOwn(WINDOWS_ZONES, id) ? zoneName(WINDOWS_ZONES[id]!) : null) ?? intlName(location);
+    let zone = name ? iana(name) : definition ? readZone(definition) : null;
+    if (!zone) {
+      // A name ending in one ("/mozilla.org/20050126_1/America/New_York"). The match never starts
+      // just after a letter, and saying so keeps a long run of letters from taking ages.
+      const ending = intlName(/(?<![A-Za-z])([A-Za-z]+\/[A-Za-z_+-]+(?:\/[A-Za-z_+-]+)?)$/.exec(id)?.[1]);
+      if (ending) zone = iana(ending);
     }
-    if (!zone && pattern && isIanaZone(pattern)) zone = iana(pattern);
     zone ??= fallbackZone;
-    cache.set(tzid, zone);
+    cache.set(id, zone);
     return zone;
   };
 }
@@ -632,14 +775,62 @@ interface Rule {
   each: number | null;
   /** Roughly what stepping through one period costs, in the same units as the work allowed. */
   cost: number;
+  /** The same instances, for a daily rule that picks its days by month and the like, a year at a time. */
+  yearly?: Rule;
 }
+
+/** The days of the week, Monday first, without a number in front. */
+const WEEK = [RRule.MO, RRule.TU, RRule.WE, RRule.TH, RRule.FR, RRule.SA, RRule.SU];
 
 /**
  * An RRULE expanded in wall-clock time: dtstart is the local start as if it were UTC, so "every
  * Monday at 9" stays at 9 across daylight-saving changes. A UTC UNTIL is moved into the same frame.
  * Calendars repeat daily at most, a few times a day; faster rules aren't used.
  */
-function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) => number): Rule | null {
+function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) => number, texts: RuleTexts): Rule | null {
+  let read = texts.read.get(raw);
+  if (read === undefined) {
+    texts.work.left -= RULE_COST;
+    read = readRule(raw);
+    texts.read.set(raw, read);
+  }
+  if (!read) return null;
+  const { options, until: stamp, perDay } = read;
+  let untilWall: number | null = null;
+  if (stamp?.kind === "utc") untilWall = untilToWall(stamp.ms);
+  else if (stamp?.kind === "local") untilWall = stamp.wall;
+  else if (stamp?.kind === "date") untilWall = dateMs(stamp.date) + DAY - 1000; // through the end of that day
+  if (Number.isNaN(dtstartWall) || Number.isNaN(untilWall)) return null; // a date like the 45th of the 13th month
+  const rule = ruleOf(options, dtstartWall, untilWall, perDay);
+  // A daily rule with a COUNT that picks its days by month, day of the month or of the year, or
+  // week number, would be walked from DTSTART a day at a time. rrule picks a year's days with the
+  // same lists, so a yearly rule has the same instances in the same order, a year at a time.
+  if (rule.freq === RRule.DAILY && rule.interval === 1 && rule.count !== null && rule.each === null && !size(options.bysetpos)) {
+    const weekdays = (options.byweekday ?? []) as Weekday[];
+    // A yearly rule picks DTSTART's day of the month when no list picks days; every day of the week is every day.
+    const picked = weekdays.length || size(options.bymonthday) || size(options.byyearday) || size(options.byweekno);
+    const byweekday = weekdays.length ? [...new Set(weekdays.map((d) => d.weekday))].map((d) => WEEK[d]!) : picked ? options.byweekday : WEEK;
+    rule.yearly = ruleOf({ ...options, freq: RRule.YEARLY, byweekday }, dtstartWall, untilWall, perDay);
+  }
+  return rule;
+}
+
+/** A rule's text, read and checked: the same for every event that has it. */
+interface RuleText {
+  options: Partial<Options>;
+  until: Stamp | null;
+  /** Instances on each day it falls on: one for each BYHOUR, BYMINUTE and BYSECOND together. */
+  perDay: number;
+}
+
+/** Each rule text a file has is read once, for a few microseconds of its work. */
+interface RuleTexts {
+  read: Map<string, RuleText | null>;
+  work: Work;
+}
+const RULE_COST = 4;
+
+function readRule(raw: string): RuleText | null {
   const parts = raw
     .replace(/^RRULE:/i, "")
     .split(";")
@@ -647,15 +838,8 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
     .filter((p) => RULE_PARTS.has(p.split("=")[0]!.toUpperCase()));
   // RRule goes by the last FREQ when there are several, so there must be just one.
   if (parts.filter((p) => /^FREQ=/i.test(p)).length !== 1) return null;
-  let untilWall: number | null = null;
   const untilPart = parts.find((p) => /^UNTIL=/i.test(p));
-  if (untilPart) {
-    const stamp = readValue(untilPart.slice(6), null);
-    if (stamp?.kind === "utc") untilWall = untilToWall(stamp.ms);
-    else if (stamp?.kind === "local") untilWall = stamp.wall;
-    else if (stamp?.kind === "date") untilWall = dateMs(stamp.date) + DAY - 1000; // through the end of that day
-  }
-  if (Number.isNaN(dtstartWall) || Number.isNaN(untilWall)) return null; // a date like the 45th of the 13th month
+  const until = untilPart ? readValue(untilPart.slice(6), null) : null;
   let options: Partial<Options>;
   try {
     options = RRule.parseString(parts.filter((p) => !/^UNTIL=/i.test(p)).join(";"));
@@ -681,9 +865,15 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
     }
     options.byweekday = [...days.values()];
   }
-  // One instance for each BYHOUR, BYMINUTE and BYSECOND together on each day it falls on.
   const perDay = (size(options.byhour) || 1) * (size(options.byminute) || 1) * (size(options.bysecond) || 1);
   if (perDay > MAX_PER_DAY) return null;
+  return { options, until, perDay };
+}
+
+/** What's worked out from a rule that was read and checked. */
+function ruleOf(options: Partial<Options>, dtstartWall: number, untilWall: number | null, perDay: number): Rule {
+  const { freq = RRule.DAILY, interval = 1, count = null } = options;
+  const lists = options as Record<string, unknown>;
 
   // The days a period can have one on. Each list narrows it down; with none, it's DTSTART's day.
   // (BYDAY=2TU is one day a month, or a year in a yearly rule without BYMONTH; daily and weekly rules ignore the 2.)
@@ -713,26 +903,29 @@ function buildRule(raw: string, dtstartWall: number, untilToWall: (utc: number) 
   const most = positions.length ? Math.min(positions.filter((p) => p > 0).length, days * perDay) + positions.filter((p) => p < 0).length : days * perDay;
   const least = freq <= RRule.MONTHLY ? fewest(options, freq, dtstartWall, perDay) : 0;
   // A daily step lands on each weekday once in seven steps, unless it's a whole number of weeks.
+  // A daily rule's BYSETPOS picks from each day's times, the same ones every day.
+  const daily = freq === RRule.DAILY && positions.length ? positions.filter((p) => p > 0 && p <= perDay).length + positions.filter((p) => p < 0).length : perDay;
   let block = 1;
   let each: number | null = null;
-  if (freq >= RRule.WEEKLY && !["bymonth", "bymonthday", "byyearday", "byweekno", "bysetpos"].some((name) => size(lists[name]))) {
-    if (freq === RRule.WEEKLY || !weekdays.length) each = (plain || 1) * perDay;
+  if (freq >= RRule.WEEKLY && !["bymonth", "bymonthday", "byyearday", "byweekno"].some((name) => size(lists[name])) && (freq === RRule.DAILY || !positions.length)) {
+    if (freq === RRule.WEEKLY || !weekdays.length) each = (plain || 1) * daily;
     else {
       block = interval % 7 ? 7 : 1;
-      each = (block === 7 ? plain : weekdays.some((d) => d.weekday === (new Date(dtstartWall).getUTCDay() + 6) % 7) ? 1 : 0) * perDay;
+      each = (block === 7 ? plain : weekdays.some((d) => d.weekday === (new Date(dtstartWall).getUTCDay() + 6) % 7) ? 1 : 0) * daily;
     }
   }
 
-  // On top of a period's base cost: each day is looked up in the lists, each BYDAY like 2TU is
-  // placed again in each month, BYSETPOS goes through the period's days once for each position,
-  // and a daily or weekly step moves the date a month at a time.
+  // On top of a period's base cost: each day is looked up in the lists, BYDAY like 2TU is placed
+  // again in each month (rrule marks the days anew), BYSETPOS goes through all the period's days
+  // for each position, and a daily or weekly step moves the date a month at a time.
   const setpos = size(options.bysetpos);
   const periodCost =
     cost +
     ((months + size(options.bymonthday) + weekdays.length + 2 * size(options.byyearday)) * longest) / 1000 +
-    (nth * (freq === RRule.YEARLY ? months || 1 : 1) + size(options.byweekno)) / 8 +
-    setpos * (0.3 + (longest + setpos) / 1000) +
-    (freq >= RRule.WEEKLY ? (interval * shortest) / 300 : 0);
+    (nth && 3 + (nth * (freq === RRule.YEARLY ? months || 1 : 1)) / 8) +
+    size(options.byweekno) / 8 +
+    setpos * (0.5 + longest / 128) +
+    (freq >= RRule.WEEKLY ? (interval * shortest) / 200 : 0);
   return { options, freq, interval, count, dtstart: dtstartWall, until: untilWall, most, least, block, each, cost: periodCost };
 }
 
@@ -782,9 +975,9 @@ function fewest(options: Partial<Options>, freq: number, dtstart: number, perDay
 /** Days in the longest and the shortest of each kind of period, and roughly what stepping through a plain one costs. */
 const PERIODS: Record<number, { longest: number; shortest: number; cost: number }> = {
   [RRule.YEARLY]: { longest: 366, shortest: 365, cost: 25 },
-  [RRule.MONTHLY]: { longest: 31, shortest: 28, cost: 5 },
+  [RRule.MONTHLY]: { longest: 31, shortest: 28, cost: 8 },
   [RRule.WEEKLY]: { longest: 7, shortest: 7, cost: 5 },
-  [RRule.DAILY]: { longest: 1, shortest: 1, cost: 5 },
+  [RRule.DAILY]: { longest: 1, shortest: 1, cost: 4 },
 };
 
 /**
@@ -813,36 +1006,47 @@ function alignedStart(rule: Rule, target: number): number {
 }
 
 /**
+ * Where a walk through a rule's instances from lo to hi starts, the rule it walks and the COUNT it
+ * has left then; null when it surely has none there. Nothing is walked (or charged) to find out.
+ */
+function walkFrom(rule: Rule, lo: number, hi: number): { rule: Rule; start: number; count: number | null } | null {
+  if (hi < rule.dtstart || (rule.until !== null && rule.until < lo)) return null;
+  const { shortest, longest } = PERIODS[rule.freq]!;
+  const step = rule.interval * shortest * DAY;
+  // Instances before the walk's start are left out, and they're all before lo. A weekly walk's
+  // first week only begins at its start, which BYSETPOS would count from, so it starts a week early.
+  const start = alignedStart(rule, rule.freq === RRule.WEEKLY ? lo - 7 * DAY : lo);
+  // A COUNT counts from DTSTART. With the same number in every block of periods, the ones before
+  // the walk's start are counted rather than walked...
+  if (rule.count === null) return { rule, start, count: null };
+  if (rule.each !== null) {
+    const count = rule.count - rule.each * Math.round((start - rule.dtstart) / (rule.block * step));
+    return count > 0 ? { rule, start, count } : null;
+  }
+  // ...and otherwise the walk has to start at DTSTART, unless the COUNT can't run out by hi, or
+  // it surely ran out before lo (period n ends within n + 1 of the longest periods of DTSTART).
+  if (rule.count >= (Math.floor((hi - rule.dtstart) / step) + 4) * rule.most) return { rule, start, count: null };
+  if (rule.least && rule.dtstart + (Math.ceil(rule.count / rule.least) + 1) * rule.interval * longest * DAY < lo) return null;
+  return rule.yearly ? walkFrom(rule.yearly, lo, hi) : { rule, start: rule.dtstart, count: rule.count };
+}
+
+/**
  * A rule's instances from lo to hi (wall times, both included), the first `max` of them. The walk
  * starts just before lo, a whole number of periods after DTSTART, and is charged to `file` and `own`.
  */
 function expand(rule: Rule, lo: number, hi: number, max: number, file: Work, own: Work): number[] {
   const found: number[] = [];
-  if (hi < rule.dtstart || (rule.until !== null && rule.until < lo) || max <= 0) return found;
-  const { shortest, longest } = PERIODS[rule.freq]!;
-  const step = rule.interval * shortest * DAY;
-  const periods = (from: number) => Math.floor((hi - from) / step) + 4;
-  // Instances before the walk's start are left out, and they're all before lo. A weekly walk's
-  // first week only begins at its start, which BYSETPOS would count from, so it starts a week early.
-  let start = alignedStart(rule, rule.freq === RRule.WEEKLY ? lo - 7 * DAY : lo);
-  // A COUNT counts from DTSTART. With the same number in every block of periods, the ones before
-  // the walk's start are counted rather than walked...
-  let count = rule.count;
-  if (count !== null && rule.each !== null) {
-    count -= rule.each * Math.round((start - rule.dtstart) / (rule.block * step));
-    if (count <= 0) return found;
-  } else if (count !== null) {
-    // ...and otherwise the walk has to start at DTSTART, unless the COUNT can't run out by hi, or
-    // it surely ran out before lo (period n ends within n + 1 of the longest periods of DTSTART).
-    if (count >= periods(rule.dtstart) * rule.most) count = null;
-    else if (rule.least && rule.dtstart + (Math.ceil(count / rule.least) + 1) * rule.interval * longest * DAY < lo) return found;
-    else start = rule.dtstart;
-  }
+  const from = max > 0 ? walkFrom(rule, lo, hi) : null;
+  if (!from) return found;
   const allowed = Math.min(file.left, own.left);
   if (allowed <= 0) {
     file.short = true;
     return found;
   }
+  const { start, count } = from;
+  rule = from.rule;
+  const step = rule.interval * PERIODS[rule.freq]!.shortest * DAY;
+  const periods = (from: number) => Math.floor((hi - from) / step) + 4;
   let units = allowed - WALK_COST;
   const walk = new RRule({ ...rule.options, dtstart: new Date(start), until: rule.until === null ? null : new Date(rule.until), count, tzid: null }, true);
   // Past hi only a later instance ends a walk, and a rule that never matches (February 30th) has
@@ -855,7 +1059,11 @@ function expand(rule: Rule, lo: number, hi: number, max: number, file: Work, own
   walk.all((date) => {
     const at = date.getTime();
     if (at > hi || --units <= 0) return false;
-    if (at >= lo) found.push(at);
+    // One that's kept is looked at again: worked out in UTC, and checked against exclusions.
+    if (at >= lo) {
+      found.push(at);
+      units -= 0.5;
+    }
     return found.length < max;
   });
   const used = allowed - Math.max(units, 0);
@@ -924,15 +1132,87 @@ interface Details {
   tentative: boolean;
 }
 
+/** An event's own start and end: its times in UTC are worked out only when asked for. */
+interface Own {
+  allDay: boolean;
+  zone: Zone;
+  startWall: number;
+  end: Stamp | null;
+  duration: number | null;
+  /** The most its length can be, before its end is worked out. */
+  longest: number;
+  /** Its length in its zone, once worked out. */
+  length?: number;
+  /** Whether it can be within two weeks of the window; only then are its times in UTC worked out. */
+  near: boolean;
+  instance: Instance;
+}
+
+/** The times of an event that's too far from the window to be in it. */
+const FAR: Instance = Object.freeze({ allDay: false, start: NaN, end: NaN });
+
+/** A moved or cancelled instance of a series. */
+interface Moved {
+  o: Component;
+  rid: Stamp;
+  own: Own | null;
+  /** Whether it can show in the window. */
+  shows: boolean;
+}
+
+const cancelled = (event: Component) => first(event, "STATUS")?.value.trim().toUpperCase() === "CANCELLED";
+const NOTHING_MOVED: ReadonlyMap<string, { o: Component; own: Own | null }> = new Map();
+const nowhere = () => false;
+
 /** A stamp as UTC ms (or a date's ms); `zoneOf` resolves local times. */
 function identity(stamp: Stamp, zoneOf: (tzid: string | null) => Zone): number {
   if (stamp.kind === "date") return dateMs(stamp.date);
   return stamp.kind === "utc" ? stamp.ms : zoneOf(stamp.tzid).toUtc(stamp.wall);
 }
 
+/** A stamp as it's written, before any zone: a date's midnight, or a wall time as if it were UTC. */
+const written = (stamp: Stamp) => (stamp.kind === "date" ? dateMs(stamp.date) : stamp.kind === "utc" ? stamp.ms : stamp.wall);
+
+/** A zone moves a time by 100 hours at most, so times written further apart than this are different instants in any zones. */
+const APART = 9 * DAY;
+
+/** Whether a list in order has a value within APART of `at`. */
+function nearOne(sorted: number[], at: number): boolean {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid]! < at - APART) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < sorted.length && sorted[lo]! <= at + APART;
+}
+
+/** A short, steady stand-in for a long text: 64 bits of it, in hex. */
+function digest(text: string): string {
+  let a = 0xdeadbeef ^ text.length;
+  let b = 0x41c6ce57 ^ text.length;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 2654435761);
+    b = Math.imul(b ^ c, 1597334677);
+  }
+  a = Math.imul(a ^ (a >>> 16), 2246822507) ^ Math.imul(b ^ (b >>> 13), 3266489909);
+  b = Math.imul(b ^ (b >>> 16), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909);
+  return (b >>> 0).toString(16).padStart(8, "0") + (a >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * The UID as each instance's key has it. One that's most of a file would be in every key, and the
+ * keys of up to 5000 instances would take gigabytes to store: it's cut short, and a digest of all
+ * of it keeps it apart from others.
+ */
+const keyUid = (uid: string) => (uid.length <= MAX_UID ? uid : `${clip(uid, 200)}#${digest(uid)}`);
+
 export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
   const work: Work = { left: FILE_WORK };
   const zoneWork: Work = { left: ZONE_WORK };
+  const texts: RuleTexts = { read: new Map(), work };
   const components = parseComponents(input);
   const calendar = components.find((c) => c.type === "VCALENDAR") ?? { type: "VCALENDAR", props: [], children: components };
   const zoneOf = zoneResolver(calendar.children, options.zone, zoneWork);
@@ -999,8 +1279,26 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     };
   };
 
-  /** One event's own start and end (no repeats: when it has none, `alone`). */
-  const single = (event: Component, alone: boolean): (Instance & { zone: Zone; startWall: number; length: number }) | null => {
+  /** An event's length in its zone, worked out the first time it's needed. */
+  const lengthOf = (own: Own): number => {
+    if (own.length === undefined) {
+      const { end, duration, startWall, zone } = own;
+      let endWall = startWall;
+      if (end && end.kind !== "date") endWall = zone.toWall(identity(end, zoneOf));
+      else if (end?.kind === "date") endWall = dateMs(end.date);
+      else if (duration !== null) endWall = startWall + duration;
+      own.length = Math.max(0, Math.min(endWall, END_OF_TIME) - startWall);
+    }
+    return own.length;
+  };
+
+  /**
+   * One event's own start and end. A zone moves a time by 100 hours at most (TZOFFSETTO:+995959),
+   * and an end by its own zone's and then the start's, so an event more than two weeks from the
+   * window can't be in it (it isn't `near`), and its times aren't worked out: for an old event in a
+   * file's own zone, that's working out the zone's year.
+   */
+  const single = (event: Component): Own | null => {
     const start = readStamp(first(event, "DTSTART"));
     if (!start) return null;
     const end = readStamp(first(event, "DTEND"));
@@ -1009,23 +1307,16 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
       const s = dateMs(start.date);
       const e = end?.kind === "date" ? dateMs(end.date) : duration !== null ? s + Math.max(DAY, Math.round(duration / DAY) * DAY) : s + DAY;
       const length = Math.min(Math.max(e, s + DAY), END_OF_TIME) - s;
-      return { allDay: true, start: s, end: s + length, zone: UTC_ZONE, startWall: s, length };
+      return { allDay: true, zone: UTC_ZONE, startWall: s, end, duration, longest: length, length, near: true, instance: { allDay: true, start: s, end: s + length } };
     }
     const zone = start.kind === "utc" ? UTC_ZONE : zoneOf(start.tzid);
     const startWall = start.kind === "utc" ? start.ms : start.wall;
-    if (alone) {
-      // A zone moves a time by 100 hours at most (TZOFFSETTO:+995959), and an end by its own zone's
-      // and then the start's, so an event two weeks from the window can't be in it. Its times aren't
-      // worked out: for an old event in a file's own zone, that's working out the zone's year.
-      const endAt = !end ? startWall + (duration ?? 0) : end.kind === "date" ? dateMs(end.date) : end.kind === "utc" ? end.ms : end.wall;
-      if (startWall - 14 * DAY >= to || Math.max(startWall, endAt) + 14 * DAY < from) return { allDay: false, start: NaN, end: NaN, zone, startWall, length: 0 };
-    }
-    let endWall = startWall;
-    if (end && end.kind !== "date") endWall = zone.toWall(identity(end, zoneOf));
-    else if (end?.kind === "date") endWall = dateMs(end.date);
-    else if (duration !== null) endWall = startWall + duration;
-    const length = Math.max(0, Math.min(endWall, END_OF_TIME) - startWall);
-    return { allDay: false, start: zone.toUtc(startWall), end: Math.min(zone.toUtc(startWall + length), END_OF_TIME), zone, startWall, length };
+    const endAt = !end ? startWall + (duration ?? 0) : end.kind === "date" ? dateMs(end.date) : end.kind === "utc" ? end.ms : end.wall;
+    const near = startWall - 14 * DAY < to && Math.max(startWall, endAt) + 14 * DAY >= from;
+    const longest = Math.max(0, Math.min(end && end.kind !== "date" ? endAt + APART : endAt, END_OF_TIME) - startWall);
+    const own: Own = { allDay: false, zone, startWall, end, duration, longest, near, instance: FAR };
+    if (near) own.instance = { allDay: false, start: zone.toUtc(startWall), end: Math.min(zone.toUtc(startWall + lengthOf(own)), END_OF_TIME) };
+    return own;
   };
 
   /** A series' instances in the window: its repeats, less exclusions, with moved ones in their new place. */
@@ -1033,57 +1324,92 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
     const out: Found[] = [];
     const add = (event: Component, original: string | null, instance: Instance) =>
       out.push({ at: instance.allDay ? dayOf(instance.start) : instance.start, event, uid, original, instance });
-    const base = master ? single(master, !first(master, "RRULE") && !first(master, "RDATE")) : null;
+    const base = master ? single(master) : null;
     // Exceptions and exclusions written without a zone belong to the series' zone.
     const zoneFor = (tzid: string | null) => (tzid || !base ? zoneOf(tzid) : base.zone);
-    const moved = new Map<string, Component>();
+    const keyOf = (s: Stamp) => (s.kind === "date" ? s.date : String(identity(s, zoneFor)));
+
+    // Moved and cancelled instances, each in place of the one that started at its RECURRENCE-ID.
+    const changes: Moved[] = [];
     for (const o of overrides) {
       const rid = readStamp(first(o, "RECURRENCE-ID"));
-      if (rid) moved.set(rid.kind === "date" ? rid.date : String(identity(rid, zoneFor)), o);
+      const own = rid && !cancelled(o) ? single(o) : null;
+      if (rid) changes.push({ o, rid, own, shows: !!own?.near });
     }
-    const emitOverride = (key: string, o: Component) => {
-      if (first(o, "STATUS")?.value.trim().toUpperCase() === "CANCELLED") return;
-      const own = single(o, true);
-      if (own && inWindow(own)) add(o, key, own);
+    /**
+     * The changes that can make a difference: ones that can show in the window, and ones written
+     * near the times the series' repeats are looked for (`repeats`). The rest aren't converted. One
+     * written within days of a change that shows is kept too, as it could be the same instance
+     * written again, and the last one written is the one that counts.
+     */
+    const showing = changes.length ? changes.flatMap((c) => (c.shows ? [written(c.rid)] : [])).sort((a, b) => a - b) : [];
+    const changesNear = (repeats: (at: number) => boolean) => (changes.length ? changes.filter((c) => c.shows || repeats(written(c.rid)) || nearOne(showing, written(c.rid))) : changes);
+    const movedFrom = (kept: Moved[]): ReadonlyMap<string, { o: Component; own: Own | null }> => {
+      if (!kept.length) return NOTHING_MOVED;
+      const moved = new Map<string, { o: Component; own: Own | null }>();
+      for (const { o, rid, own } of kept) moved.set(keyOf(rid), { o, own });
+      return moved;
+    };
+    const emitOverride = (key: string, o: Component, own: Own | null) => {
+      const instance = own?.near ? own.instance : null;
+      if (instance && inWindow(instance)) add(o, key, instance);
     };
 
     if (!master || !base) {
       // Only exceptions came through (some servers do this): show them as they are.
-      for (const [key, o] of moved) emitOverride(key, o);
+      for (const [key, { o, own }] of movedFrom(changesNear(nowhere))) emitOverride(key, o, own);
       return out;
     }
-    if (first(master, "STATUS")?.value.trim().toUpperCase() === "CANCELLED") return out;
+    if (cancelled(master)) return out;
     const rrule = first(master, "RRULE")?.value;
-    // Once the file's work has run out, repeats aren't worked out: the event shows as itself.
-    const rule = rrule && work.left > 0 ? buildRule(rrule, base.startWall, base.zone.toWall) : null;
     const extra = readStamps(all(master, "RDATE"));
+    // Repeats that could overlap the window, or start before the latest that can still be kept; the
+    // others can't show (moved ones are seen to below). Until the series' end is worked out, lo is
+    // only known to be after `before`.
+    const window = rrule || extra.length ? { from: base.zone.toWall(from), hi: base.zone.toWall(Math.min(to, latest)) + 2 * DAY } : null;
+    const hi = window?.hi ?? 0;
+    const before = (window?.from ?? 0) - base.longest - 2 * DAY;
+    // Once the file's work has run out, repeats aren't worked out: the event shows as itself. A UTC
+    // UNTIL days from the window stays on its side of it in any zone, and isn't converted.
+    const rule = rrule && work.left > 0 ? buildRule(rrule, base.startWall, (utc) => (utc + 5 * DAY < before || utc - 5 * DAY > hi ? utc : base.zone.toWall(utc)), texts) : null;
     if (!rule && !extra.length) {
-      if (inWindow(base)) add(master, null, base);
-      for (const [key, o] of moved) emitOverride(key, o);
+      const instance = base.near ? base.instance : null;
+      if (instance && inWindow(instance)) add(master, null, instance);
+      for (const [key, { o, own }] of movedFrom(changesNear(nowhere))) emitOverride(key, o, own);
       return out;
     }
 
+    const nearRepeats = (lo: number) => (at: number) => (at >= lo - APART && at <= hi + APART) || Math.abs(at - base.startWall) <= APART;
+    // A series that ended (or ran out of its COUNT) long before the window, with nothing moved into
+    // it, has nothing to show, and nothing about it is converted.
+    if (!base.near && !(rule && walkFrom(rule, before, hi)) && !extra.some((r) => nearRepeats(before)(written(r))) && !changesNear(nearRepeats(before)).length) return out;
+
+    const lo = (window?.from ?? 0) - lengthOf(base) - 2 * DAY;
+    const kept = changesNear(nearRepeats(lo));
+    const moved = movedFrom(kept);
+    // Exclusions matter only for the repeats looked at, and for the moved ones kept.
+    const keptAt = kept.map((c) => written(c.rid)).sort((a, b) => a - b);
     const skip = new Set<string>();
     for (const ex of readStamps(all(master, "EXDATE"))) {
-      skip.add(ex.kind === "date" ? ex.date : String(identity(ex, zoneFor)));
+      if (!nearRepeats(lo)(written(ex)) && !nearOne(keptAt, written(ex))) continue;
+      skip.add(keyOf(ex));
       if (ex.kind === "date") skip.add(`d${ex.date}`); // a date EXDATE on a timed series removes that day
     }
 
-    // Repeats that could overlap the window, or start before the latest that can still be kept; the
-    // others can't show (moved ones are seen to below).
-    const lo = base.zone.toWall(from) - base.length - 2 * DAY;
-    const hi = base.zone.toWall(Math.min(to, latest)) + 2 * DAY;
     const walls = new Set<number>([base.startWall]);
     if (rule) for (const wall of expand(rule, lo, hi, MAX_REPEATS, work, { left: SERIES_WORK })) walls.add(wall);
     let dates = 0;
     for (const r of extra) {
+      if (r.kind !== "date" && (written(r) < lo - APART || written(r) > hi + APART)) continue;
       const wall = r.kind === "date" ? dateMs(r.date) : base.zone.toWall(identity(r, zoneFor));
       if (wall >= lo && wall <= hi && dates++ < MAX_REPEATS) walls.add(wall);
     }
 
     const emitted = new Set<string>();
     for (const wall of [...walls].sort((a, b) => a - b)) {
-      const end = Math.min(wall + base.length, END_OF_TIME);
+      // The first start, when it's far from the window and nothing is moved, can't change anything.
+      if (wall === base.startWall && !base.near && !moved.size) continue;
+      const end = Math.min(wall + lengthOf(base), END_OF_TIME);
       const instance: Instance = base.allDay
         ? { allDay: true, start: wall, end }
         : { allDay: false, start: base.zone.toUtc(wall), end: Math.min(base.zone.toUtc(end), END_OF_TIME) };
@@ -1091,11 +1417,11 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
       if (skip.has(key) || (!base.allDay && skip.size && skip.has(`d${isoDate(wall)}`))) continue;
       emitted.add(key);
       const override = moved.get(key);
-      if (override) emitOverride(key, override);
+      if (override) emitOverride(key, override.o, override.own);
       else if (inWindow(instance)) add(master, key, instance);
     }
     // Instances moved here from a start outside the expanded range.
-    for (const [key, o] of moved) if (!emitted.has(key) && !skip.has(key)) emitOverride(key, o);
+    for (const [key, { o, own }] of moved) if (!emitted.has(key) && !skip.has(key)) emitOverride(key, o, own);
     return out;
   };
 
@@ -1107,7 +1433,7 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
   for (const [uid, { master, overrides }] of series) {
     let instances: Found[];
     try {
-      instances = expandSeries(uid, master, overrides);
+      instances = expandSeries(keyUid(uid), master, overrides);
     } catch {
       continue; // an event that can't be read is left out; the rest of the calendar still comes through
     }
@@ -1133,7 +1459,8 @@ export function parseIcs(input: string, options: IcsOptions): IcsCalendar {
 /** The local dates an event covers (inclusive), for finding it by day. */
 export function eventDays(item: Pick<IcsItem, "allDay" | "start" | "end">, zone: string): { starts_on: string; ends_on: string } {
   if (item.allDay) return { starts_on: item.start, ends_on: item.end > item.start ? addDays(item.end, -1) : item.start };
-  const z = isIanaZone(zone) ? ianaZone(zone) : UTC_ZONE;
+  const name = zoneName(zone);
+  const z = name ? ianaZone(name) : UTC_ZONE;
   const start = Date.parse(item.start);
   const end = Math.max(start, Date.parse(item.end) - 1); // an event ending at midnight doesn't cover the next day
   // Only the days Postgres takes, whatever the times.
