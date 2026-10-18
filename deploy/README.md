@@ -62,6 +62,14 @@ reference and works as written):
 
 Keep these versions in step with `docker-compose.yml`, and test a version change there first.
 
+`docker-compose.yml` takes the same images from Docker Hub (`supabase/gotrue`,
+`postgrest/postgrest`, `supabase/storage-api`; the digests match), because anonymous pulls from
+`public.ecr.aws` fail on GitHub's runners with "Data limit exceeded". The template stays on
+`public.ecr.aws` for now: Railway pulls from its own network and hasn't hit that limit. If it ever
+does, switch these three services to the Docker Hub names in the template and `.railway/railway.ts`.
+Make sure their auto updates are off when you do: Railway can watch Docker Hub, and would otherwise
+move them to versions nobody tested here.
+
 ## The live template
 
 **https://railway.com/deploy/Chzzxj?referralCode=pQ_v0d** (template code `Chzzxj`, in the
