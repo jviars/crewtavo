@@ -60,6 +60,20 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"assistant_connections": {
+                  Row: {
+                    "allow_changes": boolean,"client_id": string,"updated_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "allow_changes"?: boolean,"client_id": string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Update: {
+                    "allow_changes"?: boolean,"client_id"?: string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 },"attachments": {
                   Row: {
                     "caption": string | null,"company_id": string,"content_type": string | null,"created_at": string,"created_by": string | null,"file_name": string,"id": string,"owner_id": string,"owner_type": string,"path": string,"size_bytes": number | null
