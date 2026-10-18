@@ -86,14 +86,45 @@ describe("sign-in guard", () => {
     expect(seen).toHaveLength(0);
   });
 
-  it("passes requests it can't read on to GoTrue", async () => {
-    let forwarded = "";
-    const response = await guardSignIn(env, signIn("not json"), async (request) => {
-      forwarded = await request.text();
-      return Response.json({ error_code: "bad_json" }, { status: 400 });
-    });
-    expect(response.status).toBe(400);
-    expect(forwarded).toBe("not json");
+  it("refuses requests it can't read rather than passing them on unchecked", async () => {
+    const { send, seen } = gotrue();
+    expect((await guardSignIn(env, signIn("not json"), send)).status).toBe(400);
+    expect((await guardSignIn(env, signIn([{ email: "a@example.com" }]), send)).status).toBe(400);
+    expect((await guardSignIn(env, signIn({ password: "guess" }), send)).status).toBe(400);
+    expect((await guardSignIn(env, signIn({ phone: "+15405550199", password: "guess" }), send)).status).toBe(400);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("counts an email however its field is spelled, as GoTrue reads it", async () => {
+    fakeLimiter();
+    const { send, seen } = gotrue();
+    for (let i = 0; i <= GUESSES; i++) await guardSignIn(env, signIn({ EMAIL: "Spelled@Example.com", Password: `wrong-${i}` }), send);
+    expect((await guardSignIn(env, signIn({ email: "spelled@example.com", password: "right" }), send)).status).toBe(429);
+    // GoTrue got one spelling of each field: the one that was checked.
+    expect(seen[0]).toEqual({ email: "Spelled@Example.com", password: "wrong-0" });
+  });
+
+  it("lets only one guess per account through at a time", async () => {
+    fakeLimiter();
+    let open = 0;
+    let most = 0;
+    let reached = 0;
+    const slow = async (request: Request) => {
+      open++;
+      most = Math.max(most, open);
+      reached++;
+      await request.json();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      open--;
+      return Response.json({ error_code: "invalid_credentials" }, { status: 400 });
+    };
+    const burst = await Promise.all(Array.from({ length: 200 }, (_, i) => guardSignIn(env, signIn({ email: "burst@example.com", password: `wrong-${i}` }), slow)));
+    expect(most).toBe(1);
+    expect(reached).toBe(1);
+    expect(burst.filter((r) => r.status === 429)).toHaveLength(199);
+    // Sent one after another, they stop at the limit.
+    for (let i = 0; i < 30; i++) await guardSignIn(env, signIn({ email: "burst@example.com", password: `again-${i}` }), slow);
+    expect(reached).toBe(GUESSES + 1);
   });
 });
 
