@@ -223,7 +223,16 @@ function fakeGoogle() {
     const [, calendarId, eventId] = /^\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/.exec(path) ?? [];
     const events = calendarId ? calendars.get(calendarId) : undefined;
     if (!events) return error(404, "Not Found");
-    if (method === "GET") return Response.json({ items: [...events.values()] });
+    if (method === "GET") {
+      // As Google does: events ending after timeMin and starting before timeMax.
+      const at = (t: unknown) => {
+        const time = t as { dateTime?: string; date?: string } | undefined;
+        return Date.parse(time?.dateTime ?? `${time?.date}T00:00:00Z`);
+      };
+      const min = Date.parse(url.searchParams.get("timeMin") ?? "");
+      const max = Date.parse(url.searchParams.get("timeMax") ?? "");
+      return Response.json({ items: [...events.values()].filter((e) => !(at(e.start) >= max) && !(at(e.end) <= min)) });
+    }
     if (method === "DELETE") return events.delete(eventId!) ? new Response(null, { status: 204 }) : error(410, "Resource has been deleted");
     if (method === "PUT") {
       if (!events.has(eventId!)) return error(404, "Not Found");
@@ -373,6 +382,19 @@ describe("visits on Google Calendar after reconnecting", () => {
     expect(google.calendars.get("visits-cal")!.get(eventFor("4"))!.start).toEqual({ date: addDays(today, 200) });
   });
 
+  it("takes a visit months away off Google too, when it was cancelled meanwhile", async () => {
+    const tables = await world({ visitsCalendar: true });
+    tables.visits = [visit("1"), visit("2", { scheduled_on: addDays(today, 250) })];
+    const db = fakeDb(tables);
+    const google = fakeGoogle();
+    // Pushed when it was booked, as any visit is.
+    for (const key of ["1", "2"]) await runJob(db, { company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: visit(key).id } });
+    expect(onGoogle(google)).toEqual([eventFor("1"), eventFor("2")].sort());
+    tables.visits.find((v) => v.id === visit("2").id)!.status = "cancelled";
+    await pushUpcomingVisits(env, db, COMPANY);
+    expect(onGoogle(google)).toEqual([eventFor("1")]);
+  });
+
   it("leaves a visit Google turns down to the outbox, and sends the rest", async () => {
     const tables = await world({ visitsCalendar: true });
     tables.visits = ["1", "2", "3", "4", "5"].map((key) => visit(key));
@@ -459,6 +481,20 @@ describe("visits on Google Calendar after reconnecting", () => {
     expect(tables.outbox!.slice(4)).toMatchObject([{ payload: { visit_ids: [visit("2").id, visit("3").id] } }]);
   });
 
+  it("keeps a warning that still holds when a visit goes through, and clears one that doesn't", async () => {
+    const tables = await world({ visitsCalendar: true });
+    tables.visits = [visit("1")];
+    const db = fakeDb(tables);
+    fakeGoogle();
+    const unchecked = "Couldn't check what's on Google Calendar, so visits cancelled or deleted lately may still show there. Turn visits off and on again to rebuild it.";
+    tables.integrations![0]!.last_error = unchecked;
+    await runJob(db, { company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: visit("1").id } });
+    expect(tables.integrations![0]).toMatchObject({ last_sync_at: expect.any(String), last_error: unchecked });
+    tables.integrations![0]!.last_error = "Google Calendar: 503 Service Unavailable";
+    await runJob(db, { company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: visit("1").id } });
+    expect(tables.integrations![0]!.last_error).toBeNull();
+  });
+
   it("stops, and says what to do, when the visits calendar is gone or can only be read", async () => {
     for (const cause of ["gone", "read-only"]) {
       const tables = await world({ visitsCalendar: true });
@@ -480,6 +516,15 @@ describe("visits on Google Calendar after reconnecting", () => {
       await runJob(db, tables.outbox[0]!);
       expect(google.calls, cause).toHaveLength(cause === "gone" ? 2 : 1);
       expect(tables.outbox, cause).toHaveLength(1);
+      expect(tables.integrations![0]!.last_error, cause).toMatch(/to make a new one/);
+
+      // One visit's change: a cancelled one coming off (which Google answers the same either way)
+      // leaves the warning, and an active one stops at once rather than being tried for hours.
+      tables.visits[0]!.status = "cancelled";
+      await runJob(db, { company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: tables.visits[0]!.id } });
+      expect(tables.integrations![0]!.last_error, cause).toMatch(/to make a new one/);
+      tables.integrations![0]!.last_error = null;
+      await expect(runJob(db, { company_id: COMPANY, topic: "calendar.visit", payload: { visit_id: tables.visits[1]!.id } }), cause).resolves.toBeUndefined();
       expect(tables.integrations![0]!.last_error, cause).toMatch(/to make a new one/);
 
       // And turning visits off (to make a new calendar) still works.

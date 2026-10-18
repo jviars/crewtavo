@@ -2,7 +2,7 @@ import dns from "node:dns";
 import { createServer, type IncomingMessage, type RequestOptions, type Server, type ServerResponse } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { isIP, type AddressInfo, type LookupFunction } from "node:net";
-import { gzipSync } from "node:zlib";
+import { deflateSync, gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -213,6 +213,8 @@ describe("calendar links", () => {
     handler = (_req, res) => res.writeHead(200, { "Content-Encoding": "gzip" }).end(gzipSync(CALENDAR));
     expect(await fetchIcs(link)).toBe(CALENDAR);
     expect(internet.requests[0]!.options.headers).toMatchObject({ "Accept-Encoding": "gzip, br" });
+    handler = (_req, res) => res.writeHead(200, { "Content-Encoding": "deflate" }).end(deflateSync(CALENDAR));
+    expect(await fetchIcs(link)).toBe(CALENDAR);
     const big = Buffer.concat([Buffer.from(CALENDAR), Buffer.alloc(11 * 1024 * 1024, " ")]);
     handler = (_req, res) => res.end(big);
     await expect(fetchIcs(link)).rejects.toThrow(/too big to read/);
