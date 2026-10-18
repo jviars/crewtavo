@@ -403,17 +403,13 @@ describe("public submissions", () => {
 });
 
 describe("quote approval", () => {
-  it("records the amounts the client approved, with the options they picked", async () => {
+  // The database claims the quote, then picks the options and records the approval with the amounts
+  // they came to, in one step (approve_hub_quote; supabase/tests/hub_approval_test.sql).
+  const approve = async (approved: boolean) => {
     const option = crypto.randomUUID();
     const calls = serve((call) => {
-      const picked = calls.some((c) => c.method === "PATCH" && c.path === "quote_line_items" && c.body.selected === true);
-      if (call.method === "GET" && call.path === "quotes") {
-        if (call.url.searchParams.get("select") === "id,status") return [{ id: "quote-1", status: "sent" }];
-        // The database's totals follow the lines picked.
-        return [picked ? { subtotal: 1450, discount_amount: 100, tax_amount: 70.2, total: 1420.2 } : { subtotal: 1200, discount_amount: 100, tax_amount: 57.2, total: 1157.2 }];
-      }
-      if (call.method === "GET" && call.path === "quote_line_items") return [{ id: option }];
-      if (call.method === "PATCH" && call.path === "quotes") return [{ id: "quote-1" }];
+      if (call.method === "GET" && call.path === "quotes") return [{ id: "quote-1", status: "sent" }];
+      if (call.path === "rpc/approve_hub_quote") return approved;
       return [];
     });
     const quote = (await clientLink(env, "https://ops.example.com", { c: "co-1", t: "quote", id: "quote-1" })).split("/hub/")[1];
@@ -422,9 +418,26 @@ describe("quote approval", () => {
       { method: "POST", headers: { "Content-Type": "application/json", "X-Real-IP": "203.0.113.9" }, body: JSON.stringify({ name: "Ana Smith", selected_line_ids: [option] }) },
       env,
     );
+    return { option, calls, res };
+  };
+  // Picking the options here, before the quote is claimed, let an approval that lost change them.
+  const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && ["quotes", "quote_line_items"].includes(c.path));
+
+  it("records the client's approval with the options they picked", async () => {
+    const { option, calls, res } = await approve(true);
     expect(await res.json()).toEqual({ status: "approved" });
-    expect(calls.find((c) => c.method === "PATCH" && c.path === "quotes")?.body.approval).toMatchObject({
-      name: "Ana Smith", selected_line_ids: [option], subtotal: 1450, discount_amount: 100, tax_amount: 70.2, total: 1420.2, ip: "203.0.113.9",
+    expect(calls.find((c) => c.path === "rpc/approve_hub_quote")?.body).toEqual({
+      p_company: "co-1",
+      p_quote: "quote-1",
+      p_selected: [option],
+      p_approval: { name: "Ana Smith", selected_line_ids: [option], signature: null, signed_at: expect.any(String), ip: "203.0.113.9" },
     });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it("changes nothing when another approval got there first", async () => {
+    const { calls, res } = await approve(false);
+    expect(res.status).toBe(409);
+    expect(writes(calls)).toEqual([]);
   });
 });

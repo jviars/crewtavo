@@ -71,13 +71,18 @@ async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: s
 // ---------------------------------------------------------------------------------------------
 // Provider HTTP
 // ---------------------------------------------------------------------------------------------
+//
+// A create we stopped waiting for (the timeout, or a dropped connection) may still go through at
+// the provider, and the outbox then tries the job again. So before making an invoice or payment we
+// look for the one we sent, by our own number or reference, and QuickBooks creates carry a request
+// id (one per record) that QuickBooks answers a repeat of with the record it already made.
 
-async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknown) {
+async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknown, requestId?: string) {
   const realm = ctx.integration.external_account_id;
   if (!realm) throw new IntegrationError("QuickBooks company (realm) ID is missing; reconnect QuickBooks.");
   const env = ctx.integration.settings.environment === "sandbox" ? "sandbox" : (ctx.env.QUICKBOOKS_ENVIRONMENT ?? "production");
   const { token } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "quickbooks");
-  const url = `${QBO_BASE[env]}/v3/company/${realm}/${path}${path.includes("?") ? "&" : "?"}minorversion=${QBO_MINOR_VERSION}`;
+  const url = `${QBO_BASE[env]}/v3/company/${realm}/${path}${path.includes("?") ? "&" : "?"}minorversion=${QBO_MINOR_VERSION}${requestId ? `&requestid=${requestId}` : ""}`;
   const response = await fetch(url, {
     method,
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Type": "application/json" },
@@ -133,7 +138,7 @@ async function pushClient(ctx: Ctx, clientId: string): Promise<string> {
       CompanyName: client.company_name ?? undefined,
       PrimaryEmailAddr: client.email ? { Address: client.email } : undefined,
       PrimaryPhone: client.phone ? { FreeFormNumber: client.phone } : undefined,
-    })).Customer;
+    }, `client-${clientId}`)).Customer;
     await remember(ctx, "client", clientId, customer.Id, customer.SyncToken);
     return customer.Id;
   }
@@ -165,9 +170,12 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
   const discount = Number(invoice.discount_amount ?? 0);
 
   if (ctx.provider === "quickbooks") {
+    // Sent already: QuickBooks has an invoice with our number for this customer.
+    const query = encodeURIComponent(`select * from Invoice where DocNumber = '${String(invoice.number).replace(/'/g, "\\'")}'`);
+    const sent = ((await qbo(ctx, "GET", `query?query=${query}`)).QueryResponse?.Invoice ?? []).find((i: any) => i.CustomerRef?.value === customerId);
     const itemMap = (ctx.integration.settings.item_map ?? {}) as Record<string, string>;
     const defaultItem = String(ctx.integration.settings.default_item_id ?? "1");
-    const created = (await qbo(ctx, "POST", "invoice", {
+    const created = sent ?? (await qbo(ctx, "POST", "invoice", {
       CustomerRef: { value: customerId },
       DocNumber: String(invoice.number),
       TxnDate: invoice.issued_on,
@@ -189,14 +197,18 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
       ],
       ApplyTaxAfterDiscount: true,
       ...(Number(invoice.tax_amount) > 0 ? { TxnTaxDetail: { TotalTax: Number(invoice.tax_amount) } } : {}),
-    })).Invoice;
+    }, `invoice-${invoiceId}`)).Invoice;
     await remember(ctx, "invoice", invoiceId, created.Id, created.SyncToken);
     return created.Id;
   }
 
-  const created = (await zoho(ctx, "POST", "invoices", {
+  // Sent already: Zoho has an invoice for this customer with our number as its reference.
+  const reference = String(invoice.number);
+  const sent = ((await zoho(ctx, "GET", `invoices?reference_number=${encodeURIComponent(reference)}&customer_id=${encodeURIComponent(customerId)}`)).invoices ?? [])
+    .find((i: any) => i.reference_number === reference && i.customer_id === customerId);
+  const created = sent ?? (await zoho(ctx, "POST", "invoices", {
     customer_id: customerId,
-    reference_number: String(invoice.number),
+    reference_number: reference,
     date: invoice.issued_on,
     due_date: invoice.due_on ?? undefined,
     line_items: lines.map((line: any) => ({
@@ -224,21 +236,27 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
   const date = String(payment.received_at).slice(0, 10);
 
   if (ctx.provider === "quickbooks") {
+    // Nothing of ours to look a payment up by (its reference number takes 21 characters, too few
+    // for our id), so the request id is what stops a second copy.
     const created = (await qbo(ctx, "POST", "payment", {
       CustomerRef: { value: customerId },
       TotalAmt: Number(payment.amount),
       TxnDate: date,
       Line: invoiceExternal ? [{ Amount: Number(payment.amount), LinkedTxn: [{ TxnId: invoiceExternal, TxnType: "Invoice" }] }] : [],
-    })).Payment;
+    }, `payment-${paymentId}`)).Payment;
     await remember(ctx, "payment", paymentId, created.Id, created.SyncToken);
     return created.Id;
   }
 
-  const created = (await zoho(ctx, "POST", "customerpayments", {
+  // Sent already: Zoho has a payment with our id as its reference.
+  const sent = ((await zoho(ctx, "GET", `customerpayments?reference_number=${encodeURIComponent(paymentId)}`)).customerpayments ?? [])
+    .find((p: any) => p.reference_number === paymentId);
+  const created = sent ?? (await zoho(ctx, "POST", "customerpayments", {
     customer_id: customerId,
     payment_mode: payment.method === "ach" ? "Bank Transfer" : payment.method === "card" ? "Credit Card" : payment.method,
     amount: Number(payment.amount),
     date,
+    reference_number: paymentId,
     invoices: invoiceExternal ? [{ invoice_id: invoiceExternal, amount_applied: Number(payment.amount) }] : [],
   })).payment;
   await remember(ctx, "payment", paymentId, created.payment_id);

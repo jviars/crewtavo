@@ -122,27 +122,18 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   const quote = must(await admin.from("quotes").select("id, status").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
   if (!["sent", "changes_requested"].includes(quote.status)) throw new HttpError(409, "This quote can't be approved anymore.");
 
-  // Optional lines follow the client's choices; required lines stay selected.
-  const optional = must(await admin.from("quote_line_items").select("id").eq("quote_id", l.id).eq("optional", true));
-  for (const line of optional) {
-    const { error } = await admin.from("quote_line_items").update({ selected: body.selected_line_ids.includes(line.id) }).eq("id", line.id);
-    if (error) throw dbError(error);
-  }
-  // The amounts with those choices, so the approval shows the price that was agreed to.
-  const totals = must(await admin.from("quotes").select("subtotal, discount_amount, tax_amount, total").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
-  // Only while it's still waiting for an answer: two approvals at once record one.
-  const { data: approved, error } = await admin
-    .from("quotes")
-    .update({
-      status: "approved",
-      approved_at: new Date().toISOString(),
-      approval: { name: body.name, selected_line_ids: body.selected_line_ids, ...totals, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c) },
-    })
-    .eq("id", l.id)
-    .in("status", ["sent", "changes_requested"])
-    .select("id");
+  // One step in the database (20261018000830_hub_approval.sql): it claims the quote while it's still
+  // waiting for an answer, then sets the optional lines to the client's choices and records the
+  // approval with the amounts they came to. So two approvals at once, or one racing a change by the
+  // office, record one, and only that one picks the options.
+  const { data: approved, error } = await admin.rpc("approve_hub_quote", {
+    p_company: l.c,
+    p_quote: l.id,
+    p_selected: body.selected_line_ids,
+    p_approval: { name: body.name, selected_line_ids: body.selected_line_ids, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c) },
+  });
   if (error) throw dbError(error);
-  if (!approved?.length) throw new HttpError(409, "This quote can't be approved anymore.");
+  if (!approved) throw new HttpError(409, "This quote can't be approved anymore.");
   kickAutomations(c, l.c);
   return c.json({ status: "approved" });
 });

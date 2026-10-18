@@ -244,7 +244,8 @@ describe("accounting sync", () => {
     const clientLinked = (entity: string): Answer => ({ data: entity === "client" ? { external_id: "cust-1" } : null });
     const quickbooksTakesIt = () => {
       const sent: string[] = [];
-      vi.stubGlobal("fetch", async (url: string) => {
+      vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+        if (init?.method !== "POST") return Response.json({ QueryResponse: {} }); // not sent before
         sent.push(url);
         return Response.json({ Invoice: { Id: "qbo-77", SyncToken: "0" } });
       });
@@ -294,6 +295,134 @@ describe("accounting sync", () => {
       const { db } = fakeDb(answers(ciphertext, () => ({ error: { message: "connection reset" } }), () => ({})));
       await expect(runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" } })).rejects.toThrow("connection reset");
       expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  // The provider can finish a create after we stopped waiting for it (providerTimeout), and the
+  // outbox then runs the job again.
+  describe("a create that goes through after we stop waiting", () => {
+    const invoice = {
+      id: "inv-1", number: 1042, client_id: "client-1", issued_on: "2026-10-17", due_on: null, subject: null, tax_rate: 0, tax_amount: 0, discount_amount: 0,
+      invoice_line_items: [{ name: "Mowing", description: null, quantity: 1, unit_price: 45, taxable: false, service_id: null, sort: 0 }],
+    };
+    const payment = { id: "pay-1", client_id: "client-1", invoice_id: "inv-1", amount: 45, method: "card", received_at: "2026-10-17T15:00:00Z" };
+    const invoiceJob = { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" } };
+    const paymentJob = { company_id: COMPANY, topic: "accounting.payment", payload: { payment_id: "pay-1" } };
+
+    /** Our side: the client (and maybe the invoice) sent before, and the links saved since. */
+    async function ours(provider: "quickbooks" | "zoho_books", linked: Record<string, string>) {
+      const ciphertext = await encryptJson(env, { access_token: "token", expires_at: Date.now() + 3_600_000 });
+      const links = new Map(Object.entries(linked));
+      const { db } = fakeDb((q) => {
+        if (q.table === "integrations") return verb(q) === "select" ? { data: { provider, external_account_id: "books-1", settings: {} } } : {};
+        if (q.table === "integration_secrets") return { data: { ciphertext } };
+        if (q.table === "invoices") return { data: invoice };
+        if (q.table === "payments") return { data: payment };
+        if (q.table === "sync_links") {
+          if (verb(q) === "upsert") links.set(call(q, "upsert")![1].entity, call(q, "upsert")![1].external_id);
+          const id = links.get(call(q, "match")?.[1].entity);
+          return { data: id ? { external_id: id } : null };
+        }
+        return { data: null };
+      });
+      return { db, links };
+    }
+
+    /**
+     * The provider: it makes every record it's sent, but answers the first one only after we've
+     * stopped waiting. It finds records the way its API does, and (QuickBooks, unless it has
+     * forgotten them) answers a repeated request id with the record it made for it.
+     */
+    function provider(options: { find: (url: URL, made: Array<Record<string, any>>) => unknown; answer: (record: Record<string, any>) => unknown; requestIds?: boolean; made?: Array<Record<string, any>> }) {
+      const made = options.made ?? [];
+      const posts: URL[] = [];
+      const answered = new Map<string, unknown>();
+      vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+        const url = new URL(input);
+        if (init?.method !== "POST") return Response.json(options.find(url, made));
+        posts.push(url);
+        const requestId = url.searchParams.get("requestid");
+        if (options.requestIds && requestId && answered.has(requestId)) return Response.json(answered.get(requestId));
+        const record = { ...JSON.parse(String(init.body)), kind: url.pathname.split("/").at(-1), id: `made-${made.length + 1}` };
+        made.push(record);
+        if (requestId) answered.set(requestId, options.answer(record));
+        if (posts.length === 1) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+        return Response.json(options.answer(record));
+      });
+      return { made, posts };
+    }
+
+    const quickbooks = (options: { requestIds?: boolean; made?: Array<Record<string, any>> } = {}) =>
+      provider({
+        ...options,
+        // query?query=select * from Invoice where DocNumber = '1042'
+        find: (url, made) => {
+          const number = /DocNumber = '(.*)'/.exec(url.searchParams.get("query") ?? "")?.[1];
+          return { QueryResponse: { Invoice: made.filter((r) => r.kind === "invoice" && r.DocNumber === number).map((r) => ({ ...r, Id: r.id, SyncToken: "0" })) } };
+        },
+        answer: (r) => ({ [r.kind === "invoice" ? "Invoice" : "Payment"]: { Id: r.id, SyncToken: "0" } }),
+      });
+
+    const zoho = () =>
+      provider({
+        // invoices?reference_number=...&customer_id=... and customerpayments?reference_number=...
+        find: (url, made) => {
+          const kind = url.pathname.split("/").at(-1);
+          const hits = made.filter((r) => r.kind === kind && r.reference_number === url.searchParams.get("reference_number"));
+          return kind === "invoices"
+            ? { code: 0, invoices: hits.filter((r) => r.customer_id === url.searchParams.get("customer_id")).map((r) => ({ ...r, invoice_id: r.id })) }
+            : { code: 0, customerpayments: hits.map((r) => ({ ...r, payment_id: r.id })) };
+        },
+        answer: (r) => (r.kind === "invoices" ? { code: 0, invoice: { invoice_id: r.id } } : { code: 0, payment: { payment_id: r.id } }),
+      });
+
+    it("doesn't put a second invoice in QuickBooks, even once it has forgotten the request id", async () => {
+      const { db, links } = await ours("quickbooks", { client: "cust-1" });
+      const qbo = quickbooks();
+      await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("timeout");
+      await runAccountingJob(env, db, invoiceJob); // the outbox's retry
+      expect(qbo.made).toHaveLength(1);
+      expect(qbo.posts).toHaveLength(1); // found by its number instead
+      expect(links.get("invoice")).toBe("made-1");
+    });
+
+    it("still sends an invoice when the one in QuickBooks with that number is another customer's", async () => {
+      const { db, links } = await ours("quickbooks", { client: "cust-1" });
+      const qbo = quickbooks({ made: [{ kind: "invoice", id: "theirs", DocNumber: "1042", CustomerRef: { value: "cust-9" } }] });
+      await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("timeout");
+      await runAccountingJob(env, db, invoiceJob);
+      expect(qbo.made.map((r) => r.id)).toEqual(["theirs", "made-2"]);
+      expect(links.get("invoice")).toBe("made-2");
+    });
+
+    it("sends a payment again with the same request id, so QuickBooks answers with the one it made", async () => {
+      const { db, links } = await ours("quickbooks", { client: "cust-1", invoice: "qbo-inv-1" });
+      const qbo = quickbooks({ requestIds: true });
+      await expect(runAccountingJob(env, db, paymentJob)).rejects.toThrow("timeout");
+      await runAccountingJob(env, db, paymentJob);
+      expect(qbo.made).toHaveLength(1);
+      expect(qbo.posts.map((url) => url.searchParams.get("requestid"))).toEqual(["payment-pay-1", "payment-pay-1"]);
+      expect(links.get("payment")).toBe("made-1");
+    });
+
+    it("doesn't put a second invoice in Zoho Books", async () => {
+      const { db, links } = await ours("zoho_books", { client: "contact-1" });
+      const books = zoho();
+      await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("timeout");
+      await runAccountingJob(env, db, invoiceJob);
+      expect(books.made).toHaveLength(1);
+      expect(books.posts).toHaveLength(1);
+      expect(links.get("invoice")).toBe("made-1");
+    });
+
+    it("doesn't put a second payment in Zoho Books", async () => {
+      const { db, links } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" });
+      const books = zoho();
+      await expect(runAccountingJob(env, db, paymentJob)).rejects.toThrow("timeout");
+      await runAccountingJob(env, db, paymentJob);
+      expect(books.made).toMatchObject([{ reference_number: "pay-1", invoices: [{ invoice_id: "zoho-inv-1", amount_applied: 45 }] }]);
+      expect(books.posts).toHaveLength(1);
+      expect(links.get("payment")).toBe("made-1");
     });
   });
 });

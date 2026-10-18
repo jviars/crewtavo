@@ -1650,6 +1650,9 @@ isOneToOne: false
 "apply_promo_code":
 { Args: { "p_code": string,"p_id": string,"p_kind": string }; Returns: Json
                            },
+"approve_hub_quote":
+{ Args: { "p_approval": Json,"p_company": string,"p_quote": string,"p_selected": (string)[] }; Returns: boolean
+                           },
 "campaign_audience":
 { Args: { "p_audience": Json,"p_company_id": string }; Returns: {
               "client_id": string,"display_name": string,"email": string
