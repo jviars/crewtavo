@@ -381,6 +381,7 @@ describe("recurring visits", () => {
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const { pathname } = new URL(String(input));
       if (pathname === "/rest/v1/jobs") return Response.json([job("bad", "FREQ=HOURLY"), job("good", "FREQ=WEEKLY;BYDAY=MO")]);
+      if (pathname === "/rest/v1/recurrence_skips") return Response.json([]); // nothing deleted by hand
       if (pathname === "/rest/v1/visits" && init?.method === "POST") {
         const rows = JSON.parse(String(init.body)) as typeof posted;
         posted.push(...rows);

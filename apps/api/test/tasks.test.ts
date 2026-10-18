@@ -58,7 +58,7 @@ describe("weather holds", () => {
       visit("task", null),
     ];
     const calls = serve((call) => (call.url.host === "api.open-meteo.com" ? forecast : call.method === "GET" && call.path === "visits" ? visits : []));
-    expect(await runTask("weather", env)).toEqual({ checked: 5, flagged: 2 });
+    expect(await runTask("weather", env)).toEqual({ checked: 5, flagged: 2, unknown: 0 });
     const holds = calls.filter((c) => c.method === "PATCH" && c.path === "visits").map((c) => ({ id: c.url.searchParams.get("id"), hold: c.body.hold_reason }));
     expect(holds).toEqual([
       { id: "eq.mow", hold: "Weekly mow: 90% chance of rain" },
