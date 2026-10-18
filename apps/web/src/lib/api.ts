@@ -6,7 +6,7 @@
  */
 import type { Database } from "@crewtavo/core/database";
 import { createClient, isAuthRetryableFetchError, type SupabaseClient } from "@supabase/supabase-js";
-import { ApiError, friendlyDbError, OFFLINE, SESSION_EXPIRED } from "./errors";
+import { ApiError, friendlyDbError, isRestarting, OFFLINE, SESSION_EXPIRED } from "./errors";
 import { startMonitoring, type MonitoringConfig } from "./monitoring";
 
 export { ApiError } from "./errors";
@@ -177,17 +177,27 @@ export const api = {
   delete: <T>(path: string, options?: RequestOptions) => request<T>("DELETE", path, undefined, options),
 };
 
-type DbResult = { data: unknown; error: { message: string; code?: string; details?: string | null; hint?: string | null } | null };
+type DbResult = { data: unknown; error: { message: string; code?: string; details?: string | null; hint?: string | null } | null; status?: number };
+
+/**
+ * A failed database request as a friendly ApiError. One answered for the server while it restarts
+ * keeps its 502, 503 or 504, so a queued field action waits for it instead of failing (lib/offline.ts).
+ */
+function dbFailure(result: DbResult): ApiError {
+  // The server restarting isn't a database fault to report (a field action retries through it).
+  if (isRestarting(result.status)) return new ApiError("Crewtavo is restarting. Try again in a moment.", result.status!, "restarting");
+  return friendlyDbError(result.error!);
+}
 
 /** Unwrap a supabase-js result in a react-query function; errors become friendly ApiErrors. */
 export function unwrap<R extends DbResult>(result: R): NonNullable<R["data"]> {
-  if (result.error) throw friendlyDbError(result.error);
+  if (result.error) throw dbFailure(result);
   return result.data as NonNullable<R["data"]>;
 }
 
 /** Like unwrap, but a missing row is an error ("not found") rather than null. */
 export function unwrapOne<R extends DbResult>(result: R, what = "That record"): NonNullable<R["data"]> {
-  if (result.error) throw friendlyDbError(result.error);
+  if (result.error) throw dbFailure(result);
   if (result.data == null) throw new ApiError(`${what} wasn't found. It may have been deleted.`, 404, "PGRST116");
   return result.data as NonNullable<R["data"]>;
 }

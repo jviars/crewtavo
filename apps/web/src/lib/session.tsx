@@ -49,7 +49,8 @@ export interface Session {
   /** Areas this person's role includes. */
   permissions: Permission[];
   switchCompany: (id: string) => void;
-  signOut: () => Promise<void>;
+  /** True once signed out. */
+  signOut: () => Promise<boolean>;
   refresh: () => Promise<unknown>;
 }
 
@@ -234,7 +235,11 @@ export function SessionProvider({ children, requireCompany = true }: { children:
     [queryClient],
   );
 
-  /** Signing out clears everything of theirs from this phone, so first say if field actions are still waiting to send. */
+  /**
+   * Signing out on purpose, from the menu or a screen before the app (the license, setting up a
+   * business, choosing a password), clears everything of theirs from this phone, so first say if
+   * field actions are still waiting to send.
+   */
   const signOut = useCallback(async () => {
     const waiting = pendingFieldActions(queryClient);
     const ok =
@@ -245,12 +250,14 @@ export function SessionProvider({ children, requireCompany = true }: { children:
         confirmLabel: "Sign out anyway",
         danger: true,
       }));
-    if (!ok) return;
+    if (!ok) return false;
     signingOut.current = true;
     await supabase().auth.signOut().catch(() => undefined);
     // Still set: no SIGNED_OUT came (the sign-in needed refreshing and that didn't get through).
-    if (signingOut.current) toast.error("Couldn't sign out. Try again when you have signal.");
+    const signedOut = !signingOut.current;
+    if (!signedOut) toast.error("Couldn't sign out. Try again when you have signal.");
     signingOut.current = false;
+    return signedOut;
   }, [queryClient]);
 
   const value = useMemo<Session | null>(() => {
@@ -287,7 +294,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
     // A one-business instance: setup steps, or the owner's first account, before the sign-in page.
     return config.data.singleCompany ? <FirstRun><LoginPage notice={linkProblem} /></FirstRun> : <LoginPage notice={linkProblem} />;
   }
-  if (settingPassword) return <SetPasswordPage kind={settingPassword} onDone={() => setSettingPassword(null)} />;
+  if (settingPassword) return <SetPasswordPage kind={settingPassword} onDone={() => setSettingPassword(null)} onSignOut={signOut} />;
   if (me.error) {
     return (
       <SetupGate>
@@ -302,11 +309,11 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   }
   if (!me.data) return <ShellSkeleton />;
   if (!membership) {
-    return requireCompany ? <OnboardingPage onCreated={() => me.refetch()} /> : <>{children}</>;
+    return requireCompany ? <OnboardingPage onCreated={() => me.refetch()} onSignOut={signOut} /> : <>{children}</>;
   }
   // Only false from the server counts: an account saved for working offline may predate it.
   if (membership.terms_accepted === false && (membership.role === "owner" || membership.role === "admin")) {
-    return <TermsPage companyName={membership.company.name} onAccepted={() => me.refetch()} />;
+    return <TermsPage companyName={membership.company.name} onAccepted={() => me.refetch()} onSignOut={signOut} />;
   }
   if (!value) return <ShellSkeleton />;
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

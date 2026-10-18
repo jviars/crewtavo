@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineTotal, quoteTotals, toCents, toUnits, type TotalsPromo } from "../src/money";
+import { lineTotal, quoteTotals, taxPercent, taxRateFromPercent, toCents, toUnits, type TotalsPromo } from "../src/money";
 import { sqlQuoteTotals, type SqlLine } from "./numeric";
 
 // The expected values below were checked in Postgres 16.
@@ -48,12 +48,38 @@ describe("money", () => {
     expect(quoteTotals([], { taxRate: 0.08, discountAmount: 10 })).toEqual({ subtotal: 0, discount: 0, tax: 0, total: 0 });
   });
 
+  it("keeps a tax rate to 0.0001%, as the columns do", () => {
+    // New York City's 8.875% on $1,000.00 is $88.75 (8.88% would be $88.80), as in Postgres.
+    const lines = [{ quantity: 1, unit_price: 1000, taxable: true }, { quantity: 1, unit_price: 50, taxable: false }];
+    expect(quoteTotals(lines, { taxRate: 0.08875 })).toEqual({ subtotal: 1050, discount: 0, tax: 88.75, total: 1138.75 });
+    expect(quoteTotals(lines, { taxRate: "0.088750" }).tax).toBe(88.75); // as PostgREST may send it
+    expect(quoteTotals(lines, { taxRate: 0.07375 }).tax).toBe(73.75);
+    expect(quoteTotals(lines, { taxRate: 0.088755 }).tax).toBe(88.76); // 88.755, half away from zero
+    expect(quoteTotals(lines, { taxRate: 0.0887549 }).tax).toBe(88.76); // stored as 0.088755
+    // A discount's taxable share, at a three-decimal rate.
+    expect(quoteTotals(lines, { taxRate: 0.08875, discountAmount: 105 })).toEqual({ subtotal: 1050, discount: 105, tax: 79.88, total: 1024.88 });
+  });
+
+  it("turns tax rates into percents and back exactly", () => {
+    expect(taxPercent(0.08875)).toBe(8.875);
+    expect(taxPercent("0.088750")).toBe(8.875);
+    expect(taxPercent(0.0825)).toBe(8.25);
+    expect(taxPercent(0.07375)).toBe(7.375);
+    expect(taxPercent(0.088755)).toBe(8.8755);
+    expect(taxPercent(null)).toBe(0);
+    expect(taxRateFromPercent(8.875)).toBe(0.08875);
+    expect(taxRateFromPercent("9.125")).toBe(0.09125);
+    expect(taxRateFromPercent(4.02)).toBe(0.0402); // 4.02 / 100 is 0.04019999999999999 in floats
+    expect(taxRateFromPercent(8.87555)).toBe(0.088756); // rounded as numeric(8, 6) rounds it
+    expect(taxRateFromPercent(taxPercent(0.08875))).toBe(0.08875);
+  });
+
   // Property test: the helper (cents, from JSON numbers) against a BigInt reimplementation of the SQL.
   let seed = 20261017;
   const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
   const pick = <T,>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
   const money = (lo: number, hi: number) => (Math.floor(lo * 100 + rnd() * (hi - lo) * 100) / 100).toFixed(2);
-  const RATES = ["0", "0.0725", "0.0825", "0.06", "0.0888", "0.053", "0.0475", "0.1025", "0.0625", "0.07", "0.0875", "0.0333"];
+  const RATES = ["0", "0.0725", "0.0825", "0.06", "0.0888", "0.053", "0.0475", "0.1025", "0.0625", "0.07", "0.0875", "0.0333", "0.08875", "0.07375", "0.09125", "0.088755", "0.047125"];
   const PROMOS = [null, null, null, { kind: "percent", value: "15" }, { kind: "percent", value: "7.5" }, { kind: "percent", value: "33.33" }, { kind: "amount", value: "50.00" }, { kind: "amount", value: "1.00" }];
 
   const compare = (lines: SqlLine[], q: { discount_amount: string; tax_rate: string; promo: { kind: string; value: string } | null }) => {

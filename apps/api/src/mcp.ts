@@ -8,7 +8,8 @@
  * an assistant can never see or do more than the person who connected it.
  *
  * Owners and admins can turn assistants off or make them read-only (companies.settings.assistants),
- * every tool call is logged to assistant_calls, and each person is rate limited.
+ * every tool call is logged to assistant_calls, and each person is rate limited. Each connection
+ * also only reads until the person who made it turns on "Allow changes" for it (lib/assistants.ts).
  */
 import { localDate } from "@crewtavo/core";
 import type { Context } from "hono";
@@ -16,6 +17,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "./env";
 import { ownOrigin } from "./lib/address";
+import { allowsChanges, ASSISTANT_READ_ONLY } from "./lib/assistants";
 import { bearerToken } from "./lib/auth";
 import { appUrl } from "./lib/http";
 import { allow } from "./lib/limit";
@@ -74,6 +76,7 @@ function friendly(message: string) {
   if (/row-level security|permission denied|violates.*policy/i.test(message)) return "You don't have permission to do that in Crewtavo.";
   if (/violates foreign key|not present in table/i.test(message)) return "That record doesn't exist (or you can't see it).";
   if (/invalid input syntax|violates check constraint/i.test(message)) return "One of the values isn't valid.";
+  if (/read-only transaction/i.test(message)) return ASSISTANT_READ_ONLY;
   return message.length > 160 || /relation|column|function|syntax/i.test(message) ? "That didn't work. Try again." : message;
 }
 
@@ -188,7 +191,9 @@ const TOOLS = {
     input: z.object({ query: z.string().min(2).max(200), ...companyArg }),
     readOnly: true,
     run: async (ctx, a) => {
-      const { data, error } = await ctx.db.rpc("search_sops", { p_company: ctx.companyId, p_query: a.query, p_limit: 5 });
+      // Asked with GET like the other lookups: an instance's gateway takes only reads from an
+      // assistant that can't change things (lib/assistants.ts).
+      const { data, error } = await ctx.db.rpc("search_sops", { p_company: ctx.companyId, p_query: a.query, p_limit: 5 }, { get: true });
       if (error) throw new Error(friendly(error.message));
       return (data ?? []).map((s: { id: string; title: string; category: string; snippet: string }) => ({ id: s.id, title: s.title, category: s.category, excerpt: s.snippet }));
     },
@@ -296,6 +301,7 @@ mcp.post("/mcp", async (c) => {
         ctx = await toolContext(db, userId, (parsed.data as { company_id?: string }).company_id);
         if (!ctx.assistants.enabled) throw new Error("AI assistants are turned off for this company. An owner or admin can turn them on in Crewtavo under Settings → Apps.");
         if (ctx.assistants.read_only && !t.readOnly) throw new Error("Assistants can only look things up for this company, not make changes. An owner or admin can change this under Settings → Apps.");
+        if (oauthClient && !t.readOnly && !(await allowsChanges(db, oauthClient))) throw new Error(ASSISTANT_READ_ONLY);
         const value = await t.run(ctx, parsed.data);
         await audit(c, ctx, userId, oauthClient, name, true, summarize(parsed.data));
         return c.json(result(id, { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], structuredContent: { result: value } }));

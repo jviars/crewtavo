@@ -11,7 +11,10 @@ import {
   roofingSquares,
   SALES,
   summarizeFeatureCollection,
+  validateFormula,
   type FeatureCollection,
+  type FormulaVariable,
+  type MeasurementSummary,
 } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -54,6 +57,15 @@ sales.post("/requests/:id/quote", requireUser, requireCompany(SALES, "sales"), a
   return c.json(quote, 201);
 });
 
+/** A saved measurement's roof slope, or null when its pitch doesn't read (formulas that use it say so). */
+function savedPitchFactor(pitch: string | null): number | null {
+  try {
+    return pitchFactor(pitch);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Fill quote line quantities (or prices) from a measurement using each line's formula.
  * Variables: area_sqft, area_sqyd, length_ft, count, depth_in, pitch_factor, waste, waste_pct.
@@ -72,13 +84,14 @@ sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "
     "Measurement not found.",
   );
   const sections = (m.sections ?? []) as Array<{ kind: string; depth_in?: number | null }>;
-  const vars = {
+  // Every value a formula may use (FORMULA_VARIABLES), and nothing else.
+  const vars: Record<FormulaVariable, number | null> = {
     area_sqft: Number(m.total_area_sqft),
     area_sqyd: Number(m.total_area_sqyd),
     length_ft: Number(m.total_length_ft),
     count: sections.filter((s) => s.kind === "Count").length,
     depth_in: body.depth_in ?? sections.find((s) => s.depth_in)?.depth_in ?? null,
-    pitch_factor: pitchFactor(m.roof_pitch),
+    pitch_factor: savedPitchFactor(m.roof_pitch),
     waste: Number(m.waste_pct) / 100,
     waste_pct: Number(m.waste_pct),
   };
@@ -311,7 +324,8 @@ const featureCollection = z.object({
       z.object({
         type: z.literal("Feature"),
         id: z.union([z.string(), z.number()]).optional(),
-        geometry: z.object({ type: z.enum(["Polygon", "MultiPolygon", "LineString", "Point", "MultiPoint"]), coordinates: z.any() }),
+        // The points are checked shape by shape in summarizeFeatureCollection.
+        geometry: z.object({ type: z.enum(["Polygon", "MultiPolygon", "LineString", "Point", "MultiPoint"]), coordinates: z.unknown() }),
         properties: z.record(z.string(), z.unknown()).nullable().optional(),
       }),
     )
@@ -334,12 +348,22 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
     }),
   );
   // Totals always come from the shapes, recomputed here; nothing the browser computed is trusted.
-  const summary = summarizeFeatureCollection(body.geojson as FeatureCollection);
+  let summary: MeasurementSummary;
+  try {
+    summary = summarizeFeatureCollection(body.geojson as FeatureCollection);
+  } catch (error) {
+    if (error instanceof RangeError) throw new HttpError(400, error.message);
+    throw error;
+  }
   let squares: number | null = null;
   try {
     squares = body.roof_pitch ? Math.round(roofingSquares(summary.total_area_sqft, body.roof_pitch, body.waste_pct) * 100) / 100 : null;
   } catch {
     throw new HttpError(400, "Roof pitch should look like 7/12.");
+  }
+  // As much as the columns hold: under a trillion square feet or feet, a hundred million squares.
+  if (summary.total_area_sqft >= 1e12 || summary.total_length_ft >= 1e12 || (squares ?? 0) >= 1e8) {
+    throw new HttpError(400, "This measurement is too large to save. Check the shapes and measured values.");
   }
   const { id, ...fields } = body;
   const row = {
@@ -362,6 +386,8 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
 sales.post("/formulas/evaluate", requireUser, requireCompany(), async (c) => {
   const body = await readJson(c, z.object({ formula: z.string().max(300), variables: z.record(z.string(), z.number().nullable()) }));
   try {
+    // Only values a measurement supplies, so a formula that checks out here works on quotes.
+    validateFormula(body.formula);
     return c.json({ value: evaluateFormula(body.formula, body.variables) });
   } catch (error) {
     if (error instanceof FormulaError) throw new HttpError(400, error.message);

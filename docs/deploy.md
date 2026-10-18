@@ -98,14 +98,26 @@ docker compose --env-file .env.instance down -v   # delete the instance and all 
 ```
 
 **On a server:** set `APP_URL=https://your-domain` in `.env.instance`, run `npm run instance` again,
-and put a web server with HTTPS in front of port 8080 (`CREWTAVO_PORT`). With Caddy, a two-line
-`Caddyfile` does it:
+and put a web server with HTTPS in front of port 8080 (`CREWTAVO_PORT`) on the same server, since
+the port only answers there. With Caddy, this `Caddyfile` does it:
 
 ```
 your-domain {
   reverse_proxy localhost:8080
 }
 ```
+
+Caddy adds each visitor's address to `X-Forwarded-For`, which Crewtavo's rate limits go by (see
+[Visitors' addresses](#visitors-addresses)). Another web server has to add it the same way (nginx:
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). A Caddyfile with a
+`header_up X-Real-IP {remote_host}` line, from earlier versions of these steps, works as it is.
+
+**Updating from an earlier version:** Crewtavo used to go by `X-Real-IP`. A web server that only
+sets that one (nginx's `proxy_set_header X-Real-IP $remote_addr;`) needs the `X-Forwarded-For` line
+above as well, or `CREWTAVO_VISITOR_IP=x-real-ip` in `.env.instance`. Without either, visitors can
+pick their own address, and everyone who doesn't shares the web server's. Port 8080 also used to
+answer on every address; now it only answers on the server itself. If your web server runs on
+another machine, see [Visitors' addresses](#visitors-addresses).
 
 **Backups:** back up the `crewtavo-instance_db-data` and `crewtavo-instance_storage-data` Docker
 volumes, and `.env.instance`.
@@ -130,14 +142,57 @@ lists them all).
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_ENVIRONMENT` | QuickBooks Online. Create an app at developer.intuit.com; the redirect URI is shown on the Apps page. |
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books. Create a server-based client at api-console.zoho.com. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar: show a company's Google calendars on the schedule and put visits on a Google calendar Crewtavo makes. In Google Cloud, turn on the Google Calendar API, set up the OAuth consent screen with the scopes `calendar.calendarlist.readonly`, `calendar.events.readonly` and `calendar.app.created`, and create a Web application client whose redirect URI is the one shown on the Google Calendar app page (`https://your-domain/api/apps/google_calendar/callback`). Without these, calendars can still be added by their ICS link. |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Not needed for most businesses: connect Stripe on the **Apps** page instead (see [Connecting Stripe](#connecting-stripe)). These share one Stripe account with every company on the server that hasn't connected its own. Point a webhook at `/api/webhooks/stripe` with API version `2024-06-20` and the events in `STRIPE_EVENTS` (`apps/api/src/integrations/stripe.ts`): `invoice.*` (finalized, paid, payment_failed, voided, marked_uncollectible), `payment_intent.processing`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`, `payout.*` (created, updated, paid, failed, canceled) and `checkout.session.*` (completed, async_payment_succeeded, async_payment_failed). |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Not needed for most businesses: connect Stripe on the **Apps** page instead (see [Connecting Stripe](#connecting-stripe)). These share one Stripe account with every company on the server that hasn't connected its own (so **Bring in your Stripe history** works with it only on a one-company server). Point a webhook at `/api/webhooks/stripe` with API version `2024-06-20` and the events in `STRIPE_EVENTS` (`apps/api/src/integrations/stripe.ts`): `invoice.*` (finalized, paid, payment_failed, voided, marked_uncollectible), `payment_intent.processing`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`, `payout.*` (created, updated, paid, failed, canceled) and `checkout.session.*` (completed, async_payment_succeeded, async_payment_failed). |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email through [Resend](https://resend.com). **Needed on Railway's trial and Hobby plans**, which block outgoing mail servers (SMTP). On Railway Pro or when self-hosting, the business can instead connect its own mailbox under **Settings → Email**, and these only give it a default sender until then. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages. For two-way texting, set the number's **Messaging > A message comes in** webhook to `https://your-domain/api/webhooks/twilio` (HTTP POST). Replies appear in Messages and notify the office. `APP_URL` must match that address exactly, because Twilio signs the full URL. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SCHEDULER` | Set to `off` on extra replicas of `crewtavo`, so background tasks run in one place. |
+| `CREWTAVO_VISITOR_IP` | Only when something other than Railway's edge or one web server is in front of Crewtavo: where visitors' addresses come from (see [Visitors' addresses](#visitors-addresses)). |
+| `CREWTAVO_BIND` | Docker only: the address port 8080 answers on. Defaults to `127.0.0.1`, the computer itself, which is all a web server there needs; read [Visitors' addresses](#visitors-addresses) before changing it. |
 | `CREWTAVO_SENTRY_DSN` | Error tracking for the API and the web app (see below). Unset turns it off. |
 | `CREWTAVO_SENTRY_WEB_DSN` | Optional: send the web app's errors to a separate project. Defaults to `CREWTAVO_SENTRY_DSN`. |
 | `CREWTAVO_SENTRY_ENVIRONMENT` | Optional: the environment shown on each report, such as `staging`. Defaults to `production`. |
+
+### Visitors' addresses
+
+Public pages (booking forms, promo codes, Client Hub payments and messages, sign-in links, the
+first-run setup) limit how often each visitor can use them, by address, and a quote approval
+records the address it came from. Anyone can send their own `X-Real-IP` or `X-Forwarded-For`
+header, so Crewtavo only goes by what the instance's own proxy sets:
+
+- **On Railway:** `X-Real-IP`, which Railway's edge sets on every request in place of anything
+  the visitor sent.
+- **With Docker or on your own server:** the last `X-Forwarded-For` entry, which the web server in
+  front adds, on connections from the same machine or a private network (where that web server
+  connects from). Connections from anywhere else count by their own address.
+
+With Docker, port 8080 only answers on the server itself (`CREWTAVO_BIND`, `127.0.0.1` by
+default), so the web server there is the only way in. Keep it that way with a web server in front:
+Docker hands some outside connections to Crewtavo from its own network address (over IPv6, and on
+Docker Desktop or rootless Docker often all of them), and Crewtavo would take them for the web
+server's and believe their `X-Forwarded-For`.
+
+- **Web server on another machine:** set `CREWTAVO_BIND` to this server's address on the private
+  network between them, not `0.0.0.0`.
+- **No web server** (trying Crewtavo from other computers on your network): set
+  `CREWTAVO_BIND=0.0.0.0` and `CREWTAVO_VISITOR_IP=connection`. On Docker Desktop, everyone then
+  counts as one visitor.
+- **Without Docker:** close port 8080 to other computers with the server's firewall.
+
+Sign-in and file storage get the same address from Crewtavo (Auth records it with each sign-in).
+With something else in front, set `CREWTAVO_VISITOR_IP`:
+
+| Value | When |
+| --- | --- |
+| `x-forwarded-for:2` | Two proxies add to `X-Forwarded-For`, such as Cloudflare's proxy in front of Caddy. Caddy keeps Cloudflare's entries only from addresses in its `trusted_proxies` setting, so list Cloudflare's there. The number counts the proxies. |
+| `cf-connecting-ip`, `x-real-ip` (or another header) | The proxy in front sets this header to the visitor's address, replacing any the visitor sent (nginx's `proxy_set_header X-Real-IP $remote_addr;` does). |
+| `connection` | Nothing is in front: the address each connection comes from. |
+
+Once set, it's believed on every connection, so nothing may reach Crewtavo without going through
+those proxies: keep port 8080 on the server (above), and let the web server take connections only
+from the proxy in front of it (for Cloudflare, allow only [Cloudflare's addresses](https://www.cloudflare.com/ips/)
+in the server's firewall). Caddy with `x-forwarded-for:2` doesn't need the firewall, since it
+replaces the `X-Forwarded-For` of anyone outside `trusted_proxies`; nginx adds to it.
 
 ### Error tracking
 
@@ -176,6 +231,10 @@ the Sentry project's security settings so the server never infers them.
 - **Settings → Profile → Notifications** (each person): turn on notifications for their phone and
   choose what also comes by email or text. On an iPhone, add Crewtavo to the Home Screen first
   (Share → Add to Home Screen) and open it from there. Phone notifications are free and need no setup.
+  Where the browser offers it (Chrome or Edge, on Android or a computer), **Install the app** is
+  there too, and on the crew's Home and My day, where crews in Safari on an iPhone get the Home
+  Screen steps instead. Crew updates made with no signal go out once Crewtavo is on the screen with
+  signal; on Android, if it's put away or closed by then, a notification says how many are waiting.
 - **Company settings**: address (used for route starts and email footers), payment terms, tax rate and brand color.
 - **Marketing > Reviews**: paste your Google review link so review requests point at it.
 - **Marketing > Referrals**: set the reward you offer, if any.
@@ -195,16 +254,40 @@ Then:
 - **Sending an invoice** also creates it in Stripe, so it shows in your Stripe dashboard. Crewtavo
   emails or texts the client as before; Stripe doesn't. The **Pay** button in the Client Hub opens
   Stripe's page for that invoice. A client can't pay it twice, a bank payment shows as on its way
-  until it clears (no reminders meanwhile), and a check you record replaces the Stripe invoice with
-  one for what's still owed.
+  until it clears (no reminders meanwhile, and the invoice page says when it started and asks
+  before you record another payment, which could have the client pay twice), and a check you
+  record replaces the Stripe invoice with one for what's still owed. A few cents left, less than
+  Stripe can charge (50¢ in dollars), aren't put in Stripe: collect them another way. A sent
+  invoice moved back to draft can be deleted once its Stripe invoice is voided, a few minutes
+  later (if Stripe can't be reached to void it, void the invoice instead).
 - **Invoices you make in Stripe** (a one-off or a big job you'd rather bill by hand) come into
   Crewtavo on their own, matched to the client by email or added as a new client, and their
-  payments are recorded when they're paid.
+  payments are recorded when they're paid. Stripe asks the client for what it billed, so record a
+  payment on one in Stripe, not in Crewtavo: mark it paid there when the client paid all of it, or
+  issue a credit note there for what they paid when it's part of it, so Stripe asks for only the
+  rest. The credit note is recorded here once the invoice is paid in Stripe.
 - **Payments** record the fee Stripe kept, and **Invoices → Stripe deposits** shows each payout to
   your bank with the payments in it. Refunds, failed bank payments and disputes show up on their own.
+  A client's balance in Stripe goes on their next Stripe invoice: credit they had is recorded on
+  that invoice, and money they owed from before as a payment from them that isn't on the invoice
+  (a refund or a lost dispute of that charge takes it back too). When credit pays all of an
+  invoice and the client adds a tip in the Client Hub, Stripe charges only the tip: that's recorded
+  as a payment of just the tip, with its fee and deposit. A credit note you issue in Stripe
+  before the invoice is paid is recorded on it, so it isn't asked for again. Tips aren't sent to
+  QuickBooks or Zoho Books (they aren't on the invoice there); Reports shows them.
 - **Bring in your Stripe history** on the Stripe card imports past invoices, their clients and
   payments, and deposits, from a date you choose. History comes in quietly: no automations,
-  reminders or notifications. Running it again only updates what's already there.
+  reminders or notifications. Running it again only updates what's already there. On the
+  server's own Stripe account (`STRIPE_SECRET_KEY`) it only runs when the server has one company,
+  since that account is shared.
+
+**Replacing the key** (**Replace key** on Stripe's page in **Apps**) only takes over once Crewtavo has added
+the webhook with the new key; if it can't, Stripe stays connected as it was. When the new key is
+for another Stripe account, or it's your live key after a test one, Crewtavo stops using the old
+account: its open invoices are voided there (any paid meanwhile are recorded), and clients get a
+new Stripe invoice in the new account when they pay. **Disconnecting** does the same. A bank
+payment still clearing in the old account is left alone, so the client isn't asked to pay twice;
+a note on the client reminds you to record it once it clears there.
 
 Stripe only sends webhooks to a public `https` address, so on a local copy the key is saved
 without one. Run `stripe listen --forward-to localhost:8787/api/webhooks/stripe` and use the
@@ -218,5 +301,13 @@ Instances come with this turned on. Open **Apps** in Crewtavo and copy the conne
 - **Claude**: Settings > Connectors > Add custom connector.
 - **ChatGPT**: Settings > Apps and connectors > Add (developer mode).
 
-Each person signs in to Crewtavo and approves access on `/oauth/consent`. The assistant then has
-exactly that person's permissions.
+Each person signs in to Crewtavo and approves access on `/oauth/consent`. The assistant can then
+look up whatever that person can see, but can't add or change anything until they turn on **Allow
+changes** for it (Settings > Profile > AI assistants, which everyone has whatever their role; owners
+and admins also see it on the Claude and ChatGPT pages under Apps); connections made before that
+switch existed only read too. It never gets more than the person's own permissions, and it can't
+change their sign-in. The database holds it to reading as well, through PostgREST's pre-request
+setting (`pgrst.db_pre_request` on the `authenticator` role, which the migrations set). If the
+database role that runs the migrations isn't allowed to change `authenticator`, the update's log
+says so (`migrate: warning in 20261019001040_assistant_access.sql`) with the command to run as a
+superuser; then run `notify pgrst, 'reload config';` (or restart the Data API).

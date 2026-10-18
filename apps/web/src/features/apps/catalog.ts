@@ -199,9 +199,9 @@ export const APP_INFO: Record<string, AppInfo> = {
     highlights: [
       { icon: "search", title: "Look things up", text: "Clients, requests and the schedule, asked in plain words." },
       { icon: "plus", title: "Get things done", text: "Log a request or add a note without opening Crewtavo." },
-      { icon: "lock", title: "Your rules", text: "Turn it off any time, or let it look things up only." },
+      { icon: "lock", title: "Your rules", text: "It only looks things up until you allow changes. Turn it off any time." },
     ],
-    access: ["Search clients and see their details", "See requests and the schedule", "Log requests and add notes (unless set to look things up only)", "Search your guides"],
+    access: ["Search clients and see their details", "See requests and the schedule", "Log requests and add notes, once you turn on Allow changes for it", "Search your guides"],
     connectsWith: "Connector link",
     website: "https://claude.ai/",
   },
@@ -213,9 +213,9 @@ export const APP_INFO: Record<string, AppInfo> = {
     highlights: [
       { icon: "search", title: "Look things up", text: "Clients, requests and the schedule, asked in plain words." },
       { icon: "plus", title: "Get things done", text: "Log a request or add a note without opening Crewtavo." },
-      { icon: "lock", title: "Your rules", text: "Turn it off any time, or let it look things up only." },
+      { icon: "lock", title: "Your rules", text: "It only looks things up until you allow changes. Turn it off any time." },
     ],
-    access: ["Search clients and see their details", "See requests and the schedule", "Log requests and add notes (unless set to look things up only)", "Search your guides"],
+    access: ["Search clients and see their details", "See requests and the schedule", "Log requests and add notes, once you turn on Allow changes for it", "Search your guides"],
     connectsWith: "Connector link",
     website: "https://chatgpt.com/",
   },

@@ -60,6 +60,20 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"assistant_connections": {
+                  Row: {
+                    "allow_changes": boolean,"client_id": string,"updated_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "allow_changes"?: boolean,"client_id": string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Update: {
+                    "allow_changes"?: boolean,"client_id"?: string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+
+                  ]
                 },"attachments": {
                   Row: {
                     "caption": string | null,"company_id": string,"content_type": string | null,"created_at": string,"created_by": string | null,"file_name": string,"id": string,"owner_id": string,"owner_type": string,"path": string,"size_bytes": number | null
@@ -102,14 +116,14 @@ isOneToOne: false
                   ]
                 },"automation_runs": {
                   Row: {
-                    "activity_id": number | null,"attempts": number,"company_id": string,"created_at": string,"error": string | null,"finished_at": string | null,"id": number,"locked_until": string | null,"result": NonNullable<Json>,"rule_id": string,"run_after": string,"status": string,"subject_id": string | null,"subject_type": string | null
+                    "activity_id": number | null,"attempts": number,"claim_token": string | null,"company_id": string,"created_at": string,"error": string | null,"finished_at": string | null,"id": number,"locked_until": string | null,"result": NonNullable<Json>,"rule_id": string,"run_after": string,"status": string,"subject_id": string | null,"subject_type": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "activity_id"?: number | null,"attempts"?: number,"company_id": string,"created_at"?: string,"error"?: string | null,"finished_at"?: string | null,"id"?: never,"locked_until"?: string | null,"result"?: NonNullable<Json>,"rule_id": string,"run_after"?: string,"status"?: string,"subject_id"?: string | null,"subject_type"?: string | null
+                    "activity_id"?: number | null,"attempts"?: number,"claim_token"?: string | null,"company_id": string,"created_at"?: string,"error"?: string | null,"finished_at"?: string | null,"id"?: never,"locked_until"?: string | null,"result"?: NonNullable<Json>,"rule_id": string,"run_after"?: string,"status"?: string,"subject_id"?: string | null,"subject_type"?: string | null
                   }
                   Update: {
-                    "activity_id"?: number | null,"attempts"?: number,"company_id"?: string,"created_at"?: string,"error"?: string | null,"finished_at"?: string | null,"id"?: never,"locked_until"?: string | null,"result"?: NonNullable<Json>,"rule_id"?: string,"run_after"?: string,"status"?: string,"subject_id"?: string | null,"subject_type"?: string | null
+                    "activity_id"?: number | null,"attempts"?: number,"claim_token"?: string | null,"company_id"?: string,"created_at"?: string,"error"?: string | null,"finished_at"?: string | null,"id"?: never,"locked_until"?: string | null,"result"?: NonNullable<Json>,"rule_id"?: string,"run_after"?: string,"status"?: string,"subject_id"?: string | null,"subject_type"?: string | null
                   }
                   Relationships: [
                     {
@@ -200,14 +214,14 @@ isOneToOne: false
                   ]
                 },"campaign_recipients": {
                   Row: {
-                    "campaign_id": string,"claimed_at": string | null,"client_id": string | null,"company_id": string,"email": string,"error": string | null,"id": number,"name": string | null,"sent_at": string | null,"status": string
+                    "campaign_id": string,"claim_token": string | null,"claimed_at": string | null,"client_id": string | null,"company_id": string,"email": string,"error": string | null,"id": number,"locked_until": string | null,"name": string | null,"sent_at": string | null,"status": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "campaign_id": string,"claimed_at"?: string | null,"client_id"?: string | null,"company_id": string,"email": string,"error"?: string | null,"id"?: never,"name"?: string | null,"sent_at"?: string | null,"status"?: string
+                    "campaign_id": string,"claim_token"?: string | null,"claimed_at"?: string | null,"client_id"?: string | null,"company_id": string,"email": string,"error"?: string | null,"id"?: never,"locked_until"?: string | null,"name"?: string | null,"sent_at"?: string | null,"status"?: string
                   }
                   Update: {
-                    "campaign_id"?: string,"claimed_at"?: string | null,"client_id"?: string | null,"company_id"?: string,"email"?: string,"error"?: string | null,"id"?: never,"name"?: string | null,"sent_at"?: string | null,"status"?: string
+                    "campaign_id"?: string,"claim_token"?: string | null,"claimed_at"?: string | null,"client_id"?: string | null,"company_id"?: string,"email"?: string,"error"?: string | null,"id"?: never,"locked_until"?: string | null,"name"?: string | null,"sent_at"?: string | null,"status"?: string
                   }
                   Relationships: [
                     {
@@ -1196,6 +1210,26 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"recurrence_skips": {
+                  Row: {
+                    "company_id": string,"deleted_at": string,"deleted_by": string | null,"job_id": string,"recurrence_key": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"deleted_at"?: string,"deleted_by"?: string | null,"job_id": string,"recurrence_key": string
+                  }
+                  Update: {
+                    "company_id"?: string,"deleted_at"?: string,"deleted_by"?: string | null,"job_id"?: string,"recurrence_key"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "recurrence_skips_company_id_job_id_fkey"
+      columns: ["company_id","job_id"]
+isOneToOne: false
+      referencedRelation: "jobs"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"referrals": {
                   Row: {
                     "company_id": string,"created_at": string,"id": string,"referred_client_id": string | null,"referred_name": string,"referrer_client_id": string,"request_id": string | null,"reward_amount": number,"reward_issued_at": string | null,"reward_status": string,"status": string,"updated_at": string
@@ -1412,14 +1446,14 @@ isOneToOne: false
                   ]
                 },"stripe_invoices": {
                   Row: {
-                    "amount_due": number,"company_id": string,"created_at": string,"hosted_url": string | null,"id": string,"invoice_id": string | null,"livemode": boolean,"number": string | null,"origin": string,"status": string,"stripe_id": string | null,"tip_amount": number,"updated_at": string
+                    "amount_due": number,"company_id": string,"created_at": string,"detached_at": string | null,"hosted_url": string | null,"id": string,"invoice_id": string | null,"livemode": boolean,"number": string | null,"origin": string,"processing_at": string | null,"status": string,"stripe_account": string | null,"stripe_id": string | null,"tip_amount": number,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_due"?: number,"company_id": string,"created_at"?: string,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin": string,"status"?: string,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
+                    "amount_due"?: number,"company_id": string,"created_at"?: string,"detached_at"?: string | null,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin": string,"processing_at"?: string | null,"status"?: string,"stripe_account"?: string | null,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
                   }
                   Update: {
-                    "amount_due"?: number,"company_id"?: string,"created_at"?: string,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin"?: string,"status"?: string,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
+                    "amount_due"?: number,"company_id"?: string,"created_at"?: string,"detached_at"?: string | null,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin"?: string,"processing_at"?: string | null,"status"?: string,"stripe_account"?: string | null,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -1650,6 +1684,9 @@ isOneToOne: false
 "apply_promo_code":
 { Args: { "p_code": string,"p_id": string,"p_kind": string }; Returns: Json
                            },
+"approve_hub_quote":
+{ Args: { "p_approval": Json,"p_company": string,"p_quote": string,"p_selected": (string)[] }; Returns: boolean
+                           },
 "campaign_audience":
 { Args: { "p_audience": Json,"p_company_id": string }; Returns: {
               "client_id": string,"display_name": string,"email": string
@@ -1662,6 +1699,7 @@ isOneToOne: false
 { Args: { "p_company"?: string,"p_limit"?: number }; Returns: {
               "activity_id": number | null,
 "attempts": number,
+"claim_token": string | null,
 "company_id": string,
 "created_at": string,
 "error": string | null,
@@ -1682,14 +1720,16 @@ isOneToOne: false
         isSetofReturn: true
       } },
 "claim_campaign_recipients":
-{ Args: { "p_campaign": string,"p_limit"?: number,"p_timeout_seconds"?: number }; Returns: {
+{ Args: { "p_campaign": string,"p_limit"?: number }; Returns: {
               "campaign_id": string,
+"claim_token": string | null,
 "claimed_at": string | null,
 "client_id": string | null,
 "company_id": string,
 "email": string,
 "error": string | null,
 "id": number,
+"locked_until": string | null,
 "name": string | null,
 "sent_at": string | null,
 "status": string
@@ -1765,6 +1805,12 @@ isOneToOne: false
               "ends_at": string,"equipment_id": string,"starts_at": string,"title": string,"visit_id": string
             }[]
                            },
+"finish_automation_run":
+{ Args: { "p_error"?: string,"p_id": number,"p_result": Json,"p_status": string,"p_token": string }; Returns: boolean
+                           },
+"finish_campaign_recipients":
+{ Args: { "p_error"?: string,"p_ids": (number)[],"p_status": string,"p_token": string }; Returns: number
+                           },
 "global_search":
 { Args: { "p_company_id": string,"p_limit"?: number,"p_query": string }; Returns: {
               "client_id": string,"id": string,"kind": string,"number": number,"status": string,"subtitle": string,"title": string
@@ -1802,13 +1848,28 @@ isOneToOne: false
 "rate_limit_hit":
 { Args: { "p_key": string,"p_max": number,"p_window_seconds": number }; Returns: boolean
                            },
+"release_automation_runs":
+{ Args: { "p_ids": (number)[],"p_token": string }; Returns: number
+                           },
+"release_campaign_recipients":
+{ Args: { "p_ids": (number)[],"p_token": string }; Returns: number
+                           },
 "remove_promo_code":
 { Args: { "p_id": string,"p_kind": string }; Returns: undefined
+                           },
+"renew_automation_run":
+{ Args: { "p_id": number,"p_result": Json,"p_token": string }; Returns: boolean
+                           },
+"renew_campaign_recipient":
+{ Args: { "p_id": number,"p_token": string }; Returns: boolean
                            },
 "search_sops":
 { Args: { "p_company": string,"p_limit"?: number,"p_query": string }; Returns: {
               "acknowledged": boolean,"body_text": string,"category": string,"id": string,"rank": number,"required": boolean,"revision": number,"snippet": string,"title": string
             }[]
+                           },
+"start_automation_run":
+{ Args: { "p_id": number,"p_token": string }; Returns: boolean
                            },
 "stripe_import_invoice":
 { Args: { "p_company": string,"p_data": Json,"p_quiet"?: boolean }; Returns: string

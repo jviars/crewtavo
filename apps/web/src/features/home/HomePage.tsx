@@ -15,6 +15,7 @@ import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { monthToDate } from "@/lib/trends";
 import { managesEquipment, useEquipmentDue } from "../equipment/equipmentData";
+import { InstallAppCard } from "../field/InstallAppCard";
 import type { Dashboard } from "./types";
 import { WorkflowStrip } from "./WorkflowStrip";
 
@@ -73,6 +74,9 @@ export function HomePage() {
           </div>
         )}
       </div>
+
+      {/* The crew's phones: Crewtavo as an app. The office isn't asked here (Settings has it). */}
+      {!isOffice && <InstallAppCard />}
 
       {isPending && <HomeSkeleton office={isOffice} />}
       {error && <div className="card"><ErrorState error={error} onRetry={() => refetch()} title="Couldn't load your dashboard" /></div>}

@@ -10,10 +10,11 @@ import { handleStripeEvent, hubPayment, stripeAccess, stripeCheckout, type Webho
 import { kickAutomations, runInBackground } from "../lib/background";
 import { geocodeAddress } from "../services/external";
 import { firstName } from "../lib/email";
-import { appUrl, asJson, clientIp, dbError, HttpError, must, readJson, uuid } from "../lib/http";
+import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { clientLink, readClientLink, type LinkKind } from "../lib/links";
 import { adminClient } from "../lib/supabase";
+import { clientIp } from "../lib/visitor";
 import { buildCalendar } from "../lib/ics";
 import { StripeError, verifyStripeSignature, type StripeEvent } from "../services/stripe";
 
@@ -34,6 +35,17 @@ function geocodeLater(c: Parameters<typeof appUrl>[0], propertyId: string, addre
       if (hit) await adminClient(c.env).from("properties").update({ lat: hit.lat, lng: hit.lng }).eq("id", propertyId);
     })(),
   );
+}
+
+/**
+ * Booking forms, referrals and "request work" each make a request and tell the office, and the
+ * first two add a client and look up the address (a billed Google call). So a script can't send
+ * them by the thousand: a few an hour from one visitor, and a hundred an hour for each company.
+ */
+async function limitSubmissions(c: Parameters<typeof appUrl>[0], kind: "form" | "referral" | "hub-request", companyId: string) {
+  if (!(await allow(c.env, `${kind}:ip:${clientIp(c)}`, 10, 60 * 60)) || !(await allow(c.env, `${kind}:company:${companyId}`, 100, 60 * 60))) {
+    throw new HttpError(429, "Too many requests. Try again later, or call us.");
+  }
 }
 
 async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | undefined) {
@@ -82,6 +94,9 @@ publicRoutes.get("/hub/:token", async (c) => {
   );
   if ((invoice.status === "draft" && !l.pv) || invoice.status === "void") throw new HttpError(404, invoice.status === "void" ? "This invoice was cancelled. Contact us with any questions." : "This invoice isn't ready yet.");
   (invoice.lines as Array<{ sort: number }>).sort((a, b) => a.sort - b.sort);
+  // The Hub lists what was paid and refunded against the total. A payment that was only a tip (or
+  // the refund of one) doesn't change what's owed, so it isn't among them.
+  invoice.payments = invoice.payments.filter((p) => Number(p.amount) !== 0);
   const online = await hubPayment(c.env, admin, l.c, invoice.id);
   // Invoices made in Stripe are paid exactly as Stripe billed them, so no tip.
   const tips = (company as { hub_tips?: unknown }).hub_tips === true && !online.imported;
@@ -111,25 +126,18 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   const quote = must(await admin.from("quotes").select("id, status").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
   if (!["sent", "changes_requested"].includes(quote.status)) throw new HttpError(409, "This quote can't be approved anymore.");
 
-  // Optional lines follow the client's choices; required lines stay selected.
-  const optional = must(await admin.from("quote_line_items").select("id").eq("quote_id", l.id).eq("optional", true));
-  for (const line of optional) {
-    const { error } = await admin.from("quote_line_items").update({ selected: body.selected_line_ids.includes(line.id) }).eq("id", line.id);
-    if (error) throw dbError(error);
-  }
-  // Only while it's still waiting for an answer: two approvals at once record one.
-  const { data: approved, error } = await admin
-    .from("quotes")
-    .update({
-      status: "approved",
-      approved_at: new Date().toISOString(),
-      approval: { name: body.name, selected_line_ids: body.selected_line_ids, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c) },
-    })
-    .eq("id", l.id)
-    .in("status", ["sent", "changes_requested"])
-    .select("id");
+  // One step in the database (20261018000830_hub_approval.sql): it claims the quote while it's still
+  // waiting for an answer, then sets the optional lines to the client's choices and records the
+  // approval with the amounts they came to. So two approvals at once, or one racing a change by the
+  // office, record one, and only that one picks the options.
+  const { data: approved, error } = await admin.rpc("approve_hub_quote", {
+    p_company: l.c,
+    p_quote: l.id,
+    p_selected: body.selected_line_ids,
+    p_approval: { name: body.name, selected_line_ids: body.selected_line_ids, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c) },
+  });
   if (error) throw dbError(error);
-  if (!approved?.length) throw new HttpError(409, "This quote can't be approved anymore.");
+  if (!approved) throw new HttpError(409, "This quote can't be approved anymore.");
   kickAutomations(c, l.c);
   return c.json({ status: "approved" });
 });
@@ -180,6 +188,8 @@ publicRoutes.post("/hub/:token/promo", async (c) => {
 });
 
 publicRoutes.delete("/hub/:token/promo", async (c) => {
+  // Like putting one on: each change to what's owed is a new Stripe invoice for an invoice.
+  if (!(await allow(c.env, `promo:${clientIp(c)}`, 10, 10 * 60))) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
   const { l, admin, kind } = await hubDocument(c);
   const { error } = await admin.rpc("remove_promo_code", { p_kind: kind, p_id: l.id });
   if (error) throw dbError(error);
@@ -190,6 +200,10 @@ publicRoutes.delete("/hub/:token/promo", async (c) => {
 publicRoutes.post("/hub/:token/pay", async (c) => {
   const l = await link(c);
   if (l.t !== "invoice" || l.pv) throw new HttpError(400, "Only invoices can be paid.");
+  // Each try can void a Stripe invoice and make another, so a script can't keep at it.
+  if (!(await allow(c.env, `pay:ip:${clientIp(c)}`, 20, 10 * 60)) || !(await allow(c.env, `pay:invoice:${l.id}`, 10, 10 * 60))) {
+    throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
+  }
   const body = await readJson(c, z.object({ tip: z.number().min(0).max(100_000).default(0) }).default({ tip: 0 }));
   const admin = adminClient(c.env);
   const company = must(await admin.from("companies").select("settings->hub_tips").eq("id", l.c).maybeSingle());
@@ -238,6 +252,12 @@ publicRoutes.get("/public/forms/:company/:form", async (c) => {
   return c.json({ company: { name: company.name, phone: company.phone }, form: { name: form.name, kind: form.kind, questions: form.questions } });
 });
 
+// Answers to a form's questions: text, or the options picked. Sized well past what a form asks (up
+// to 30 questions, 4,000 characters for a long answer), so a script can't store megabytes with each.
+const formAnswers = z
+  .record(z.string().max(100), z.union([z.string().max(4000), z.number(), z.boolean(), z.array(z.string().max(500)).max(50)]))
+  .refine((answers) => Object.keys(answers).length <= 50 && JSON.stringify(answers).length <= 50_000, "Too many answers.");
+
 publicRoutes.post("/public/forms/:company/:form", async (c) => {
   const body = await readJson(
     c,
@@ -246,7 +266,7 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
       email: z.email().optional(),
       phone: z.string().trim().min(7).max(30).optional(),
       address: z.object({ line1: z.string().trim().min(3).max(200), city: z.string().max(100).optional(), postal_code: z.string().max(12).optional() }),
-      answers: z.record(z.string(), z.unknown()).default({}),
+      answers: formAnswers.default({}),
       promo_code: z.string().trim().max(40).optional(),
       turnstile_token: z.string().optional(),
     }),
@@ -256,6 +276,7 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
   await verifyTurnstile(c, body.turnstile_token);
 
   const { admin, company, form } = await findForm(c);
+  await limitSubmissions(c, "form", company.id);
   const zips = (form.service_area_zips ?? []) as string[];
   // A code that doesn't check out is dropped rather than blocking the request.
   let promo: string | null = null;
@@ -448,6 +469,7 @@ publicRoutes.post("/hub/:token/request", async (c) => {
       promo_code: z.string().trim().max(40).optional(),
     }),
   );
+  await limitSubmissions(c, "hub-request", l.c);
   const admin = adminClient(c.env);
   must(await admin.from("clients").select("id").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "This link isn't valid anymore.");
   if (body.property_id) {
@@ -455,6 +477,8 @@ publicRoutes.post("/hub/:token/request", async (c) => {
   }
   let promo: string | null = null;
   if (body.promo_code) {
+    // The answer says whether a code is real, so this counts toward the same limit as checking one.
+    if (!(await allow(c.env, `promo:${clientIp(c)}`, 10, 10 * 60))) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
     const { error } = await admin.rpc("check_promo_code", { p_company: l.c, p_code: body.promo_code });
     if (error) throw dbError(error);
     promo = body.promo_code.toUpperCase().replace(/\s/g, "");
@@ -541,6 +565,7 @@ publicRoutes.post("/public/refer/:token", async (c) => {
   );
   if (!body.email && !body.phone) throw new HttpError(400, "Add an email or phone number so we can reach you.");
   await verifyTurnstile(c, body.turnstile_token);
+  await limitSubmissions(c, "referral", l.c);
   const admin = adminClient(c.env);
   const referrer = must(await admin.from("clients").select("id, display_name").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "This referral link isn't valid anymore.");
   const { data: company } = await admin.from("companies").select("settings").eq("id", l.c).maybeSingle();

@@ -18,6 +18,14 @@ export interface StoredSecret {
   extra?: Record<string, string>;
 }
 
+/** The provider said no for good (sign-in revoked or expired, or this server's app keys are wrong). */
+export class SignInRefused extends IntegrationError {
+  override name = "SignInRefused";
+}
+
+// OAuth errors that mean signing in again, not trying later. Zoho says invalid_code for a dead refresh token.
+const REFUSALS = ["invalid_grant", "invalid_client", "unauthorized_client", "invalid_code", "invalid_client_secret"];
+
 interface TokenResponse {
   access_token: string;
   refresh_token?: string;
@@ -43,7 +51,8 @@ async function tokenRequest(env: Env, provider: Provider, form: Record<string, s
   const response = await fetch(config.tokenUrl(env, ctx, saved), { method: "POST", headers, body, signal: providerTimeout() });
   const json = (await response.json().catch(() => ({}))) as TokenResponse;
   if (!response.ok || !json.access_token) {
-    throw new IntegrationError(`${provider} token request failed (${response.status}${json.error ? `: ${json.error}` : ""})`);
+    const Failure = json.error && REFUSALS.includes(json.error) ? SignInRefused : IntegrationError;
+    throw new Failure(`${provider} token request failed (${response.status}${json.error ? `: ${json.error}` : ""})`);
   }
   return json;
 }
@@ -104,11 +113,14 @@ export async function accessToken(env: Env, admin: Db, companyId: string, provid
     await saveSecret(env, admin, companyId, provider, refreshed);
     return { token: refreshed.access_token!, secret: refreshed };
   } catch (error) {
-    await admin
-      .from("integrations")
-      .update({ status: "error", last_error: "Sign-in expired. Reconnect on the Apps page." })
-      .eq("company_id", companyId)
-      .eq("provider", provider);
+    // Only a definite no needs a person to reconnect. An outage or timeout throws so the work is retried later.
+    if (error instanceof SignInRefused) {
+      await admin
+        .from("integrations")
+        .update({ status: "error", last_error: "Sign-in expired. Reconnect on the Apps page." })
+        .eq("company_id", companyId)
+        .eq("provider", provider);
+    }
     throw error;
   }
 }

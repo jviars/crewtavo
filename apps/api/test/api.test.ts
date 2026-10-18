@@ -121,6 +121,43 @@ describe("routes", () => {
   });
 });
 
+describe("setting up a business", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // A session Supabase Auth vouches for: getClaims asks /auth/v1/user about HS256 tokens.
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const token = `${part({ alg: "HS256", typ: "JWT" })}.${part({ sub: "user-1", role: "authenticated", exp: Math.floor(Date.now() / 1000) + 600 })}.c2ln`;
+
+  const create = (timezone: string) => {
+    const rpcs: Array<{ name: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/auth/v1/user") return Response.json({ id: "user-1", aud: "authenticated", role: "authenticated" });
+      if (url.pathname.startsWith("/rest/v1/rpc/")) rpcs.push({ name: url.pathname.slice("/rest/v1/rpc/".length), body: JSON.parse(String(init?.body)) });
+      return Response.json(url.pathname === "/rest/v1/rpc/create_company" ? "company-1" : []);
+    });
+    const body = { name: "Acme Lawn", trade_preset: "lawn_exterior", timezone, terms_version: TERMS_VERSION };
+    const res = request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return { rpcs, res };
+  };
+
+  it("takes a time zone name", async () => {
+    const { rpcs, res } = create("America/Chicago");
+    expect((await res).status).toBe(201);
+    expect(rpcs[0]).toEqual({ name: "create_company", body: { p_name: "Acme Lawn", p_trade_preset: "lawn_exterior", p_timezone: "America/Chicago" } });
+  });
+
+  it("refuses offsets, which Postgres reads with the sign reversed, and made-up zones", async () => {
+    for (const timezone of ["+05:00", "-0500", "Not/AZone"]) {
+      const { rpcs, res } = create(timezone);
+      const response = await res;
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Unknown time zone. Pick one from the list, like America/New_York." });
+      expect(rpcs).toEqual([]);
+    }
+  });
+});
+
 describe("MCP discovery", () => {
   // The instance's earlier addresses (none here).
   beforeEach(() => vi.stubGlobal("fetch", async () => Response.json([])));
@@ -351,6 +388,7 @@ describe("recurring visits", () => {
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const { pathname } = new URL(String(input));
       if (pathname === "/rest/v1/jobs") return Response.json([job("bad", "FREQ=HOURLY"), job("good", "FREQ=WEEKLY;BYDAY=MO")]);
+      if (pathname === "/rest/v1/recurrence_skips") return Response.json([]); // nothing deleted by hand
       if (pathname === "/rest/v1/visits" && init?.method === "POST") {
         const rows = JSON.parse(String(init.body)) as typeof posted;
         posted.push(...rows);

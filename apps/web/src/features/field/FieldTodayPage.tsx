@@ -10,13 +10,14 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
-import { useSession } from "@/lib/session";
+import { hasRole, useSession } from "@/lib/session";
 import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
 import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
-import { pendingVisitStatus, setVisitStatus, showVisitStatus, type VisitStatusChange } from "./fieldActions";
+import { pendingVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl } from "./fieldData";
+import { InstallAppCard } from "./InstallAppCard";
 import { OfflineNote } from "./OfflineNote";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { toast } from "@/lib/toast";
@@ -79,12 +80,13 @@ export function FieldTodayPage() {
     queryClient.invalidateQueries({ queryKey: ["running-timer"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
-  // Works offline: the tap is saved on the phone (with its time) and sent when there's signal.
+  // Works offline: the tap is saved on the phone (with its time) and sent when there's signal. Sent
+  // by the action registered for it (fieldActions.ts), not a mutationFn here: lib/offline.ts notes
+  // when it's on its way, for the count of updates waiting.
   const setStatus = useMutation({
     mutationKey: ["visit-status"],
     scope: FIELD_SCOPE,
-    meta: { success: (_: unknown, v: VisitStatusChange) => (v.status === "en_route" ? "On your way" : v.status === "in_progress" ? "Visit started. Your clock is running." : "Visit complete. Nice work!") },
-    mutationFn: setVisitStatus,
+    meta: { success: statusSaved },
     onMutate: async (change: VisitStatusChange) => {
       if (!onlineManager.isOnline()) toast.info("Saved on this phone. It'll send when you have signal.");
       await queryClient.cancelQueries({ queryKey: key });
@@ -109,6 +111,7 @@ export function FieldTodayPage() {
       </div>
 
       <OfflineNote />
+      {!hasRole(session, "admin", "office", "estimator") && <InstallAppCard />}
       <ClockCard />
       {session.role === "crew_lead" && <CrewClockCard visits={data.data?.today ?? []} />}
 

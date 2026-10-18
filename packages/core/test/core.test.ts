@@ -8,6 +8,7 @@ import {
   dueProgress,
   dueSummary,
   dueTone,
+  FORMULA_VARIABLES,
   FormulaError,
   checkCondition,
   describeRuleSentence,
@@ -15,11 +16,15 @@ import {
   renderTemplate,
   validateRule,
   PRESETS,
+  addDays,
   evaluateFormula,
   formulaVariables,
   isIsoDate,
+  isTimeZoneName,
+  jobWeatherRules,
   lineLengthM,
   localDate,
+  localTime,
   mToFt,
   occurrenceDates,
   orderStops,
@@ -73,6 +78,20 @@ describe("geo", () => {
     expect(roofingSquares(2000, "6/12", 10)).toBeCloseTo(24.6, 1);
   });
 
+  it("refuses pitches that aren't a roof", () => {
+    expect(pitchFactor("30deg")).toBeCloseTo(1.1547, 4);
+    // Up to 80 degrees, about 68/12: steeper than any roof a crew shingles.
+    expect(pitchFactor("24/12")).toBeCloseTo(2.2361, 4);
+    expect(pitchFactor("80deg")).toBeCloseTo(5.7588, 4);
+    expect(pitchFactor("68/12")).toBeCloseTo(5.7542, 4);
+    // "abcdeg" used to be NaN, "90deg" 1.6e16 and "1e200" Infinity; just short of upright was
+    // millions of times the plan area.
+    for (const bad of ["abcdeg", "90deg", "-90deg", "120deg", "deg30", "1e200", "7/0", "seven", "80.5deg", "89.99999deg", "69/12", "1e9/1", "1e150"]) {
+      expect(() => pitchFactor(bad), bad).toThrow(RangeError);
+    }
+    expect(() => roofingSquares(2000, "90deg")).toThrow(RangeError);
+  });
+
   it("summarizes a drawing", () => {
     const summary = summarizeFeatureCollection({
       type: "FeatureCollection",
@@ -88,6 +107,22 @@ describe("geo", () => {
     expect(summary.total_area_sqyd).toBeCloseTo(summary.total_area_sqft / 9, 1);
     expect(summary.sections[2].manual_override).toBe(true);
     expect(summary.count).toBe(1);
+  });
+
+  it("refuses shapes whose points aren't numbers, with a message to show", () => {
+    const summarize = (geometry: { type: string; coordinates: unknown }, properties = {}) =>
+      () => summarizeFeatureCollection({ type: "FeatureCollection", features: [{ type: "Feature", properties: { label: "Drive" }, geometry: { type: "Point", coordinates: RECT[0] } }, { type: "Feature", properties, geometry }] });
+    // coordinates: null used to be a TypeError (a 500 from the API).
+    for (const type of ["Polygon", "MultiPolygon", "LineString", "Point", "MultiPoint"]) {
+      expect(summarize({ type, coordinates: null }), type).toThrow(new RangeError("Shape 2 needs its points as [longitude, latitude] numbers"));
+    }
+    for (const coordinates of ["abc", RECT, [[["-80.5", "37.1"], RECT[1], RECT[2]]], [[[-80.5, 37.1], [Infinity, 37.1], RECT[2]]], [[[-80.5, 137.1], RECT[1], RECT[2]]], [[[-80.5], RECT[1], RECT[2]]]]) {
+      expect(summarize({ type: "Polygon", coordinates }), JSON.stringify(coordinates)).toThrow(RangeError);
+    }
+    expect(summarize({ type: "LineString", coordinates: [RECT] })).toThrow(RangeError);
+    expect(summarize({ type: "Polygon", coordinates: [RECT] }, { manual_value: "about 90" })).toThrow(new RangeError("Shape 2 needs a measured value of zero or more"));
+    expect(summarize({ type: "Polygon", coordinates: [RECT] }, { manual_value: -90 })).toThrow(RangeError);
+    expect(summarize({ type: "Polygon", coordinates: [RECT] }, { manual_value: "90" })().total_area_sqft).toBe(90);
   });
 });
 
@@ -123,6 +158,14 @@ describe("formulas", () => {
     expect(() => evaluateFormula("area_sqft * 2", {})).toThrow(/Unknown value/);
     expect(() => evaluateFormula("depth_in * 2", { depth_in: null })).toThrow(/no value yet/);
     expect(() => evaluateFormula("1 / 0", {})).toThrow(/Division by zero/);
+  });
+
+  it("accepts only the values a measurement supplies", () => {
+    for (const name of FORMULA_VARIABLES) expect(() => validateFormula(`${name} * 2`), name).not.toThrow();
+    // These used to be accepted, but nothing ever supplies them, so a formula using one never worked.
+    for (const name of ["hours", "rate", "unit_price", "quantity"]) {
+      expect(() => validateFormula(`${name} * 2`), name).toThrow(`Unknown value "${name}"`);
+    }
   });
 
   it("lists the values a formula needs", () => {
@@ -197,6 +240,12 @@ describe("recurrence", () => {
     expect(occurrenceDates(job, "2026-01-20", "2026-12-31")).toEqual(["2026-01-20", "2026-01-27"]);
   });
 
+  it("lists no dates for COUNT=0, as rrule does", () => {
+    // 0 isn't "no limit": that's a rule without COUNT.
+    expect(occurrenceDates({ starts_on: "2026-01-06", recurrence_rule: "FREQ=WEEKLY;COUNT=0;BYDAY=TU" }, "2026-01-01", "2026-12-31")).toEqual([]);
+    expect(occurrenceDates({ starts_on: "2026-01-06", recurrence_rule: "FREQ=DAILY;COUNT=0" }, "2026-03-01", "2026-03-31")).toEqual([]);
+  });
+
   it("lists the same dates as rrule", () => {
     const rules = [
       "FREQ=DAILY", "FREQ=DAILY;INTERVAL=3", "FREQ=DAILY;BYDAY=MO,WE,FR", "FREQ=DAILY;INTERVAL=2;BYMONTH=3,4",
@@ -205,7 +254,7 @@ describe("recurrence", () => {
       "FREQ=MONTHLY;BYDAY=1MO", "FREQ=MONTHLY;BYDAY=-1FR", "FREQ=MONTHLY;INTERVAL=3;BYDAY=2TU,4TU", "FREQ=MONTHLY;BYDAY=MO,TU;BYMONTHDAY=1,2,3",
       "FREQ=MONTHLY;BYDAY=5SA", "FREQ=YEARLY", "FREQ=YEARLY;BYMONTH=3,9;BYDAY=1SA", "FREQ=YEARLY;BYDAY=20MO", "FREQ=YEARLY;BYDAY=-1SU",
       "FREQ=YEARLY;INTERVAL=2;BYMONTH=6;BYMONTHDAY=1,15", "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29", "FREQ=YEARLY;BYMONTH=4", "FREQ=WEEKLY;COUNT=10;BYDAY=TU,FR",
-      "FREQ=MONTHLY;COUNT=5;BYMONTHDAY=31", "FREQ=DAILY;INTERVAL=5;UNTIL=20261115T000000Z",
+      "FREQ=MONTHLY;COUNT=5;BYMONTHDAY=31", "FREQ=DAILY;INTERVAL=5;UNTIL=20261115T000000Z", "FREQ=WEEKLY;COUNT=0;BYDAY=MO",
     ];
     const iso = (d: Date) => d.toISOString().slice(0, 10);
     for (const starts_on of ["2024-02-29", "2025-12-31", "2026-01-31", "2026-03-08"]) {
@@ -229,6 +278,47 @@ describe("time zones", () => {
   it("only takes real calendar dates", () => {
     for (const date of ["2026-02-30", "2026-02-29", "2026-04-31", "2026-13-01", "2026-00-10", "2026-01-00", "2026-1-05", "20260105"]) expect(isIsoDate(date), date).toBe(false);
     for (const date of ["2024-02-29", "2026-02-28", "2026-12-31", "2026-01-01"]) expect(isIsoDate(date), date).toBe(true);
+  });
+
+  it("moves times the clocks skip forward, and takes the first of times they repeat", () => {
+    expect(zonedTimeToUtc("2026-03-08", "02:30", "America/New_York").toISOString()).toBe("2026-03-08T07:30:00.000Z"); // 03:30 EDT
+    expect(zonedTimeToUtc("2026-03-29", "02:30", "Europe/Berlin").toISOString()).toBe("2026-03-29T01:30:00.000Z"); // 03:30 CEST
+    // Where the change is at midnight, the day still starts on that day.
+    expect(zonedTimeToUtc("2026-09-06", "00:00", "America/Santiago").toISOString()).toBe("2026-09-06T04:00:00.000Z"); // 01:00
+    expect(zonedTimeToUtc("2026-03-08", "00:00", "America/Havana").toISOString()).toBe("2026-03-08T05:00:00.000Z"); // 01:00
+    expect(zonedTimeToUtc("2026-11-01", "01:30", "America/New_York").toISOString()).toBe("2026-11-01T05:30:00.000Z"); // EDT
+    expect(zonedTimeToUtc("2026-10-25", "01:30", "Europe/London").toISOString()).toBe("2026-10-25T00:30:00.000Z"); // BST
+  });
+
+  // Every half hour of 2026, checked against what the clock on the wall shows at each instant.
+  it.each(["America/New_York", "America/Los_Angeles", "America/Santiago", "America/Havana", "Europe/London", "Australia/Sydney"])(
+    "resolves every wall time of the year in %s",
+    (tz) => {
+      const hhmm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+      const shows = (t: number) => `${localDate(new Date(t), tz)} ${localTime(new Date(t), tz)}`;
+      // The first instant that shows each wall time.
+      const first = new Map<string, number>();
+      for (let t = Date.UTC(2025, 11, 31); t < Date.UTC(2027, 0, 2); t += 30 * 60_000) {
+        if (!first.has(shows(t))) first.set(shows(t), t);
+      }
+      const wrong: string[] = [];
+      let skipped = 0;
+      for (let day = "2026-01-01"; day <= "2026-12-31"; day = addDays(day, 1)) {
+        for (let min = 0; min < 1440; min += 30) {
+          const result = zonedTimeToUtc(day, hhmm(min), tz).getTime();
+          const expected = first.get(`${day} ${hhmm(min)}`);
+          if (expected === undefined) skipped++; // skipped by the clocks: an hour later, the same day
+          if (expected === undefined ? shows(result) !== `${day} ${hhmm(min + 60)}` : result !== expected) wrong.push(`${day} ${hhmm(min)} -> ${shows(result)}`);
+        }
+      }
+      expect(wrong).toEqual([]);
+      expect(skipped).toBe(2);
+    },
+  );
+
+  it("accepts zone names, not offsets", () => {
+    for (const zone of ["America/New_York", "America/Argentina/Buenos_Aires", "America/Port-au-Prince", "Etc/GMT+5", "UTC"]) expect(isTimeZoneName(zone)).toBe(true);
+    for (const zone of ["+05:00", "-0500", "Not/AZone", "", "America/New York"]) expect(isTimeZoneName(zone)).toBe(false);
   });
 });
 
@@ -257,6 +347,26 @@ describe("weather rules", () => {
     ]);
     expect(weatherRisks([{ requires_dry_hours: 24 }], "2026-10-20", outlook)).toHaveLength(1);
     expect(weatherRisks([{ max_rain_pct: 90 }], "2026-10-21", outlook)).toEqual([]);
+  });
+
+  it("counts rain on the visit day itself as part of the dry time", () => {
+    const outlook = [
+      { date: "2026-10-20", temp_min_f: 55, temp_max_f: 70, rain_chance_pct: 90 },
+      { date: "2026-10-21", temp_min_f: 55, temp_max_f: 70, rain_chance_pct: 10 },
+    ];
+    expect(weatherRisks([{ applies_to: "Sealcoat", requires_dry_hours: 24 }], "2026-10-20", outlook)).toEqual([
+      "Sealcoat: rain likely on 2026-10-20 during the 24-hour dry time",
+    ]);
+  });
+
+  it("checks a job against its own rules, or else the company's for the services on it", () => {
+    const company = [{ applies_to: "Sealcoat", requires_dry_hours: 24 }, { applies_to: "Hot-mix asphalt surface", min_temp_f: 50 }, { max_rain_pct: 80 }];
+    expect(jobWeatherRules([], company, ["Front lot", "sealcoat "])).toEqual([company[0], company[2]]);
+    expect(jobWeatherRules([], company, ["Crack fill"])).toEqual([company[2]]);
+    expect(jobWeatherRules([{ max_rain_pct: 40 }], company, ["Sealcoat"])).toEqual([{ max_rain_pct: 40 }]);
+    // Hand-edited settings that aren't a list of rules are ignored.
+    expect(jobWeatherRules(null, { applies_to: "Sealcoat" }, ["Sealcoat"])).toEqual([]);
+    expect(jobWeatherRules([], [null, "rain", { applies_to: "Sealcoat", min_temp_f: 50 }], ["Sealcoat"])).toEqual([{ applies_to: "Sealcoat", min_temp_f: 50 }]);
   });
 });
 

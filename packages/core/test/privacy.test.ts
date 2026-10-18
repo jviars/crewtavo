@@ -53,6 +53,22 @@ describe("scrubText", () => {
     // Something cut in half at the limit is still masked.
     expect(scrubText(`${"a ".repeat(4_997)}call 540-555-0199 now${" b".repeat(500)}`)).not.toMatch(/\d{3}/);
   });
+
+  it("doesn't keep half an email or phone number that ran past where scrubbing stopped", () => {
+    // Dropping a long query string shortens the text, so the end of what was scrubbed can be kept.
+    // 10,200 is where scrubbing used to stop; 20,000 is where it stops now.
+    for (const [query, at] of [[500, 10_200], [12_000, 20_000]] as const) {
+      const head = `GET /api/clients?search=${"x".repeat(query)} `;
+      for (const secret of ["dana.hale@example.com", "+1 (540) 555-0199", "540 555 0199"]) {
+        for (let shift = 2; shift < secret.length; shift++) {
+          const before = `${(head + "z ".repeat(at)).slice(0, at - shift - 1)} `;
+          const scrubbed = scrubText(`${before}${secret}${" z".repeat(5_000)}`);
+          expect(scrubbed, `${secret} cut after ${shift} characters`).not.toContain(secret.slice(0, shift));
+          expect(scrubbed).toMatch(/^GET \/api\/clients z z .* \[truncated\]$/);
+        }
+      }
+    }
+  });
 });
 
 describe("scrubUrl", () => {

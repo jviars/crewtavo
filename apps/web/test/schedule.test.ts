@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { monthLabel, type CalendarEvent } from "../src/features/schedule/CalendarEventDialog";
 import { place, type GridVisit } from "../src/features/schedule/TimeGrid";
 import { entrySpan } from "../src/features/timesheets/entrySpan";
 
@@ -21,6 +22,24 @@ describe("double bookings on the schedule", () => {
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("x", "cancelled", "09:00", "11:00")])).toEqual({ a: false });
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("b", "scheduled", "09:00", "11:00", "crew-2")])).toEqual({ a: false, b: false });
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00", null), visit("b", "scheduled", "09:00", "11:00", null)])).toEqual({ a: false, b: false });
+  });
+});
+
+describe("other calendars in the month view", () => {
+  const call: CalendarEvent = {
+    id: "e1", title: "Supplier call", location: null, description: null, url: null, all_day: false,
+    starts_at: "2026-10-20T14:00:00+00:00", ends_at: "2026-10-20T15:00:00+00:00", starts_on: "2026-10-20", ends_on: "2026-10-20", busy: true, source: null,
+  };
+
+  it("shows an event's time in the company's zone, whatever zone the computer is in", () => {
+    // Two companies far apart: at least one of them isn't in this computer's zone.
+    expect(monthLabel(call, "2026-10-20", "America/Chicago")).toBe("9:00 AM Supplier call");
+    expect(monthLabel(call, "2026-10-20", "Asia/Kathmandu")).toBe("7:45 PM Supplier call");
+  });
+
+  it("shows no time for all-day events, or on the later days of a long one", () => {
+    expect(monthLabel({ ...call, all_day: true, starts_at: null, ends_at: null }, "2026-10-20", tz)).toBe("Supplier call");
+    expect(monthLabel({ ...call, ends_on: "2026-10-21" }, "2026-10-21", tz)).toBe("Supplier call");
   });
 });
 

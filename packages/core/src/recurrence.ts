@@ -103,12 +103,14 @@ export function occurrenceDates(job: RecurringJob, from: string, to: string): st
   const dates: string[] = [];
   let count = 0;
   // With COUNT, occurrences before the window count too, so start at the job's start date.
+  // COUNT=0 means no dates at all (as in rrule), not no limit, so check for null rather than 0.
+  const limit = rule.count;
   const end = utcMidnight(to).getTime();
-  for (let t = utcMidnight(rule.count ? job.starts_on : start).getTime(); t <= end && dates.length < MAX_DATES; t += DAY_MS) {
+  for (let t = utcMidnight(limit !== null ? job.starts_on : start).getTime(); t <= end && dates.length < MAX_DATES; t += DAY_MS) {
     const day = new Date(t);
     if (rule.until && day > rule.until) break;
     if (!occursOn(rule, day)) continue;
-    if (rule.count && ++count > rule.count) break;
+    if (limit !== null && ++count > limit) break;
     const date = day.toISOString().slice(0, 10);
     if (date >= start && (!months || months.has(day.getUTCMonth() + 1))) dates.push(date);
   }

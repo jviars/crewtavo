@@ -1,3 +1,4 @@
+import type { IncomingMessage } from "node:http";
 import type { Db } from "./lib/supabase";
 import type { Permission, Role } from "@crewtavo/core";
 
@@ -36,6 +37,12 @@ export interface Env {
   CREWTAVO_SINGLE_COMPANY?: string;
   /** Shared secret for /api/cron/* (run a background task by hand, as a bearer token). */
   CRON_SECRET?: string;
+  /**
+   * Where the visitor's address comes from, when something other than Railway's edge or one web
+   * server (Caddy, nginx) is in front: a header the proxy sets ("cf-connecting-ip"), how many proxies
+   * add to X-Forwarded-For ("x-forwarded-for:2"), or "connection" for none. See lib/visitor.ts.
+   */
+  CREWTAVO_VISITOR_IP?: string;
 
   ANTHROPIC_API_KEY?: string;
   AI_MODEL?: string;
@@ -83,7 +90,8 @@ export interface Vars {
   permissions: Permission[];
 }
 
-export type AppEnv = { Bindings: Env; Variables: Vars };
+/** A request to the app gets the settings and, from server.ts, the connection it came in on. */
+export type AppEnv = { Bindings: Env & { incoming?: IncomingMessage }; Variables: Vars };
 
 const normalized = new WeakMap<object, Env>();
 

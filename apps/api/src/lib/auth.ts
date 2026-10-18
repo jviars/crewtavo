@@ -1,6 +1,7 @@
 import { isRole, memberPermissions, type Permission, type Role } from "@crewtavo/core";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../env";
+import { allowsChanges, ASSISTANT_READ_ONLY, isRead } from "./assistants";
 import { dbError, HttpError, uuid } from "./http";
 import { userClient } from "./supabase";
 
@@ -11,7 +12,8 @@ export function bearerToken(header: string | undefined): string | null {
 
 /**
  * Verifies the Supabase access token (signature, expiry) and attaches a client that acts as the
- * user. Works for browser sessions and for MCP access tokens from Supabase's OAuth server.
+ * user. Works for browser sessions and for MCP access tokens from Supabase's OAuth server; an AI
+ * assistant's token only reads, unless the person allowed it to change things (lib/assistants.ts).
  */
 export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const token = bearerToken(c.req.header("authorization"));
@@ -20,6 +22,8 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const { data, error } = await db.auth.getClaims(token);
   const sub = data?.claims?.sub;
   if (error || !sub) throw new HttpError(401, "Your session has expired. Sign in again.");
+  const client = typeof data.claims.client_id === "string" && data.claims.client_id ? data.claims.client_id : null;
+  if (client && !isRead(c.req.method) && !(await allowsChanges(db, client))) throw new HttpError(403, ASSISTANT_READ_ONLY);
   c.set("userId", sub);
   c.set("token", token);
   c.set("db", db);

@@ -33,9 +33,11 @@ import { buildCalendar, type IcsEvent } from "../lib/ics";
 import { adminClient } from "../lib/supabase";
 import {
   CalendarError,
+  clip,
   createVisitsCalendar,
   deleteVisitsCalendar,
   fetchIcs,
+  hideDetails,
   listGoogleCalendars,
   normalizeLink,
   pushUpcomingVisits,
@@ -276,7 +278,7 @@ calendar.post("/calendars", ...manage, async (c) => {
       company_id: c.var.companyId,
       kind: "ics",
       app: body.app,
-      name: (body.name || own || fallback).slice(0, 80),
+      name: clip(body.name || own || fallback, 80),
       color: body.color ?? null,
       crew_id: body.crew_id ?? null,
       show_details: body.show_details,
@@ -311,9 +313,13 @@ calendar.patch("/calendars/:id", ...manage, async (c) => {
   if (error) throw dbError(error);
   if (body.enabled === false) {
     await admin.from("calendar_events").delete().eq("source_id", id);
-  } else if ((body.enabled && !before.enabled) || (body.show_details !== undefined && body.show_details !== before.show_details)) {
-    // Names are only kept while details are on, so turning them on (or the calendar back on) reads it again.
-    await syncSource(c.env, admin, id).catch(() => null);
+  } else {
+    // Off: the names, places and notes kept so far go now, whether or not the calendar can be read again.
+    if (body.show_details === false) await hideDetails(admin, id);
+    if ((body.enabled && !before.enabled) || (body.show_details !== undefined && body.show_details !== before.show_details)) {
+      // Names are only kept while details are on, so turning them on (or the calendar back on) reads it again.
+      await syncSource(c.env, admin, id).catch(() => null);
+    }
   }
   return c.json(must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", id).single()));
 });

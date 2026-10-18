@@ -34,14 +34,20 @@ const SENSITIVE_KEY = /pass|secret|token|auth|cookie|session|email|phone|mobile|
 const CODE_KEY = /(?<!^|(?:status|error|err|exit|http|response|reason|country|currency|language|lang|locale)[_-]?)code$/i;
 const URL_KEY = /^(url|from|to|href)$/i;
 const KEEP_HEADERS = /^user-agent$/i;
-/** Longest text scrubbed; the rest is dropped, so one huge string can't stall an error report. */
+/** Longest text kept; the rest is dropped, so one huge string can't stall an error report. */
 const MAX_TEXT = 10_000;
+/** How much of a longer text is scrubbed before it's cut (the patterns are linear, and masking shortens it). */
+const SCRUBBED_TEXT = 2 * MAX_TEXT;
+/** The longest email address there is (RFC 5321); phone numbers are far shorter. */
+const LONGEST_PART = 254;
+/** The end of a text that could be the start of an email or phone number: their characters, and spaces between a phone number's digits. */
+const PART_AT_END = /(?:[\w.%+@()-]|(?<=[\d)])\s(?=[\d(]|$))*$/;
 
 /** Mask personal data and secrets in free text. */
 export function scrubText(text: string): string {
   const long = text.length > MAX_TEXT;
-  // Scrub a little past the cut, so an email or phone number cut in half is still masked.
-  const scrubbed = (long ? text.slice(0, MAX_TEXT + 200) : text)
+  const cut = text.length > SCRUBBED_TEXT;
+  let scrubbed = (cut ? text.slice(0, SCRUBBED_TEXT) : text)
     .replace(URL_QUERY, "$1")
     .replace(QUERY_STRING, "")
     .replace(TOKEN, "[token]")
@@ -49,6 +55,9 @@ export function scrubText(text: string): string {
     .replace(EMAIL, "[email]")
     .replace(TEL_LINK, "$1:[phone]")
     .replace(PHONE, "[phone]");
+  // Where the text was cut, its end may be half of an email or phone number, which the patterns don't
+  // recognize. Masking can shorten the text enough for that end to be kept, so drop it.
+  if (cut) scrubbed = scrubbed.slice(0, -LONGEST_PART) + scrubbed.slice(-LONGEST_PART).replace(PART_AT_END, "");
   return long ? `${scrubbed.slice(0, MAX_TEXT)} [truncated]` : scrubbed;
 }
 

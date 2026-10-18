@@ -41,10 +41,19 @@ export function showVisitStatus(queryClient: QueryClient, change: VisitStatusCha
 export async function setVisitStatus(v: VisitStatusChange) {
   // As the company it was tapped in, even if the app has switched company since. Forward only: a
   // tap sent again after later ones went out (the app closed before it heard back) is skipped.
-  const result = await api.patch<{ skipped?: boolean }>(`/visits/${v.visitId}`, { status: v.status, forward_only: true }, { companyId: v.companyId });
-  if (result.skipped) return; // Already past this step, so there's nothing to clock either.
-  if (v.status === "in_progress") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "start", v.at);
+  const result = await api.patch<{ skipped?: boolean; status?: string }>(`/visits/${v.visitId}`, { status: v.status, forward_only: true }, { companyId: v.companyId });
+  // The visit's status is shared, but each person's clock is their own: when the visit has moved on
+  // (a crewmate finished it first), this person still clocks in and out as they tapped. Only a
+  // cancelled visit doesn't start a clock.
+  if (v.status === "in_progress" && !(result.skipped && result.status === "cancelled")) await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "start", v.at);
   if (v.status === "completed") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "stop", v.at);
+  return { skipped: Boolean(result.skipped), visitStatus: result.status };
+}
+
+/** What a status tap's confirmation says, once the server has it. */
+export function statusSaved(result: { skipped: boolean; visitStatus?: string } | undefined, change: VisitStatusChange): string {
+  if (result?.skipped) return result.visitStatus === "cancelled" ? "The office cancelled this visit." : "Your crew already moved this visit on. Your time is saved.";
+  return change.status === "en_route" ? "On your way" : change.status === "in_progress" ? "Visit started. Your clock is running." : "Visit complete. Nice work!";
 }
 
 export interface ChecklistSave {
