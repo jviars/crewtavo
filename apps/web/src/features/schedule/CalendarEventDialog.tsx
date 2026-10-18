@@ -7,6 +7,7 @@ import type { CSSProperties } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { formatTime } from "@/lib/format";
 import type { VisitInput } from "./VisitDialog";
 
 export interface CalendarEvent {
@@ -35,6 +36,10 @@ export function eventWhen(e: CalendarEvent, tz: string): string {
   if (e.starts_on === e.ends_on) return `${dayLabel(e.starts_on)} · ${time(e.starts_at)} – ${time(e.ends_at)}`;
   return `${dayLabel(e.starts_on)} ${time(e.starts_at)} – ${dayLabel(e.ends_on)} ${time(e.ends_at)}`;
 }
+
+/** "9:00 AM Supplier call" for the month view, in the company's zone like the visits beside it (the time only on the day it starts). */
+export const monthLabel = (e: CalendarEvent, date: string, tz: string) =>
+  `${!e.all_day && e.starts_at && e.starts_on === date ? `${formatTime(e.starts_at, tz)} ` : ""}${e.title}`;
 
 export function CalendarEventDialog({ event, tz, onClose, onAddVisit }: { event: CalendarEvent; tz: string; onClose: () => void; onAddVisit?: (visit: VisitInput) => void }) {
   const calendar = event.source?.name ?? "Another calendar";

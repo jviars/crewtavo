@@ -4,13 +4,17 @@
  * Calendars come from an ICS link (Zoho Calendar, Outlook, iCloud, Google's secret address, any
  * other) or from a connected Google account. Every 15 minutes each is read again and its events
  * for the next six months (and last month) replace what we had. Links are secrets: they're stored
- * encrypted, and only fetched after checking they point at a public address.
+ * encrypted, and only fetched from public addresses (checked as each connection is made).
  *
  * With Google Calendar connected, visits can also go onto a calendar Crewtavo makes in that
  * account: the outbox (see the calendar_sync migration) brings each change across.
  */
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import dns from "node:dns";
+import { request as httpRequest, type IncomingMessage } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
+import { pipeline, type Readable } from "node:stream";
+import { createBrotliDecompress, createGunzip } from "node:zlib";
 import { addDays, eventDays, localDate, looksLikeIcs, parseIcs, plainText, type IcsItem } from "@crewtavo/core";
 import type { Env } from "../env";
 import { decryptJson } from "../lib/crypto";
@@ -26,6 +30,21 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_EVENTS = 5000;
 export const WINDOW_BACK_DAYS = 30;
 export const WINDOW_AHEAD_DAYS = 180;
+
+/**
+ * At most `max` characters, never cutting one in half: an emoji is two UTF-16 units, and half of
+ * one can't be saved (the database turns down the whole batch it's in).
+ */
+export function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let end = 0;
+  let count = 0;
+  for (const char of text) {
+    if (count++ === max) break;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}
 
 // ---------------------------------------------------------------------------------------------
 // Fetching an ICS link
@@ -48,63 +67,107 @@ export function normalizeLink(input: string): URL {
   return url;
 }
 
+const PRIVATE = "That link points at a private address. Use the calendar's public ICS link.";
+const UNREACHABLE = "Couldn't reach that calendar. Check the link, or try again in a few minutes.";
+
+/** An IPv6 address as its eight 16-bit groups. */
+function ipv6Groups(ip: string): number[] {
+  let text = ip.toLowerCase().replace(/^\[|\]$/g, "").replace(/%.*$/, "");
+  // An IPv4 ending (::ffff:1.2.3.4) is the last two groups.
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number);
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head = "", tail] = text.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const gap = tail === undefined ? 0 : 8 - left.length - right.length;
+  return [...left, ...Array<string>(gap).fill("0"), ...right].map((group) => parseInt(group, 16));
+}
+
+const ipv4 = (hi: number, lo: number) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+
 function privateAddress(ip: string): boolean {
   if (isIP(ip) === 4) {
     const [a = 0, b = 0] = ip.split(".").map(Number);
     return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) || (a === 192 && (b === 168 || b === 0)) || (a === 198 && (b === 18 || b === 19));
   }
-  const v6 = ip.toLowerCase().replace(/^\[|\]$/g, "");
-  const mapped = /^::ffff:(?:(\d+\.\d+\.\d+\.\d+)|([0-9a-f]{1,4}):([0-9a-f]{1,4}))$/.exec(v6);
-  if (mapped) {
-    if (mapped[1]) return privateAddress(mapped[1]);
-    const hi = parseInt(mapped[2]!, 16);
-    const lo = parseInt(mapped[3]!, 16);
-    return privateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  const g = ipv6Groups(ip);
+  const zeros = (from: number, to: number) => g.slice(from, to).every((group) => group === 0);
+  // IPv6 addresses that stand for an IPv4 one are as private as it is: IPv4-compatible (::a.b.c.d,
+  // which takes in :: and ::1), mapped (::ffff:a.b.c.d), translated (::ffff:0:a.b.c.d) and NAT64
+  // (64:ff9b::a.b.c.d), and 6to4 (2002:a.b.c.d::/48).
+  if (zeros(0, 6) || (zeros(0, 5) && g[5] === 0xffff) || (zeros(0, 4) && g[4] === 0xffff && g[5] === 0) || (g[0] === 0x64 && g[1] === 0xff9b && zeros(2, 6))) {
+    return privateAddress(ipv4(g[6], g[7]));
   }
-  return v6 === "::" || v6 === "::1" || /^(fc|fd|fe[89ab]|ff)/.test(v6);
+  if (g[0] === 0x2002) return privateAddress(ipv4(g[1], g[2]));
+  // Teredo (2001::/32) and local-use NAT64 (64:ff9b:1::/48) tunnel to IPv4 addresses too; no calendar needs them.
+  if ((g[0] === 0x2001 && g[1] === 0) || (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1)) return true;
+  // Unique local (fc00::/7), link-local (fe80::/10), site-local (fec0::/10) and multicast (ff00::/8).
+  return g[0] >= 0xfc00;
 }
 
-/** Calendars must be on the public internet: never this server, its network or its cloud's metadata service. */
-async function assertPublic(url: URL) {
+/**
+ * Calendars must be on the public internet: never this server, its network or its cloud's metadata
+ * service. A name is checked as it's looked up for the connection itself (publicLookup), so the
+ * address checked is the one connected to, even when the name's answer changes from one lookup to
+ * the next.
+ */
+function assertPublic(url: URL) {
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  if (/^localhost$|\.localhost$|\.internal$|\.local$/i.test(host)) throw new CalendarError("That link points at a private address. Use the calendar's public ICS link.");
-  const addresses = isIP(host) ? [host] : await lookup(host, { all: true }).then((r) => r.map((a) => a.address)).catch(() => {
-    throw new CalendarError(`Couldn't find ${host}. Check the link and try again.`);
-  });
-  if (!addresses.length || addresses.some(privateAddress)) throw new CalendarError("That link points at a private address. Use the calendar's public ICS link.");
+  if (/^localhost$|\.localhost$|\.internal$|\.local$/i.test(host) || (isIP(host) && privateAddress(host))) throw new CalendarError(PRIVATE);
 }
 
-async function readLimited(response: Response): Promise<string> {
-  const reader = response.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
+/** Looks a link's name up for its connection, and refuses it if any address is private. */
+const publicLookup: LookupFunction = (hostname, options, callback) => {
+  dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
+    if (error) return callback(new CalendarError(`Couldn't find ${hostname}. Check the link and try again.`), []);
+    if (!addresses.length || addresses.some((a) => privateAddress(a.address))) return callback(new CalendarError(PRIVATE), []);
+    if (options.all) callback(null, addresses);
+    else callback(null, addresses[0].address, addresses[0].family);
+  });
+};
+
+/** Send a GET and wait for the response's headers. */
+function get(url: URL, headers: Record<string, string>, signal: AbortSignal): Promise<IncomingMessage> {
+  // Its own connection (no agent), so nothing reuses one made to another address.
+  const options = { headers, lookup: publicLookup, agent: false as const, signal };
+  return new Promise((resolve, reject) => {
+    const request = url.protocol === "https:" ? httpsRequest(url, options, resolve) : httpRequest(url, options, resolve);
+    request.on("error", reject).end();
+  });
+}
+
+async function readLimited(response: IncomingMessage): Promise<string> {
+  const encoding = String(response.headers["content-encoding"] ?? "").trim().toLowerCase();
+  const unzip = encoding === "gzip" || encoding === "x-gzip" ? createGunzip() : encoding === "br" ? createBrotliDecompress() : null;
+  const body: Readable = unzip ? pipeline(response, unzip, () => undefined) : response;
+  const chunks: Buffer[] = [];
   let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BYTES) {
-      await reader.cancel();
-      throw new CalendarError("That calendar is too big to read (over 10 MB). Try a calendar with fewer past events.");
+  try {
+    for await (const chunk of body as AsyncIterable<Buffer>) {
+      size += chunk.byteLength;
+      if (size > MAX_BYTES) throw new CalendarError("That calendar is too big to read (over 10 MB). Try a calendar with fewer past events.");
+      chunks.push(chunk);
     }
-    chunks.push(value);
+    // Cut off partway (or too slow to finish).
+    if (!response.complete) throw new CalendarError(UNREACHABLE);
+  } catch (error) {
+    throw error instanceof CalendarError ? error : new CalendarError(UNREACHABLE);
+  } finally {
+    response.destroy();
   }
-  const all = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    all.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(all);
+  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
 /** Download a calendar file, following up to five redirects (each checked again). */
 export async function fetchIcs(link: string | URL): Promise<string> {
   let url = typeof link === "string" ? normalizeLink(link) : link;
   for (let hop = 0; hop < 5; hop++) {
-    await assertPublic(url);
-    const headers: Record<string, string> = { Accept: "text/calendar, text/plain;q=0.9, */*;q=0.5", "User-Agent": "Crewtavo calendar sync" };
+    assertPublic(url);
+    const headers: Record<string, string> = { Accept: "text/calendar, text/plain;q=0.9, */*;q=0.5", "Accept-Encoding": "gzip, br", "User-Agent": "Crewtavo calendar sync" };
     const target = new URL(url);
     // A link with a name and password in it (some self-hosted calendars) signs in with them.
     if (target.username || target.password) {
@@ -112,21 +175,23 @@ export async function fetchIcs(link: string | URL): Promise<string> {
       target.username = "";
       target.password = "";
     }
-    let response: Response;
+    let response: IncomingMessage;
     try {
-      response = await fetch(target, { headers, redirect: "manual", signal: AbortSignal.timeout(20_000) });
-    } catch {
-      throw new CalendarError("Couldn't reach that calendar. Check the link, or try again in a few minutes.");
+      response = await get(target, headers, AbortSignal.timeout(20_000));
+    } catch (error) {
+      throw error instanceof CalendarError ? error : new CalendarError(UNREACHABLE);
     }
-    const location = response.headers.get("location");
-    if (response.status >= 300 && response.status < 400 && location) {
+    const status = response.statusCode ?? 0;
+    const location = response.headers.location;
+    if (status < 200 || status > 299) response.destroy();
+    if (status >= 300 && status < 400 && location) {
       url = new URL(location, target);
       if (url.protocol !== "https:" && url.protocol !== "http:") break;
       continue;
     }
-    if (response.status === 401 || response.status === 403) throw new CalendarError("That calendar needs a sign-in. Use its private or secret ICS link (the one with a long code in it).");
-    if (response.status === 404 || response.status === 410) throw new CalendarError("No calendar at that link. It may have been turned off or replaced; copy the link again.");
-    if (!response.ok) throw new CalendarError(`The calendar's server had a problem (${response.status}). It will try again later.`);
+    if (status === 401 || status === 403) throw new CalendarError("That calendar needs a sign-in. Use its private or secret ICS link (the one with a long code in it).");
+    if (status === 404 || status === 410) throw new CalendarError("No calendar at that link. It may have been turned off or replaced; copy the link again.");
+    if (status < 200 || status > 299) throw new CalendarError(`The calendar's server had a problem (${status}). It will try again later.`);
     const text = await readLimited(response);
     if (!looksLikeIcs(text)) throw new CalendarError("That link opened a web page, not a calendar. Use the ICS link (also called the iCal, webcal, private or secret address).");
     return text;
@@ -189,7 +254,7 @@ export async function listGoogleCalendars(env: Env, admin: Db, companyId: string
     const json = (await gcal(env, admin, companyId, "GET", `/users/me/calendarList?${params}`))!;
     for (const c of json.items ?? []) {
       if (c.id === skip) continue;
-      calendars.push({ id: c.id, name: String(c.summaryOverride ?? c.summary ?? c.id).slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(c.backgroundColor ?? "") ? c.backgroundColor : null, primary: Boolean(c.primary) });
+      calendars.push({ id: c.id, name: clip(String(c.summaryOverride ?? c.summary ?? c.id), 80), color: /^#[0-9a-f]{6}$/i.test(c.backgroundColor ?? "") ? c.backgroundColor : null, primary: Boolean(c.primary) });
     }
     page = json.nextPageToken;
   } while (page && calendars.length < 500);
@@ -198,7 +263,10 @@ export async function listGoogleCalendars(env: Env, admin: Db, companyId: string
 
 /** After connecting: which Google account it is (its main calendar's ID is the address). */
 export async function describeGoogleAccount(token: string) {
-  const response = await fetch(`${GCAL}/users/me/calendarList/primary?fields=id,summary`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+  const response = await fetch(`${GCAL}/users/me/calendarList/primary?fields=id,summary`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    signal: AbortSignal.timeout(20_000),
+  });
   const json = (await response.json().catch(() => ({}))) as GoogleJson;
   return { external_account_id: null, account_label: (json.id as string | undefined) ?? (json.summary as string | undefined) ?? "Google account" };
 }
@@ -226,11 +294,12 @@ async function googleEvents(env: Env, admin: Db, companyId: string, calendarId: 
     for (const e of json.items ?? []) {
       if (e.status === "cancelled" || !e.start || !e.end) continue;
       const allDay = Boolean(e.start.date);
+      const notes = plainText(e.description ? clip(String(e.description), 4000) : null);
       items.push({
         key: String(e.id),
-        title: String(e.summary ?? "Busy").slice(0, 200),
-        location: e.location ? String(e.location).slice(0, 300) : null,
-        description: plainText(e.description ? String(e.description).slice(0, 4000) : null)?.slice(0, 2000) ?? null,
+        title: clip(String(e.summary ?? "Busy"), 200),
+        location: e.location ? clip(String(e.location), 300) : null,
+        description: notes === null ? null : clip(notes, 2000),
         url: typeof e.htmlLink === "string" && e.htmlLink.startsWith("https://") ? e.htmlLink : null,
         allDay,
         start: allDay ? e.start.date : new Date(e.start.dateTime).toISOString(),
@@ -262,7 +331,7 @@ interface SourceRow {
 async function shortKey(key: string): Promise<string> {
   if (key.length <= 400) return key;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
-  return `${key.slice(0, 200)}#${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return `${clip(key, 200)}#${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 /** Replace a calendar's events with `items`: upsert what's there, then drop what wasn't this time. */
@@ -300,6 +369,19 @@ async function storeEvents(admin: Db, source: SourceRow, items: IcsItem[], tz: s
   return rows.length;
 }
 
+/** Details turned off: the events kept so far become "Busy", with no name, place, notes or link (as storeEvents keeps them). */
+export async function hideDetails(admin: Db, sourceId: string) {
+  const { error } = await admin.from("calendar_events").update({ title: "Busy", location: null, description: null, url: null }).eq("source_id", sourceId);
+  if (error) throw new Error(`Couldn't hide calendar details: ${error.message}`);
+}
+
+/** Whether a calendar's details are on right now. */
+async function detailsOn(admin: Db, sourceId: string): Promise<boolean> {
+  const { data, error } = await admin.from("calendar_sources").select("show_details").eq("id", sourceId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return Boolean(data?.show_details);
+}
+
 /** Read a calendar's events now (ICS link or Google) and keep them. Returns how many there are. */
 export async function syncSource(env: Env, admin: Db, sourceId: string): Promise<number> {
   const { data: source, error } = await admin
@@ -321,12 +403,16 @@ export async function syncSource(env: Env, admin: Db, sourceId: string): Promise
     } else {
       items = await googleEvents(env, admin, source.company_id, source.external_id!, from, to);
     }
-    const count = await storeEvents(admin, source, items, tz);
+    // Details can be turned off while the calendar is read, or while its events are saved: those
+    // stay off either way.
+    const details = await detailsOn(admin, source.id);
+    const count = await storeEvents(admin, { ...source, show_details: details }, items, tz);
+    if (details && !(await detailsOn(admin, source.id))) await hideDetails(admin, source.id);
     await admin.from("calendar_sources").update({ last_synced_at: new Date().toISOString(), last_error: null, event_count: count }).eq("id", source.id);
     return count;
   } catch (err) {
     const message = err instanceof CalendarError || err instanceof IntegrationError ? err.message : "Couldn't refresh this calendar. It will try again in a few minutes.";
-    await admin.from("calendar_sources").update({ last_error: message.slice(0, 500) }).eq("id", source.id);
+    await admin.from("calendar_sources").update({ last_error: clip(message, 500) }).eq("id", source.id);
     throw err;
   }
 }
@@ -369,7 +455,7 @@ export const googleEventId = (visitId: string) => `ctv${visitId.replace(/-/g, ""
 /** Make the "<Company> (Crewtavo)" calendar in the connected account. Returns its ID. */
 export async function createVisitsCalendar(env: Env, admin: Db, companyId: string): Promise<{ id: string; name: string }> {
   const { data: company } = await admin.from("companies").select("name, timezone").eq("id", companyId).single();
-  const name = `${company?.name ?? "Crewtavo"} visits`.slice(0, 80);
+  const name = clip(`${company?.name ?? "Crewtavo"} visits`, 80);
   const created = (await gcal(env, admin, companyId, "POST", "/calendars", {
     summary: name,
     description: "Visits from Crewtavo, kept up to date as the schedule changes. Changes made here aren't copied back.",
@@ -391,12 +477,14 @@ export async function deleteVisitsCalendar(env: Env, admin: Db, companyId: strin
 export async function pushVisit(env: Env, admin: Db, companyId: string, calendarId: string, visitId: string) {
   const cal = `/calendars/${encodeURIComponent(calendarId)}/events`;
   const eventId = googleEventId(visitId);
-  const { data: visit } = await admin
+  const { data: visit, error } = await admin
     .from("visits")
     .select("id, title, kind, status, scheduled_on, starts_at, ends_at, notes, crew:crews(name), job:jobs(number, client:clients(display_name)), property:properties(line1, city, region, postal_code)")
     .eq("company_id", companyId)
     .eq("id", visitId)
     .maybeSingle();
+  // Not read isn't gone: taking the event off for it would be wrong.
+  if (error) throw new Error(error.message);
 
   if (!visit || !visit.scheduled_on || visit.status === "unscheduled" || visit.status === "cancelled") {
     try {
@@ -460,29 +548,92 @@ export async function runCalendarJob(env: Env, admin: Db, row: { company_id: str
   await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: row.company_id, provider: "google_calendar" });
 }
 
-/** When visits start going to Google: everything from last week through the next six months. */
+const VISIT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The visits that have an event on the visits calendar between two days (events people added there themselves aren't). */
+async function visitsOnGoogle(env: Env, admin: Db, companyId: string, calendarId: string, from: string, to: string): Promise<string[]> {
+  const ids: string[] = [];
+  let page: string | undefined;
+  do {
+    const params = new URLSearchParams({ timeMin: `${from}T00:00:00Z`, timeMax: `${to}T00:00:00Z`, maxResults: "2500", fields: "items(id,extendedProperties),nextPageToken" });
+    if (page) params.set("pageToken", page);
+    const json = (await gcal(env, admin, companyId, "GET", `/calendars/${encodeURIComponent(calendarId)}/events?${params}`))!;
+    for (const e of json.items ?? []) {
+      const visit = e.extendedProperties?.private?.crewtavo_visit;
+      if (typeof visit === "string" && VISIT_ID.test(visit) && e.id === googleEventId(visit)) ids.push(visit);
+    }
+    page = json.nextPageToken;
+  } while (page && ids.length < MAX_EVENTS);
+  return ids;
+}
+
+/** Leave visits to the outbox (topic calendar.visit), which tries them again in a few minutes. */
+async function queueVisits(admin: Db, companyId: string, visitIds: string[]) {
+  for (let i = 0; i < visitIds.length; i += 500) {
+    const rows = visitIds.slice(i, i + 500).map((id) => ({ company_id: companyId, topic: "calendar.visit", payload: { visit_id: id } }));
+    const { error } = await admin.from("outbox").insert(rows);
+    if (error) throw new Error(`Couldn't queue visits for Google Calendar: ${error.message}`);
+  }
+}
+
+/**
+ * Bring the visits calendar in line with the schedule from last week through the next six months:
+ * when visits start going to Google, and after it's reconnected (changes made while it needed
+ * reconnecting weren't queued). Events for visits cancelled, deleted, unscheduled or moved away
+ * meanwhile are found on Google and brought in line too. A visit Google doesn't take now is left
+ * to the outbox, and the rest still go.
+ */
 export async function pushUpcomingVisits(env: Env, admin: Db, companyId: string) {
   const calendarId = await visitsCalendar(admin, companyId);
-  if (!calendarId) return { pushed: 0 };
+  if (!calendarId) return { pushed: 0, queued: 0 };
   const { data: company } = await admin.from("companies").select("timezone").eq("id", companyId).single();
   const today = localDate(new Date(), company?.timezone ?? "UTC");
+  const from = addDays(today, -7);
+  const to = addDays(today, WINDOW_AHEAD_DAYS);
   const { data: visits, error } = await admin
     .from("visits")
     .select("id")
     .eq("company_id", companyId)
-    .gte("scheduled_on", addDays(today, -7))
-    .lte("scheduled_on", addDays(today, WINDOW_AHEAD_DAYS))
+    .gte("scheduled_on", from)
+    .lte("scheduled_on", to)
     .not("status", "in", "(unscheduled,cancelled)")
     .order("scheduled_on")
     .limit(2000);
   if (error) throw new Error(error.message);
-  let pushed = 0;
-  for (const v of visits ?? []) {
-    // Stop if visits were turned off or Google was disconnected meanwhile.
-    if (pushed % 50 === 0 && pushed > 0 && !(await visitsCalendar(admin, companyId))) break;
-    await pushVisit(env, admin, companyId, calendarId, v.id);
-    pushed++;
+  // What's on Google for those days (a day either side covers every time zone).
+  let lastError: string | null = null;
+  let onGoogle: string[] = [];
+  try {
+    onGoogle = await visitsOnGoogle(env, admin, companyId, calendarId, addDays(from, -1), addDays(to, 2));
+  } catch (err) {
+    if (!(await visitsCalendar(admin, companyId))) return { pushed: 0, queued: 0 };
+    console.error("Couldn't read the visits calendar", err);
+    lastError = "Couldn't check what's on Google Calendar, so visits cancelled or deleted lately may still show there. Turn visits off and on again to rebuild it.";
   }
-  await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: companyId, provider: "google_calendar" });
-  return { pushed };
+  const ids = [...new Set([...(visits ?? []).map((v) => v.id), ...onGoogle])];
+  const retry: string[] = [];
+  let pushed = 0;
+  let failedInARow = 0;
+  for (const [i, id] of ids.entries()) {
+    // Stop if visits were turned off or Google was disconnected meanwhile.
+    if (i % 50 === 0 && i > 0 && !(await visitsCalendar(admin, companyId))) return { pushed, queued: 0 };
+    try {
+      await pushVisit(env, admin, companyId, calendarId, id);
+      pushed++;
+      failedInARow = 0;
+    } catch (err) {
+      // Google refused the sign-in (gcal and accessToken mark it), or visits were turned off: nothing more to send.
+      if (!(await visitsCalendar(admin, companyId))) return { pushed, queued: 0 };
+      console.error("Couldn't put a visit on Google Calendar", id, err);
+      retry.push(id);
+      // Google is having trouble: the outbox takes the rest.
+      if (++failedInARow === 5) {
+        retry.push(...ids.slice(i + 1));
+        break;
+      }
+    }
+  }
+  await queueVisits(admin, companyId, retry);
+  await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: lastError }).match({ company_id: companyId, provider: "google_calendar" });
+  return { pushed, queued: retry.length };
 }

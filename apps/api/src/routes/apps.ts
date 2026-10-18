@@ -142,7 +142,8 @@ apps.get("/apps/:provider/callback", async (c) => {
     if (error) throw new Error(error.message);
     await saveSecret(c.env, admin, state.company, provider, secret);
     // Reconnected while visits go to Google: changes made while it needed reconnecting weren't
-    // queued, so send the upcoming visits again.
+    // queued, so bring the visits calendar in line again (visits cancelled or deleted meanwhile
+    // come off it too).
     if (provider === "google_calendar") runInBackground(c, pushUpcomingVisits(c.env, admin, state.company));
     return done("connected");
   } catch (error) {
