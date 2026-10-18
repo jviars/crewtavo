@@ -10,7 +10,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { TERMS_REQUIRED, TERMS_VERSION, TermsAgreement } from "@/features/legal/License";
-import { api, supabase } from "@/lib/api";
+import { api } from "@/lib/api";
 import { AuthLayout } from "./LoginPage";
 import styles from "./auth.module.css";
 
@@ -24,7 +24,8 @@ const zones = (() => {
   }
 })();
 
-export function OnboardingPage({ onCreated }: { onCreated: () => void }) {
+/** `onSignOut` is the session's, which leaves nothing of theirs on the phone. */
+export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void; onSignOut: () => void }) {
   const presets = useQuery({ queryKey: ["presets"], queryFn: () => api.get<PresetSummary[]>("/presets") });
   const [name, setName] = useState("");
   const [preset, setPreset] = useState("general");
@@ -85,7 +86,7 @@ export function OnboardingPage({ onCreated }: { onCreated: () => void }) {
 
         <FormError error={create.error} />
         <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-          <Button variant="ghost" icon="logout" onClick={() => supabase().auth.signOut()}>Sign out</Button>
+          <Button variant="ghost" icon="logout" onClick={() => onSignOut()}>Sign out</Button>
           <Button type="submit" variant="primary" size="lg" loading={create.isPending} disabled={!presets.data}>Create business</Button>
         </div>
       </form>

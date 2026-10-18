@@ -76,4 +76,9 @@ export const isAuthError = (error: unknown) => error instanceof ApiError && erro
 export const SESSION_EXPIRED = "session_expired";
 /** The request never got an answer: no signal, or too little to carry it. */
 export const isNetworkError = (error: unknown) => error instanceof ApiError && error.status === 0;
+/**
+ * Answered for the server rather than by it: 502, 503 or 504 from the proxy in front of it while it
+ * restarts or deploys, or from the gateway while a part of it is still starting.
+ */
+export const isRestarting = (status?: number) => status === 502 || status === 503 || status === 504;
 export const isNotFound = (error: unknown) => error instanceof ApiError && error.status === 404;
