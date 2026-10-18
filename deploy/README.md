@@ -166,18 +166,15 @@ version.
 
 ### Switching to the moving tags
 
-Instances deployed before the template used them run version tags with patch updates (`0.1.x`), and
-keep that setting.
+Done on 2026-10-18: release `v0.1.3` created `crewtavo:latest` and `crewtavo-db:pg17`, the template
+was switched to them, and so was the test instance (`pure-prosperity`).
 
-1. Push a release with this workflow. It creates `crewtavo:latest`, and `crewtavo-db:pg17` (the
-   first release builds the database image even though `deploy/postgres` didn't change, because the
-   tag doesn't exist yet).
-2. In the template, change `crewtavo`'s image to `ghcr.io/jviars/crewtavo:latest` and `db`'s to
-   `ghcr.io/jviars/crewtavo-db:pg17`, with auto updates as listed above.
-3. Existing instances move over in each service's **Settings → Source**, by changing the image to
-   the same tags.
-4. Check one instance takes the next release by itself: `/api/health` shows the new version. People
-   have reported Railway missing a moved tag on GitHub's registry, so don't rely on it before then.
+Instances deployed before then run version tags with patch updates (`0.1.x`), and keep that setting
+until their owner changes the image in each service's **Settings → Source** to the same tags.
+
+Still to check: that an instance takes the next release by itself (`/api/health` shows the new
+version). People have reported Railway missing a moved tag on GitHub's registry, so don't rely on it
+before then.
 
 ### Why images
 
