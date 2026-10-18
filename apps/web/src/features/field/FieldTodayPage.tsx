@@ -15,7 +15,7 @@ import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
 import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
-import { pendingVisitStatus, setVisitStatus, showVisitStatus, type VisitStatusChange } from "./fieldActions";
+import { pendingVisitStatus, setVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl } from "./fieldData";
 import { OfflineNote } from "./OfflineNote";
 import { FIELD_SCOPE } from "@/lib/offline";
@@ -83,7 +83,7 @@ export function FieldTodayPage() {
   const setStatus = useMutation({
     mutationKey: ["visit-status"],
     scope: FIELD_SCOPE,
-    meta: { success: (_: unknown, v: VisitStatusChange) => (v.status === "en_route" ? "On your way" : v.status === "in_progress" ? "Visit started. Your clock is running." : "Visit complete. Nice work!") },
+    meta: { success: statusSaved },
     mutationFn: setVisitStatus,
     onMutate: async (change: VisitStatusChange) => {
       if (!onlineManager.isOnline()) toast.info("Saved on this phone. It'll send when you have signal.");

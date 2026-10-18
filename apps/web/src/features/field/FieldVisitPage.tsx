@@ -18,7 +18,7 @@ import { toast } from "@/lib/toast";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
-import { pendingVisitStatus, saveChecklist, saveVisitNotes, setVisitStatus, showVisitStatus, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
+import { pendingVisitStatus, saveChecklist, saveVisitNotes, setVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl, formatDuration } from "./fieldData";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { SignaturePad } from "./SignaturePad";
@@ -65,7 +65,7 @@ export function FieldVisitPage() {
   const statusMutation = useMutation({
     mutationKey: ["visit-status"],
     scope: FIELD_SCOPE,
-    meta: { success: (_: unknown, change: VisitStatusChange) => (change.status === "en_route" ? "On your way" : change.status === "in_progress" ? "Visit started. Your clock is running." : "Visit complete. Nice work!") },
+    meta: { success: statusSaved },
     mutationFn: setVisitStatus,
     onMutate: (change: VisitStatusChange) => {
       queued();
