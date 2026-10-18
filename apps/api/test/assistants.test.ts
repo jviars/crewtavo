@@ -3,6 +3,9 @@
  * tools that write refuse, and so do our API and the instance's gateway to the Data API and
  * Storage. Ordinary sign-ins are unaffected (lib/assistants.ts).
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -86,11 +89,19 @@ describe("MCP tools", () => {
       const calls = supabase();
       const res = await (await call(bearer, "add_note", note)).json();
       expect(res.result).toMatchObject({ isError: true, content: [{ type: "text", text: ASSISTANT_READ_ONLY }] });
-      expect(ASSISTANT_READ_ONLY).toBe('This assistant can only read. To let it make changes, turn on "Allow changes" for it in Crewtavo, under Settings → Apps → AI assistants.');
+      expect(ASSISTANT_READ_ONLY).toBe('This assistant can only read. To let it make changes, turn on "Allow changes" for it in Crewtavo, under Settings → Profile → AI assistants.');
       expect(wrote(calls)).toBe(false);
       // The refusal is in the activity log the owner sees.
       expect(calls.find((c) => c.path === "/rest/v1/assistant_calls")?.body).toMatchObject({ tool: "add_note", ok: false });
     }
+  });
+
+  it("that write refuse the way the database does, pointing to the profile every role has", () => {
+    // The newest hooks.before_request, the Data API's pre-request (the assistant_access migrations).
+    const dir = fileURLToPath(new URL("../../../supabase/migrations", import.meta.url));
+    const sql = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort().map((f) => readFileSync(join(dir, f), "utf8")).filter((s) => s.includes("function hooks.before_request()")).at(-1)!;
+    const latest = sql.slice(sql.lastIndexOf("create or replace function hooks.before_request()"));
+    expect(/message = '((?:[^']|'')*)'/.exec(latest)?.[1].replaceAll("''", "'")).toBe(ASSISTANT_READ_ONLY);
   });
 
   it("that write work for an assistant allowed to change things, and for an ordinary sign-in", async () => {
