@@ -19,7 +19,9 @@ export const GUESS_WINDOW_SECONDS = 15 * 60;
 const MAX_BODY = 64 * 1024;
 
 const paused = new Map<string, number>();
-const inFlight = new Set<string>();
+/** Attempts per account waiting for (or at) GoTrue, sent one after another. */
+const queues = new Map<string, { tail: Promise<unknown>; waiting: number }>();
+const MAX_WAITING = 5;
 
 /** Requests that carry an email and a secret someone could guess: a password, or a 6-digit code. */
 export function isGuessable(method: string, url: URL, prefix: string): boolean {
@@ -41,26 +43,34 @@ export async function guardSignIn(env: Env, request: Request, send: (request: Re
   if (!email) return typeof fields.token_hash === "string" && fields.token_hash ? send(replay) : refuse("Sign in with your email address.");
 
   const key = `sign-in-guess:${email}`;
-  const now = Date.now();
-  const until = paused.get(key);
-  if (until && until > now) return tooMany(until - now);
-  if (until) paused.delete(key);
-  // One guess at a time per account: failures are counted as GoTrue answers, so guesses sent all at
-  // once would otherwise all get through before the count reached the limit.
-  if (inFlight.has(key)) return tooMany(1000, "Another sign-in for this account is still going. Try again in a moment.");
-  inFlight.add(key);
+  // An account's attempts go to GoTrue one at a time: failures are counted as GoTrue answers, so
+  // guesses sent all at once would otherwise all get through before the count reached the limit.
+  // A few waiting is normal (people sharing a sign-in, several tabs); a burst beyond that isn't.
+  const queue = queues.get(key) ?? { tail: Promise.resolve(), waiting: 0 };
+  if (queue.waiting >= MAX_WAITING) return tooMany(1000, "Too many sign-ins for this account at once. Try again in a moment.");
+  queue.waiting++;
+  queues.set(key, queue);
+  const turn = queue.tail.then(() => attempt(env, key, replay, send));
+  queue.tail = turn.catch(() => undefined);
   try {
-    const response = await send(replay);
-    if (response.status >= 400 && response.status < 500 && response.status !== 429) {
-      if (!(await allow(env, key, GUESSES, GUESS_WINDOW_SECONDS))) {
-        if (paused.size > 10_000) for (const [k, t] of paused) if (t <= Date.now()) paused.delete(k);
-        paused.set(key, Date.now() + GUESS_WINDOW_SECONDS * 1000);
-      }
-    }
-    return response;
+    return await turn;
   } finally {
-    inFlight.delete(key);
+    if (--queue.waiting === 0) queues.delete(key);
   }
+}
+
+async function attempt(env: Env, key: string, request: Request, send: (request: Request) => Promise<Response>): Promise<Response> {
+  const until = paused.get(key);
+  if (until && until > Date.now()) return tooMany(until - Date.now());
+  if (until) paused.delete(key);
+  const response = await send(request);
+  if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+    if (!(await allow(env, key, GUESSES, GUESS_WINDOW_SECONDS))) {
+      if (paused.size > 10_000) for (const [k, t] of paused) if (t <= Date.now()) paused.delete(k);
+      paused.set(key, Date.now() + GUESS_WINDOW_SECONDS * 1000);
+    }
+  }
+  return response;
 }
 
 /** What a password sign-in or a code check may carry (what supabase-js sends). */

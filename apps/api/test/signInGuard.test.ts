@@ -104,7 +104,7 @@ describe("sign-in guard", () => {
     expect(seen[0]).toEqual({ email: "Spelled@Example.com", password: "wrong-0" });
   });
 
-  it("lets only one guess per account through at a time", async () => {
+  it("sends an account's attempts one at a time, so a burst can't outrun the limit", async () => {
     fakeLimiter();
     let open = 0;
     let most = 0;
@@ -113,15 +113,21 @@ describe("sign-in guard", () => {
       open++;
       most = Math.max(most, open);
       reached++;
-      await request.json();
+      const body = (await request.json()) as { password?: string };
       await new Promise((resolve) => setTimeout(resolve, 5));
       open--;
-      return Response.json({ error_code: "invalid_credentials" }, { status: 400 });
+      return body.password === "right" ? Response.json({ access_token: "jwt" }) : Response.json({ error_code: "invalid_credentials" }, { status: 400 });
     };
+    // A few people signing in to one shared account at the same moment all get in, one after another.
+    const shared = await Promise.all(Array.from({ length: 4 }, () => guardSignIn(env, signIn({ email: "shared@example.com", password: "right" }), slow)));
+    expect(shared.map((r) => r.status)).toEqual([200, 200, 200, 200]);
+    expect(most).toBe(1);
+
+    reached = 0;
     const burst = await Promise.all(Array.from({ length: 200 }, (_, i) => guardSignIn(env, signIn({ email: "burst@example.com", password: `wrong-${i}` }), slow)));
     expect(most).toBe(1);
-    expect(reached).toBe(1);
-    expect(burst.filter((r) => r.status === 429)).toHaveLength(199);
+    expect(reached).toBe(5);
+    expect(burst.filter((r) => r.status === 429)).toHaveLength(195);
     // Sent one after another, they stop at the limit.
     for (let i = 0; i < 30; i++) await guardSignIn(env, signIn({ email: "burst@example.com", password: `again-${i}` }), slow);
     expect(reached).toBe(GUESSES + 1);
