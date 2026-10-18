@@ -10,8 +10,12 @@
 .provider small { display: block; font-weight: 500; color: var(--text-2); font-size: 12px; }
 .mark {
   display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px;
-  background: var(--fill-2); color: var(--text-2); font-size: 13px; font-weight: 800;
+  background: var(--fill-2); color: var(--text-2);
 }
+/* Real logos sit on a white tile in both themes, like the app icons (.app-icon). */
+.logo { background: #fff; border: 1px solid rgba(0, 0, 0, 0.08); }
+.logo img { width: 60%; height: 60%; object-fit: contain; display: block; }
+.logo[data-wide] img { width: 84%; height: 84%; } /* wordmark-shaped logos (Zoho) */
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
 .status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .address { font-size: 16px; font-weight: 800; word-break: break-all; }
