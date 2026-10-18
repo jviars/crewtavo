@@ -15,8 +15,12 @@ export function parseCsv(text: string): string[][] {
           i++;
         } else quoted = false;
       } else field += ch;
-    } else if (ch === '"' && field === "") quoted = true; // later in a field (12" curb) it's just a character
-    else if (ch === ",") {
+    } else if (ch === '"' && /^ *$/.test(field)) {
+      // A quote opens a quoted field at its start, even after spaces (a, "b, c"), which are dropped.
+      // Later in a field (12" curb) it's just a character.
+      field = "";
+      quoted = true;
+    } else if (ch === ",") {
       row.push(field);
       field = "";
     } else if (ch === "\n" || ch === "\r") {
