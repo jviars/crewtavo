@@ -314,8 +314,9 @@ account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async 
 
 /**
  * "Forgot password" and "Email me a sign-in link". The link is sent from the person's company
- * mailbox when it has one (or the install's own email), so it reaches everyone; without either it
- * falls back to Supabase's mailer. Always answers the same way, so it can't reveal who has an account.
+ * mailbox when it has a working one (or the install's own email, which also takes over if the
+ * mailbox fails), so it reaches everyone; without either it falls back to Supabase's mailer.
+ * Always answers the same way, so it can't reveal who has an account.
  */
 account.post("/auth/email-link", async (c) => {
   const body = await readJson(c, z.object({ email: z.email(), kind: z.enum(["recovery", "magiclink"]) }));
@@ -334,20 +335,24 @@ account.post("/auth/email-link", async (c) => {
   // several, any of them could have added this person, and whoever runs a mailbox can read the link.
   const only = memberships?.length === 1 ? memberships[0]! : null;
   const onlyCompany = only?.company as unknown as { name: string; email: string | null } | undefined;
+  // And only while it works: one whose sign-in failed (a changed or revoked app password) would just
+  // fail again.
+  const mailbox = only ? await loadMailbox(c.env, only.company_id).catch(() => null) : null;
   let sender: { id: string | null; name: string; email: string | null } | null = null;
-  if (only && onlyCompany && (await loadMailbox(c.env, only.company_id).catch(() => null))) {
+  if (only && onlyCompany && mailbox && mailbox.status !== "error") {
     sender = { id: only.company_id, name: onlyCompany.name, email: onlyCompany.email };
   }
   if (!sender && emailConfigured(c.env)) {
     sender = { id: null, name: onlyCompany?.name ?? "Crewtavo", email: onlyCompany?.email ?? null };
   }
-  if (!sender) {
+  const supabaseMailer = async () => {
     const fallback = body.kind === "recovery"
       ? await admin.auth.resetPasswordForEmail(email, { redirectTo })
       : await admin.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: redirectTo } });
     if (fallback.error) console.error("Supabase auth email failed", fallback.error.message);
     return c.json({ sent: true });
-  }
+  };
+  if (!sender) return supabaseMailer();
 
   const { data, error } = await admin.auth.admin.generateLink({ type: body.kind, email, options: { redirectTo } });
   if (error || !data.properties?.hashed_token) {
@@ -358,11 +363,14 @@ account.post("/auth/email-link", async (c) => {
   const text = body.kind === "recovery"
     ? `Someone asked to reset the password for your ${sender.name} account on Crewtavo. Choose a new password here:\n\n${link}\n\nIf that wasn't you, ignore this email. Your password stays the same.`
     : `Here's your link to sign in to ${sender.name} on Crewtavo. It works once and expires soon:\n\n${link}\n\nIf you didn't ask for it, ignore this email.`;
-  const result = await sendEmail(
-    c.env,
-    { to: email, subject: body.kind === "recovery" ? `Reset your ${sender.name} password` : `Your ${sender.name} sign-in link`, ...renderEmail({ companyName: sender.name, text }), replyTo: sender.email ?? undefined, fromName: sender.name },
-    sender.id,
-  );
+  const message = { to: email, subject: body.kind === "recovery" ? `Reset your ${sender.name} password` : `Your ${sender.name} sign-in link`, ...renderEmail({ companyName: sender.name, text }), replyTo: sender.email ?? undefined, fromName: sender.name };
+  let result = await sendEmail(c.env, message, sender.id);
+  // The company mailbox didn't take it: the install's own email, or else Supabase's mailer, still can.
+  if (!result.sent && sender.id) {
+    console.error("Auth email not sent from the company mailbox", result.reason);
+    if (!emailConfigured(c.env)) return supabaseMailer();
+    result = await sendEmail(c.env, message, null);
+  }
   if (!result.sent) console.error("Auth email not sent", result.reason);
   return c.json({ sent: true });
 });
