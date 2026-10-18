@@ -746,6 +746,53 @@ describe("closed with updates waiting", () => {
     stop();
   });
 
+  it("opened with no signal and put away, an update put back from the phone goes when the signal comes, off the count as it goes; a notice shown just then is taken down once it's through", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const { close, waiting, caches } = phone({ backgroundSync: true });
+    // Earlier: tapped with no signal, then the app was closed.
+    const before = newClient();
+    before.setMutationDefaults(["visit-notes"], { mutationFn: async () => undefined });
+    onlineManager.setOnline(false);
+    const stopBefore = startOfflineCache(before, "u39", true);
+    void tap(before, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    await settle();
+    stopBefore();
+    before.clear();
+
+    // Opened again, still with no signal, and put away.
+    const qc = newClient();
+    const sent: string[] = [];
+    qc.setMutationDefaults(["visit-notes"], {
+      mutationFn: async (v: { notes: string }) => {
+        await new Promise((r) => setTimeout(r, 3_000));
+        sent.push(v.notes);
+      },
+    });
+    const stop = startOfflineCache(qc, "u39", true);
+    await settle();
+    expect(waiting()).toEqual({ "/waiting/u39": "1" });
+    page.visibilityState = "hidden";
+    page.dispatchEvent(new Event("visibilitychange"));
+    await settle(100);
+
+    // The signal comes back with the phone in a pocket: React Query sends the one put back even so,
+    // and the worker, woken by the same signal, finds nothing waiting.
+    onlineManager.setOnline(true);
+    await settle(10);
+    expect(waiting()).toEqual({});
+    const sw = loadServiceWorker({ caches, windows: [{ url: "https://crew.example.com/field", visibilityState: "hidden" }] });
+    await sw.dispatch("sync", { tag: SYNC_TAG });
+    expect(sw.showNotification).not.toHaveBeenCalled();
+
+    // Had the worker read the count first and said it was waiting, that notice goes once it's sent.
+    close.mockClear();
+    await settle(4_000);
+    expect(sent).toEqual(["Gate was open"]);
+    expect(close).toHaveBeenCalled();
+    stop();
+  });
+
   it("an update waiting to try again still counts while the phone says it has signal and My day reloads, so put away and closed then, the worker says so", async () => {
     const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
     vi.stubGlobal("document", page);

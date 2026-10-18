@@ -220,7 +220,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 @keyframes sheet-in { from { transform: translateY(40px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 
 /* ---------- Toasts ---------- */
-.toaster { position: fixed; inset: auto 20px 20px auto; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(380px, calc(100vw - 32px)); z-index: 200; }
+.toaster { position: fixed; inset: auto max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) auto; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(380px, calc(100vw - 32px)); z-index: 200; }
 .toaster:not(:popover-open):not([data-fallback]) { display: none; }
 .toast {
   display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--solid); color: var(--on-solid);
@@ -239,7 +239,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .toast .toast-x:hover { color: inherit; background: color-mix(in srgb, currentColor 12%, transparent); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: none; } }
 @keyframes toast-out { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
-@media (max-width: 900px) { .toaster { inset: auto 16px calc(var(--mobile-nav-height) + 12px + env(safe-area-inset-bottom)) 16px; width: auto; align-items: stretch; } }
+@media (max-width: 900px) { .toaster { inset: auto max(16px, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + 12px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); width: auto; align-items: stretch; } }
 
 /* ---------- Menus and popovers ---------- */
 .menu {
