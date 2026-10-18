@@ -38,11 +38,24 @@ export function closeAfterUnreadBodies(server: Server) {
         res.setHeader("Connection", "close");
         socket.crewtavoClosing = true;
         lingerOnClose(req, socket);
+        // The answer's own headers would otherwise win (a streamed answer says keep-alive).
+        args = args.map(withoutConnection);
       }
       return (writeHead as (...a: unknown[]) => ServerResponse).apply(this, args);
     } as typeof res.writeHead;
     for (const handle of handlers) handle.call(server, req, res);
   });
+}
+
+/** writeHead's headers (an object, or a flat [name, value, ...] list) without Connection. */
+function withoutConnection(arg: unknown) {
+  if (Array.isArray(arg)) {
+    const kept: unknown[] = [];
+    for (let i = 0; i + 1 < arg.length; i += 2) if (String(arg[i]).toLowerCase() !== "connection") kept.push(arg[i], arg[i + 1]);
+    return kept;
+  }
+  if (arg && typeof arg === "object") return Object.fromEntries(Object.entries(arg).filter(([name]) => name.toLowerCase() !== "connection"));
+  return arg;
 }
 
 function unread(req: IncomingMessage) {
