@@ -103,6 +103,19 @@ try {
   // database then refuses a second one too, whoever asks (see the audit_fixes migration).
   await sql`insert into private.instance (single_company) values (${process.env.CREWTAVO_SINGLE_COMPANY === "1"})
             on conflict (id) do update set single_company = excluded.single_company`;
+  // Row checks a migration couldn't rewrite while the app was busy (20261018000990_policy_lookups.sql)
+  // are rewritten a table at a time, each in its own transaction, so each holds up only that table,
+  // for a moment. One that stays busy is left for the next start: its checks are right as they are,
+  // just slower.
+  const [{ folds }] = await sql`select to_regprocedure('private.member_fold_changes(regclass)') is not null as folds`;
+  if (folds) {
+    const until = Date.now() + 60_000;
+    for (const { tbl } of await sql`select distinct tbl from private.member_fold_changes() order by tbl`) {
+      if (Date.now() > until) break;
+      const [{ changed }] = await sql`select private.fold_member_checks(${tbl}::regclass, interval '5 seconds') as changed`;
+      if (changed > 0) console.log(`migrate: rewrote the row checks on ${tbl}`);
+    }
+  }
   // PostgREST caches the schema; tell it about the new tables and functions.
   if (count) await sql`notify pgrst, 'reload schema'`;
   console.log(count ? `migrate: ${count} migration(s) applied.` : "migrate: database is up to date.");

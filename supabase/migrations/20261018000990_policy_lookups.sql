@@ -13,6 +13,9 @@
 -- The answers are the same: has_role and the rest stay as they are, for the database's own
 -- functions, and supabase/tests/policy_lookups_test.sql checks that both forms agree for every role
 -- and fails if a helper changes without its list (private.folded_helpers).
+--
+-- Rewriting a policy locks its table. If the app is too busy for that, the policies are left as
+-- they are and scripts/migrate.mjs rewrites them a table at a time, then or on a later start.
 
 create or replace function private.member_companies() returns uuid[]
 language sql stable security definer set search_path = '' as $$
@@ -167,8 +170,10 @@ begin
     ) as r(n, pattern, fn)
     order by n
   loop
+    -- manages_equipment and schedules_crew are folded into has_role's and has_perm's lists, and
     -- schedules_crew and works_visit check the crew through my_crews and visit_crew as well.
     continue when rule.fn = any (changed)
+      or rule.n in (4, 5) and changed && array['private.has_role(uuid,public.member_role[])', 'private.has_perm(uuid,text)']
       or rule.n = 5 and 'private.my_crews(uuid)' = any (changed)
       or rule.n = 7 and 'private.visit_crew(uuid)' = any (changed);
     loop
@@ -210,38 +215,27 @@ language sql immutable set search_path = '' as $$
 $$;
 
 /**
- * Rewrites every policy's per-row checks (private.fold_member_expr), keeping each policy's name,
- * command, roles and the rest of its expression, and returns how many changed. Safe to run again:
- * a migration that adds policies written the old way can end with `select private.fold_member_checks();`.
+ * The ALTER POLICY statements that rewrite the per-row checks (private.fold_member_expr) of every
+ * policy, or of one table's, keeping each policy's name, command, roles and the rest of its
+ * expression. Warns about any check it can't rewrite.
  */
-create or replace function private.fold_member_checks() returns integer
-language plpgsql set search_path = '' as $$
+create or replace function private.member_fold_changes(p_only regclass default null)
+returns table (tbl text, statement text)
+language plpgsql stable set search_path = '' as $$
 declare
   per_row constant text := 'private\.(has_role|has_perm|is_member|manages_equipment|schedules_crew|assigned_to_visit|works_visit|crew_sees_[a-z]+)\(';
-  lock_timeout_was constant text := current_setting('lock_timeout');
   p record;
   q text;
   c text;
   required text[];
-  changes text[] := '{}';
-  tables text[] := '{}';
-  started constant timestamptz := clock_timestamp();
-  attempt timestamptz;
-  tries integer := 0;
-  busy text;
 begin
-  if exists (select private.changed_folded_helpers()) then
-    raise warning 'These helpers changed, so policies using them are left checking each row: %. Change their lists in this migration''s functions to match, and fold again.',
-      (select string_agg(h, ', ') from private.changed_folded_helpers() h);
-  end if;
-  -- With an empty search path every name in the printed expressions is schema-qualified, so they
+  -- With the empty search path every name in the printed expressions is schema-qualified, so they
   -- read back the same.
-  perform set_config('search_path', '', true);
   for p in
     select pol.polname, pol.polrelid, pol.polrelid::regclass::text as tbl,
            pg_get_expr(pol.polqual, pol.polrelid) as qual, pg_get_expr(pol.polwithcheck, pol.polrelid) as chk
     from pg_policy pol join pg_class t on t.oid = pol.polrelid join pg_namespace n on n.oid = t.relnamespace
-    where n.nspname in ('public', 'storage')
+    where n.nspname in ('public', 'storage') and (p_only is null or pol.polrelid = p_only)
     order by pol.polrelid::regclass::text, pol.polname
   loop
     select coalesce(array_agg(a.attname::text), '{}') into required
@@ -252,39 +246,72 @@ begin
       raise warning 'Policy % on % still checks each row with a security definer function: %', p.polname, p.tbl, concat(q, ' / ', c);
     end if;
     if q is distinct from p.qual or c is distinct from p.chk then
-      changes := changes || (format('alter policy %I on %s', p.polname, p.tbl)
-        || coalesce(' using (' || q || ')', '') || coalesce(' with check (' || c || ')', ''));
-      if not p.tbl = any (tables) then tables := tables || p.tbl; end if;
+      tbl := p.tbl;
+      statement := format('alter policy %I on %s', p.polname, p.tbl)
+        || coalesce(' using (' || q || ')', '') || coalesce(' with check (' || c || ')', '');
+      return next;
     end if;
   end loop;
-  if cardinality(changes) = 0 then return 0; end if;
+end $$;
 
-  -- Changing a policy locks its table until the migration commits. Take all the locks first, in
-  -- the order a query takes them (its table, then memberships and company_roles if those change,
-  -- as its policy reads them). Each try waits a little for each table (longer as tries go on, for a
-  -- busy app) and lets go of everything after 0.8 s at most: requests on a table are held up for a
-  -- moment at a time, never as long as Postgres waits before it looks for a deadlock (a second). If
-  -- the app keeps a table busy for three minutes the update stops (Railway keeps the running
-  -- version), and it tries again the next time Crewtavo starts.
+/**
+ * Rewrites every policy's per-row checks (or one table's), and returns how many policies changed,
+ * or -1 if the tables stayed too busy to change for p_wait. Safe to run again: a migration that
+ * adds policies written the old way can end with `select private.fold_member_checks();`, and
+ * scripts/migrate.mjs finishes, a table at a time, whatever a busy app kept it from doing.
+ */
+create or replace function private.fold_member_checks(p_only regclass default null, p_wait interval default '10 seconds')
+returns integer
+language plpgsql set search_path = '' as $$
+declare
+  lock_timeout_was constant text := current_setting('lock_timeout');
+  -- How long one try may hold the locks it has taken: well under the time Postgres waits before it
+  -- looks for a deadlock, so a query held up behind it never gets that far.
+  budget constant interval := least(interval '500 ms', current_setting('deadlock_timeout')::interval / 2);
+  started constant timestamptz := clock_timestamp();
+  changes text[];
+  tables text[];
+  attempt timestamptz;
+  remaining interval;
+  tries integer := 0;
+  busy text;
+begin
+  if exists (select private.changed_folded_helpers()) then
+    raise warning 'These helpers changed, so policies using them are left checking each row: %. Change their lists in this migration''s functions to match, and fold again.',
+      (select string_agg(h, ', ') from private.changed_folded_helpers() h);
+  end if;
+  select array_agg(statement), array_agg(distinct tbl) into changes, tables from private.member_fold_changes(p_only);
+  if changes is null then return 0; end if;
+
+  -- Changing a policy locks its table until the transaction commits. Take all the locks first, in
+  -- the order most queries take them (their table, then memberships and company_roles, if those
+  -- change, as the policy reads them). Each try waits for each table only as long as is left of its
+  -- budget, then lets go of everything and tries again after a pause that grows: requests on a
+  -- table are held up for half a second at most, and a query that takes the locks the other way
+  -- round can't deadlock with it. If the tables stay busy for p_wait, nothing is changed.
   select array_agg(t order by t in ('public.memberships', 'public.company_roles'), t = 'public.company_roles', t)
   into tables from unnest(tables) as u(t);
   loop
     attempt := clock_timestamp();
-    perform set_config('lock_timeout', least(100 + 25 * tries, 500) || 'ms', true);
     tries := tries + 1;
     begin
       foreach busy in array tables loop
-        if clock_timestamp() - attempt > interval '800 ms' then
+        remaining := budget - (clock_timestamp() - attempt);
+        if remaining < interval '20 ms' then
           raise exception using errcode = 'lock_not_available';
         end if;
+        perform set_config('lock_timeout', ceil(extract(epoch from remaining) * 1000)::integer || 'ms', true);
         execute 'lock table ' || busy || ' in access exclusive mode';
       end loop;
       exit;
     exception when lock_not_available or deadlock_detected then
-      if clock_timestamp() - started > interval '3 minutes' then
-        raise exception 'Couldn''t update the row checks: other queries kept % busy for three minutes. It''ll try again when Crewtavo next starts.', busy;
+      if clock_timestamp() - started > p_wait then
+        perform set_config('lock_timeout', lock_timeout_was, true);
+        raise warning 'The row checks on % weren''t rewritten yet: % stayed busy. They''re right as they are, just slower; Crewtavo tries again as it starts.',
+          array_to_string(tables, ', '), busy;
+        return -1;
       end if;
-      perform pg_sleep(0.1 + random() * 0.3);
+      perform pg_sleep(least(0.1 * tries, 1.0) * (0.5 + random()));
     end;
   end loop;
   perform set_config('lock_timeout', lock_timeout_was, true);
@@ -295,7 +322,8 @@ begin
   return cardinality(changes);
 end $$;
 
-revoke all on function private.fold_member_checks(), private.fold_member_expr(text, text[]),
-  private.fold_test(text, text, text[]), private.folded_helpers(), private.changed_folded_helpers() from public;
+revoke all on function private.fold_member_checks(regclass, interval), private.member_fold_changes(regclass),
+  private.fold_member_expr(text, text[]), private.fold_test(text, text, text[]), private.folded_helpers(),
+  private.changed_folded_helpers() from public;
 
 select private.fold_member_checks();
