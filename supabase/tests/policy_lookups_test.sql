@@ -148,6 +148,7 @@ select t60.check(not exists (
         ~ '(^|[^''])private\.(has_role|has_perm|is_member|manages_equipment|schedules_crew|assigned_to_visit|works_visit|crew_sees_[a-z]+)\('),
   'no policy checks each row with has_role, has_perm, is_member or a crew helper (end a migration that adds one with select private.fold_member_checks())');
 select t60.check(private.fold_member_checks() = 0, 'running the rewrite again changes nothing');
+select t60.check(not exists (select from private.member_fold_changes()), 'and nothing is left for scripts/migrate.mjs to rewrite');
 select t60.check(pg_get_expr(polqual, polrelid) !~ 'COALESCE', 'a check on a column that can''t be NULL is written plainly, so its index can be used')
 from pg_policy where polname = 'invoices_area';
 select t60.check(current_setting('lock_timeout') = '0', 'the rewrite leaves the lock timeout as it found it');
@@ -165,6 +166,15 @@ select t60.check((select array_agg(h) from private.changed_folded_helpers() h) =
 select t60.check(private.fold_member_expr('(private.crew_sees_job(job_id) OR private.is_member(company_id))', '{job_id,company_id}')
   = '(private.crew_sees_job(job_id) OR (company_id = ANY ((SELECT private.member_companies())::uuid[])))', 'and left checking each row');
 rollback;
+begin;
+create or replace function private.has_role(p_company uuid, p_roles public.member_role[]) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.memberships m where m.company_id = p_company and m.user_id = (select auth.uid()) and m.active and m.role = any (p_roles) and m.role_id is null)
+$$;
+select t60.check(private.fold_member_expr('private.manages_equipment(company_id)', '{company_id}') = 'private.manages_equipment(company_id)'
+  and private.fold_member_expr('private.schedules_crew(company_id, crew_id)', '{company_id}') = 'private.schedules_crew(company_id, crew_id)',
+  'helpers folded into has_role''s list are left too when has_role changes');
+rollback;
 
 -- A policy added the old way is rewritten, and still lets in exactly who it did: a NOT over a check
 -- on a column that can be NULL still lets a row with no value in, and a check named inside a string
@@ -179,7 +189,14 @@ insert into public.t60_notes (company_id, other_company, label) select id, null,
 insert into public.t60_notes (company_id, other_company, label) select id, id, 'own other' from public.companies where name = 'Lima Lawn';
 insert into public.t60_notes (company_id, label) select id, 'private.is_member(company_id)' from public.companies where name = 'Lima Lawn';
 create policy t60_notes_named on public.t60_notes for select to authenticated using (private.is_member(company_id) and label = 'private.has_role(');
-select t60.check(private.fold_member_checks() = 2, 'the new policies are rewritten');
+-- Tables too busy to lock in time (here: no time at all) are left as they are, for later.
+set deadlock_timeout = '30ms';
+select t60.check(private.fold_member_checks(null, interval '0 seconds') = -1, 'when the tables stay busy the rewrite gives up');
+reset deadlock_timeout;
+select t60.check((select count(*) from private.member_fold_changes()) = 2 and pg_get_expr(polqual, polrelid) ~ 'private\.has_role\(',
+  'and changes nothing, leaving them to be rewritten later') from pg_policy where polname = 't60_notes_read';
+select t60.check(current_setting('lock_timeout') = '0', 'with the lock timeout put back');
+select t60.check(private.fold_member_checks('public.t60_notes') = 2, 'one table''s policies can be rewritten on their own');
 select t60.check(current_setting('lock_timeout') = '0', 'and the lock timeout is put back after');
 select t60.check(e ~ 'role_companies' and e ~ 'COALESCE\(\(other_company = ANY' and e ~ '''private\.is_member\(company_id\)''' and e !~ '[^'']private\.(has_role|is_member)\(',
   'to check against the lists, NULL-safe where the column can be empty, with the string as it was: ' || e)
