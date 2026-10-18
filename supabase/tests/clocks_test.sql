@@ -30,7 +30,12 @@ insert into public.crew_members (company_id, crew_id, user_id) values (:'co', :'
 commit;
 
 insert into public.time_entries (company_id, user_id, started_at) values (:'co', 'ac000000-0000-0000-0000-000000000003', now() - interval '11 hours') returning id as long \gset
-insert into public.time_entries (company_id, user_id, started_at) values (:'co', 'ac000000-0000-0000-0000-000000000002', now() - interval '20 hours') returning id as overnight \gset
+-- 7 AM yesterday, company time: over 16 hours ago whatever the time now. ("20 hours ago" could
+-- start just after midnight, and the clock then rightly runs to 6 PM, past 16 hours.)
+insert into public.time_entries (company_id, user_id, started_at)
+values (:'co', 'ac000000-0000-0000-0000-000000000002',
+        (((now() at time zone (select timezone from public.companies where id = :'co'))::date - 1 + time '07:00') at time zone (select timezone from public.companies where id = :'co')))
+returning id as overnight \gset
 insert into public.time_entries (company_id, user_id, started_at) values (:'co', 'ac000000-0000-0000-0000-000000000001', now() - interval '2 hours') returning id as fresh \gset
 
 select public.clock_upkeep() as first \gset
