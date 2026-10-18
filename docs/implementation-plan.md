@@ -176,6 +176,11 @@ base writes, team management, other people's expenses), and the API and screens 
 Members without a custom role get every area their level allows. New companies start with General manager,
 Operations manager, Foreman and Employee.
 
+Policies are written with `private.has_role()`, `has_perm()` and `is_member()` on the row's `company_id`, and
+`private.fold_member_checks()` (end any migration that adds policies with it) rewrites them to check the row against
+the person's companies, looked up once per query: called for each row, the lookups made a list of 20,000 invoices take
+1.5 s.
+
 | Data | Read | Write |
 | --- | --- | --- |
 | Clients, properties, jobs, visits, SOPs | Any member | Office and up (crew leads can update visits) |
