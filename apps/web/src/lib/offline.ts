@@ -39,6 +39,12 @@ const isFieldAction = (m: Mutation) => OFFLINE_MUTATIONS.has(String(m.options.mu
 const signInExpired = (error: unknown) => isAuthError(error) && (error as ApiError).code === SESSION_EXPIRED;
 /** Not sent yet: waiting for a connection or its turn, or on its way, or turned away only because the sign-in expired. */
 const unsent = (m: Mutation) => isFieldAction(m) && (m.state.status === "pending" || (m.state.status === "error" && signInExpired(m.state.error)));
+/**
+ * Unsent and not on its way, as the service worker counts them: waiting for signal (or for requests
+ * to get through), its turn, or a new sign-in. One on its way when the app closes has most likely
+ * gone, and goes again when the app next opens anyway.
+ */
+const queued = (m: Mutation) => unsent(m) && (m.state.isPaused || m.state.status === "error" || !onlineManager.isOnline());
 
 /** No answer from the server itself: no signal, too little to carry a request, or the server restarting or deploying. */
 const cannotReach = (error: unknown) => isNetworkError(error) || (error instanceof ApiError && isRestarting(error.status));
@@ -226,7 +232,7 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
 
   let told = -1;
   const tell = () => {
-    const waiting = pendingFieldActions(queryClient);
+    const waiting = queryClient.getMutationCache().getAll().filter(queued).length;
     if (waiting !== told) tellServiceWorker(userId, waiting);
     told = waiting;
   };

@@ -3,11 +3,13 @@
  * first paint in the page's own color, the install button and iPhone tip (lib/install.ts), and the
  * service worker's notice about updates waiting to be sent (public/sw.js).
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { inflateSync } from "node:zlib";
+import { ROLES } from "@crewtavo/core/roles";
 import { matchPath } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { canLogRequests } from "../src/features/requests/RequestsPage";
 import { SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
 import { FakeCaches, loadServiceWorker } from "./serviceWorker";
 
@@ -134,6 +136,16 @@ describe("the manifest", () => {
     // New request opens the form on Requests.
     expect(manifest.shortcuts.find((s) => s.name === "New request")!.url).toBe("/requests?new=1");
     expect(read("src/features/requests/RequestsPage.tsx")).toContain('params.get("new") === "1"');
+  });
+
+  it("New request opens the form only for people the database lets log one (everyone's phone has the shortcut)", () => {
+    // The roles requests_insert allows: the write list given to private.apply_policies, as last set.
+    const migrations = readdirSync(file("../../supabase/migrations")).sort().map((name) => read(`../../supabase/migrations/${name}`));
+    const writers = [...migrations.join("\n").matchAll(/apply_policies\('requests', '\{([^}]+)\}'\)/g)].at(-1)![1]!.split(",");
+    for (const role of ROLES) expect(canLogRequests({ role }), role).toBe(writers.includes(role));
+    expect(canLogRequests({ role: "field_crew" })).toBe(false);
+    // The crew get Requests without the form.
+    expect(read("src/features/requests/RequestsPage.tsx")).toContain('const creating = params.get("new") === "1" && canLogRequests(session);');
   });
 });
 

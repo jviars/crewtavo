@@ -10,7 +10,7 @@ import { EntityStatus } from "@/components/ui/StatusPill";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
-import { can, hasRole, useSession } from "@/lib/session";
+import { can, hasRole, useSession, type Session } from "@/lib/session";
 import { NewRequestDialog } from "./NewRequestDialog";
 
 const FILTERS = [
@@ -24,6 +24,9 @@ type FilterKey = (typeof FILTERS)[number]["key"];
 
 export const REQUEST_SOURCES: Record<string, string> = { web_form: "Booking form", phone: "Phone", email: "Email", hub: "Client Hub", manual: "In person", assistant: "AI assistant", referral: "Referral" };
 
+/** Who can log a request: the roles the database lets add one (requests_insert). */
+export const canLogRequests = (session: Pick<Session, "role">) => hasRole(session, "admin", "office", "estimator");
+
 export function RequestsPage() {
   const session = useSession();
   const navigate = useNavigate();
@@ -31,7 +34,9 @@ export function RequestsPage() {
   const [filter, setFilter] = useState<FilterKey>(() => (FILTERS.find((x) => x.key === params.get("status"))?.key as FilterKey | undefined) ?? "open");
   const [search, setSearch] = useState("");
   const term = useDeferredValue(searchTerm(search));
-  const creating = params.get("new") === "1";
+  // ?new=1 opens the form only for people who can log a request: the installed app's "New request"
+  // shortcut is on everyone's phone, and the crew get Requests without a form they can't save.
+  const creating = params.get("new") === "1" && canLogRequests(session);
   const setCreating = (on: boolean) => setParams(on ? { new: "1" } : {}, { replace: true });
   const statuses = FILTERS.find((f) => f.key === filter)!.statuses;
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
