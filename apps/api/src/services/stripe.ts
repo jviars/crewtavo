@@ -171,6 +171,8 @@ export interface StripeInvoice {
   total: number;
   amount_due: number;
   amount_paid: number;
+  /** The customer's balance in Stripe when it was finalized: credit (negative) or owed from before. */
+  starting_balance: number;
   tax: number | null;
   total_discount_amounts: Array<{ amount: number }> | null;
   due_date: number | null;
@@ -199,6 +201,13 @@ export interface StripePayout {
 
 /** Dollars (numeric columns arrive as numbers or strings) to cents. */
 export const cents = (amount: number | string | null | undefined) => Math.round(Number(amount ?? 0) * 100);
+
+/**
+ * The least Stripe charges, in cents (50 in most currencies). Stripe marks an invoice for less as
+ * paid without charging anything, and adds the amount to the customer's next invoice there.
+ */
+const MINIMUM_CHARGE: Record<string, number> = { aed: 200, bgn: 100, czk: 1500, dkk: 250, gbp: 30, hkd: 400, huf: 17500, mxn: 1000, myr: 200, nok: 300, pln: 200, ron: 200, sek: 300, thb: 1000 };
+export const minimumCharge = (currency: string) => MINIMUM_CHARGE[currency.toLowerCase()] ?? 50;
 
 /** How the client paid, in our payment methods. */
 export function paymentMethod(charge: StripeCharge | null | undefined): "card" | "ach" | "other" {

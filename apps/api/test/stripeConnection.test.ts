@@ -1,12 +1,23 @@
 /**
- * Connecting, switching and disconnecting Stripe, history imports on the server's key, and Hub
- * Pay, against an in-memory database and a fake Stripe that keeps accounts (and test and live
- * mode) apart the way Stripe does: one account's invoice is "No such invoice" to another's key.
+ * Connecting, switching and disconnecting Stripe, history imports on the server's key, Hub Pay,
+ * and the money Stripe reports (disputes, and customers' balances there), against an in-memory
+ * database and a fake Stripe that keeps accounts (and test and live mode) apart the way Stripe
+ * does: one account's invoice is "No such invoice" to another's key.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
-import { connectStripe, hubPayment, importFromStripe, beginStripeImport, PROCESSING_MESSAGE, SHARED_STRIPE_IMPORT, stripeCheckout, syncStripeInvoice } from "../src/integrations/stripe";
+import {
+  beginStripeImport,
+  connectStripe,
+  handleStripeEvent,
+  hubPayment,
+  importFromStripe,
+  PROCESSING_MESSAGE,
+  SHARED_STRIPE_IMPORT,
+  stripeCheckout,
+  syncStripeInvoice,
+} from "../src/integrations/stripe";
 import { loadSecret } from "../src/integrations/tokens";
 import { clientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
@@ -237,7 +248,22 @@ async function fakeStripe(input: string | URL, init: RequestInit = {}): Promise<
   if ((m = path.match(/^\/v1\/invoices\/([^/]+)\/finalize$/))) {
     const invoice = s.invoices.get(m[1]!);
     if (!invoice) return noInvoice(m[1]!);
-    Object.assign(invoice, { status: "open", number: `N-${m[1]}`, hosted_invoice_url: `https://invoice.stripe.com/i/${k.account}_${k.live ? "live" : "test"}_${m[1]}` });
+    // The customer's balance goes on it: their credit comes off, and what they owed before is
+    // added. Less than 50 cents left is marked paid without a charge, and goes on their next one.
+    const customer = s.customers.find((c) => c.id === invoice.customer)!;
+    const balance = customer.balance ?? 0;
+    const applied = Math.max(balance, -invoice.total);
+    customer.balance = balance - applied;
+    let due = invoice.total + applied;
+    if (due > 0 && due < 50) {
+      customer.balance += due;
+      due = 0;
+    }
+    Object.assign(invoice, {
+      status: due ? "open" : "paid", amount_due: due, starting_balance: balance, number: `N-${m[1]}`,
+      hosted_invoice_url: `https://invoice.stripe.com/i/${k.account}_${k.live ? "live" : "test"}_${m[1]}`,
+      status_transitions: { finalized_at: 1_760_000_100, paid_at: due ? null : 1_760_000_100 },
+    });
     return json(invoice);
   }
   if ((m = path.match(/^\/v1\/invoices\/([^/]+)\/void_invoice$/))) {
@@ -497,5 +523,113 @@ describe("Hub Pay", () => {
     const last = (await (await pay(t, 20)).json()) as { url: string };
     expect(last.url).toBe(rowsFor(INV).find((r) => r.status === "open")!.hosted_url);
     expect(side(key).invoices.size).toBe(5);
+  });
+});
+
+describe("money Stripe reports", () => {
+  const event = (type: string, object: Row) => handleStripeEvent(env, db.db, { companyId: CO }, { id: `evt_${++stripe.n}`, type, data: { object } });
+  const dispute = (intent: string, amount: number, status: string, id = "dp_1") => ({ id, amount, charge: `ch_${intent}`, payment_intent: intent, status, reason: "fraudulent", evidence_details: { due_by: null } });
+  const paidIn = (invoiceId: string) => db.tables.payments!.filter((p) => p.invoice_id === invoiceId);
+
+  it("takes a lost dispute off the invoice first, then the tip, like a refund", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    // Both invoices are paid through the Hub with a $15 tip: $175 in Stripe.
+    for (const id of [INV, INV2]) {
+      await stripeCheckout(env, db.db, CO, id, 1500);
+      payInStripe(rowsFor(id)[0]!.stripe_id);
+      await event("invoice.paid", { id: rowsFor(id)[0]!.stripe_id });
+    }
+    expect(db.tables.payments).toEqual([
+      expect.objectContaining({ invoice_id: INV, amount: 160, tip_amount: 15 }),
+      expect.objectContaining({ invoice_id: INV2, amount: 160, tip_amount: 15 }),
+    ]);
+    const [one, two] = db.tables.payments!.map((p) => p.processor_ref as string);
+
+    // The client disputes all of the first one, and the bank sides with them.
+    await event("charge.dispute.created", dispute(one!, 17500, "needs_response"));
+    await event("charge.dispute.closed", dispute(one!, 17500, "lost"));
+    expect(paidIn(INV).filter((p) => p.amount < 0)).toEqual([expect.objectContaining({ amount: -160, tip_amount: -15, processor_ref: `${one}:dispute:dp_1`, notes: "Dispute lost in Stripe" })]);
+    expect(db.tables.messages).toContainEqual(expect.objectContaining({ subject: "Payment disputed", related_type: "invoice", related_id: INV, external_id: "dp_1:opened" }));
+
+    // $50 of the second was refunded first, so the bank takes back what's left: $110, and the tip.
+    await event("charge.refunded", { id: `ch_${two}`, payment_intent: two, amount_refunded: 5000 });
+    await event("charge.dispute.closed", dispute(two!, 12500, "lost", "dp_2"));
+    expect(paidIn(INV2).filter((p) => p.amount < 0).map((p) => [p.amount, p.notes])).toEqual([[-50, "Refunded in Stripe"], [-110, "Dispute lost in Stripe"]]);
+    expect(paidIn(INV2).find((p) => p.notes === "Dispute lost in Stripe")).toMatchObject({ tip_amount: -15 });
+    // Stripe repeating itself changes nothing.
+    await event("charge.dispute.closed", dispute(two!, 12500, "lost", "dp_2"));
+    expect(paidIn(INV2)).toHaveLength(3);
+  });
+
+  it("notes a dispute on a payment with no invoice the way only the office reads it", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    // Paid after its invoice was voided, so it's the client's (20261018000800_review_fixes.sql's
+    // messages_read keeps internal notes with an external_id and no related_type to the office).
+    db.tables.payments = [{ id: crypto.randomUUID(), company_id: CO, client_id: CLIENT, invoice_id: null, method: "card", amount: 160, tip_amount: 0, processor: "stripe", processor_ref: "pi_loose" }];
+    await event("charge.dispute.created", dispute("pi_loose", 16000, "needs_response", "dp_3"));
+    expect(db.tables.messages).toEqual([
+      expect.objectContaining({ channel: "note", direction: "internal", related_type: null, external_id: "dp_3:opened", body: expect.stringContaining("$160.00") }),
+    ]);
+  });
+
+  it("doesn't bill Stripe for less than it can charge", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("created");
+    const [made] = rowsFor(INV);
+    // A $159.60 check leaves 40 cents: the Stripe invoice is voided, and none is made for the rest.
+    owe(INV, 0.4);
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("too small for Stripe");
+    expect(stripeInvoice(made!.stripe_id)!.status).toBe("void");
+    expect(side(key).invoices.size).toBe(1);
+    expect(rowsFor(INV).filter((r) => LIVE.includes(r.status))).toEqual([]);
+    // Nor can the client pay it online, unless a tip makes it enough.
+    await expect(stripeCheckout(env, db.db, CO, INV, 0)).rejects.toMatchObject({ status: 409, message: "What's left on this invoice is too small to pay online. Contact us to pay it." });
+    expect(await stripeCheckout(env, db.db, CO, INV, 100)).toContain("acct_A_live_");
+    expect(rowsFor(INV).find((r) => r.status === "open")).toMatchObject({ amount_due: 1.4, tip_amount: 1 });
+  });
+
+  it("books only the invoice's own money to it when Stripe adds the client's balance there", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    // Pat owed $25 in Stripe from before Crewtavo, so Stripe adds it to the next invoice.
+    side(key).customers.push({ id: "cus_pat", email: "pat@example.com", balance: 2500 });
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("created");
+    const [made] = rowsFor(INV);
+    expect(stripeInvoice(made!.stripe_id)).toMatchObject({ amount_due: 18500, starting_balance: 2500 });
+    expect(made).toMatchObject({ status: "open", amount_due: 160 });
+    payInStripe(made!.stripe_id);
+    await event("invoice.paid", { id: made!.stripe_id });
+    expect(db.tables.payments).toEqual([
+      expect.objectContaining({ invoice_id: INV, amount: 160, processor: "stripe", processor_ref: `pi_${made!.stripe_id}` }),
+      expect.objectContaining({ invoice_id: null, client_id: CLIENT, amount: 25, processor: "stripe", notes: "Owed from before in Stripe, paid with invoice #42" }),
+    ]);
+
+    // Later Stripe holds $40 of credit for them, which pays part of the next one.
+    side(key).customers.find((c) => c.id === "cus_pat")!.balance = -4000;
+    expect(await syncStripeInvoice(env, db.db, CO, INV2)).toBe("created");
+    const [next] = rowsFor(INV2);
+    expect(stripeInvoice(next!.stripe_id)).toMatchObject({ amount_due: 12000 });
+    payInStripe(next!.stripe_id);
+    await event("invoice.paid", { id: next!.stripe_id });
+    expect(paidIn(INV2)).toEqual([
+      expect.objectContaining({ amount: 120, method: "card", processor: "stripe" }),
+      expect.objectContaining({ amount: 40, method: "other", processor: null, notes: "Account credit in Stripe" }),
+    ]);
+  });
+
+  it("books credit that pays it all, or all but a few cents, as only the credit there was", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    side(key).customers.push({ id: "cus_pat", email: "pat@example.com", balance: -15980 });
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("created");
+    const [made] = rowsFor(INV);
+    // Stripe used $159.80 of credit, and marked it paid with the last 20 cents put on Pat's next one.
+    expect(stripeInvoice(made!.stripe_id)).toMatchObject({ status: "paid", amount_due: 0, amount_paid: 0 });
+    expect(made).toMatchObject({ status: "paid" });
+    expect(db.tables.payments).toEqual([expect.objectContaining({ invoice_id: INV, amount: 159.8, method: "other", notes: "Account credit in Stripe" })]);
+    // Stripe's webhook for it changes nothing more.
+    await event("invoice.paid", { id: made!.stripe_id });
+    expect(db.tables.payments).toHaveLength(1);
   });
 });

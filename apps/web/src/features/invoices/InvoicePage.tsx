@@ -22,6 +22,7 @@ import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
 import { SendDialog } from "../quotes/SendDialog";
 import { refundable } from "./refunds";
+import { paidInStripe } from "./stripeInvoices";
 
 const METHODS: Record<string, string> = { check: "Check", cash: "Cash", card: "Card", ach: "Bank transfer", other: "Other" };
 
@@ -45,7 +46,7 @@ function InvoicePageScreen() {
       unwrapOne(
         await supabase()
           .from("invoices")
-          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone), job:jobs(id, number, title, po_number), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at)")
+          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone), job:jobs(id, number, title, po_number), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at, detached_at)")
           .eq("id", id)
           .order("sort", { referencedTable: "invoice_line_items" })
           .order("received_at", { referencedTable: "payments" })
@@ -100,6 +101,8 @@ function InvoicePageScreen() {
   const processing = stripe?.status === "processing";
   // Made in Stripe: paid as Stripe billed it, so its total changes there, not here.
   const fromStripe = inv.stripe.some((s) => s.origin === "stripe");
+  // And while it's open there, so do its payments.
+  const paysInStripe = paidInStripe(inv.stripe);
 
   return (
     <>
@@ -109,7 +112,7 @@ function InvoicePageScreen() {
         actions={
           <>
             {!isVoid && <Button icon="send" variant={draft ? "primary" : "secondary"} disabled={!inv.lines.length} title={!inv.lines.length ? "Add a line item first" : undefined} onClick={() => setDialog("send")}>{draft ? "Send invoice" : "Resend"}</Button>}
-            {!draft && !isVoid && balance > 0 && <Button variant="primary" icon="dollar" onClick={() => setDialog("payment")}>Record payment</Button>}
+            {!draft && !isVoid && balance > 0 && <Button variant="primary" icon="dollar" disabled={paysInStripe} title={paysInStripe ? "Made in Stripe: mark it paid there, and the payment shows up here" : undefined} onClick={() => setDialog("payment")}>Record payment</Button>}
             <Menu
               items={[
                 { label: "Preview as client", icon: "eye", onSelect: () => openClientView.mutate(false) },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { refundable } from "../src/features/invoices/refunds";
+import { paidInStripe } from "../src/features/invoices/stripeInvoices";
 
 describe("refunds", () => {
   const check = { amount: 100, method: "check", processor: null };
@@ -16,5 +17,24 @@ describe("refunds", () => {
     expect(refundable(cash, [check, cash, { amount: -100, method: "check" }])).toBe(50);
     expect(refundable(check, [check, cash, { amount: -100, method: "check" }])).toBe(0);
     expect(refundable(check, [check, { amount: -0.1, method: "check" }, { amount: -0.2, method: "check" }])).toBe(99.7);
+  });
+});
+
+describe("payments on invoices in Stripe", () => {
+  const made = (status: string, detached_at: string | null = null) => ({ origin: "stripe", status, detached_at });
+
+  it("are recorded in Stripe while an invoice made there is open there", () => {
+    expect(paidInStripe([made("open")])).toBe(true);
+    expect(paidInStripe([made("processing")])).toBe(true);
+    // Paid, voided or written off there, it no longer asks for money.
+    expect(paidInStripe([made("paid")])).toBe(false);
+    expect(paidInStripe([made("void")])).toBe(false);
+  });
+
+  it("but here for Crewtavo's own, and for one in a Stripe account Crewtavo left", () => {
+    // Crewtavo's own Stripe invoice is redone for what's left after a payment here.
+    expect(paidInStripe([{ origin: "crewtavo", status: "open", detached_at: null }])).toBe(false);
+    expect(paidInStripe([made("open", "2026-10-01T00:00:00Z")])).toBe(false);
+    expect(paidInStripe([])).toBe(false);
   });
 });
