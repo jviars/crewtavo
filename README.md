@@ -99,11 +99,14 @@ docker compose --env-file .env.instance down -v    # delete the instance and all
 1. Point a DNS record for your domain (say `ops.example.com`) at the server.
 2. In `.env.instance`, set `APP_URL=https://ops.example.com`, then run `npm run instance` again.
 3. Put a web server with HTTPS in front of port 8080. With [Caddy](https://caddyserver.com), this
-   whole `Caddyfile` gets a certificate and forwards everything:
+   whole `Caddyfile` gets a certificate and forwards everything (the `header_up` line passes on each
+   visitor's address, which Crewtavo's rate limits go by):
 
    ```
    ops.example.com {
-     reverse_proxy localhost:8080
+     reverse_proxy localhost:8080 {
+       header_up X-Real-IP {remote_host}
+     }
    }
    ```
 
