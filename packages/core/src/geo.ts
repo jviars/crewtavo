@@ -104,7 +104,12 @@ export const mToFt = (m: number) => m * FT_PER_M;
 export function pitchFactor(pitch: string | number | null | undefined): number {
   if (pitch === null || pitch === undefined || pitch === "" || pitch === 0 || pitch === "0") return 1;
   const text = String(pitch).trim().toLowerCase();
-  if (text.endsWith("deg")) return 1 / Math.cos(rad(Number(text.slice(0, -3))));
+  if (text.endsWith("deg")) {
+    // Short of upright: at 90 degrees the slope never ends.
+    const degrees = Number(text.slice(0, -3));
+    if (!(Math.abs(degrees) < 90)) throw new RangeError(`Invalid roof pitch "${pitch}"`);
+    return 1 / Math.cos(rad(degrees));
+  }
   let rise: number;
   let run = 12;
   if (text.includes("/")) {
@@ -115,7 +120,9 @@ export function pitchFactor(pitch: string | number | null | undefined): number {
     rise = Number(text);
   }
   if (!Number.isFinite(rise) || !Number.isFinite(run) || run <= 0) throw new RangeError(`Invalid roof pitch "${pitch}"`);
-  return Math.sqrt(1 + (rise / run) ** 2);
+  const factor = Math.sqrt(1 + (rise / run) ** 2);
+  if (!Number.isFinite(factor)) throw new RangeError(`Invalid roof pitch "${pitch}"`); // too steep to count, like "1e200/12"
+  return factor;
 }
 
 /** Roof plane angle (for example from Google's Solar API) to rise per 12, rounded to the half inch. */
@@ -128,9 +135,19 @@ export function roofingSquares(planAreaSqft: number, pitch: string | null | unde
   return (planAreaSqft * pitchFactor(pitch) * (1 + (wastePct || 0) / 100)) / SQFT_PER_ROOFING_SQUARE;
 }
 
+/** How deep each kind of shape nests its [longitude, latitude] points. */
+const NESTING: Record<string, number> = { Point: 0, MultiPoint: 1, LineString: 1, Polygon: 2, MultiPolygon: 3 };
+
+const isPosition = (value: unknown) =>
+  Array.isArray(value) && value.length >= 2 && value.every((n) => typeof n === "number" && Number.isFinite(n)) &&
+  Math.abs(value[0]) <= 180 && Math.abs(value[1]) <= 90;
+const nestsPositions = (value: unknown, depth: number): boolean =>
+  depth === 0 ? isPosition(value) : Array.isArray(value) && value.every((item) => nestsPositions(item, depth - 1));
+
 /**
  * Per-shape values and totals for a FeatureCollection. Feature properties understood: label,
  * depth_in, pitch, manual_value (overrides the computed value, for shapes measured on site).
+ * Throws RangeError, with a message to show, for a shape whose points or value aren't numbers.
  */
 export function summarizeFeatureCollection(collection: FeatureCollection): MeasurementSummary {
   const sections: Section[] = [];
@@ -141,6 +158,10 @@ export function summarizeFeatureCollection(collection: FeatureCollection): Measu
   (collection.features ?? []).forEach((feature, index) => {
     const geometry = feature.geometry;
     if (!geometry) return;
+    // Shapes can come from the API as well as the map, so check them before doing math on them.
+    if (Object.hasOwn(NESTING, geometry.type) && !nestsPositions(geometry.coordinates, NESTING[geometry.type])) {
+      throw new RangeError(`Shape ${index + 1} needs its points as [longitude, latitude] numbers`);
+    }
     const props = feature.properties ?? {};
     const coords = geometry.coordinates as never;
     let kind: ShapeKind;
@@ -169,7 +190,10 @@ export function summarizeFeatureCollection(collection: FeatureCollection): Measu
 
     const manual = props.manual_value;
     const hasManual = manual !== undefined && manual !== null && manual !== "";
-    if (hasManual) value = Number(manual);
+    if (hasManual) {
+      value = Number(manual);
+      if (!(value >= 0 && Number.isFinite(value))) throw new RangeError(`Shape ${index + 1} needs a measured value of zero or more`);
+    }
     if (kind === "Area") area += value;
     else if (kind === "Length") length += value;
     else count += value;

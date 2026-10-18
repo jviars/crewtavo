@@ -8,6 +8,7 @@ import {
   dueProgress,
   dueSummary,
   dueTone,
+  FORMULA_VARIABLES,
   FormulaError,
   checkCondition,
   describeRuleSentence,
@@ -73,6 +74,15 @@ describe("geo", () => {
     expect(roofingSquares(2000, "6/12", 10)).toBeCloseTo(24.6, 1);
   });
 
+  it("refuses pitches that aren't a roof", () => {
+    expect(pitchFactor("30deg")).toBeCloseTo(1.1547, 4);
+    // "abcdeg" used to be NaN, "90deg" 1.6e16 and "1e200" Infinity.
+    for (const bad of ["abcdeg", "90deg", "-90deg", "120deg", "deg30", "1e200", "7/0", "seven"]) {
+      expect(() => pitchFactor(bad), bad).toThrow(RangeError);
+    }
+    expect(() => roofingSquares(2000, "90deg")).toThrow(RangeError);
+  });
+
   it("summarizes a drawing", () => {
     const summary = summarizeFeatureCollection({
       type: "FeatureCollection",
@@ -88,6 +98,22 @@ describe("geo", () => {
     expect(summary.total_area_sqyd).toBeCloseTo(summary.total_area_sqft / 9, 1);
     expect(summary.sections[2].manual_override).toBe(true);
     expect(summary.count).toBe(1);
+  });
+
+  it("refuses shapes whose points aren't numbers, with a message to show", () => {
+    const summarize = (geometry: { type: string; coordinates: unknown }, properties = {}) =>
+      () => summarizeFeatureCollection({ type: "FeatureCollection", features: [{ type: "Feature", properties: { label: "Drive" }, geometry: { type: "Point", coordinates: RECT[0] } }, { type: "Feature", properties, geometry }] });
+    // coordinates: null used to be a TypeError (a 500 from the API).
+    for (const type of ["Polygon", "MultiPolygon", "LineString", "Point", "MultiPoint"]) {
+      expect(summarize({ type, coordinates: null }), type).toThrow(new RangeError("Shape 2 needs its points as [longitude, latitude] numbers"));
+    }
+    for (const coordinates of ["abc", RECT, [[["-80.5", "37.1"], RECT[1], RECT[2]]], [[[-80.5, 37.1], [Infinity, 37.1], RECT[2]]], [[[-80.5, 137.1], RECT[1], RECT[2]]], [[[-80.5], RECT[1], RECT[2]]]]) {
+      expect(summarize({ type: "Polygon", coordinates }), JSON.stringify(coordinates)).toThrow(RangeError);
+    }
+    expect(summarize({ type: "LineString", coordinates: [RECT] })).toThrow(RangeError);
+    expect(summarize({ type: "Polygon", coordinates: [RECT] }, { manual_value: "about 90" })).toThrow(new RangeError("Shape 2 needs a measured value of zero or more"));
+    expect(summarize({ type: "Polygon", coordinates: [RECT] }, { manual_value: -90 })).toThrow(RangeError);
+    expect(summarize({ type: "Polygon", coordinates: [RECT] }, { manual_value: "90" })().total_area_sqft).toBe(90);
   });
 });
 
@@ -123,6 +149,14 @@ describe("formulas", () => {
     expect(() => evaluateFormula("area_sqft * 2", {})).toThrow(/Unknown value/);
     expect(() => evaluateFormula("depth_in * 2", { depth_in: null })).toThrow(/no value yet/);
     expect(() => evaluateFormula("1 / 0", {})).toThrow(/Division by zero/);
+  });
+
+  it("accepts only the values a measurement supplies", () => {
+    for (const name of FORMULA_VARIABLES) expect(() => validateFormula(`${name} * 2`), name).not.toThrow();
+    // These used to be accepted, but nothing ever supplies them, so a formula using one never worked.
+    for (const name of ["hours", "rate", "unit_price", "quantity"]) {
+      expect(() => validateFormula(`${name} * 2`), name).toThrow(`Unknown value "${name}"`);
+    }
   });
 
   it("lists the values a formula needs", () => {
