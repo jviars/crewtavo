@@ -199,8 +199,9 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
     </td>
     <td width="34%" valign="top">
       <p><strong>In the field.</strong> <em>My day</em> on any phone: on my way, start and finish,
-      gate codes, checklists with signatures, photos, materials used and a crew clock. It keeps
-      working with no signal and catches up when the connection is back.</p>
+      gate codes, checklists with signatures, photos, materials used and a crew clock. It installs
+      like an app on Android and iPhone, keeps working with no signal and catches up when the
+      connection is back.</p>
       <p><strong>For your clients.</strong> The Client Hub, with no account to create: approve
       quotes, pay invoices (with an optional tip), see the next visit, ask for changes, request
       work and message the office.</p>

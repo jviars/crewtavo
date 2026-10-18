@@ -5,6 +5,11 @@
  * between. Office screens aren't kept: they hold prices and client details that don't belong on a
  * crew phone. Cleared when the person signs out; when the app signs them out (an expired sign-in),
  * only their unsent field actions are kept, for when they sign back in.
+ *
+ * They go out while Crewtavo is open: as it opens, when the connection is back, and when it comes
+ * back on the screen. With it closed nothing sends them (that would take the person's sign-in in
+ * the service worker); where the phone has Background Sync (Android), the service worker says how
+ * many are waiting once there's signal (tellServiceWorker).
  */
 import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type QueryClient } from "@tanstack/react-query";
 import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } from "./errors";
@@ -50,19 +55,31 @@ const FIELD_RETRY = { retry: (_failures: number, error: unknown) => cannotReach(
 // check whether requests get through again.
 let recheck: ReturnType<typeof setTimeout> | undefined;
 let recheckDelay = 0;
+let checking = false;
 
 function cannotReachServer() {
   onlineManager.setOnline(false);
-  if (recheck !== undefined) return;
+  if (recheck !== undefined || checking) return;
   recheckDelay = Math.min(recheckDelay * 2 || 2_000, 30_000);
-  recheck = setTimeout(async () => {
-    // The phone knows it has no signal: its "online" event brings the app back.
-    const ok = onlineManager.isOnline() || navigator.onLine === false || (await reachable());
-    recheck = undefined;
-    if (onlineManager.isOnline() || navigator.onLine === false) return;
-    if (ok) onlineManager.setOnline(true); // Paused field actions resume (QueryClient listens).
-    else cannotReachServer();
-  }, recheckDelay);
+  recheck = setTimeout(checkServer, recheckDelay);
+}
+
+/**
+ * Whether requests get through again. Also checked as soon as the app is back on the screen: a
+ * phone put away for a while has waited out the delay, and the timer may not have run meanwhile.
+ */
+async function checkServer() {
+  clearTimeout(recheck);
+  recheck = undefined;
+  // The phone knows it has no signal: its "online" event brings the app back.
+  const noSignal = () => navigator.onLine === false;
+  if (checking || onlineManager.isOnline() || noSignal()) return;
+  checking = true;
+  const ok = await reachable();
+  checking = false;
+  if (onlineManager.isOnline() || noSignal()) return;
+  if (ok) onlineManager.setOnline(true); // Paused field actions resume (QueryClient listens).
+  else cannotReachServer();
 }
 
 /** Any answer from the server itself counts; a request that fails outright or hangs doesn't, nor one answered for it while it restarts. */
@@ -149,6 +166,46 @@ function restore(queryClient: QueryClient, userId: string) {
   }
 }
 
+/** The Background Sync tag public/sw.js listens for, also the tag of its notification. */
+export const SYNC_TAG = "crewtavo-field-sync";
+/** Where public/sw.js reads how many field actions wait on this phone: one entry per person. */
+export const WAITING_CACHE = "crewtavo-waiting";
+
+type SyncRegistration = ServiceWorkerRegistration & { sync?: { register: (tag: string) => Promise<void> } };
+
+/** Everyone's waiting field actions on this phone, as the service worker counts them. */
+async function waitingOnPhone(cache: Cache) {
+  let total = 0;
+  for (const entry of await cache.keys()) total += Number(await (await cache.match(entry))?.text()) || 0;
+  return total;
+}
+
+let telling = Promise.resolve();
+
+/**
+ * Tells the service worker how many of this person's field actions are waiting and, while some are,
+ * asks to hear when there's signal (Background Sync, on Android): if Crewtavo isn't open then, it
+ * says so with a notification. Once none are left, that notification goes. Without Background Sync
+ * (iPhones) only the count is kept, and the queue goes out the next time the app is open.
+ */
+function tellServiceWorker(userId: string, waiting: number) {
+  telling = telling.then(async () => {
+    try {
+      if (typeof caches === "undefined" || typeof navigator === "undefined" || !navigator.serviceWorker) return;
+      const cache = await caches.open(WAITING_CACHE);
+      const entry = `/waiting/${encodeURIComponent(userId)}`;
+      if (waiting) await cache.put(entry, new Response(String(waiting)));
+      else await cache.delete(entry);
+      const registration = (await navigator.serviceWorker.getRegistration()) as SyncRegistration | undefined;
+      if (!registration) return;
+      if (waiting) await registration.sync?.register(SYNC_TAG);
+      else if (!(await waitingOnPhone(cache))) for (const shown of (await registration.getNotifications?.({ tag: SYNC_TAG })) ?? []) shown.close();
+    } catch {
+      // Storage turned off, or a private window: the queue still goes out while the app is open.
+    }
+  });
+}
+
 interface Running {
   userId: string;
   stop: () => void;
@@ -167,11 +224,18 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   for (const key of OFFLINE_MUTATIONS) queryClient.setMutationDefaults([key], { ...queryClient.getMutationDefaults([key]), ...FIELD_RETRY });
   restore(queryClient, userId);
 
+  let told = -1;
+  const tell = () => {
+    const waiting = pendingFieldActions(queryClient);
+    if (waiting !== told) tellServiceWorker(userId, waiting);
+    told = waiting;
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const saveNow = () => {
     clearTimeout(timer);
     timer = undefined;
     save(userId, snapshot(queryClient, keepQueries));
+    tell();
   };
   const saveSoon = () => {
     clearTimeout(timer);
@@ -179,7 +243,12 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   };
   // A phone often closes an app soon after it's put away: don't leave a change unsaved.
   const flush = () => timer !== undefined && saveNow();
-  const onHide = () => document.visibilityState === "hidden" && flush();
+  const onVisibility = () => {
+    if (document.visibilityState === "visible") return void checkServer();
+    flush();
+    // Put away with updates waiting: ask again to hear when there's signal, in case Crewtavo is closed by then.
+    if (told > 0) tellServiceWorker(userId, told);
+  };
 
   const stopQueries = queryClient.getQueryCache().subscribe(saveSoon);
   const stopMutations = queryClient.getMutationCache().subscribe((event) => {
@@ -192,8 +261,9 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     // Screens do this too, but an action restored after a restart has no screen.
     if (action.type === "error" && !signInExpired(action.error)) queryClient.invalidateQueries({ predicate: (q) => KEEP.has(String(q.queryKey[0])) });
   });
-  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onHide);
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
   if (typeof window !== "undefined") window.addEventListener("pagehide", flush);
+  tell();
   queryClient.resumePausedMutations().catch(() => undefined);
 
   const end = (saveFirst: boolean) => {
@@ -202,7 +272,7 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     stopQueries();
     stopMutations();
     clearTimeout(timer);
-    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onHide);
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     if (typeof window !== "undefined") window.removeEventListener("pagehide", flush);
   };
   // Signing out stops it without saving; anything else (a remount, a new role) saves what's pending first.
@@ -217,6 +287,7 @@ export function forgetOfflineCache(userId: string) {
   remove(storageKey(userId));
   // Who they are and their companies, kept by lib/session.tsx for opening the app with no signal.
   remove(`crewtavo.me.${userId}`);
+  tellServiceWorker(userId, 0);
 }
 
 /**
@@ -239,6 +310,7 @@ export function keepQueuedFieldActions(queryClient: QueryClient, userId: string)
   }
   if (!mutations.length) remove(key);
   else write(key, { mutations, queries: [] });
+  tellServiceWorker(userId, mutations.length);
 }
 
 /** Field actions not sent yet (waiting for a connection, their turn or a new sign-in, or on their way), for "3 updates waiting to send". */

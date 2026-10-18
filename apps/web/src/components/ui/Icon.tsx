@@ -5,7 +5,7 @@ import {
   Funnel, Gauge, Gift, Globe, GripVertical, Heading, Hexagon, History, House, Image, Inbox, Info, Italic, Kanban, Layers, LayoutGrid, Link,
   List, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, Minus, Monitor, Moon, MousePointer2, Navigation,
   Pause, Pencil, Percent, Phone, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Search, Send, SeparatorHorizontal,
-  Settings, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Tag, ThumbsUp, Trash, TriangleAlert, Truck, Underline, Undo2, Upload,
+  Settings, Share, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Tag, ThumbsUp, Trash, TriangleAlert, Truck, Underline, Undo2, Upload,
   User, Users, WifiOff, Wrench, X, Zap, type LucideIcon,
 } from "lucide-react";
 
@@ -106,6 +106,7 @@ const ICONS = {
   sun: Sun,
   moon: Moon,
   monitor: Monitor,
+  share: Share,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

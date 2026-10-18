@@ -12,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveVisitNotes, setVisitStatus } from "../src/features/field/fieldActions";
 import { api, setActiveCompany, unwrap } from "../src/lib/api";
 import { ApiError, OFFLINE, SESSION_EXPIRED } from "../src/lib/errors";
-import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache } from "../src/lib/offline";
+import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache, SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
+import { FakeCaches, loadServiceWorker } from "./serviceWorker";
 
 // The phone's storage, which can be made to run out of room.
 const store = new Map<string, string>();
@@ -415,6 +416,154 @@ describe("company", () => {
     await api.get("/me");
     expect(sentAs).toEqual(["company-a", "company-a", "company-b", "company-b"]);
     setActiveCompany(null);
+  });
+});
+
+describe("back on the screen", () => {
+  it("with requests not getting through, checks again as soon as the app is opened, not after the wait, and sends what's queued", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const show = (state: DocumentVisibilityState) => {
+      page.visibilityState = state;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+    const qc = newClient();
+    let reachable = false;
+    const sent: unknown[] = [];
+    qc.setMutationDefaults(["visit-status"], {
+      mutationFn: async (v: unknown) => {
+        if (!reachable) throw new ApiError(OFFLINE, 0, "network");
+        sent.push(v);
+      },
+    });
+    const check = vi.fn(async () => {
+      if (!reachable) throw new TypeError("Failed to fetch");
+      return new Response("{}");
+    });
+    vi.stubGlobal("fetch", check);
+    const stop = startOfflineCache(qc, "u20", true);
+    const result = tap(qc, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    // Put away for two minutes: by then the checks are 30 seconds apart.
+    show("hidden");
+    await settle(120_000);
+    expect(onlineManager.isOnline()).toBe(false);
+    const checks = check.mock.calls.length;
+
+    reachable = true;
+    show("visible");
+    await settle(50);
+    expect(check).toHaveBeenCalledTimes(checks + 1);
+    expect(onlineManager.isOnline()).toBe(true);
+    await expect(result).resolves.toBe("sent");
+    expect(sent).toHaveLength(1);
+    stop();
+  });
+
+  it("doesn't check when the phone knows it has no signal (its online event brings the app back)", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    vi.stubGlobal("navigator", { onLine: false });
+    const check = vi.fn(async () => new Response("{}"));
+    vi.stubGlobal("fetch", check);
+    const qc = newClient();
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u21", true);
+    page.dispatchEvent(new Event("visibilitychange"));
+    await settle(50);
+    expect(check).not.toHaveBeenCalled();
+    expect(onlineManager.isOnline()).toBe(false);
+    stop();
+  });
+});
+
+describe("closed with updates waiting", () => {
+  /** The phone's service worker registration: with Background Sync (Android) or without (iPhone). */
+  function phone({ backgroundSync }: { backgroundSync: boolean }) {
+    const caches = new FakeCaches();
+    const register = vi.fn(async (_tag: string) => undefined);
+    const close = vi.fn();
+    const registration = { ...(backgroundSync ? { sync: { register } } : {}), getNotifications: vi.fn(async () => [{ close }]) };
+    vi.stubGlobal("caches", caches);
+    vi.stubGlobal("navigator", { onLine: true, serviceWorker: { getRegistration: async () => registration } });
+    return { caches, register, close, waiting: () => caches.entries(WAITING_CACHE) };
+  }
+
+  it("on Android, asks to hear when there's signal, and tells the worker how many wait; once sent, takes its notice down", async () => {
+    const { register, close, waiting, caches } = phone({ backgroundSync: true });
+    const qc = newClient();
+    const server = fakeServer();
+    qc.setMutationDefaults(["visit-status"], { mutationFn: server.setVisitStatus });
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u30", true);
+    void tap(qc, "visit-status", { visitId: "v1", status: "en_route", at: "2026-10-17T13:00:00.000Z" });
+    void tap(qc, "visit-status", { visitId: "v1", status: "in_progress", at: "2026-10-17T13:20:00.000Z" });
+    await settle();
+    expect(register).toHaveBeenCalledWith(SYNC_TAG);
+    expect(waiting()).toEqual({ "/waiting/u30": "2" });
+
+    // The app closed here: the worker, woken by the signal coming back, says so.
+    const sw = loadServiceWorker({ caches });
+    await sw.dispatch("sync", { tag: SYNC_TAG });
+    expect(sw.showNotification.mock.calls[0]![1]).toMatchObject({ body: "2 updates are waiting to be sent. Open Crewtavo to send them." });
+
+    // Opened again with signal: the queue goes out and the notice goes.
+    onlineManager.setOnline(true);
+    await settle();
+    expect(server.s.patches).toEqual(["en_route", "in_progress"]);
+    expect(waiting()).toEqual({});
+    expect(close).toHaveBeenCalled();
+    stop();
+  });
+
+  it("put away with updates still waiting, asks again, in case the earlier signal came while the app was open", async () => {
+    const page = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+    vi.stubGlobal("document", page);
+    const { register } = phone({ backgroundSync: true });
+    const qc = newClient();
+    qc.setMutationDefaults(["visit-notes"], { mutationFn: async () => undefined });
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u31", true);
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    await settle();
+    expect(register).toHaveBeenCalledTimes(1);
+    page.visibilityState = "hidden";
+    page.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    expect(register).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("on an iPhone (no Background Sync), nothing breaks and the queue goes out when the app is open with signal", async () => {
+    const { waiting } = phone({ backgroundSync: false });
+    const qc = newClient();
+    const server = fakeServer();
+    qc.setMutationDefaults(["visit-status"], { mutationFn: server.setVisitStatus });
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u32", true);
+    const result = tap(qc, "visit-status", { visitId: "v1", status: "en_route", at: "2026-10-17T13:00:00.000Z" });
+    await settle();
+    expect(waiting()).toEqual({ "/waiting/u32": "1" });
+    onlineManager.setOnline(true);
+    await settle();
+    await expect(result).resolves.toBe("sent");
+    expect(waiting()).toEqual({});
+    stop();
+  });
+
+  it("forgets the count with the queue when the person signs out, and keeps it when the app signs them out", async () => {
+    const { waiting } = phone({ backgroundSync: true });
+    const qc = newClient();
+    qc.setMutationDefaults(["visit-notes"], { mutationFn: async () => undefined });
+    onlineManager.setOnline(false);
+    startOfflineCache(qc, "u33", true);
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    await settle();
+    keepQueuedFieldActions(qc, "u33");
+    await settle();
+    expect(waiting()).toEqual({ "/waiting/u33": "1" });
+    forgetOfflineCache("u33");
+    await settle();
+    expect(waiting()).toEqual({});
   });
 });
 
