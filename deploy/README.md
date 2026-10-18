@@ -21,9 +21,9 @@ every deploy generates its own and the person deploying fills in nothing.
 
 ### crewtavo
 
-- **Source:** Docker image `ghcr.io/jviars/crewtavo:<version>`, the latest release (built from the
-  root `Dockerfile`; see [Updates](#updates)). **Auto updates:** update to the latest tag, as soon
-  as ready.
+- **Source:** Docker image `ghcr.io/jviars/crewtavo:latest`, which always points at the newest
+  release (built from the root `Dockerfile`; see [Updates](#updates)). **Auto updates:** on, as
+  soon as ready.
 - **Networking:** public HTTP on port **8080**; a generated `*.up.railway.app` domain.
 - **Deploy:** healthcheck path `/api/health`, healthcheck timeout **600** seconds (a brand-new
   instance waits for its database and services, then sets up the schema).
@@ -42,9 +42,9 @@ every deploy generates its own and the person deploying fills in nothing.
 
 ### db
 
-- **Source:** Docker image `ghcr.io/jviars/crewtavo-db:<version>`, its latest release (built from
-  `deploy/postgres/Dockerfile`: Supabase's Postgres image plus the role setup). **Auto updates:**
-  update to the latest tag, overnight.
+- **Source:** Docker image `ghcr.io/jviars/crewtavo-db:pg17`, which always points at the newest
+  database image for Postgres 17 (built from `deploy/postgres/Dockerfile`: Supabase's Postgres
+  image plus the role setup). **Auto updates:** on, overnight.
 - **Volume:** mounted at `/var/lib/postgresql/data`.
 - **Variables:** `POSTGRES_PASSWORD` = `${{secret(32, "abcdef0123456789")}}`, `POSTGRES_HOST` =
   `/var/run/postgresql`, `POSTGRES_PORT` = `5432`, `PGPORT` = `5432`, `POSTGRES_DB` = `postgres`.
@@ -65,9 +65,9 @@ Keep these versions in step with `docker-compose.yml`, and test a version change
 ## The live template
 
 **https://railway.com/deploy/Chzzxj?referralCode=pQ_v0d** (template code `Chzzxj`, in the
-`jviars's Projects` workspace on Railway). Edit it under **Workspace → Templates → Crewtavo**. A
-deploy starts from the image versions the template names and then updates itself, so the template
-only needs a new version when a release needs something the old one can't upgrade from.
+`jviars's Projects` workspace on Railway). Edit it under **Workspace → Templates → Crewtavo**. The
+template names the moving tags, so a release doesn't need a template change. The exception is a new
+Postgres major version: point `db` at its new tag (`pg18`) so new deploys start on it.
 
 ## Rebuilding the template
 
@@ -80,8 +80,9 @@ template editor. To do it again:
    `auth`, `rest` and `storage`; the variables refer to services by name. Attach a volume to `db`
    at `/var/lib/postgresql/data` and to `storage` at `/var/lib/storage` (right-click the service →
    **Attach Volume**).
-3. On `crewtavo` and `db`: **Settings → Source → Configure auto updates**, as listed above. (The
-   editor saves "Update to the latest tag" as patch updates; it doesn't offer minor ones.)
+3. On `crewtavo` and `db`: **Settings → Source → Configure auto updates**, as listed above. (A
+   tag that isn't a version number has no patch or minor choice: Railway redeploys whenever a new
+   image is pushed to it.)
 4. Paste each service's variables into its **Variables → Raw Editor**: the tables above, and
    `.railway/railway.ts` for auth, rest and storage, with `${{secret(...)}}` for `JWT_SECRET` and
    `POSTGRES_PASSWORD` so every deploy gets its own.
@@ -103,52 +104,80 @@ delete an earlier test project before deploying the template again.
 
 ## Updates
 
-Instances update themselves. `crewtavo` and `db` run images that
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) publishes to GitHub's container
-registry when a version tag is pushed, and the template turns on Railway's
-[image auto updates](https://docs.railway.com/deployments/image-auto-updates) for both. Railway
-checks the registry (it can take several hours to notice a new tag), moves the service to the next
-patch version (`0.1.1` → `0.1.2`, never `0.2.0`) and redeploys it, then notifies the workspace's
-admins. The business does nothing, and nothing is paid for: the images are public, and GitHub
-Actions and the registry are free for public repositories.
+Instances update themselves to every release, whatever its number. `crewtavo` and `db` run images
+that [`.github/workflows/release.yml`](../.github/workflows/release.yml) publishes to GitHub's
+container registry when a version tag is pushed. Each image gets its version tag (`0.2.0`) and, when
+it's the highest version so far, a moving tag the template points at: `crewtavo:latest`, and
+`crewtavo-db:pg17` for the database. The template turns on Railway's
+[image auto updates](https://docs.railway.com/deployments/image-auto-updates) for both, and for a
+tag that isn't a version number Railway redeploys whenever a new image is pushed to it. It can take
+several hours to notice (it caches what it finds in the registry), then it redeploys the service
+and notifies the workspace's admins. The business does nothing, and nothing is paid for: the images
+are public, and GitHub Actions and the registry are free for public repositories.
 
 - **crewtavo** updates as soon as Railway sees a release. There's no downtime: the new version
   applies migrations as it starts and only takes traffic once `/api/health` answers, so a failed
   update leaves the previous version serving.
 - **db** gets a new image only when `deploy/postgres` changed since the previous release, so most
   releases don't touch it. It updates overnight (02:00–06:00 UTC) and is down for about a minute
-  while Postgres restarts.
+  while Postgres restarts. Its tag names the Postgres major version because that's the one change
+  an instance can't take unattended: Postgres 18 can't open Postgres 17's data until it's upgraded.
+  A release that moves to a new major publishes `pg18`, instances stay on `pg17` until their owner
+  upgrades, and the release notes say how.
 - **auth, rest and storage** stay on the versions the template pins: Railway can't watch their
   registry (`public.ecr.aws`). Changing one of them reaches new instances only.
-- A new **minor or major version** (`0.2.0`, `1.0.0`) doesn't install itself: the template only
-  sets up patch updates, and an instance keeps the setting it was deployed with. The owner moves to
-  it by changing the image tag under **Settings → Source**, after reading the release notes.
+- **Opting out:** an owner can turn updates off, or change when they install, under the service's
+  **Settings → Source → Configure auto updates**. To stay on one version, they set the image to its
+  version tag there (`ghcr.io/jviars/crewtavo:0.2.0`), which then takes only that version's patch
+  updates, or none with auto updates off.
 
 `https://<instance>/api/health` shows the version an instance runs, for example
-`{"ok":true,"version":"0.1.1"}`. In the first test, an instance moved from 0.1.0 to 0.1.1 by itself
-4 hours 16 minutes after the release was published; the service's **Deployments** list shows it
-with the reason "autoupdate".
+`{"ok":true,"version":"0.1.1"}`; Railway itself only shows the tag, `latest`. The service's
+**Deployments** list shows each update with the reason "autoupdate". In the first test (on version
+tags, before the moving tags), an instance moved from 0.1.0 to 0.1.1 by itself 4 hours 16 minutes
+after the release was published.
 
 ### Releasing
 
 On a commit of `main` whose CI passed:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-The workflow publishes `ghcr.io/jviars/crewtavo:0.1.1` (and `crewtavo-db:0.1.1` when
-`deploy/postgres` changed) in about five minutes, and instances pick it up over the next several
-hours. Write release notes on GitHub for anything an
-owner should know. Pick the number by whether an instance can take it unattended:
+The workflow publishes `ghcr.io/jviars/crewtavo:0.1.2` (and `crewtavo-db:0.1.2` when
+`deploy/postgres` changed) in about five minutes, moves the moving tags to it, and instances pick it
+up over the next several hours. Write release notes on GitHub for anything an owner should know.
 
-- **Patch** (`0.1.1`, `0.1.2`...): every release that can, features and migrations included. The
-  previous version keeps serving while the new one migrates, so a migration has to leave the
-  database usable by the previous version (add first, remove in a later release).
-- **Minor or major** (`0.2.0`, `1.0.0`): only for what the owner has to do by hand, such as a new
-  required variable or a new Postgres major version (which needs its data upgraded). Say what to do
-  in the release notes.
+The number is up to you (`0.1.2`, `0.2.0`, `1.0.0` all install the same way), but every release
+reaches every instance unattended, so it has to work without anyone doing anything:
+
+- **Migrations:** the previous version keeps serving while the new one migrates, so a migration has
+  to leave the database usable by the previous version (add first, remove in a later release).
+- **Settings:** a new variable needs a default. If the new version can't start without it, every
+  instance stays on the previous version until its owner adds it.
+- **Fixing a bad release:** release a fix as a new version. Moving `latest` back to an older image
+  would run old code against a database the newer one has already migrated.
+
+To publish a fix for owners who stayed on an older version, tag it from that version's code
+(`v0.1.9` after `v0.2.0`). It gets its version tag only: the moving tags stay on the highest
+version.
+
+### Switching to the moving tags
+
+Instances deployed before the template used them run version tags with patch updates (`0.1.x`), and
+keep that setting.
+
+1. Push a release with this workflow. It creates `crewtavo:latest`, and `crewtavo-db:pg17` (the
+   first release builds the database image even though `deploy/postgres` didn't change, because the
+   tag doesn't exist yet).
+2. In the template, change `crewtavo`'s image to `ghcr.io/jviars/crewtavo:latest` and `db`'s to
+   `ghcr.io/jviars/crewtavo-db:pg17`, with auto updates as listed above.
+3. Existing instances move over in each service's **Settings → Source**, by changing the image to
+   the same tags.
+4. Check one instance takes the next release by itself: `/api/health` shows the new version. People
+   have reported Railway missing a moved tag on GitHub's registry, so don't rely on it before then.
 
 ### Why images
 
@@ -159,5 +188,5 @@ repository, and Railway's template updates only show **Update available** after 
 counted as an update, a docs change included, and the database rebuilt and restarted with each one.
 
 An instance deployed that way moves over in each service's **Settings → Source**: disconnect the
-repository, connect the image `ghcr.io/jviars/crewtavo:<version>` (or `crewtavo-db` on `db`), and
-configure auto updates as above.
+repository, connect the image `ghcr.io/jviars/crewtavo:latest` (or `crewtavo-db:pg17` on `db`),
+and configure auto updates as above.
