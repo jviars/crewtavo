@@ -112,10 +112,11 @@ export const CATALOG: CatalogEntry[] = [
     id: "stripe",
     name: "Stripe",
     category: "Payments",
-    description: "Card and bank (ACH) payments from invoices and the client portal.",
+    description: "Invoices go to Stripe and clients pay by card or bank. Invoices you make in Stripe come in too, with the fees and deposits behind every payment.",
     auth: "api_key",
     docs: "https://docs.stripe.com/keys",
-    available: (env) => Boolean(env.STRIPE_SECRET_KEY),
+    // A company adds its own key; a deployment can also set one for everyone.
+    available: () => true,
   },
   {
     id: "twilio",

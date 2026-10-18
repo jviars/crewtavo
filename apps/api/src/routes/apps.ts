@@ -7,12 +7,13 @@ import type { AppEnv, Env } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { runInBackground } from "../lib/background";
 import { randomId, signToken, verifyToken } from "../lib/crypto";
-import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
+import { appUrl, dbError, HttpError, isoDate, must, readJson } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
+import { beginStripeImport, connectStripe, IMPORT_STALE_MS, importFromStripe, removeStripeWebhook, stripeAccess, type ImportState } from "../integrations/stripe";
 import { exchangeCode, loadSecret, revoke, saveSecret } from "../integrations/tokens";
 
 export const apps = new Hono<AppEnv>();
@@ -21,12 +22,27 @@ const STATE_COOKIE = "crewtavo_oauth_nonce";
 const callbackUrl = (base: string, provider: string) => `${base}/api/apps/${provider}/callback`;
 
 apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
-  const [rows, calendars] = await Promise.all([
-    c.var.db.from("integrations").select("provider, status, account_label, connected_at, last_sync_at, last_error").eq("company_id", c.var.companyId),
+  const [rows, calendars, stripeKey] = await Promise.all([
+    c.var.db.from("integrations").select("provider, status, account_label, connected_at, last_sync_at, last_error, settings").eq("company_id", c.var.companyId),
     c.var.db.from("calendar_sources").select("app, last_error").eq("company_id", c.var.companyId),
+    adminClient(c.env).from("integration_secrets").select("provider", { count: "exact", head: true }).match({ company_id: c.var.companyId, provider: "stripe" }),
   ]);
-  const byProvider = new Map(must(rows).map((r) => [r.provider, r]));
+  const integrations = must(rows);
+  const byProvider = new Map(integrations.map(({ settings, ...r }) => [r.provider, r]));
   const calendarRows = must(calendars);
+  const ownKey = Boolean(stripeKey.count);
+  const stripeSettings = (integrations.find((r) => r.provider === "stripe")?.settings ?? {}) as { webhook?: boolean; livemode?: boolean; import?: ImportState };
+  // The deployment's own Stripe account, for companies that haven't added theirs.
+  const serverStripe = !ownKey && Boolean(c.env.STRIPE_SECRET_KEY);
+  if (serverStripe) byProvider.set("stripe", { provider: "stripe", status: "connected", account_label: "Set up for this server", connected_at: null, last_sync_at: null, last_error: null });
+  const stripe = ownKey || serverStripe
+    ? {
+        own: ownKey,
+        webhook: ownKey ? stripeSettings.webhook !== false : true,
+        livemode: ownKey ? stripeSettings.livemode !== false : !c.env.STRIPE_SECRET_KEY?.includes("_test_"),
+        import: stripeSettings.import ?? null,
+      }
+    : null;
   return c.json({
     mcp_url: `${appUrl(c)}/mcp`,
     apps: CATALOG.map(({ available, ...entry }) => {
@@ -39,9 +55,27 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
         redirect_uri: OAUTH[entry.id as Provider] ? callbackUrl(appUrl(c), entry.id) : null,
         ...(row ?? { status: entry.auth === "link" && own.length ? "connected" : "disconnected" }),
         ...linked,
+        ...(entry.id === "stripe" && stripe ? { stripe } : {}),
       };
     }),
   });
+});
+
+/** Bring in past invoices, payments and deposits from Stripe. Runs in the background; GET /apps shows progress. */
+apps.post("/apps/stripe/import", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const body = await readJson(c, z.object({ since: isoDate.nullable().default(null) }));
+  const admin = adminClient(c.env);
+  if (!(await stripeAccess(c.env, admin, c.var.companyId))) throw new HttpError(400, "Connect Stripe first.");
+  const { data: row } = await admin.from("integrations").select("settings").match({ company_id: c.var.companyId, provider: "stripe" }).maybeSingle();
+  const running = (row?.settings as { import?: ImportState } | undefined)?.import;
+  if (running?.status === "running" && Date.now() - Date.parse(running.started_at) < IMPORT_STALE_MS) throw new HttpError(409, "An import is already running.");
+  if (!row) {
+    // Using the deployment's Stripe account: the import's progress needs somewhere to live.
+    await admin.from("integrations").upsert({ company_id: c.var.companyId, provider: "stripe", status: "disconnected", account_label: "Set up for this server" });
+  }
+  const state = await beginStripeImport(admin, c.var.companyId, body.since);
+  runInBackground(c, importFromStripe(c.env, admin, c.var.companyId, state));
+  return c.json({ status: "running" }, 202);
 });
 
 /** Step 1: returns the provider's sign-in URL. The signed state is also bound to an httpOnly cookie. */
@@ -129,7 +163,7 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
     await admin.from("outbox").update({ done_at: new Date().toISOString() }).match({ company_id: c.var.companyId, topic: "calendar.visit" }).is("done_at", null);
   }
   const secret = await loadSecret(c.env, admin, c.var.companyId, provider).catch(() => null);
-  if (secret) await revoke(c.env, provider, secret);
+  if (secret) await (provider === "stripe" ? removeStripeWebhook(secret) : revoke(c.env, provider, secret));
   await admin.from("integration_secrets").delete().match({ company_id: c.var.companyId, provider });
   const { error } = await admin
     .from("integrations")
@@ -146,6 +180,10 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   if (!entry || entry.auth !== "api_key") throw new HttpError(400, "That app doesn't use a key.");
   const body = await readJson(c, z.object({ api_key: z.string().trim().min(10).max(500) }));
   const admin = adminClient(c.env);
+  if (provider === "stripe") {
+    const connected = await connectStripe(c.env, admin, { companyId: c.var.companyId, userId: c.var.userId, key: body.api_key, baseUrl: appUrl(c) });
+    return c.json({ provider, status: "connected", ...connected });
+  }
   const { error } = await admin.from("integrations").upsert({
     company_id: c.var.companyId,
     provider,

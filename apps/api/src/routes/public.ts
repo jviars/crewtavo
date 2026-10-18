@@ -1,20 +1,21 @@
 /**
  * No-account routes: the Client Hub (signed quote/invoice links), public booking forms, and the
- * Stripe webhook. These use the admin client, so every query filters by the company in the link
+ * Stripe webhooks. These use the admin client, so every query filters by the company in the link
  * or form, and responses include only client-facing fields (never costs or internal notes).
  */
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
+import { handleStripeEvent, hubPayment, stripeAccess, stripeCheckout, type WebhookRoute } from "../integrations/stripe";
 import { kickAutomations, runInBackground } from "../lib/background";
 import { geocodeAddress } from "../services/external";
 import { firstName } from "../lib/email";
-import { appUrl, asJson, clientIp, dbError, HttpError, must, readJson } from "../lib/http";
+import { appUrl, asJson, clientIp, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { clientLink, readClientLink, type LinkKind } from "../lib/links";
 import { adminClient } from "../lib/supabase";
 import { buildCalendar } from "../lib/ics";
-import { createCheckoutSession, verifyStripeSignature } from "../services/stripe";
+import { StripeError, verifyStripeSignature, type StripeEvent } from "../services/stripe";
 
 export const publicRoutes = new Hono<AppEnv>();
 
@@ -81,10 +82,14 @@ publicRoutes.get("/hub/:token", async (c) => {
   );
   if ((invoice.status === "draft" && !l.pv) || invoice.status === "void") throw new HttpError(404, invoice.status === "void" ? "This invoice was cancelled. Contact us with any questions." : "This invoice isn't ready yet.");
   (invoice.lines as Array<{ sort: number }>).sort((a, b) => a.sort - b.sort);
-  const tips = (company as { hub_tips?: unknown }).hub_tips === true;
+  const online = await hubPayment(c.env, admin, l.c, invoice.id);
+  // Invoices made in Stripe are paid exactly as Stripe billed them, so no tip.
+  const tips = (company as { hub_tips?: unknown }).hub_tips === true && !online.imported;
   return c.json({
     kind: "invoice", company, invoice, preview: Boolean(l.pv), tips,
-    can_pay: !l.pv && Boolean(c.env.STRIPE_SECRET_KEY) && Number(invoice.balance_due) > 0,
+    can_pay: !l.pv && online.enabled && !online.processing && Number(invoice.balance_due) > 0,
+    processing: online.processing,
+    from_stripe: online.imported,
     home: l.pv ? null : await homeLink(c, l.c, invoice.client_id),
   });
 });
@@ -181,34 +186,22 @@ publicRoutes.delete("/hub/:token/promo", async (c) => {
   return c.json({ ok: true });
 });
 
+/** Pay from the Client Hub: Stripe's page for this invoice, which a client can only pay once. */
 publicRoutes.post("/hub/:token/pay", async (c) => {
   const l = await link(c);
   if (l.t !== "invoice" || l.pv) throw new HttpError(400, "Only invoices can be paid.");
-  if (!c.env.STRIPE_SECRET_KEY) throw new HttpError(501, "Online payments aren't set up.");
   const body = await readJson(c, z.object({ tip: z.number().min(0).max(100_000).default(0) }).default({ tip: 0 }));
   const admin = adminClient(c.env);
-  const invoice = must(
-    await admin.from("invoices").select("id, number, status, balance_due, client:clients(email), company:companies(name, currency, settings)").eq("company_id", l.c).eq("id", l.id).maybeSingle(),
-    "Invoice not found.",
-  ) as unknown as { id: string; number: number; status: string; balance_due: number; client: { email: string | null } | null; company: { name: string; currency: string; settings: { hub_tips?: boolean } | null } };
-  if (invoice.status === "void") throw new HttpError(409, "This invoice was cancelled, so it can't be paid.");
-  if (invoice.status === "draft") throw new HttpError(409, "This invoice isn't ready yet.");
-  const cents = Math.round(Number(invoice.balance_due) * 100);
-  if (cents <= 0) throw new HttpError(409, "This invoice is already paid.");
-  const tipCents = invoice.company.settings?.hub_tips ? Math.round(body.tip * 100) : 0;
-  const back = `${appUrl(c)}/hub/${c.req.param("token")}`;
-  const session = await createCheckoutSession(c.env.STRIPE_SECRET_KEY, {
-    lines: [
-      { name: `${invoice.company.name} invoice #${invoice.number}`, amountCents: cents },
-      ...(tipCents > 0 ? [{ name: "Tip for the crew", amountCents: tipCents }] : []),
-    ],
-    currency: invoice.company.currency,
-    successUrl: `${back}?paid=1`,
-    cancelUrl: back,
-    metadata: { company_id: l.c, invoice_id: l.id, tip_cents: String(tipCents) },
-    email: invoice.client?.email,
-  });
-  return c.json({ url: session.url });
+  const company = must(await admin.from("companies").select("settings->hub_tips").eq("id", l.c).maybeSingle());
+  const online = await hubPayment(c.env, admin, l.c, l.id);
+  const tipCents = (company as { hub_tips?: unknown }).hub_tips === true && !online.imported ? Math.round(body.tip * 100) : 0;
+  try {
+    return c.json({ url: await stripeCheckout(c.env, admin, l.c, l.id, tipCents) });
+  } catch (error) {
+    if (!(error instanceof StripeError)) throw error;
+    console.error("Stripe checkout failed", error);
+    throw new HttpError(502, "Online payments aren't working right now. Try again in a few minutes, or contact us to pay.");
+  }
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -304,80 +297,32 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// Stripe webhook
+// Stripe webhooks
 // ---------------------------------------------------------------------------------------------
 
-publicRoutes.post("/webhooks/stripe", async (c) => {
-  const secret = c.env.STRIPE_WEBHOOK_SECRET;
+// Payments, refunds, disputes and deposits, and invoices made in Stripe (integrations/stripe.ts).
+// A company with its own key has its own address and signing secret; STRIPE_WEBHOOK_SECRET is the
+// deployment's.
+async function stripeWebhook(c: Context<AppEnv>, route: WebhookRoute, secret: string | undefined) {
   if (!secret) throw new HttpError(501, "Stripe webhooks aren't configured.");
   const payload = await c.req.text();
   if (!(await verifyStripeSignature(payload, c.req.header("stripe-signature"), secret))) throw new HttpError(400, "Bad signature.");
-
-  const event = JSON.parse(payload) as { type: string; data: { object: Record<string, any> } };
-  const object = event.data.object;
   const admin = adminClient(c.env);
-
-  // Card payments arrive paid; bank (ACH) payments take a few days and arrive as async_payment_succeeded.
-  const paid =
-    (event.type === "checkout.session.completed" && object.payment_status === "paid") ||
-    event.type === "checkout.session.async_payment_succeeded";
-  if (paid) {
-    const { company_id, invoice_id, tip_cents } = object.metadata ?? {};
-    if (company_id && invoice_id) {
-      const invoice = must(await admin.from("invoices").select("client_id").eq("company_id", company_id).eq("id", invoice_id).maybeSingle());
-      const tip = Math.max(0, Number(tip_cents ?? 0));
-      // processor_ref is unique, so Stripe retries can't record the payment twice.
-      const { error } = await admin.from("payments").insert({
-        company_id, invoice_id, client_id: invoice.client_id,
-        amount: (Number(object.amount_total) - tip) / 100, tip_amount: tip / 100,
-        method: event.type === "checkout.session.async_payment_succeeded" ? "ach" : "card",
-        processor: "stripe", processor_ref: object.payment_intent ?? object.id, recorded_by: null,
-      });
-      if (error && error.code !== "23505") throw dbError(error);
-      kickAutomations(c, company_id);
-    }
-  }
-
-  // A bank payment that bounced: leave a note on the client so the office follows up.
-  if (event.type === "checkout.session.async_payment_failed") {
-    const { company_id, invoice_id } = object.metadata ?? {};
-    if (company_id && invoice_id) {
-      const invoice = must(await admin.from("invoices").select("client_id, number").eq("company_id", company_id).eq("id", invoice_id).maybeSingle());
-      const noted = await admin.from("messages").select("id").eq("company_id", company_id).eq("external_id", `${object.id}:failed`).limit(1);
-      if (!noted.data?.length) await admin.from("messages").insert({
-        company_id, client_id: invoice.client_id, channel: "note", direction: "internal", status: "received",
-        subject: "Bank payment failed", body: `The bank payment for invoice #${invoice.number} didn't go through. The invoice is still owed.`,
-        related_type: "invoice", related_id: invoice_id, sent_by: null, external_id: `${object.id}:failed`,
-      });
-    }
-  }
-
-  // Refunds made in Stripe show up as negative payments. Each refunded total is recorded once.
-  if (event.type === "charge.refunded" && object.payment_intent) {
-    const paid = (await admin.from("payments").select("company_id, client_id, invoice_id, method, amount, tip_amount").eq("processor_ref", object.payment_intent).maybeSingle()).data;
-    if (paid) {
-      const { amount: paidAmount, tip_amount: paidTip, ...original } = paid;
-      const prefix = `${object.payment_intent}:refund:`;
-      const cents = (value: unknown) => Math.round(Number(value ?? 0) * 100);
-      const { data: earlier } = await admin.from("payments").select("amount, tip_amount").like("processor_ref", `${prefix}%`);
-      const refundedAmount = -(earlier ?? []).reduce((sum, p) => sum + cents(p.amount), 0);
-      const refundedTip = -(earlier ?? []).reduce((sum, p) => sum + cents(p.tip_amount), 0);
-      // Stripe's total includes the tip, which the payment keeps apart from what the invoice was
-      // paid: a refund comes off the invoice first, then the tip.
-      const newly = Number(object.amount_refunded ?? 0) - refundedAmount - refundedTip;
-      const amount = Math.min(newly, cents(paidAmount) - refundedAmount);
-      const tip = Math.max(0, Math.min(newly - amount, cents(paidTip) - refundedTip));
-      // (A refund of only the tip, once the invoice part was all refunded, has no invoice amount to
-      // record; payments can't be zero.)
-      if (amount > 0) {
-        const { error } = await admin.from("payments").insert({
-          ...original, amount: -amount / 100, tip_amount: -tip / 100, processor: "stripe", processor_ref: `${prefix}${object.amount_refunded}`, notes: "Refunded in Stripe", recorded_by: null,
-        });
-        if (error && error.code !== "23505") throw dbError(error);
-      }
-    }
+  const companyId = await handleStripeEvent(c.env, admin, route, JSON.parse(payload) as StripeEvent);
+  if (companyId) kickAutomations(c, companyId);
+  if (route.companyId) {
+    await admin.from("integrations").update({ last_sync_at: new Date().toISOString(), last_error: null }).match({ company_id: route.companyId, provider: "stripe" });
   }
   return c.json({ received: true });
+}
+
+publicRoutes.post("/webhooks/stripe", (c) => stripeWebhook(c, {}, c.env.STRIPE_WEBHOOK_SECRET));
+
+publicRoutes.post("/webhooks/stripe/:company", async (c) => {
+  const companyId = c.req.param("company");
+  if (!uuid.safeParse(companyId).success) throw new HttpError(404, "Not found");
+  const access = await stripeAccess(c.env, adminClient(c.env), companyId);
+  return stripeWebhook(c, { companyId }, access?.own ? access.webhookSecret : undefined);
 });
 
 // ---------------------------------------------------------------------------------------------

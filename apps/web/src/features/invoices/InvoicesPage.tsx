@@ -90,7 +90,12 @@ function InvoicesPageScreen() {
         title="Invoices"
         actions={
           <>
-            <Menu items={[{ label: "Download as spreadsheet", icon: "download", onSelect: exportCsv, disabled: !rows.length }]} />
+            <Menu
+              items={[
+                { label: "Stripe deposits", icon: "dollar", onSelect: () => navigate("/payouts") },
+                { label: "Download as spreadsheet", icon: "download", onSelect: exportCsv, disabled: !rows.length },
+              ]}
+            />
             <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" }, { replace: true })}>New invoice</Button>
           </>
         }

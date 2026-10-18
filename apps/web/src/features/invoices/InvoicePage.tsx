@@ -14,6 +14,7 @@ import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { addDaysIso, formatDate, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -44,10 +45,11 @@ function InvoicePageScreen() {
       unwrapOne(
         await supabase()
           .from("invoices")
-          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone), job:jobs(id, number, title, po_number), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes)")
+          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone), job:jobs(id, number, title, po_number), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at)")
           .eq("id", id)
           .order("sort", { referencedTable: "invoice_line_items" })
           .order("received_at", { referencedTable: "payments" })
+          .order("created_at", { referencedTable: "stripe_invoices", ascending: false })
           .maybeSingle(),
         "This invoice",
       ),
@@ -93,6 +95,11 @@ function InvoicePageScreen() {
   const paid = Number(inv.amount_paid);
   const daysLate = inv.due_on && balance > 0 && !draft && !isVoid ? Math.floor((Date.parse(today) - Date.parse(inv.due_on)) / 86_400_000) : 0;
   const lastPayment = inv.payments.at(-1);
+  // The Stripe invoice that matters now: the live one, else the latest.
+  const stripe = inv.stripe.find((s) => s.status === "open" || s.status === "processing") ?? inv.stripe.find((s) => s.stripe_id);
+  const processing = stripe?.status === "processing";
+  // Made in Stripe: paid as Stripe billed it, so its total changes there, not here.
+  const fromStripe = inv.stripe.some((s) => s.origin === "stripe");
 
   return (
     <>
@@ -110,7 +117,7 @@ function InvoicePageScreen() {
                 { separator: true },
                 { label: "Mark as sent", icon: "check", hidden: !draft || !inv.lines.length, onSelect: () => update.mutate({ status: "sent" }) },
                 { label: "Record payment", icon: "dollar", hidden: !draft || !inv.lines.length, onSelect: () => setDialog("payment") },
-                { label: "Move back to draft", icon: "undo", hidden: draft || isVoid || inv.payments.length > 0, onSelect: () => update.mutate({ status: "draft", sent_at: null }) },
+                { label: "Move back to draft", icon: "undo", hidden: draft || isVoid || inv.payments.length > 0 || fromStripe, onSelect: () => update.mutate({ status: "draft", sent_at: null }) },
                 {
                   label: "Void invoice",
                   icon: "x",
@@ -146,7 +153,13 @@ function InvoicePageScreen() {
 
       {isVoid && <div className="callout"><Icon name="x" size={18} /><div className="grow">This invoice is void and isn't owed.</div></div>}
       {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
-      {daysLate > 0 && (
+      {processing && balance > 0 && (
+        <div className="callout callout-info">
+          <Icon name="clock" size={18} />
+          <div className="grow">A bank payment of {formatMoneyCents(stripe.amount_due)} is on its way through Stripe. It usually clears in a few business days, and shows up here when it does.</div>
+        </div>
+      )}
+      {daysLate > 0 && !processing && (
         <div className="callout callout-danger">
           <Icon name="alert" size={18} />
           <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.</div>
@@ -171,7 +184,11 @@ function InvoicePageScreen() {
                   <span className="grow">
                     <strong className="tabular">{formatMoneyCents(p.amount)}</strong>
                     {Number(p.tip_amount) > 0 && <span className="muted"> + {formatMoneyCents(p.tip_amount)} tip</span>}
-                    <span className="muted small" style={{ display: "block" }}>{METHODS[p.method] ?? p.method}{p.processor ? ` via ${p.processor}` : ""}{p.notes ? ` · ${p.notes}` : ""}</span>
+                    <span className="muted small" style={{ display: "block" }}>
+                      {METHODS[p.method] ?? p.method}{p.processor ? ` via ${p.processor === "stripe" ? "Stripe" : p.processor}` : ""}{p.notes ? ` · ${p.notes}` : ""}
+                      {Number(p.fee_amount) > 0 && ` · ${formatMoneyCents(p.fee_amount)} fee`}
+                      {p.payout && ` · ${p.payout.status === "paid" ? "deposited" : "arrives"} ${formatDate(p.payout.arrival_on)}`}
+                    </span>
                   </span>
                   <span className="muted small">{formatDate(p.received_at)}</span>
                   {/* Online payments are refunded in Stripe, and the refund shows up here on its own. */}
@@ -201,7 +218,7 @@ function InvoicePageScreen() {
               discount={Number(inv.discount_amount)}
               subtotal={Number(inv.subtotal)}
               canEditDiscount={draft}
-              canChangePromo={!isVoid && inv.payments.length === 0 && ["draft", "sent", "overdue"].includes(inv.status)}
+              canChangePromo={!isVoid && !fromStripe && inv.payments.length === 0 && ["draft", "sent", "overdue"].includes(inv.status)}
               onSaveDiscount={(v) => update.mutate({ discount_amount: v })}
               onChanged={refresh}
             />
@@ -237,6 +254,7 @@ function InvoicePageScreen() {
             {inv.sent_at && <span className="muted small">Sent {formatDate(inv.sent_at)}</span>}
             {inv.job?.po_number && <span className="muted small">PO {inv.job.po_number}</span>}
           </div>
+          {stripe?.stripe_id && <StripeCard stripe={stripe} />}
         </aside>
       </div>
 
@@ -244,6 +262,33 @@ function InvoicePageScreen() {
       {dialog === "payment" && <PaymentDialog invoice={{ id: inv.id, client_id: inv.client_id, balance, draft }} onClose={() => setDialog(null)} onSaved={refresh} />}
       {refunding && <RefundDialog invoice={{ id: inv.id, client_id: inv.client_id }} payment={refunding} left={refundable(refunding, inv.payments)} onClose={() => setRefunding(null)} onSaved={refresh} />}
     </>
+  );
+}
+
+const STRIPE_STATUS: Record<string, string> = {
+  open: "Waiting on payment",
+  processing: "Bank payment on its way",
+  paid: "Paid",
+  void: "Voided",
+  uncollectible: "Written off in Stripe",
+};
+
+/** Where this invoice is in Stripe, with a way to open it there or share its payment page. */
+function StripeCard({ stripe }: { stripe: { stripe_id: string | null; origin: string; status: string; number: string | null; hosted_url: string | null; livemode: boolean } }) {
+  const dashboard = `https://dashboard.stripe.com/${stripe.livemode ? "" : "test/"}invoices/${stripe.stripe_id}`;
+  return (
+    <div className="card card-pad stack-sm">
+      <strong>Stripe</strong>
+      <div className="totals">
+        <div className="line"><span>{stripe.origin === "stripe" ? "Made in Stripe" : "Invoice"}</span><span>{stripe.number ?? "—"}</span></div>
+        <div className="line"><span>Status</span><span>{STRIPE_STATUS[stripe.status] ?? stripe.status}</span></div>
+      </div>
+      <div className="row wrap" style={{ gap: 6 }}>
+        <a className="btn btn-sm" href={dashboard} target="_blank" rel="noreferrer">Open in Stripe <Icon name="external" size={13} /></a>
+        {stripe.hosted_url && stripe.status === "open" && <Button size="sm" icon="copy" onClick={() => copyText(stripe.hosted_url!, "Payment link copied")}>Copy payment link</Button>}
+      </div>
+      {!stripe.livemode && <span className="muted small">Test mode: no real money moves.</span>}
+    </div>
   );
 }
 

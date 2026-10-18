@@ -976,14 +976,14 @@ isOneToOne: false
                   ]
                 },"payments": {
                   Row: {
-                    "amount": number,"client_id": string,"company_id": string,"created_at": string,"id": string,"invoice_id": string | null,"method": string,"notes": string | null,"processor": string | null,"processor_ref": string | null,"received_at": string,"recorded_by": string | null,"tip_amount": number
+                    "amount": number,"client_id": string,"company_id": string,"created_at": string,"fee_amount": number,"id": string,"invoice_id": string | null,"method": string,"notes": string | null,"payout_id": string | null,"processor": string | null,"processor_ref": string | null,"received_at": string,"recorded_by": string | null,"tip_amount": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount": number,"client_id": string,"company_id": string,"created_at"?: string,"id"?: string,"invoice_id"?: string | null,"method"?: string,"notes"?: string | null,"processor"?: string | null,"processor_ref"?: string | null,"received_at"?: string,"recorded_by"?: string | null,"tip_amount"?: number
+                    "amount": number,"client_id": string,"company_id": string,"created_at"?: string,"fee_amount"?: number,"id"?: string,"invoice_id"?: string | null,"method"?: string,"notes"?: string | null,"payout_id"?: string | null,"processor"?: string | null,"processor_ref"?: string | null,"received_at"?: string,"recorded_by"?: string | null,"tip_amount"?: number
                   }
                   Update: {
-                    "amount"?: number,"client_id"?: string,"company_id"?: string,"created_at"?: string,"id"?: string,"invoice_id"?: string | null,"method"?: string,"notes"?: string | null,"processor"?: string | null,"processor_ref"?: string | null,"received_at"?: string,"recorded_by"?: string | null,"tip_amount"?: number
+                    "amount"?: number,"client_id"?: string,"company_id"?: string,"created_at"?: string,"fee_amount"?: number,"id"?: string,"invoice_id"?: string | null,"method"?: string,"notes"?: string | null,"payout_id"?: string | null,"processor"?: string | null,"processor_ref"?: string | null,"received_at"?: string,"recorded_by"?: string | null,"tip_amount"?: number
                   }
                   Relationships: [
                     {
@@ -1004,6 +1004,32 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "invoices"
       referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "payments_payout_fkey"
+      columns: ["company_id","payout_id"]
+isOneToOne: false
+      referencedRelation: "payouts"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"payouts": {
+                  Row: {
+                    "amount": number,"arrival_on": string,"company_id": string,"created_at": string,"currency": string,"failure_message": string | null,"fee_amount": number | null,"gross_amount": number | null,"id": string,"itemized_at": string | null,"processor": string,"processor_ref": string,"status": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount": number,"arrival_on": string,"company_id": string,"created_at"?: string,"currency"?: string,"failure_message"?: string | null,"fee_amount"?: number | null,"gross_amount"?: number | null,"id"?: string,"itemized_at"?: string | null,"processor"?: string,"processor_ref": string,"status": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "amount"?: number,"arrival_on"?: string,"company_id"?: string,"created_at"?: string,"currency"?: string,"failure_message"?: string | null,"fee_amount"?: number | null,"gross_amount"?: number | null,"id"?: string,"itemized_at"?: string | null,"processor"?: string,"processor_ref"?: string,"status"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payouts_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
     }
                   ]
                 },"profiles": {
@@ -1384,6 +1410,32 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"stripe_invoices": {
+                  Row: {
+                    "amount_due": number,"company_id": string,"created_at": string,"hosted_url": string | null,"id": string,"invoice_id": string | null,"livemode": boolean,"number": string | null,"origin": string,"status": string,"stripe_id": string | null,"tip_amount": number,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount_due"?: number,"company_id": string,"created_at"?: string,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin": string,"status"?: string,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
+                  }
+                  Update: {
+                    "amount_due"?: number,"company_id"?: string,"created_at"?: string,"hosted_url"?: string | null,"id"?: string,"invoice_id"?: string | null,"livemode"?: boolean,"number"?: string | null,"origin"?: string,"status"?: string,"stripe_id"?: string | null,"tip_amount"?: number,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "stripe_invoices_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "stripe_invoices_company_id_invoice_id_fkey"
+      columns: ["company_id","invoice_id"]
+isOneToOne: false
+      referencedRelation: "invoices"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"sync_links": {
                   Row: {
                     "company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token": string | null,"synced_at": string
@@ -1737,6 +1789,9 @@ isOneToOne: false
 { Args: { "p_company": string,"p_limit"?: number,"p_query": string }; Returns: {
               "acknowledged": boolean,"body_text": string,"category": string,"id": string,"rank": number,"required": boolean,"revision": number,"snippet": string,"title": string
             }[]
+                           },
+"stripe_import_invoice":
+{ Args: { "p_company": string,"p_data": Json,"p_quiet"?: boolean }; Returns: string
                            },
 "user_id_for_email":
 { Args: { "p_email": string }; Returns: string

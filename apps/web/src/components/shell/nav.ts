@@ -26,7 +26,7 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: "/requests", label: "Requests", icon: "requests" },
     { to: "/quotes", label: "Quotes", icon: "quote", roles: ["admin", "office", "estimator"], also: ["/pipeline", "/measure"] },
     { to: "/jobs", label: "Jobs", icon: "job" },
-    { to: "/invoices", label: "Invoices", icon: "invoice", roles: ["admin", "office"], perm: "invoices" },
+    { to: "/invoices", label: "Invoices", icon: "invoice", roles: ["admin", "office"], perm: "invoices", also: ["/payouts"] },
   ],
   [
     { to: "/marketing", label: "Marketing", icon: "marketing", roles: ["admin", "office"], perm: "marketing" },
