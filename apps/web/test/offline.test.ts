@@ -1,13 +1,17 @@
 /**
  * The field queue for crews with no signal (lib/offline.ts): queued actions are sent once, the
- * saved copy never lists actions that have gone out, a weak signal queues instead of failing, and
- * each action goes to the company it was made in.
+ * saved copy never lists actions that have gone out, a weak signal or a restarting server queues
+ * instead of failing, an expired sign-in keeps the queue, and each action goes to the company it
+ * was made in.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath, URL } from "node:url";
 import { onlineManager, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveVisitNotes, setVisitStatus } from "../src/features/field/fieldActions";
-import { api, setActiveCompany } from "../src/lib/api";
-import { ApiError, OFFLINE } from "../src/lib/errors";
+import { api, setActiveCompany, unwrap } from "../src/lib/api";
+import { ApiError, OFFLINE, SESSION_EXPIRED } from "../src/lib/errors";
 import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache } from "../src/lib/offline";
 
 // The phone's storage, which can be made to run out of room.
@@ -137,6 +141,47 @@ describe("restoring the saved queue", () => {
     await settle();
     expect(sent).toEqual([{ visitId: "v1", notes: "Gate was open" }]);
     expect(saved("u2")!.mutations).toHaveLength(0);
+    again();
+  });
+
+  it("keeps actions turned away because the sign-in expired, and sends each once after the person signs back in", async () => {
+    const qc = newClient();
+    // Signed out everywhere from another device: the API turns this phone's sign-in away, refreshed or not.
+    let signedIn = false;
+    const tries: string[] = [];
+    const sent: string[] = [];
+    qc.setMutationDefaults(["visit-notes"], {
+      mutationFn: async (v: { notes: string }) => {
+        tries.push(v.notes);
+        if (!signedIn) throw new ApiError("Your session has expired. Sign in again.", 401, SESSION_EXPIRED);
+        sent.push(v.notes);
+      },
+    });
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u8", true);
+    const first = tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    const second = tap(qc, "visit-notes", { visitId: "v1", notes: "Dog in the yard" });
+    onlineManager.setOnline(true);
+    await settle();
+    // Each fails (so the app signs them out, lib/queryClient.ts) but still counts as waiting to send.
+    await expect(first).resolves.toBe("failed");
+    await expect(second).resolves.toBe("failed");
+    expect(pendingFieldActions(qc)).toBe(2);
+
+    // SIGNED_OUT from the app.
+    keepQueuedFieldActions(qc, "u8");
+    qc.clear();
+    stop();
+    await settle(60_000);
+    expect(tries).toEqual(["Gate was open", "Dog in the yard"]); // not tried again while signed out
+    expect(saved("u8")).toMatchObject({ mutations: [{ state: { variables: { notes: "Gate was open" } } }, { state: { variables: { notes: "Dog in the yard" } } }], queries: [] });
+
+    signedIn = true;
+    const again = startOfflineCache(qc, "u8", true);
+    await settle();
+    expect(sent).toEqual(["Gate was open", "Dog in the yard"]);
+    expect(tries).toHaveLength(4);
+    expect(saved("u8")!.mutations).toHaveLength(0);
     again();
   });
 
@@ -283,6 +328,72 @@ describe("weak signal", () => {
     unsubscribe();
     stop();
   });
+
+  it.each([
+    ["notes, through the API (Railway's proxy answers 502)", "visit-notes", () => {
+      throw new ApiError("Something went wrong on our end. Try again in a moment.", 502);
+    }],
+    ["a checklist, through the gateway to the database (503 while it starts)", "checklist-save", () => {
+      unwrap({ data: null, error: { message: "This part of Crewtavo is still starting. Try again in a moment." }, status: 503 });
+    }],
+  ])("%s, sent while the server restarts, waits and goes out once the server answers again", async (_, key, restarting) => {
+    const qc = newClient();
+    let up = false;
+    let tries = 0;
+    const sent: unknown[] = [];
+    qc.setMutationDefaults([key], {
+      mutationFn: async (v: unknown) => {
+        tries++;
+        if (!up) restarting();
+        sent.push(v);
+      },
+    });
+    // The proxy answers for the server until it's back.
+    const check = vi.fn(async () => new Response("{}", { status: up ? 200 : 504 }));
+    vi.stubGlobal("fetch", check);
+    const stop = startOfflineCache(qc, "u9", true);
+    const result = tap(qc, key, { visitId: "v1" });
+    await settle(1_500);
+
+    const [action] = qc.getMutationCache().getAll();
+    expect(action!.state).toMatchObject({ status: "pending", isPaused: true });
+    expect(onlineManager.isOnline()).toBe(false);
+    expect(saved("u9")!.mutations).toHaveLength(1);
+
+    await settle(10_000);
+    expect(check.mock.calls.length).toBeGreaterThan(1);
+    // The proxy's answer isn't the server's: the action isn't sent into it again at each check.
+    expect(onlineManager.isOnline()).toBe(false);
+    expect(tries).toBe(1);
+    expect(sent).toHaveLength(0);
+
+    up = true;
+    await settle(31_000);
+    expect(onlineManager.isOnline()).toBe(true);
+    await expect(result).resolves.toBe("sent");
+    expect(sent).toHaveLength(1);
+    expect(saved("u9")!.mutations).toHaveLength(0);
+    stop();
+  });
+
+  it("any other server error is final, and isn't sent again", async () => {
+    const qc = newClient();
+    let calls = 0;
+    qc.setMutationDefaults(["visit-notes"], {
+      mutationFn: async () => {
+        calls++;
+        throw new ApiError("Something went wrong on our end. Try again in a moment.", 500);
+      },
+    });
+    const stop = startOfflineCache(qc, "u10", true);
+    const result = tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    await settle(60_000);
+    await expect(result).resolves.toBe("failed");
+    expect(calls).toBe(1);
+    expect(onlineManager.isOnline()).toBe(true);
+    expect(saved("u10")!.mutations).toHaveLength(0);
+    stop();
+  });
 });
 
 describe("company", () => {
@@ -303,5 +414,18 @@ describe("company", () => {
     await api.get("/me");
     expect(sentAs).toEqual(["company-a", "company-a", "company-b", "company-b"]);
     setActiveCompany(null);
+  });
+});
+
+describe("signing out", () => {
+  // A plain auth.signOut() counts as the app signing the person out (lib/session.tsx), which keeps
+  // their queued field actions on the phone. Sign out buttons use the session's signOut instead.
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const sources = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []));
+
+  it("on purpose, from any screen (the license, setting up a business, choosing a password), leaves nothing of theirs on the phone", () => {
+    const callers = sources(SRC).filter((file) => /\.auth\s*\.signOut\(/.test(readFileSync(file, "utf8")));
+    expect(callers.map((file) => relative(SRC, file).replaceAll("\\", "/"))).toEqual(["lib/session.tsx"]);
   });
 });

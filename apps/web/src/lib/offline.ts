@@ -7,7 +7,7 @@
  * only their unsent field actions are kept, for when they sign back in.
  */
 import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type QueryClient } from "@tanstack/react-query";
-import { isNetworkError } from "./errors";
+import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } from "./errors";
 
 // React Query assumes it's online until it hears otherwise; a phone that opens the app with no
 // signal is offline from the start, so field actions queue instead of failing.
@@ -26,14 +26,23 @@ const BUDGET = 2_000_000;
 const storageKey = (userId: string) => `crewtavo.offline.v${VERSION}.${userId}`;
 
 const isFieldAction = (m: Mutation) => OFFLINE_MUTATIONS.has(String(m.options.mutationKey?.[0]));
-/** Not sent yet: waiting for a connection or its turn, or on its way. */
-const unsent = (m: Mutation) => isFieldAction(m) && m.state.status === "pending";
+/**
+ * Turned away for the sign-in even after refreshing it: the app signs the person out (lib/queryClient.ts)
+ * and keeps the action, which goes out once they sign back in (keepQueuedFieldActions). It isn't
+ * tried again before then.
+ */
+const signInExpired = (error: unknown) => isAuthError(error) && (error as ApiError).code === SESSION_EXPIRED;
+/** Not sent yet: waiting for a connection or its turn, or on its way, or turned away only because the sign-in expired. */
+const unsent = (m: Mutation) => isFieldAction(m) && (m.state.status === "pending" || (m.state.status === "error" && signInExpired(m.state.error)));
+
+/** No answer from the server itself: no signal, too little to carry a request, or the server restarting or deploying. */
+const cannotReach = (error: unknown) => isNetworkError(error) || (error instanceof ApiError && isRestarting(error.status));
 
 /**
- * Field actions keep trying while they can't reach the server (no signal, or too little to carry a
- * request). Anything the server does answer, a refusal included, is final and shows as an error.
+ * Field actions keep trying while they can't reach the server. Anything else the server answers, a
+ * refusal included, is final and shows as an error.
  */
-const FIELD_RETRY = { retry: (_failures: number, error: unknown) => isNetworkError(error) };
+const FIELD_RETRY = { retry: (_failures: number, error: unknown) => cannotReach(error) };
 
 // The phone can say it's online while nothing gets through (one bar, a hotspot with no data). When a
 // field action can't reach the server, the app goes offline as if there were no signal at all:
@@ -56,13 +65,13 @@ function cannotReachServer() {
   }, recheckDelay);
 }
 
-/** Any answer from the server counts; a request that fails outright or hangs doesn't. */
+/** Any answer from the server itself counts; a request that fails outright or hangs doesn't, nor one answered for it while it restarts. */
 async function reachable(): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    await fetch("/api/config", { cache: "no-store", signal: controller.signal });
-    return true;
+    const res = await fetch("/api/config", { cache: "no-store", signal: controller.signal });
+    return !isRestarting(res.status);
   } catch {
     return false;
   } finally {
@@ -77,8 +86,9 @@ function snapshot(queryClient: QueryClient, keepQueries: boolean): DehydratedSta
     shouldDehydrateMutation: unsent,
   });
   // All saved as waiting, the one on its way included, so if the app closes before the server
-  // answers it goes again on the next start. Each field action is safe to repeat on its own.
-  return { ...state, mutations: state.mutations.map((m) => ({ ...m, state: { ...m.state, isPaused: true } })) };
+  // answers it goes again on the next start (as do any turned away for the sign-in). Each field
+  // action is safe to repeat on its own.
+  return { ...state, mutations: state.mutations.map((m) => ({ ...m, state: { ...m.state, status: "pending" as const, error: null, isPaused: true } })) };
 }
 
 function write(key: string, state: DehydratedState, budget = Infinity): boolean {
@@ -176,11 +186,11 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     saveSoon();
     if (event.type !== "updated" || !isFieldAction(event.mutation)) return;
     const { action } = event;
-    if (action.type === "failed" && isNetworkError(action.error)) cannotReachServer();
+    if (action.type === "failed" && cannotReach(action.error)) cannotReachServer();
     if (action.type === "success") recheckDelay = 0;
     // Turned down by the server: what the screens showed ahead of it is wrong, so load it again.
     // Screens do this too, but an action restored after a restart has no screen.
-    if (action.type === "error") queryClient.invalidateQueries({ predicate: (q) => KEEP.has(String(q.queryKey[0])) });
+    if (action.type === "error" && !signInExpired(action.error)) queryClient.invalidateQueries({ predicate: (q) => KEEP.has(String(q.queryKey[0])) });
   });
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onHide);
   if (typeof window !== "undefined") window.addEventListener("pagehide", flush);
@@ -229,5 +239,5 @@ export function keepQueuedFieldActions(queryClient: QueryClient, userId: string)
   else write(key, { mutations, queries: [] });
 }
 
-/** Field actions not sent yet (waiting for a connection or their turn, or on their way), for "3 updates waiting to send". */
+/** Field actions not sent yet (waiting for a connection, their turn or a new sign-in, or on their way), for "3 updates waiting to send". */
 export const pendingFieldActions = (queryClient: QueryClient) => queryClient.getMutationCache().getAll().filter(unsent).length;
