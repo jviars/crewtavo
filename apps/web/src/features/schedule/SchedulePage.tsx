@@ -20,7 +20,7 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { CalendarEventDialog, type CalendarEvent } from "./CalendarEventDialog";
+import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
 import { clock, lengthOf, minutesOf, TimeGrid, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
 import { VisitDialog, type VisitInput } from "./VisitDialog";
@@ -475,7 +475,7 @@ export function SchedulePage() {
                       ))}
                       {shownEvents.map((e) => (
                         <button key={e.id} type="button" className="month-chip" data-external data-free={!e.busy || undefined} style={{ ["--cal" as string]: e.source?.color ?? undefined }} title={`${e.title} · ${e.source?.name ?? "Calendar"}`} onClick={() => setViewing(e)}>
-                          {!e.all_day && e.starts_at && e.starts_on === date ? `${formatTime(e.starts_at)} ` : ""}{e.title}
+                          {monthLabel(e, date, tz)}
                         </button>
                       ))}
                       {more > 0 && <button type="button" className="month-more" onClick={() => { setAnchor(date); setView("day"); }}>+{more} more</button>}
