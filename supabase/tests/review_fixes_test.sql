@@ -31,7 +31,8 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('f4100000-0000-0000-0000-000000000008', 'sales@lima.test', '{"full_name": "Sam Estimator"}'),
   ('f4100000-0000-0000-0000-000000000009', 'office@lima.test', '{"full_name": "Ola Office"}'),
   ('f4100000-0000-0000-0000-000000000010', 'new.hire@lima.test', '{"full_name": "Nia New"}'),
-  ('f4100000-0000-0000-0000-000000000011', 'former@lima.test', '{"full_name": "Fay Former"}');
+  ('f4100000-0000-0000-0000-000000000011', 'former@lima.test', '{"full_name": "Fay Former"}'),
+  ('f4100000-0000-0000-0000-000000000012', 'hr.third@lima.test', '{"full_name": "Hal Thrice"}');
 
 begin;
 set local role authenticated;
@@ -72,6 +73,7 @@ select t41.expect_error(format('update public.memberships set role_id = %L where
 select t41.expect_error(format('insert into public.memberships (company_id, user_id, role) values (%L, %L, %L)', :'co', 'f4100000-0000-0000-0000-000000000010', 'office'), 'or invite someone as plain office');
 select t41.expect_error(format('insert into public.memberships (company_id, user_id, role, role_id, active) values (%L, %L, %L, null, true) on conflict (company_id, user_id) do update set role = excluded.role, role_id = excluded.role_id, active = excluded.active', :'co', 'f4100000-0000-0000-0000-000000000003', 'admin'), 'or re-invite their other account as admin (the invite route''s upsert)');
 select t41.expect_error(format('update public.memberships set active = true where company_id = %L and user_id = %L', :'co', 'f4100000-0000-0000-0000-000000000011'), 'or bring back a removed admin');
+select t41.expect_error(format('update public.memberships set user_id = %L where company_id = %L and user_id = %L', 'f4100000-0000-0000-0000-000000000010', :'co', 'f4100000-0000-0000-0000-000000000005'), 'or move a plain admin''s membership to another account');
 select t41.expect_error(format('insert into public.company_roles (company_id, name, base_role, permissions) values (%L, %L, %L, %L)', :'co', 'Everything', 'admin', '{team,invoices}'), 'or make a role with areas they don''t have');
 select t41.expect_error(format('update public.company_roles set permissions = %L where id = %L', '{schedule,equipment}', :'foreman_role'), 'or add areas to a role someone else has');
 select t41.expect_error(format('delete from public.company_roles where id = %L', :'foreman_role'), 'or delete one (its people would get every area of their level)');
@@ -91,6 +93,14 @@ select t41.check((select name from public.company_roles where id = :'foreman_rol
 with changed as (update public.memberships set labor_rate = 40 where company_id = :'co' and user_id = 'f4100000-0000-0000-0000-000000000005' returning user_id)
 select t41.check((select count(*) from changed) = 1, 'and so is setting a plain admin''s pay rate');
 commit;
+-- Nor can they bring a plain admin over from a business of their own, where they're the owner.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f4100000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+select public.create_company('Hal on the Side', 'general') as side \gset
+insert into public.memberships (company_id, user_id, role) values (:'side', 'f4100000-0000-0000-0000-000000000012', 'admin');
+select t41.expect_error(format('update public.memberships set company_id = %L where company_id = %L and user_id = %L', :'co', :'side', 'f4100000-0000-0000-0000-000000000012'), 'or move a membership in from another business');
+rollback;
 
 -- A general manager (everything but connecting apps).
 begin;
@@ -204,6 +214,32 @@ select t41.check((select contract_total from public.job_financials where job_id 
 select t41.check((select string_agg(name || ' x' || quantity::integer, ', ' order by sort) from public.job_line_items where source_quote_id = :'change' and name <> 'Change order discount') = 'Edging x3, Lights x1', 'its lines on the job are its current ones, once');
 select t41.check((select count(*) = 1 and sum(unit_price) = -50 from public.job_line_items where source_quote_id = :'change' and name = 'Change order discount'), 'with one discount, the current one');
 select t41.check((select count(*) from public.job_line_items where job_id = :'job' and source_quote_id is null and name = 'Planting') = 1, 'and the job''s own lines stay');
+-- A discount left on the job by a change order that was deleted, and one typed in by hand with the
+-- same name, aren't a later change order's to take off when it's approved again.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f4100000-0000-0000-0000-000000000009", "role": "authenticated"}', true);
+insert into public.quotes (company_id, client_id, title, change_order_for, discount_amount) values (:'co', :'client', 'Add a gate', :'job', 40) returning id as gate \gset
+insert into public.quote_line_items (company_id, quote_id, name, quantity, unit, unit_price) values (:'co', :'gate', 'Gate', 1, 'ea', 300);
+insert into public.quotes (company_id, client_id, title, change_order_for) values (:'co', :'client', 'Add a bench', :'job') returning id as bench \gset
+insert into public.quote_line_items (company_id, quote_id, name, quantity, unit, unit_price) values (:'co', :'bench', 'Bench', 1, 'ea', 100);
+commit;
+update public.quotes set status = 'sent', sent_at = now() where id = :'gate';
+update public.quotes set status = 'approved', approved_at = now() where id = :'gate';
+update public.quotes set status = 'sent' where id = :'gate';
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f4100000-0000-0000-0000-000000000009", "role": "authenticated"}', true);
+delete from public.quotes where id = :'gate';
+insert into public.job_line_items (company_id, job_id, name, quantity, unit, unit_price) values (:'co', :'job', 'Change order discount', 1, 'ea', -10);
+commit;
+select t41.check((select contract_total from public.job_financials where job_id = :'job') = 2050, 'a deleted change order''s lines stay on the job (1800 + 300 - 40, and 10 off typed in)');
+update public.quotes set status = 'sent', sent_at = now() where id = :'bench';
+update public.quotes set status = 'approved', approved_at = now() where id = :'bench';
+update public.quotes set status = 'sent' where id = :'bench';
+update public.quotes set status = 'approved', approved_at = now() where id = :'bench';
+select t41.check((select contract_total from public.job_financials where job_id = :'job') = 2150, 'a later change order approved twice adds only its own lines (2050 + 100)');
+select t41.check((select count(*) from public.job_line_items where job_id = :'job' and name = 'Change order discount' and source_quote_id is null) = 2, 'and leaves the other discounts as they were');
 
 -- ===== Number sequences behind hand-picked numbers =============================================
 -- Documents numbered by hand ahead of the sequence (as the app allowed before), and a sequence

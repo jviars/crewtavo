@@ -24,9 +24,10 @@ grant execute on function private.my_permissions(uuid) to authenticated, service
 -- An admin whose custom role has only "team" could make another account (their own second one) a
 -- plain admin, with every area. A non-owner now gives a role, or access back, only when everything
 -- it reaches is within their own areas. (Only owners and admins manage the team, and only owners
--- make owners, so the level stays within theirs.) Deleting a custom role clears it from the people
--- who have it, which gives them every area of their level, so that's checked here too. Creating a
--- business (its first owner) and the server aren't affected.
+-- make owners, so the level stays within theirs.) Moving someone's membership to another account or
+-- business gives it to that account, so it's checked the same way. Deleting a custom role clears
+-- it from the people who have it, which gives them every area of their level, so that's checked
+-- here too. Creating a business (its first owner) and the server aren't affected.
 create function private.membership_grant_guard() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare v_areas text[];
@@ -34,7 +35,8 @@ begin
   if (select auth.uid()) is null or not private.is_member(new.company_id) or private.has_role(new.company_id, '{owner}') then
     return new;
   end if;
-  if tg_op = 'UPDATE' and new.role is not distinct from old.role and new.role_id is not distinct from old.role_id
+  if tg_op = 'UPDATE' and new.user_id = old.user_id and new.company_id = old.company_id
+     and new.role is not distinct from old.role and new.role_id is not distinct from old.role_id
      and not (new.active and not old.active) then
     return new;
   end if;
@@ -132,10 +134,12 @@ end $$;
 
 -- A change order that's re-opened, changed and approved again used to leave the job with what it
 -- added the first time. What it added (lines and discount) is now replaced with its chosen lines,
--- so the job and its total match what the client approved last.
+-- so the job and its total match what the client approved last. Only the discount lines added here
+-- are marked as its own: one left by a deleted change order, or typed in by hand with the same
+-- name, isn't, so approving again doesn't take it off.
 create or replace function private.apply_change_order(p_quote uuid) returns uuid
 language plpgsql security definer set search_path = '' as $$
-declare q public.quotes; v_sort integer;
+declare q public.quotes; v_sort integer; v_other_discounts uuid[];
 begin
   select * into q from public.quotes where id = p_quote for update;
   if not found or q.change_order_for is null or q.status = 'converted' then
@@ -147,9 +151,12 @@ begin
   insert into public.job_line_items (company_id, job_id, service_id, name, description, quantity, unit, unit_price, unit_cost, taxable, sort, source_quote_id)
   select company_id, q.change_order_for, service_id, name, description, quantity, unit, unit_price, unit_cost, taxable, v_sort + sort + 1, q.id
   from public.quote_line_items where quote_id = q.id and selected;
+  select coalesce(array_agg(id), '{}') into v_other_discounts from public.job_line_items
+  where job_id = q.change_order_for and source_quote_id is null and name = 'Change order discount';
   perform private.carry_quote_discount(q.id, q.change_order_for, 'Change order discount');
   update public.job_line_items set source_quote_id = q.id
-  where job_id = q.change_order_for and source_quote_id is null and name = 'Change order discount';
+  where job_id = q.change_order_for and source_quote_id is null and name = 'Change order discount'
+    and id <> all (v_other_discounts);
   -- The job's total (job_financials) follows its line items.
   update public.jobs set updated_at = now() where id = q.change_order_for;
   update public.quotes set status = 'converted', converted_at = now() where id = q.id;
