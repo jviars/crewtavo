@@ -22,12 +22,15 @@ const STATE_COOKIE = "crewtavo_oauth_nonce";
 const callbackUrl = (base: string, provider: string) => `${base}/api/apps/${provider}/callback`;
 
 apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
-  const [rows, calendars, stripeKey] = await Promise.all([
+  const [rows, calendars, stripeKey, company] = await Promise.all([
     c.var.db.from("integrations").select("provider, status, account_label, connected_at, last_sync_at, last_error, settings").eq("company_id", c.var.companyId),
     c.var.db.from("calendar_sources").select("app, last_error").eq("company_id", c.var.companyId),
     adminClient(c.env).from("integration_secrets").select("provider", { count: "exact", head: true }).match({ company_id: c.var.companyId, provider: "stripe" }),
+    c.var.db.from("companies").select("settings").eq("id", c.var.companyId).maybeSingle(),
   ]);
   const integrations = must(rows);
+  // Built-in apps are on or off in the company's settings (team chat: routes/chat.ts).
+  const builtinOn: Record<string, boolean> = { team_chat: (company.data?.settings as { team_chat?: { enabled?: boolean } } | null)?.team_chat?.enabled === true };
   const byProvider = new Map(integrations.map(({ settings, ...r }) => [r.provider, r]));
   const calendarRows = must(calendars);
   const ownKey = Boolean(stripeKey.count);
@@ -53,7 +56,7 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
         ...entry,
         available: available(c.env),
         redirect_uri: OAUTH[entry.id as Provider] ? callbackUrl(appUrl(c), entry.id) : null,
-        ...(row ?? { status: entry.auth === "link" && own.length ? "connected" : "disconnected" }),
+        ...(row ?? { status: (entry.auth === "link" && own.length) || builtinOn[entry.id] ? "connected" : "disconnected" }),
         ...linked,
         ...(entry.id === "stripe" && stripe ? { stripe } : {}),
       };

@@ -55,6 +55,17 @@
   --job: #5ba331;       --job-text: #3c7a1f;     --job-tint: #ebf4e5;
   --invoice: #3474d4;   --invoice-text: #2357a8; --invoice-tint: #e8f0fb;
 
+  /* Team chat: the name color a role picks (Chat settings), and its tint behind badges and @mentions. */
+  --chat-amber: #94580e;   --chat-amber-tint: #fbf1e2;
+  --chat-orange: #a8471b;  --chat-orange-tint: #fcebe1;
+  --chat-ruby: #a72940;    --chat-ruby-tint: #fbe9ec;
+  --chat-purple: #6b3fa0;  --chat-purple-tint: #f1eafa;
+  --chat-blue: #2357a8;    --chat-blue-tint: #e8f0fb;
+  --chat-teal: #1d6b66;    --chat-teal-tint: #e3f3f1;
+  --chat-green: #3c7a1f;   --chat-green-tint: #ebf4e5;
+  --chat-default: var(--ink); --chat-default-tint: var(--fill-2);
+  --chat-mentioned: #fbf1e2;
+
   --danger: #b42318;    --danger-dark: #912018;  --danger-tint: #fdecea;
   --danger-solid: #b42318;
   --danger-solid-hover: #912018;
@@ -132,6 +143,15 @@
   --quote: var(--ruby-9);   --quote-text: var(--ruby-11);  --quote-tint: var(--ruby-3);
   --job: var(--grass-9);    --job-text: var(--grass-11);   --job-tint: var(--grass-3);
   --invoice: var(--blue-9); --invoice-text: var(--blue-11); --invoice-tint: var(--blue-3);
+
+  --chat-amber: #ffca16;   --chat-amber-tint: rgba(255, 202, 22, 0.13);
+  --chat-orange: #ffa057;  --chat-orange-tint: rgba(255, 160, 87, 0.14);
+  --chat-ruby: #ff949d;    --chat-ruby-tint: rgba(255, 148, 157, 0.14);
+  --chat-purple: #d19dff;  --chat-purple-tint: rgba(209, 157, 255, 0.14);
+  --chat-blue: #70b8ff;    --chat-blue-tint: rgba(112, 184, 255, 0.14);
+  --chat-teal: #0bd8b6;    --chat-teal-tint: rgba(11, 216, 182, 0.13);
+  --chat-green: #71d083;   --chat-green-tint: rgba(113, 208, 131, 0.14);
+  --chat-mentioned: rgba(255, 197, 61, 0.09);
 
   --danger: var(--red-10);  --danger-dark: var(--red-11);  --danger-tint: var(--red-3);
   --danger-solid: var(--red-8);

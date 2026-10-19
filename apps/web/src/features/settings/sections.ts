@@ -45,7 +45,6 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
         managesEmail && { tab: "email", label: "Email", icon: "mail", keywords: "smtp outgoing mail sender gmail outlook mailbox" },
         connectsApps && { tab: "calendars", label: "Calendars", icon: "calendar", keywords: "google calendar outlook apple ics calendar file import sync" },
         isOffice && can(session, "automations") && { to: "/automations", label: "Automations", icon: "bolt", keywords: "rules reminders follow ups workflows" },
-        connectsApps && { to: "/apps", label: "Apps", icon: "apps", keywords: "integrations connect quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant" },
       ],
     },
     { title: "About", items: [{ tab: "license", label: "License", icon: "file", keywords: "terms version updates about" }] },

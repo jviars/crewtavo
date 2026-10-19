@@ -258,6 +258,162 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"chat_channels": {
+                  Row: {
+                    "archived_at": string | null,"category": string,"company_id": string,"created_at": string,"created_by": string | null,"crew_id": string | null,"id": string,"kind": string,"name": string,"position": number,"topic": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "archived_at"?: string | null,"category"?: string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"id"?: string,"kind"?: string,"name": string,"position"?: number,"topic"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "archived_at"?: string | null,"category"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"id"?: string,"kind"?: string,"name"?: string,"position"?: number,"topic"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_channels_company_id_crew_id_fkey"
+      columns: ["company_id","crew_id"]
+isOneToOne: false
+      referencedRelation: "crews"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_channels_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"chat_messages": {
+                  Row: {
+                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null
+                  }
+                  Update: {
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_messages_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_messages_company_id_job_id_fkey"
+      columns: ["company_id","job_id"]
+isOneToOne: false
+      referencedRelation: "jobs"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_messages_company_id_reply_to_fkey"
+      columns: ["company_id","reply_to"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_reactions": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"created_at": string,"kind": string,"message_id": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"created_at"?: string,"kind": string,"message_id": string,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"created_at"?: string,"kind"?: string,"message_id"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_reactions_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_reactions_company_id_message_id_fkey"
+      columns: ["company_id","message_id"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_reads": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"last_read_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"last_read_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"last_read_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_reads_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_role_rules": {
+                  Row: {
+                    "can_manage": boolean,"can_post": boolean,"can_see": boolean,"channel_id": string,"company_id": string,"id": string,"role": Database["public"]['Enums']["member_role"] | null,"role_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "can_manage"?: boolean,"can_post"?: boolean,"can_see"?: boolean,"channel_id": string,"company_id": string,"id"?: string,"role"?: Database["public"]['Enums']["member_role"] | null,"role_id"?: string | null
+                  }
+                  Update: {
+                    "can_manage"?: boolean,"can_post"?: boolean,"can_see"?: boolean,"channel_id"?: string,"company_id"?: string,"id"?: string,"role"?: Database["public"]['Enums']["member_role"] | null,"role_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_role_rules_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_role_rules_company_id_role_id_fkey"
+      columns: ["company_id","role_id"]
+isOneToOne: false
+      referencedRelation: "company_roles"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_role_settings": {
+                  Row: {
+                    "color": string,"company_id": string,"id": string,"mentionable": boolean,"own_crew_only": boolean,"role": Database["public"]['Enums']["member_role"] | null,"role_id": string | null,"show_separately": boolean,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "color"?: string,"company_id": string,"id"?: string,"mentionable"?: boolean,"own_crew_only"?: boolean,"role"?: Database["public"]['Enums']["member_role"] | null,"role_id"?: string | null,"show_separately"?: boolean,"updated_at"?: string
+                  }
+                  Update: {
+                    "color"?: string,"company_id"?: string,"id"?: string,"mentionable"?: boolean,"own_crew_only"?: boolean,"role"?: Database["public"]['Enums']["member_role"] | null,"role_id"?: string | null,"show_separately"?: boolean,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_role_settings_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "chat_role_settings_company_id_role_id_fkey"
+      columns: ["company_id","role_id"]
+isOneToOne: false
+      referencedRelation: "company_roles"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"checklist_responses": {
                   Row: {
                     "answers": NonNullable<Json>,"company_id": string,"completed_at": string | null,"completed_by": string | null,"created_at": string,"id": string,"template_id": string | null,"updated_at": string,"visit_id": string
@@ -837,12 +993,6 @@ isOneToOne: false
       referencedRelation: "companies"
       referencedColumns: ["id"]
     },{
-      foreignKeyName: "measurements_invoice_fk"
-      columns: ["company_id","invoice_id"]
-isOneToOne: false
-      referencedRelation: "invoices"
-      referencedColumns: ["company_id","id"]
-    },{
       foreignKeyName: "measurements_company_id_property_id_fkey"
       columns: ["company_id","property_id"]
 isOneToOne: false
@@ -859,6 +1009,12 @@ isOneToOne: false
       columns: ["company_id","request_id"]
 isOneToOne: false
       referencedRelation: "requests"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "measurements_invoice_fk"
+      columns: ["company_id","invoice_id"]
+isOneToOne: false
+      referencedRelation: "invoices"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -1697,6 +1853,31 @@ isOneToOne: false
 { Args: { "p_audience": Json,"p_company_id": string }; Returns: {
               "client_id": string,"display_name": string,"email": string
             }[]
+                           },
+"chat_audience":
+{ Args: { "p_channel": string }; Returns: string[]
+                           },
+"chat_create_channel":
+{ Args: { "p_category"?: string,"p_company": string,"p_crew"?: string,"p_name": string,"p_preset": string,"p_topic"?: string }; Returns: string
+                           },
+"chat_mark_read":
+{ Args: { "p_channel": string }; Returns: undefined
+                           },
+"chat_members":
+{ Args: { "p_channel": string }; Returns: {
+              "avatar_color": string,"color": string,"full_name": string,"role": Database["public"]['Enums']["member_role"],"role_id": string,"role_key": string,"role_name": string,"show_separately": boolean,"user_id": string
+            }[]
+                           },
+"chat_overview":
+{ Args: { "p_company": string }; Returns: {
+              "archived": boolean,"can_manage": boolean,"can_post": boolean,"category": string,"crew_id": string,"id": string,"kind": string,"last_message_at": string,"mentions": number,"name": string,"position": number,"topic": string,"unread": number
+            }[]
+                           },
+"chat_save_roles":
+{ Args: { "p_company": string,"p_rules": Json,"p_settings": Json }; Returns: undefined
+                           },
+"chat_set_enabled":
+{ Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
                            },
 "check_promo_code":
 { Args: { "p_code": string,"p_company": string }; Returns: string

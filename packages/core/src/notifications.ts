@@ -8,6 +8,7 @@ export const NOTIFICATION_TOPICS = [
   { key: "time", label: "Clock reminders", hint: "When a clock has been running too long" },
   { key: "equipment", label: "Equipment maintenance", hint: "Service coming due or overdue" },
   { key: "alerts", label: "Other alerts", hint: "From your company's automations, like a quote being approved" },
+  { key: "chat", label: "Team chat", hint: "When someone @mentions you or your role" },
 ] as const;
 export type NotificationTopic = (typeof NOTIFICATION_TOPICS)[number]["key"];
 
@@ -18,11 +19,11 @@ export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const DEFAULT_NOTIFICATION_PREFS: Record<NotificationChannel, NotificationTopic[]> = {
   email: ["schedule"],
   sms: [],
-  push: ["schedule", "client", "equipment", "time", "alerts"],
+  push: ["schedule", "client", "equipment", "time", "alerts", "chat"],
 };
 
 /** notifications.kind -> topic. Automations use the subject's type (quote, invoice...) as the kind. */
 export function notificationTopic(kind: string): NotificationTopic {
-  if (kind === "schedule" || kind === "client" || kind === "equipment" || kind === "time") return kind;
+  if (kind === "schedule" || kind === "client" || kind === "equipment" || kind === "time" || kind === "chat") return kind;
   return "alerts";
 }

@@ -11,6 +11,7 @@ export interface NavItem {
   only?: string[]; // only these access levels, owners included (e.g. "My day" for crews)
   also?: string[]; // other screens that count as this section (highlighted in the sidebar)
   keywords?: string; // other words people search for it by
+  feature?: "team_chat"; // only while the business has this app on (Apps)
 }
 
 /**
@@ -22,6 +23,7 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: "/", label: "Home", icon: "home", keywords: "dashboard today overview" },
     { to: "/field", label: "My day", icon: "clock", only: ["crew_lead", "field_crew"], keywords: "today my visits route" },
     { to: "/schedule", label: "Schedule", icon: "calendar", keywords: "calendar visits appointments dispatch route crews tasks" },
+    { to: "/chat", label: "Team chat", icon: "chat", feature: "team_chat", keywords: "chat channels messages talk team crew announcements" },
   ],
   [
     { to: "/clients", label: "Clients", icon: "clients", keywords: "customers contacts properties addresses" },
@@ -36,6 +38,7 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: "/timesheets", label: "Timesheets", icon: "clock", keywords: "time clock hours payroll" },
     { to: "/equipment", label: "Equipment", icon: "truck", keywords: "trucks mowers trailers tools fleet maintenance" },
     { to: "/kb", label: "Knowledge base", icon: "book", keywords: "sop procedures training how to guides" },
+    { to: "/apps", label: "Apps", icon: "apps", roles: ["admin"], perm: "apps", keywords: "integrations connect app store team chat quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant" },
   ],
 ];
 
@@ -47,13 +50,14 @@ export const OTHER_SCREENS: NavItem[] = [
   { to: "/payouts", label: "Stripe deposits", icon: "dollar", roles: ["admin", "office"], perm: "invoices", keywords: "payouts bank stripe fees" },
 ];
 
-export const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: "settings", also: ["/automations", "/booking", "/apps"] };
+export const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: "settings", also: ["/automations", "/booking"] };
 
 /** Bottom bar on phones; everything else lives under More. */
 export const MOBILE_TABS: NavItem[] = [
   { to: "/", label: "Home", icon: "home" },
   { to: "/field", label: "My day", icon: "clock" },
   { to: "/schedule", label: "Schedule", icon: "calendar" },
+  { to: "/chat", label: "Chat", icon: "chat", feature: "team_chat" },
   { to: "/clients", label: "Clients", icon: "clients" },
 ];
 
@@ -75,9 +79,15 @@ export function createItems(session: Pick<Session, "role" | "permissions">): Arr
 }
 
 /** Whether a person sees a navigation item. */
-export function navVisible(session: { role: string; permissions: readonly string[] }, item: NavItem): boolean {
+export function navVisible(session: { role: string; permissions: readonly string[]; company?: { settings?: Record<string, unknown> | null } }, item: NavItem): boolean {
+  if (item.feature && !featureOn(session.company?.settings, item.feature)) return false;
   if (item.only) return item.only.includes(session.role);
   if (session.role === "owner") return true;
   if (item.roles && !item.roles.includes(session.role)) return false;
   return !item.perm || session.permissions.includes(item.perm);
+}
+
+/** A built-in app the business turned on in Apps (companies.settings.team_chat.enabled). */
+export function featureOn(settings: Record<string, unknown> | null | undefined, feature: NonNullable<NavItem["feature"]>): boolean {
+  return (settings?.[feature] as { enabled?: boolean } | undefined)?.enabled === true;
 }

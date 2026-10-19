@@ -3,7 +3,7 @@
  * app store. Opening one shows its own page (AppDetailPage) to connect and manage it.
  */
 import { Navigate, useSearchParams } from "react-router-dom";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState, NoAccess } from "@/components/ui/States";
 import { AppTile } from "./AppIcon";
@@ -23,9 +23,8 @@ export function AppsPage() {
 
   return (
     <>
-      <BackLink to="/settings">Settings</BackLink>
       <PageHeader title="Apps">
-        <p className="muted" style={{ margin: 0, flexBasis: "100%" }}>Bring in the calendars, books and tools you already use. Open an app to connect it.</p>
+        <p className="muted" style={{ margin: 0, flexBasis: "100%" }}>Turn on what's built into Crewtavo, and bring in the calendars, books and tools you already use. Open an app to set it up.</p>
       </PageHeader>
 
       {apps.error && <div className="card"><ErrorState error={apps.error} onRetry={() => apps.refetch()} /></div>}

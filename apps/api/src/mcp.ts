@@ -299,8 +299,8 @@ mcp.post("/mcp", async (c) => {
       let ctx: ToolContext | null = null;
       try {
         ctx = await toolContext(db, userId, (parsed.data as { company_id?: string }).company_id);
-        if (!ctx.assistants.enabled) throw new Error("AI assistants are turned off for this company. An owner or admin can turn them on in Crewtavo under Settings → Apps.");
-        if (ctx.assistants.read_only && !t.readOnly) throw new Error("Assistants can only look things up for this company, not make changes. An owner or admin can change this under Settings → Apps.");
+        if (!ctx.assistants.enabled) throw new Error("AI assistants are turned off for this company. An owner or admin can turn them on in Crewtavo, under Apps.");
+        if (ctx.assistants.read_only && !t.readOnly) throw new Error("Assistants can only look things up for this company, not make changes. An owner or admin can change this in Crewtavo, under Apps.");
         if (oauthClient && !t.readOnly && !(await allowsChanges(db, oauthClient))) throw new Error(ASSISTANT_READ_ONLY);
         const value = await t.run(ctx, parsed.data);
         await audit(c, ctx, userId, oauthClient, name, true, summarize(parsed.data));

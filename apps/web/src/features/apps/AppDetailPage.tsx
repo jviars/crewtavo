@@ -23,6 +23,7 @@ import { AssistantAccess, ConnectedAssistants } from "./AssistantAccess";
 import { CalendarRow, GoogleCalendarPanel, LinkCalendarsPanel, AddCalendarForm, useCalendars, type CalendarSource } from "./CalendarPanels";
 import { CATEGORY_LABELS, infoFor, LINK_ACCESS, MORE_LABELS, useApps, type AppRow } from "./catalog";
 import { StripePanel } from "./StripePanel";
+import { TeamChatPanel, useTeamChatSwitch } from "./TeamChatPanel";
 
 const GOOGLE_SETTINGS = "https://calendar.google.com/calendar/r/settings";
 const GOOGLE_SIGNIN_GUIDE = "https://crewtavo.com/docs/connections/google-calendar/#instant-updates-with-google-sign-in";
@@ -46,6 +47,7 @@ const CONNECTOR_STEPS: Record<string, string[]> = {
 const byLinkOnly = (app: AppRow) => app.id === "google_calendar" && !app.available;
 
 function statusOf(app: AppRow): { label: string; tone: Tone } {
+  if (app.auth === "builtin") return app.status === "connected" ? { label: "On", tone: "good" } : { label: "Off", tone: "muted" };
   if (!app.available && !byLinkOnly(app)) return { label: "Not available yet", tone: "muted" };
   if (app.status === "error" || app.calendar_errors) return { label: "Needs attention", tone: "danger" };
   if (app.auth === "link" || byLinkOnly(app)) return app.calendars ? { label: `${app.calendars} ${app.calendars === 1 ? "calendar" : "calendars"}`, tone: "good" } : { label: "Not added", tone: "muted" };
@@ -104,6 +106,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
     onSettled: refresh,
   });
   const status = statusOf(app);
+  const chatSwitch = useTeamChatSwitch();
   const callback = params.get("status") ? { ok: params.get("status") === "connected", message: params.get("message") } : null;
   const scrollTo = (target: string) => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -119,7 +122,11 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
 
   // The button next to the name, like "Get" in an app store.
   let action: ReactNode = null;
-  if (byLinkOnly(app)) action = <Button className="app-get" variant="primary" icon="plus" onClick={() => scrollTo("google-setup")}>{app.calendars ? "Add another" : "Set up"}</Button>;
+  if (app.auth === "builtin") {
+    action = app.status === "connected"
+      ? <Link className="btn btn-primary app-get" to="/chat">Open</Link>
+      : <Button className="app-get" variant="primary" loading={chatSwitch.toggle.isPending} onClick={chatSwitch.turnOn}>Turn on</Button>;
+  } else if (byLinkOnly(app)) action = <Button className="app-get" variant="primary" icon="plus" onClick={() => scrollTo("google-setup")}>{app.calendars ? "Add another" : "Set up"}</Button>;
   else if (!app.available) action = <Button className="app-get" disabled>Not available</Button>;
   else if (app.auth === "oauth") {
     action = app.status === "connected"
@@ -190,6 +197,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       {app.id === "anthropic" && <ConnectorCard app={app} mcpUrl={mcpUrl} />}
       {app.id === "stripe" && app.stripe && <StripePanel app={app} disconnecting={disconnect.isPending} onDisconnect={askDisconnect} onChanged={refresh} />}
       {app.auth === "api_key" && (app.available ? <KeyCard app={app} onSaved={refresh} /> : <NotAvailable app={app} />)}
+      {app.id === "team_chat" && <TeamChatPanel app={app} />}
 
       {/* ---- What it does ---- */}
       {info.highlights.length > 0 && (

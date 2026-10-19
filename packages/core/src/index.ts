@@ -1,5 +1,6 @@
 export * from "./address";
 export * from "./automations";
+export * from "./chat";
 export * from "./email";
 export * from "./equipment";
 export * from "./formulas";
