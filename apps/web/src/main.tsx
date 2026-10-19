@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { loadConfig } from "./lib/api";
-import { watchInstall } from "./lib/install";
+import { lockZoomInApp, watchInstall } from "./lib/install";
 import { registerServiceWorker } from "./lib/push";
 import { initTheme } from "./lib/theme";
 import "@fontsource-variable/figtree";
@@ -16,6 +16,7 @@ loadConfig().catch(() => undefined);
 initTheme();
 registerServiceWorker();
 watchInstall();
+lockZoomInApp();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

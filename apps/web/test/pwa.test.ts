@@ -344,6 +344,43 @@ describe("installing", () => {
   });
 });
 
+describe("zooming", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tag = read("index.html").match(/<meta name="viewport" content="([^"]*)"/)![1]!;
+
+  /** The page's viewport tag and a pinch in Safari (its `gesturestart`), in a browser tab or the installed app. */
+  async function pinch(settings: { userAgent: string; standalone?: boolean }) {
+    const { win } = device(settings);
+    let content = tag;
+    const viewport = { getAttribute: () => content, setAttribute: (_: string, value: string) => void (content = value) };
+    const document = Object.assign(new EventTarget(), { querySelector: () => viewport, documentElement: { style: { touchAction: "" } } });
+    const { lockZoomInApp } = await freshInstall();
+    lockZoomInApp(Object.assign(win, { document }) as unknown as Window);
+    const gesture = new Event("gesturestart", { cancelable: true });
+    document.dispatchEvent(gesture);
+    return { content, refused: gesture.defaultPrevented, touchAction: document.documentElement.style.touchAction };
+  }
+
+  it("is off in the installed app, on an iPhone and on Android, keeping the notch settings", async () => {
+    for (const userAgent of [UA.iphoneSafari, UA.androidChrome]) {
+      const app = await pinch({ userAgent, standalone: true });
+      expect(app.content).toBe(`${tag}, maximum-scale=1, user-scalable=no`);
+      expect(app.content).toContain("viewport-fit=cover");
+      expect(app.refused).toBe(true); // Safari ignores user-scalable=no
+      expect(app.touchAction).toBe("manipulation"); // no double-tap zoom
+    }
+  });
+
+  it("stays on in a browser tab, where the page itself allows it", async () => {
+    expect(tag).not.toMatch(/user-scalable|maximum-scale/);
+    for (const userAgent of [UA.iphoneSafari, UA.androidChrome, UA.windowsChrome]) {
+      expect(await pinch({ userAgent })).toEqual({ content: tag, refused: false, touchAction: "" });
+    }
+    expect(read("src/main.tsx")).toMatch(/\nlockZoomInApp\(\);\n/);
+  });
+});
+
 // --- Updates waiting while the app is closed ---------------------------------------------------------
 
 describe("the service worker, when the phone has signal again (Background Sync)", () => {
