@@ -62,14 +62,14 @@ isOneToOne: false
                   ]
                 },"assistant_connections": {
                   Row: {
-                    "allow_changes": boolean,"client_id": string,"updated_at": string,"user_id": string
+                    "areas": string[],"client_id": string,"level": string,"updated_at": string,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "allow_changes"?: boolean,"client_id": string,"updated_at"?: string,"user_id"?: string
+                    "areas"?: string[],"client_id": string,"level"?: string,"updated_at"?: string,"user_id"?: string
                   }
                   Update: {
-                    "allow_changes"?: boolean,"client_id"?: string,"updated_at"?: string,"user_id"?: string
+                    "areas"?: string[],"client_id"?: string,"level"?: string,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
                     

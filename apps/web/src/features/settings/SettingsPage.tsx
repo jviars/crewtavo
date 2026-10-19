@@ -6,6 +6,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { hasRole, useSession } from "@/lib/session";
+import { AssistantSettings } from "./AssistantSettings";
 import { CalendarSettings } from "./CalendarSettings";
 import { ChecklistSettings } from "./ChecklistSettings";
 import { CompanySettings } from "./CompanySettings";
@@ -66,6 +67,7 @@ export function SettingsPage() {
           {tab === "checklists" && <ChecklistSettings />}
           {tab === "email" && <EmailSettings />}
           {tab === "calendars" && <CalendarSettings />}
+          {tab === "assistants" && <AssistantSettings />}
           {tab === "maps" && <MapsSettings />}
           {tab === "license" && <LicenseSettings />}
         </div>

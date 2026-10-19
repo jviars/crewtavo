@@ -6,7 +6,7 @@
 import type { IconName } from "@/components/ui/Icon";
 import { can, hasRole, type Session } from "@/lib/session";
 
-export type SettingsTab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "calendars" | "maps" | "license";
+export type SettingsTab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "license";
 export type SettingsItem = { label: string; icon: IconName; keywords: string } & ({ tab: SettingsTab } | { to: string });
 
 export function settingsGroups(session: Session): Array<{ title: string; items: SettingsItem[] }> {
@@ -44,6 +44,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
       items: [
         managesEmail && { tab: "email", label: "Email", icon: "mail", keywords: "smtp outgoing mail sender gmail outlook mailbox" },
         connectsApps && { tab: "calendars", label: "Calendars", icon: "calendar", keywords: "google calendar outlook apple ics calendar file import sync" },
+        { tab: "assistants", label: "AI assistants", icon: "sparkle", keywords: "claude chatgpt mcp connector ai assistant access permissions read only full access" },
         isOffice && can(session, "automations") && { to: "/automations", label: "Automations", icon: "bolt", keywords: "rules reminders follow ups workflows" },
       ],
     },

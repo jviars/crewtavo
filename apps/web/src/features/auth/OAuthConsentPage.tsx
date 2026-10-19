@@ -1,7 +1,7 @@
 /**
  * Consent screen for Supabase's OAuth 2.1 server, shown when Claude, ChatGPT or another MCP client
  * asks to connect. Configure this path (/oauth/consent) under Authentication > OAuth Server. A new
- * connection only reads until the person turns on Allow changes for it (Settings → Profile).
+ * connection only reads until the person chooses what it can change (Settings → AI assistants).
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -88,7 +88,7 @@ export function OAuthConsentPage() {
       <ul className={styles.scopes} aria-label="Can look at">
         {CAN.map((c) => <li key={c}><Icon name="check" size={15} strokeWidth={2.6} />{c}</li>)}
       </ul>
-      <span className="muted small" style={{ marginTop: -8 }}>It can't add or change anything until you turn on Allow changes for it in Crewtavo, under Settings → Profile.</span>
+      <span className="muted small" style={{ marginTop: -8 }}>It starts out read only. Choose what it can change in Crewtavo, under Settings → AI assistants.</span>
       {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}
       <div className="stack-sm" style={{ gap: 8 }}>
         <Button variant="primary" size="lg" loading={busy === "allow"} disabled={busy !== null} onClick={() => decide(true)}>Allow access</Button>

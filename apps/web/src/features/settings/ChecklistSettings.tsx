@@ -1,4 +1,5 @@
 /** Checklist templates crews fill in on a visit: inspections, safety steps, sign-offs. */
+import { checklistItemKey as slug, MAX_CHECKLIST_ITEMS, normalizeChecklist } from "@crewtavo/core/forms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -27,12 +28,6 @@ interface Template {
 }
 
 const TYPES: Array<[Item["type"], string]> = [["check", "Checkbox"], ["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["photo", "Photo"], ["signature", "Signature"]];
-const slug = (label: string, taken: string[]) => {
-  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "item";
-  let key = base;
-  for (let i = 2; taken.includes(key); i++) key = `${base}_${i}`;
-  return key;
-};
 
 export function ChecklistSettings() {
   const session = useSession();
@@ -88,11 +83,9 @@ function TemplateEditor({ template, onDeleted }: { template: Template; onDeleted
   const save = useMutation({
     meta: { inline: true, success: "Checklist saved" },
     mutationFn: async () => {
-      if (!t.name.trim()) throw new Error("Name the checklist.");
-      if (!t.items.length) throw new Error("Add at least one item.");
-      if (t.items.some((i) => !i.label.trim())) throw new Error("Every item needs a label.");
-      if (t.items.some((i) => i.type === "choice" && !(i.options?.filter(Boolean).length ?? 0))) throw new Error("Choice items need at least one option.");
-      unwrap(await supabase().from("checklist_templates").update({ name: t.name.trim(), job_type: t.job_type?.trim() || null, items: t.items.map((i) => ({ ...i, label: i.label.trim(), options: i.type === "choice" ? i.options?.filter(Boolean) : undefined })) as never, active: t.active }).eq("id", t.id));
+      // Checked and tidied the way an AI assistant's are too (packages/core/src/forms.ts).
+      const clean = normalizeChecklist(t);
+      unwrap(await supabase().from("checklist_templates").update({ ...clean, items: clean.items as never, active: t.active }).eq("id", t.id));
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklist-templates", session.company.id] }),
   });
@@ -138,7 +131,7 @@ function TemplateEditor({ template, onDeleted }: { template: Template; onDeleted
             </div>
           </div>
         ))}
-        <Button size="sm" variant="ghost" icon="plus" style={{ justifySelf: "start" }} disabled={t.items.length >= 60} onClick={() => setT({ ...t, items: [...t.items, { key: slug(`item ${t.items.length + 1}`, t.items.map((x) => x.key)), label: "", type: "check", required: false }] })}>Add item</Button>
+        <Button size="sm" variant="ghost" icon="plus" style={{ justifySelf: "start" }} disabled={t.items.length >= MAX_CHECKLIST_ITEMS} onClick={() => setT({ ...t, items: [...t.items, { key: slug(`item ${t.items.length + 1}`, t.items.map((x) => x.key)), label: "", type: "check", required: false }] })}>Add item</Button>
       </div>
       <FormError error={save.error} />
       <div className="form-actions">
