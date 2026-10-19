@@ -14,17 +14,25 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { initials } from "@/components/shell/AppShell";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { timeAgo } from "@/lib/format";
 import { can, useSession } from "@/lib/session";
 import { choiceFor, patchFor, roleChoices, roleName, useCompanyRoles } from "./roles";
 
 export interface Member { user_id: string; role: Role; role_id: string | null; active: boolean; labor_rate: number | null; profile: { full_name: string; email: string | null; color: string | null } | null }
+/** Someone invited who hasn't set up their account yet, and when their latest link went out. */
+interface PendingInvite { user_id: string; sent_at: string }
+/** What an invite (new or resent) did: emailed or not, and the link to copy either way. */
+interface InviteSent { emailed: boolean; reason: string | null; link: string | null }
 
 export function TeamSettings() {
   const session = useSession();
   const queryClient = useQueryClient();
   const [inviting, setInviting] = useState(false);
   const [resetting, setResetting] = useState<Member | null>(null);
+  const [resending, setResending] = useState<Member | null>(null);
   const team = useQuery({ queryKey: ["team", session.company.id], queryFn: () => api.get<Member[]>("/team") });
+  const invites = useQuery({ queryKey: ["team-invites", session.company.id], queryFn: () => api.get<PendingInvite[]>("/team/invites") });
+  const pending = new Map((invites.data ?? []).map((i) => [i.user_id, i.sent_at]));
   const roles = useCompanyRoles();
   const update = useMutation({
     meta: { success: (_: unknown, v: { patch: { role?: Role; role_id?: string | null; active?: boolean; labor_rate?: number | null } }) => (v.patch.active === false ? "Access removed" : v.patch.active ? "Access restored" : "role_id" in v.patch ? "Role changed" : "Saved") },
@@ -32,6 +40,7 @@ export function TeamSettings() {
       unwrap(await supabase().from("memberships").update(patch).eq("company_id", session.company.id).eq("user_id", userId)),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["team", session.company.id] });
+      queryClient.invalidateQueries({ queryKey: ["team-invites", session.company.id] });
       queryClient.invalidateQueries({ queryKey: ["dispatch-options", session.company.id] });
     },
   });
@@ -41,7 +50,9 @@ export function TeamSettings() {
   return (
     <div className="stack">
       <div className="row-between">
-        <span className="muted">{members.filter((m) => m.active).length} people with access</span>
+        <span className="muted">
+          {members.filter((m) => m.active).length} people with access{pending.size ? ` · ${pending.size} ${pending.size === 1 ? "hasn't" : "haven't"} joined yet` : ""}
+        </span>
         <Button variant="primary" icon="plus" onClick={() => setInviting(true)}>Invite someone</Button>
       </div>
       {team.isPending ? <TableSkeleton columns={4} rows={4} /> : team.error ? <div className="card"><ErrorState error={team.error} onRetry={() => team.refetch()} /></div> : (
@@ -53,6 +64,7 @@ export function TeamSettings() {
                 const me = m.user_id === session.userId;
                 const locked = me || (m.role === "owner" && !isOwner);
                 const name = m.profile?.full_name || "Invited user";
+                const sentAt = m.active ? pending.get(m.user_id) : undefined;
                 return (
                   <tr key={m.user_id} style={m.active ? undefined : { opacity: 0.6 }}>
                     <td>
@@ -60,7 +72,15 @@ export function TeamSettings() {
                         <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }}>{initials(name)}</span>
                         <span>
                           <strong>{name}</strong>{me && <span className="chip" style={{ marginLeft: 6 }}>You</span>}<div className="muted small">{m.profile?.email}</div>
-                          {m.active && !me && can(session, "team") && canMakeResetLink(session.role, m.role) && (
+                          {sentAt && (
+                            <div className="row" style={{ gap: 6, marginTop: 2 }}>
+                              <StatusPill label="Invite pending" tone="warning" />
+                              <span className="muted small">sent {timeAgo(sentAt)}</span>
+                            </div>
+                          )}
+                          {sentAt ? !locked && (
+                            <button type="button" className="link-btn small" onClick={() => setResending(m)}>Resend invite</button>
+                          ) : m.active && !me && can(session, "team") && canMakeResetLink(session.role, m.role) && (
                             <button type="button" className="link-btn small" onClick={() => setResetting(m)}>Reset password</button>
                           )}
                         </span>
@@ -97,6 +117,7 @@ export function TeamSettings() {
       )}
       {inviting && <InviteDialog onClose={() => setInviting(false)} />}
       {resetting && <ResetPasswordDialog member={resetting} onClose={() => setResetting(null)} />}
+      {resending && <ResendInviteDialog member={resending} onClose={() => setResending(null)} />}
     </div>
   );
 }
@@ -166,37 +187,23 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
     mutationFn: () => {
       const patch = patchFor(picked);
       const level = patch.role ?? roles.data?.find((r) => r.id === patch.role_id)?.base_role ?? "field_crew";
-      return api.post<{ invited: boolean; emailed: boolean; reason: string | null; link: string | null }>("/team/invite", { email: email.trim(), full_name: name.trim() || undefined, role: level, role_id: patch.role_id });
+      return api.post<InviteSent & { invited: boolean }>("/team/invite", { email: email.trim(), full_name: name.trim() || undefined, role: level, role_id: patch.role_id });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team", session.company.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["team", session.company.id] });
+      queryClient.invalidateQueries({ queryKey: ["team-invites", session.company.id] });
+    },
   });
   return (
     <Dialog open onClose={onClose} title={invite.data ? (invite.data.invited ? (invite.data.emailed ? "Invite sent" : "Invite ready") : "Added to your team") : "Invite someone"}>
       {invite.data ? (
-        <div className="dialog-body">
-          <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
-            <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
-            <p style={{ margin: 0 }}>
-              {invite.data.invited
-                ? invite.data.emailed ? `We emailed ${email} a link to set up their account.` : `${email} can join with the link below.`
-                : `${email} already had an account and now has access.${invite.data.emailed ? " We emailed them to let them know." : ""}`}
-            </p>
-            {session.config.features.devMail && invite.data.emailed && <span className="muted small">Test mode: the email is in the local Mailpit inbox (http://localhost:56324).</span>}
-          </div>
-          {invite.data.link && (
-            <div className="stack-sm">
-              <div className="callout callout-info">
-                <Icon name="info" size={18} />
-                <div className="grow small">
-                  {invite.data.reason ?? "Email isn't connected yet."} Copy the link and text it to them. It works once and expires in a day.
-                  {can(session, "apps") || session.role === "owner" ? <> To send invites automatically, <Link to="/settings?tab=email">connect your email</Link>.</> : null}
-                </div>
-              </div>
-              <Button icon="copy" onClick={() => copyText(invite.data!.link!, "Invite link copied")}>Copy invite link</Button>
-            </div>
-          )}
-          <div className="form-actions"><Button variant="primary" onClick={onClose}>Done</Button></div>
-        </div>
+        <InviteResult
+          sent={invite.data}
+          message={invite.data.invited
+            ? invite.data.emailed ? `We emailed ${email} a link to set up their account.` : `${email} can join with the link below.`
+            : `${email} already had an account and now has access.${invite.data.emailed ? " We emailed them to let them know." : ""}`}
+          onClose={onClose}
+        />
       ) : (
         <form onSubmit={(e: FormEvent) => { e.preventDefault(); invite.mutate(); }}>
           <div className="form-grid">
@@ -212,6 +219,72 @@ function InviteDialog({ onClose }: { onClose: () => void }) {
             <Button type="submit" variant="primary" icon="send" loading={invite.isPending}>Send invite</Button>
           </div>
         </form>
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * After an invite goes out: what happened, and the one-time link to copy. Always offered, so the
+ * admin can text it too when the email lands in spam or isn't read.
+ */
+function InviteResult({ sent, message, onClose }: { sent: InviteSent; message: string; onClose: () => void }) {
+  const session = useSession();
+  return (
+    <div className="dialog-body">
+      <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
+        <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+        <p style={{ margin: 0 }}>{message}</p>
+        {session.config.features.devMail && sent.emailed && <span className="muted small">Test mode: the email is in the local Mailpit inbox (http://localhost:56324).</span>}
+      </div>
+      {sent.link && (
+        <div className="stack-sm">
+          {sent.emailed ? (
+            <p className="muted small" style={{ margin: 0 }}>
+              You can also text them the link. It works once and expires in a day. Only send it to them: it lets whoever opens it into their account.
+            </p>
+          ) : (
+            <div className="callout callout-info">
+              <Icon name="info" size={18} />
+              <div className="grow small">
+                {sent.reason ?? "Email isn't connected yet."} Copy the link and text it to them. It works once and expires in a day.
+                {can(session, "apps") || session.role === "owner" ? <> To send invites automatically, <Link to="/settings?tab=email">connect your email</Link>.</> : null}
+              </div>
+            </div>
+          )}
+          <Button icon="copy" onClick={() => copyText(sent.link!, "Invite link copied")}>Copy invite link</Button>
+        </div>
+      )}
+      <div className="form-actions"><Button variant="primary" onClick={onClose}>Done</Button></div>
+    </div>
+  );
+}
+
+/** A new invite for someone who hasn't set up their account yet (POST /api/team/:id/invite-link). */
+function ResendInviteDialog({ member, onClose }: { member: Member; onClose: () => void }) {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const email = member.profile?.email;
+  const name = member.profile?.full_name || email || "this person";
+  const first = name.split(/\s+/)[0];
+  const resend = useMutation({
+    meta: { inline: true },
+    mutationFn: () => api.post<InviteSent>(`/team/${member.user_id}/invite-link`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team-invites", session.company.id] }),
+  });
+  return (
+    <Dialog open onClose={onClose} title={resend.data ? (resend.data.emailed ? "Invite sent" : "Invite ready") : `Resend ${first}'s invite?`}>
+      {resend.data ? (
+        <InviteResult sent={resend.data} message={resend.data.emailed ? `We emailed ${email ?? first} a new link to set up their account.` : `${first} can join with the link below.`} onClose={onClose} />
+      ) : (
+        <div className="dialog-body">
+          <p style={{ margin: 0 }}>{first} hasn't set up their account yet. This makes a new one-time link for them to join {session.company.name}, and emails it if your email is connected.</p>
+          <FormError error={resend.error} />
+          <div className="form-actions">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" icon="send" loading={resend.isPending} onClick={() => resend.mutate()}>Resend invite</Button>
+          </div>
+        </div>
       )}
     </Dialog>
   );
