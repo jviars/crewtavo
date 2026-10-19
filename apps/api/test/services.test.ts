@@ -15,6 +15,7 @@ import { adminClient } from "../src/lib/supabase";
 import { zohoAccountsServer, zohoApiDomain } from "../src/integrations/registry";
 import { processCampaigns } from "../src/services/campaigns";
 import { sendReviewRequest } from "../src/services/reviews";
+import { suggestPlaces } from "../src/services/external";
 import { runTask } from "../src/tasks";
 
 const env: Env = {
@@ -434,6 +435,39 @@ describe("public submissions", () => {
       expect(limited.calls.some((c) => c.path === "rpc/check_promo_code")).toBe(false);
       expect(limited.made()).toEqual([]);
     }
+  });
+});
+
+describe("place suggestions on the measuring map", () => {
+  const photon = {
+    features: [
+      { geometry: { coordinates: [-79.88, 36.99] }, properties: { housenumber: "418", street: "Pell Avenue", city: "Rocky Mount", state: "Virginia", countrycode: "us", country: "United States" } },
+      { geometry: { coordinates: [-79.87, 37.0] }, properties: { name: "Diamond Avenue", type: "street", osm_key: "highway", city: "Rocky Mount", state: "Virginia", countrycode: "us" } },
+      { geometry: { coordinates: [-0.15, 51.5] }, properties: { name: "Hyde Park Corner", type: "locality", city: "London", state: "England", countrycode: "gb", country: "United Kingdom" } },
+      { geometry: {}, properties: { name: "No point" } },
+    ],
+  };
+
+  it("names each place plainly, leans toward the map, and asks Photon once per text and area", async () => {
+    const calls = serve(() => photon);
+    const places = await suggestPlaces("  418  Pell ", { lat: 36.9958, lng: -79.8862 });
+    expect(places).toEqual([
+      { label: "418 Pell Avenue", detail: "Rocky Mount, Virginia", lat: 36.99, lng: -79.88, country: "US", kind: "address" },
+      { label: "Diamond Avenue", detail: "Rocky Mount, Virginia", lat: 37, lng: -79.87, country: "US", kind: "street" },
+      { label: "Hyde Park Corner", detail: "London, England, United Kingdom", lat: 51.5, lng: -0.15, country: "GB", kind: "place" },
+    ]);
+    const asked = calls[0].url;
+    expect(asked.host).toBe("photon.komoot.io");
+    expect(asked.searchParams.get("q")).toBe("418 Pell");
+    expect([asked.searchParams.get("lat"), asked.searchParams.get("lon"), asked.searchParams.get("location_bias_scale")]).toEqual(["36.9958", "-79.8862", "0.1"]);
+    // The same text nearby comes from the cache.
+    await suggestPlaces("418 pell", { lat: 36.99, lng: -79.89 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("fails loudly enough for the route to say suggestions are down", async () => {
+    serve(() => new Response("busy", { status: 503 }));
+    await expect(suggestPlaces("somewhere new")).rejects.toThrow("Photon returned 503");
   });
 });
 
