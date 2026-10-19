@@ -1,6 +1,7 @@
 /**
- * Stripe for a company. A company connects its own secret key on the Apps page (Crewtavo adds the
- * webhook to its Stripe account), or a deployment sets STRIPE_SECRET_KEY for everyone. Then:
+ * Stripe for a company. A company connects its own key on the Apps page, usually a restricted key
+ * from the form the page opens in Stripe (Crewtavo adds the webhook to its Stripe account), or a
+ * deployment sets STRIPE_SECRET_KEY for everyone. Then:
  *   - a sent invoice gets a matching Stripe invoice, kept in step by the outbox (syncStripeInvoice)
  *     or made when the client goes to pay from the Client Hub (stripeCheckout);
  *   - webhooks record payments, bank payments on their way, refunds, disputes and deposits, and
@@ -138,13 +139,13 @@ const reachable = (base: string) => /^https:\/\//.test(base) && !/^https:\/\/(lo
 export async function connectStripe(env: Env, admin: Db, input: { companyId: string; userId: string; key: string; baseUrl: string }) {
   const key = input.key.trim();
   if (!/^(sk|rk)_(live|test)_\w+$/.test(key)) {
-    throw new HttpError(400, "That isn't a Stripe secret key. Copy the one that starts with sk_live_ from Developers → API keys in Stripe.");
+    throw new HttpError(400, "That isn't a Stripe key. Use Get a key from Stripe on this page, then copy the key Stripe shows you.");
   }
   let account: StripeAccount | null = null;
   try {
     account = await stripeApi<StripeAccount>(key, "GET", "/v1/account");
   } catch (error) {
-    if (error instanceof StripeError && error.status === 401) throw new HttpError(400, "Stripe didn't accept that key. Copy it again from Developers → API keys in Stripe.");
+    if (error instanceof StripeError && error.status === 401) throw new HttpError(400, "Stripe didn't accept that key. Copy it again, or make a new one with Get a key from Stripe.");
     // A restricted key may not be allowed to read the account. Adding the webhook still tests it.
     if (!(error instanceof StripeError && error.status === 403)) throw error;
   }
@@ -171,7 +172,7 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
       });
     } catch (error) {
       if (error instanceof StripeError && (error.status === 401 || error.status === 403)) {
-        throw new HttpError(400, `That key can't add a webhook. Use your standard secret key, or a restricted key that can write webhook endpoints, customers, invoices and invoice items.${unchanged}`);
+        throw new HttpError(400, `That key can't add a webhook. Make a new one with Get a key from Stripe, which gives it everything Crewtavo needs.${unchanged}`);
       }
       throw new HttpError(400, `Stripe wouldn't add the webhook: ${(error instanceof Error ? error.message : String(error)).replace(/\.$/, "")}.${unchanged}`);
     }
