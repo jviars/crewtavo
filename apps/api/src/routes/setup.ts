@@ -6,6 +6,7 @@
  *                          each piece is in place, never a value.
  *   POST /api/setup/owner  creates the owner's account, once: sign-ups are closed in an instance,
  *                          so the first person to open it sets it up and invites everyone else.
+ *                          Answers with the owner's spare keys (lib/recovery.ts), shown once.
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -13,6 +14,7 @@ import type { AppEnv, Env } from "../env";
 import { platformOf } from "../lib/address";
 import { HttpError, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
+import { replaceSpareKeys } from "../lib/recovery";
 import { startup, type MigrationProblem } from "../lib/startup";
 import { adminClient } from "../lib/supabase";
 import { clientIp } from "../lib/visitor";
@@ -80,7 +82,12 @@ setup.post("/setup/owner", async (c) => {
     await admin.auth.admin.deleteUser(data.user.id);
     throw new HttpError(409, "Someone else just set up this Crewtavo. Sign in instead.");
   }
-  return c.json({ ok: true }, 201);
+  // The owner's spare keys, shown once on the next screen, for getting back in without email.
+  const spareKeys = await replaceSpareKeys(env, data.user.id).catch((err) => {
+    console.error(err);
+    return null; // They can make them later in Settings → Profile.
+  });
+  return c.json({ ok: true, spare_keys: spareKeys }, 201);
 });
 
 async function anyUser(env: Env): Promise<boolean> {

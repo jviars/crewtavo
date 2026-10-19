@@ -35,6 +35,9 @@ export interface Env {
    */
   CREWTAVO_GATEWAY?: string;
   CREWTAVO_SINGLE_COMPANY?: string;
+  /** Owner account recovery without email (lib/recovery.ts): the account's email and a phrase of 12+ characters. */
+  CREWTAVO_RECOVERY_EMAIL?: string;
+  CREWTAVO_RECOVERY_CODE?: string;
   /** Shared secret for /api/cron/* (run a background task by hand, as a bearer token). */
   CRON_SECRET?: string;
   /**

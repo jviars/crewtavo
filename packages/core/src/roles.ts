@@ -70,3 +70,14 @@ export function memberPermissions(role: Role, customPermissions?: readonly strin
   const allowed = LEVEL_PERMISSIONS[role];
   return customPermissions ? allowed.filter((p) => customPermissions.includes(p)) : [...allowed];
 }
+
+/**
+ * Who may make a password reset link for whom (Settings → People): only for someone strictly below
+ * them, so nobody can take over an account with as much access as their own. The owner: everyone
+ * but other owners. An admin: people below admin. The API enforces it (apps/api/src/routes/recovery.ts).
+ */
+export function canMakeResetLink(requester: Role, target: Role): boolean {
+  if (requester === "owner") return target !== "owner";
+  if (requester === "admin") return target !== "owner" && target !== "admin";
+  return false;
+}

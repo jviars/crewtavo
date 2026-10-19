@@ -84,6 +84,8 @@ release notes say what to do. To see which version you're running, open
 service's **Settings → Source → Configure auto updates**. To stay on one version, change the image
 there from `ghcr.io/jviars/crewtavo:latest` to that version, such as `ghcr.io/jviars/crewtavo:0.2.0`.
 
+**Locked out?** See [Getting back in](#getting-back-in).
+
 **Making the template** (once, by whoever publishes Crewtavo): see [deploy/README.md](../deploy/README.md).
 
 ## With Docker
@@ -300,6 +302,49 @@ a note on the client reminds you to record it once it clears there.
 Stripe only sends webhooks to a public `https` address, so on a local copy the key is saved
 without one. Run `stripe listen --forward-to localhost:8787/api/webhooks/stripe` and use the
 deployment settings above to try webhooks there.
+
+## Getting back in
+
+"Forgot password?" emails a reset link once the company has connected its mailbox (**Settings →
+Email**). Until then, the sign-in page says it can't send email, and there are two other ways in:
+
+- **Someone on the team:**
+  - The owner or an admin opens **Settings → People** and chooses **Reset password** under the
+    person's name.
+  - If email works, the link is emailed. Otherwise they get a link to hand over in person or by
+    text. It works once and stops working within a day.
+  - Admins can only do this for people below admin, and the owner for everyone but other owners, so
+    nobody can take over an account with as much access as their own.
+  - People who also use Crewtavo with another business have to reset it themselves.
+  - Each link goes in the activity log, and the person gets a notification about it.
+- **The owner: their key file.**
+  - When the owner creates their account, Crewtavo has them download a key file
+    (`crewtavo-key-file.txt`), or print the keys inside it instead. It won't continue until they
+    confirm they saved it.
+  - The file holds eight one-time spare keys, like two-factor backup codes. Each upload uses the
+    next one, so the file works eight times.
+  - Locked out: **Forgot password?**, then **I'm the owner: use my key file**, then upload it and
+    choose a new password. With a printout instead, **No file? Type a key** takes their email and one
+    key.
+  - **Settings → Profile** shows how many uses are left and gets a new key file. It asks for the
+    password, and the old file stops working.
+  - It only works while email isn't set up. Once the company's email is connected, **Forgot
+    password?** sends a link instead.
+  - Keys are stored only as keyed hashes, and tries are limited per person and per account.
+- **The owner lost their key file too:** whoever helps them proves they control the server.
+  1. In Railway, open the project, then the **crewtavo** service, then **Variables**. (On your own
+     computer: the `.env.instance` file.)
+  2. Add `CREWTAVO_RECOVERY_EMAIL` with the owner's email, and `CREWTAVO_RECOVERY_CODE` with a
+     phrase you make up, at least 12 characters. Deploy (on your own computer: `npm run instance`).
+  3. Within the next hour, the owner opens **I'm the owner: use my key file**, then **No file? Type
+     a key**, and types their email and that phrase, then chooses a new password.
+  4. Delete both variables.
+
+  The phrase never appears in the logs and works once, even across restarts. It only works in the
+  hour after the server starts with it, and wrong guesses are limited. Anyone who can change those
+  variables already controls the whole instance, so it opens no new way in.
+
+After any password reset, Crewtavo signs that account out everywhere else.
 
 ## Connecting Claude and ChatGPT
 
