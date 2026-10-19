@@ -1,8 +1,8 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
 import { ADMINS, getPreset, isRole, isTimeZoneName, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../env";
+import type { AppEnv, Env } from "../env";
 import { platformOf } from "../lib/address";
 import { emailAuthLink, requireCompany, requireUser } from "../lib/auth";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
@@ -257,6 +257,56 @@ account.post("/time/rates", requireUser, requireCompany(OFFICE, "job_costs"), as
   return c.json(rates);
 });
 
+/**
+ * Where an invite stands for someone on the team: "pending" until they first sign in, so a new link
+ * to set up their account can go out; "joined" after (someone locked out gets Reset password). And
+ * "elsewhere" when another business has them too: the link sets their password, and it would come
+ * back to this admin.
+ */
+async function inviteStatus(env: Env, companyId: string, userId: string): Promise<{ status: "pending"; email: string } | { status: "joined" | "elsewhere" }> {
+  const admin = adminClient(env);
+  const [{ data: account, error }, { data: elsewhere }] = await Promise.all([
+    admin.auth.admin.getUserById(userId),
+    admin.from("memberships").select("company_id").eq("user_id", userId).eq("active", true).neq("company_id", companyId).limit(1),
+  ]);
+  if (error || !account.user?.email) {
+    console.error("Couldn't look up an account", error);
+    throw new HttpError(500, "Couldn't look up their account. Try again in a moment.");
+  }
+  if (account.user.last_sign_in_at) return { status: "joined" };
+  return elsewhere?.length ? { status: "elsewhere" } : { status: "pending", email: account.user.email };
+}
+
+/** A fresh one-time link to set up the account of someone who was invited but never signed in. */
+async function welcomeLink(env: Env, base: string, email: string): Promise<string> {
+  const { data, error } = await adminClient(env).auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: `${base}/` } });
+  if (error || !data.properties?.hashed_token) {
+    console.error("Couldn't create an invite link", error);
+    throw new HttpError(500, "Couldn't make the invite link. Try again in a moment.");
+  }
+  return emailAuthLink(base, data.properties.hashed_token, "recovery", true);
+}
+
+/**
+ * The invitation: a link to set up their account or, without one, a note that they now have access.
+ * It goes out from the company's own mailbox (Settings → Email), not Supabase's mailer, which on
+ * hosted projects only reaches the project's own team.
+ */
+async function sendInvite(c: Context<AppEnv>, to: { email: string; name?: string | null }, link: string | null) {
+  const company = must(await c.var.db.from("companies").select("name, email").eq("id", c.var.companyId).maybeSingle());
+  const inviter = (await c.var.db.from("profiles").select("full_name").eq("user_id", c.var.userId).maybeSingle()).data?.full_name || "Your team";
+  const first = to.name?.trim().split(/\s+/)[0];
+  const greeting = first ? `Hi ${first},\n\n` : "";
+  const text = link
+    ? `${greeting}${inviter} invited you to ${company.name} on Crewtavo, where you'll see your schedule, visits and time.\n\nSet up your account here (the link works once; if it has expired, ask for a new invite):\n\n${link}\n\nOn your phone, open it in your browser and use "Add to Home Screen" to keep Crewtavo one tap away.`
+    : `${greeting}${inviter} gave you access to ${company.name} on Crewtavo. Sign in with your email and password as usual:\n\n${appUrl(c)}/`;
+  return sendEmail(
+    c.env,
+    { to: to.email, subject: link ? `Join ${company.name} on Crewtavo` : `You now have access to ${company.name}`, ...renderEmail({ companyName: company.name, text }), replyTo: company.email ?? undefined, fromName: company.name },
+    c.var.companyId,
+  );
+}
+
 account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async (c) => {
   const body = await readJson(
     c,
@@ -274,8 +324,6 @@ account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async 
   const base = appUrl(c);
 
   // Existing account? Add them. Otherwise create the account and a one-time link to set a password.
-  // The link goes out from the company's own mailbox (Settings → Email), not Supabase's mailer,
-  // which on hosted projects only reaches the project's own team.
   // By the email they sign in with: profile emails are only a copy, and `ilike` would treat "_" as a wildcard.
   const { data: existing } = await admin.rpc("user_id_for_email", { p_email: email });
   let userId = existing ?? undefined;
@@ -288,35 +336,64 @@ account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async 
     }
     userId = data.user.id;
     link = emailAuthLink(base, data.properties.hashed_token, "invite");
-  } else {
-    // Invited before but never signed in (the first link expired, or never arrived): send a fresh
-    // set-up link instead of "sign in as usual", since they don't have a password yet. Not when
-    // another company has them too: the link sets their password, and it can come back to this admin.
-    const { data: account } = await admin.auth.admin.getUserById(userId);
-    const { data: elsewhere } = await admin.from("memberships").select("company_id").eq("user_id", userId).eq("active", true).neq("company_id", c.var.companyId).limit(1);
-    if (account.user && !account.user.last_sign_in_at && !elsewhere?.length) {
-      const { data } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: `${base}/` } });
-      if (data.properties?.hashed_token) link = emailAuthLink(base, data.properties.hashed_token, "recovery", true);
-    }
+  } else if ((await inviteStatus(c.env, c.var.companyId, userId)).status === "pending") {
+    // Invited before but never signed in (the first link expired, or never arrived): a fresh set-up
+    // link instead of "sign in as usual", since they don't have a password yet.
+    link = await welcomeLink(c.env, base, email);
   }
 
   // Inserted as the inviting admin, so RLS checks they may grant this role.
   const { error } = await c.var.db.from("memberships").upsert({ company_id: c.var.companyId, user_id: userId, role: body.role, role_id: body.role_id ?? null, active: true });
   if (error) throw dbError(error);
 
-  const company = must(await c.var.db.from("companies").select("name, email").eq("id", c.var.companyId).maybeSingle());
-  const inviter = (await c.var.db.from("profiles").select("full_name").eq("user_id", c.var.userId).maybeSingle()).data?.full_name || "Your team";
-  const greeting = body.full_name ? `Hi ${body.full_name.split(/\s+/)[0]},\n\n` : "";
-  const text = link
-    ? `${greeting}${inviter} invited you to ${company.name} on Crewtavo, where you'll see your schedule, visits and time.\n\nSet up your account here (the link works once; if it has expired, ask for a new invite):\n\n${link}\n\nOn your phone, open it in your browser and use "Add to Home Screen" to keep Crewtavo one tap away.`
-    : `${greeting}${inviter} gave you access to ${company.name} on Crewtavo. Sign in with your email and password as usual:\n\n${base}/`;
-  const sent = await sendEmail(
-    c.env,
-    { to: email, subject: link ? `Join ${company.name} on Crewtavo` : `You now have access to ${company.name}`, ...renderEmail({ companyName: company.name, text }), replyTo: company.email ?? undefined, fromName: company.name },
-    c.var.companyId,
+  const sent = await sendInvite(c, { email, name: body.full_name }, link);
+  // The link comes back either way, so the admin can text it too (or instead, when email isn't connected).
+  return c.json({ user_id: userId, invited: !existing, emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link }, 201);
+});
+
+/** Who on the team hasn't set up their account yet, and when their latest link went out. */
+account.get("/team/invites", requireUser, requireCompany(ADMINS, "team"), async (c) => {
+  const members = must(await c.var.db.from("memberships").select("user_id").eq("company_id", c.var.companyId).eq("active", true).neq("user_id", c.var.userId));
+  const admin = adminClient(c.env);
+  // One lookup per person: a team is a handful of people, and only Settings → People asks.
+  const accounts = await Promise.all(members.map((m) => admin.auth.admin.getUserById(m.user_id)));
+  return c.json(
+    accounts.flatMap(({ data }) => {
+      const user = data.user;
+      if (!user || user.last_sign_in_at) return [];
+      const sent = [user.invited_at, user.recovery_sent_at, user.created_at].filter((t): t is string => Boolean(t)).map((t) => new Date(t).getTime());
+      return [{ user_id: user.id, sent_at: new Date(Math.max(...sent)).toISOString() }];
+    }),
   );
-  // Not sent (email not connected yet): hand the link back so the admin can text it instead.
-  return c.json({ user_id: userId, invited: !existing, emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link: sent.sent ? null : link }, 201);
+});
+
+/**
+ * A new invite for someone who hasn't set up their account yet (the first link expired, or never
+ * arrived): emailed when the company's email works, and the link comes back to copy either way.
+ */
+account.post("/team/:userId/invite-link", requireUser, requireCompany(ADMINS, "team"), async (c) => {
+  const parsed = uuid.safeParse(c.req.param("userId"));
+  if (!parsed.success) throw new HttpError(404, "That person isn't on your team.");
+  const targetId = parsed.data;
+  const { companyId, userId, role } = c.var;
+  if (!(await allow(c.env, `invite-link:${userId}`, 20, 3600))) throw new HttpError(429, "Too many invites. Wait a while and try again.");
+
+  const { data: member, error } = await c.var.db.from("memberships").select("role, active").eq("company_id", companyId).eq("user_id", targetId).maybeSingle();
+  if (error) throw dbError(error);
+  if (!member?.active) throw new HttpError(404, "That person isn't on your team.");
+  // As with changing their role, only an owner acts for an owner.
+  if (member.role === "owner" && role !== "owner") throw new HttpError(403, "Only an owner can do that for another owner.");
+  const invite = await inviteStatus(c.env, companyId, targetId);
+  if (invite.status !== "pending") {
+    throw invite.status === "joined"
+      ? new HttpError(400, "They've already set up their account. If they can't get in, use Reset password.")
+      : new HttpError(403, "This person also uses Crewtavo with another business, so they need to use Forgot password on the sign-in screen.");
+  }
+
+  const link = await welcomeLink(c.env, appUrl(c), invite.email);
+  const profile = (await c.var.db.from("profiles").select("full_name").eq("user_id", targetId).maybeSingle()).data;
+  const sent = await sendInvite(c, { email: invite.email, name: profile?.full_name }, link);
+  return c.json({ emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link });
 });
 
 /**
