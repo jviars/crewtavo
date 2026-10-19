@@ -368,7 +368,6 @@ a.field-card:active { transform: scale(0.99); }
 .measure-hint { position: absolute; left: 50%; bottom: 46px; z-index: 2; transform: translateX(-50%); width: max-content; max-width: calc(100% - 200px); padding: 7px 12px; border-radius: 999px; background: rgba(15, 42, 53, 0.86); color: #fff; font-size: 13px; font-weight: 600; text-align: center; pointer-events: none; animation: fade-in var(--dur); }
 .measure-capturing, .measure-zoom-note { position: absolute; left: 50%; top: 50%; z-index: 5; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-lg); font-size: 14px; font-weight: 600; }
 .measure-zoom-note { pointer-events: none; max-width: calc(100% - 160px); text-align: center; }
-.measure-source { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--divider); }
 
 .measure-shape { padding: 10px 12px 10px 16px; gap: 10px; }
 .measure-shape[data-selected] { background: var(--green-tint); }

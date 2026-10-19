@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addressProblem, hostLabel, normalizeDomain, suggestAddress } from "../src/address";
+import { addressProblem, hostLabel, normalizeDomain, prefixedAddress, suggestAddress } from "../src/address";
 import { DNS_PROVIDERS, GENERIC_DNS_PROVIDER, cloudflareTokenUrl, fillStep, providerById, providerForNameservers } from "../src/dns";
 
 describe("DNS providers", () => {
@@ -173,16 +173,34 @@ describe("addressProblem", () => {
 
 describe("suggestAddress", () => {
   it("uses the website, then the email domain", () => {
-    expect(suggestAddress("https://www.greenlawn.com", null)).toBe("app.greenlawn.com");
-    expect(suggestAddress("https://www.greenlawn.com", "owner@gmail.com")).toBe("app.greenlawn.com");
-    expect(suggestAddress(null, "office@greenlawn.com")).toBe("app.greenlawn.com");
-    expect(suggestAddress("", "Office@GreenLawn.com")).toBe("app.greenlawn.com");
+    expect(suggestAddress("https://www.greenlawn.com", null)).toBe("crm.greenlawn.com");
+    expect(suggestAddress("https://www.greenlawn.com", "owner@gmail.com")).toBe("crm.greenlawn.com");
+    expect(suggestAddress(null, "office@greenlawn.com")).toBe("crm.greenlawn.com");
+    expect(suggestAddress("", "Office@GreenLawn.com")).toBe("crm.greenlawn.com");
+    expect(suggestAddress("https://app.greenlawn.com", null)).toBe("crm.greenlawn.com");
   });
 
   it("skips free mailboxes and Railway addresses", () => {
     expect(suggestAddress(null, "greenlawn@gmail.com")).toBeNull();
     expect(suggestAddress(undefined, undefined)).toBeNull();
     expect(suggestAddress("https://greenlawn.up.railway.app", "greenlawn@gmail.com")).toBeNull();
+  });
+});
+
+describe("prefixedAddress", () => {
+  it("puts crm. in front of whatever domain was typed or pasted", () => {
+    expect(prefixedAddress("greenlawn.com")).toBe("crm.greenlawn.com");
+    expect(prefixedAddress("https://www.GreenLawn.com/about")).toBe("crm.greenlawn.com");
+    expect(prefixedAddress("crm.greenlawn.com")).toBe("crm.greenlawn.com");
+    expect(prefixedAddress("office@greenlawn.com")).toBe("crm.greenlawn.com");
+    expect(prefixedAddress("greenlawn.co.uk")).toBe("crm.greenlawn.co.uk");
+  });
+
+  it("waits for a whole domain", () => {
+    expect(prefixedAddress("")).toBeNull();
+    expect(prefixedAddress("greenlawn")).toBeNull();
+    expect(prefixedAddress("www.com")).toBeNull();
+    expect(prefixedAddress("green lawn.com")).toBeNull();
   });
 });
 

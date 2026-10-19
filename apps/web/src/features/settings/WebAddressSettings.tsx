@@ -1,14 +1,15 @@
 /**
  * Settings → Web address: move Crewtavo from its Railway address (something.up.railway.app) to the
- * business's own, like app.greenlawn.com. The owner picks an address and adds the records it needs
- * where their domain is managed; Crewtavo checks them as they go in. With Railway access (Log in
- * with Railway, or a project token) Crewtavo adds the address on Railway and switches over by
- * itself; otherwise the last step is setting APP_URL by hand. GET /api/address says where it stands.
+ * business's own, like crm.greenlawn.com. The owner types their domain after crm. and adds the
+ * records it needs where their domain is managed; Crewtavo checks them as they go in. With Railway
+ * access (Log in with Railway, or a project token) Crewtavo adds the address on Railway and switches
+ * over by itself, so the screen leads with that; otherwise the last step is setting APP_URL by hand.
+ * GET /api/address says where it stands.
  */
-import { addressUrl, normalizeDomain, type AddressChange, type AddressCheck, type AddressOverview, type DnsProvider, type DnsRecordCheck } from "@crewtavo/core/address";
+import { ADDRESS_PREFIX, addressUrl, normalizeDomain, prefixedAddress, type AddressChange, type AddressCheck, type AddressOverview, type DnsProvider, type DnsRecordCheck } from "@crewtavo/core/address";
 import { cloudflareTokenUrl, fillStep, GENERIC_DNS_PROVIDER, providerById } from "@crewtavo/core/dns";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Spinner } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -47,18 +48,50 @@ export function WebAddressSettings() {
 
   if (overview.isPending) return <CardSkeleton lines={4} />;
   if (!overview.data) return <div className="card"><ErrorState error={overview.error} onRetry={() => overview.refetch()} /></div>;
-  const data = overview.data;
-  const { change } = data;
-  const settled = !change || change.status === "done";
+  return (
+    <div className={`stack ${styles.page}`}>
+      <AddressScreen overview={overview.data} returnTo="settings" choosing={choosing} onChoosing={setChoosing} checking={overview.isFetching} onCheck={() => overview.refetch()} />
+    </div>
+  );
+}
 
-  let body: ReactNode;
-  if (choosing && settled) body = <ChooseAddress overview={data} onDone={() => setChoosing(false)} />;
-  else if (!change || (change.status === "done" && normalizeDomain(data.current ?? "") !== change.domain)) body = <CurrentAddress overview={data} onChange={() => setChoosing(true)} />;
-  else if (change.status === "done") body = <Done overview={data} change={change} onChange={() => setChoosing(true)} />;
-  else if (change.status === "switching") body = <Switching change={change} />;
-  else if (change.status === "failed") body = <Failed overview={data} change={change} />;
-  else body = <Waiting overview={data} change={change} checking={overview.isFetching} onCheck={() => overview.refetch()} />;
-  return <div className={`stack ${styles.page}`}>{body}</div>;
+interface ScreenProps {
+  overview: AddressOverview;
+  /** Where Railway's sign-in comes back to. */
+  returnTo: "setup" | "settings";
+  /** The owner asked to pick an address (again). */
+  choosing: boolean;
+  onChoosing: (choosing: boolean) => void;
+  checking: boolean;
+  onCheck: () => void;
+}
+
+/** Settings → Web address and the setup step: the screen for where the address stands. */
+export function AddressScreen(props: ScreenProps) {
+  const { overview, choosing, onChoosing, checking, onCheck } = props;
+  const { change } = overview;
+  const settled = !change || change.status === "done";
+  if (change?.status === "done" && !choosing && normalizeDomain(overview.current ?? "") === change.domain) return <Done overview={overview} change={change} onChange={() => onChoosing(true)} />;
+  if (guided(overview, choosing)) return <AddressSteps {...props} />;
+  if (choosing && settled) return <ChooseAddress overview={overview} onDone={() => onChoosing(false)} />;
+  if (settled) return <CurrentAddress overview={overview} onChange={() => onChoosing(true)} />;
+  if (change.status === "switching") return <Switching change={change} />;
+  if (change.status === "failed") return <Failed overview={overview} change={change} />;
+  return <Waiting overview={overview} change={change} checking={checking} onCheck={onCheck} />;
+}
+
+const onRailwayAddress = (url: string | null) => /(^|\.)railway\.app$/.test(normalizeDomain(url ?? "") ?? "railway.app");
+
+/**
+ * On Railway the steps lead the way, until Crewtavo is on the business's own domain. An address
+ * being set up without Railway access gets the full instructions instead (Waiting): the owner does
+ * the Railway part by hand there.
+ */
+function guided(overview: AddressOverview, choosing: boolean): boolean {
+  if (overview.platform !== "railway" || !overview.railway) return false;
+  const { change } = overview;
+  if (change && change.status !== "done") return overview.railway.connected;
+  return choosing || onRailwayAddress(overview.current);
 }
 
 const RETURNS: Record<string, string> = {
@@ -74,7 +107,7 @@ export function useRailwayReturn() {
   const result = params.get("railway");
   useEffect(() => {
     if (!result) return;
-    if (result === "connected") toast.success("Connected to Railway", { description: "Crewtavo is adding your address there now." });
+    if (result === "connected") toast.success("Connected to Railway", { description: "Crewtavo can now set things up there for you." });
     else toast.error(RETURNS[result] ?? RETURNS.error!);
     queryClient.invalidateQueries({ queryKey: WEB_ADDRESS_KEY });
     setParams(
@@ -94,39 +127,280 @@ function useAddressAction<V = void>(action: (variables: V) => Promise<AddressOve
   return useMutation({ meta, mutationFn: action, onSuccess: (next) => queryClient.setQueryData(WEB_ADDRESS_KEY, next) });
 }
 
+/** Crewtavo's address as it is, with a way to change it: on the business's own domain, or off Railway. */
 function CurrentAddress({ overview, onChange }: { overview: AddressOverview; onChange: () => void }) {
-  const host = normalizeDomain(overview.current ?? "");
-  const own = Boolean(host && !/(^|\.)railway\.app$/.test(host));
+  const own = Boolean(overview.current) && !onRailwayAddress(overview.current);
   return (
     <>
       <section className="card card-pad stack">
         <div className="stack-sm">
           <strong style={{ fontSize: 16 }}>Crewtavo's web address</strong>
           {overview.current ? <a className={styles.address} href={overview.current} target="_blank" rel="noreferrer">{bare(overview.current)}</a> : <span className="muted">Not set yet</span>}
-          <span className="muted">It's the address in every link Crewtavo sends: invites, quotes, invoices and the client hub.{own ? "" : " On your own domain, those links look like your business."}</span>
+          <span className="muted">It's the address in every link Crewtavo sends: invites, quotes, invoices and the client hub.{own ? "" : ` On your own domain, like ${ADDRESS_PREFIX}.yourbusiness.com, those links look like your business.`}</span>
         </div>
         <div className="row wrap">
           <Button variant="primary" icon="globe" onClick={onChange}>{own ? "Use a different address" : "Use your own address"}</Button>
         </div>
       </section>
       <RailwayAccess overview={overview} />
-      <RailwayConnection overview={overview} />
       <RailwayDomains overview={overview} />
     </>
   );
 }
 
-/** On Railway without access yet: connecting lets Crewtavo do the Railway steps itself. */
-function RailwayConnection({ overview }: { overview: AddressOverview }) {
-  const railway = overview.railway;
-  if (overview.platform !== "railway" || !railway || railway.connected) return null;
+type Railway = NonNullable<AddressOverview["railway"]>;
+
+const STEPS = [
+  { title: "Log in with Railway", ahead: "So Crewtavo can set things up on Railway for you." },
+  { title: "Choose your domain", ahead: "Use the one your website already has, or get a new one." },
+  { title: "Connect your domain", ahead: "Add two records where you bought it. Crewtavo shows you how, or emails the steps to whoever looks after it. A domain bought on Railway skips this." },
+  { title: "Crewtavo switches over", ahead: "By itself, once the new address works. Usually within an hour." },
+];
+
+/**
+ * On Railway: the way to the business's own address as four steps, ticked off as they're done,
+ * with what to do now opened up under the current one. Settings → Web address and the setup step
+ * both show it.
+ */
+export function AddressSteps({ overview, returnTo, choosing, onChoosing, checking, onCheck }: ScreenProps) {
+  const queryClient = useQueryClient();
+  const railway = overview.railway!;
+  const change = overview.change && overview.change.status !== "done" ? overview.change : null;
+  const picking = choosing && !change;
+  const [buying, setBuying] = useState(false);
+  // The address being typed, shown at the top as it'll look.
+  const [draft, setDraft] = useState<string | null>(null);
+  // A domain bought on Railway turns up on the crewtavo service a minute or so later: keep looking.
+  useEffect(() => {
+    if (!buying) return;
+    if (change) {
+      setBuying(false);
+      return;
+    }
+    const timer = setInterval(() => queryClient.invalidateQueries({ queryKey: WEB_ADDRESS_KEY }), 10_000);
+    return () => clearInterval(timer);
+  }, [buying, change, queryClient]);
+
+  const done = [railway.connected, Boolean(change), Boolean(change && recordsIn(change)), false];
+  const current = picking ? 1 : done.indexOf(false);
+  const summaries = [`Crewtavo can make changes in ${railway.projectName ?? "your Railway project"}.`, change?.domain, "Your records are in.", null];
+  const now = (step: number): ReactNode => {
+    if (step === 0) return <LoginStep railway={railway} returnTo={returnTo} onByHand={() => onChoosing(true)} />;
+    if (step === 1) return picking ? <ChooseAddress overview={overview} onDone={() => onChoosing(false)} onDraft={setDraft} bare /> : <DomainChoice railway={railway} buying={buying} onBuying={setBuying} onUseMine={() => onChoosing(true)} />;
+    if (step === 2) return <ConnectStep overview={overview} change={change!} checking={checking} onCheck={onCheck} />;
+    return <SwitchStep overview={overview} change={change!} checking={checking} onCheck={onCheck} />;
+  };
+
   return (
-    <section className="card card-pad stack-sm">
-      <strong style={{ fontSize: 16 }}>Connect Railway</strong>
-      <span className="muted">With access to your Railway project, Crewtavo adds your address there and switches over by itself. It can also use a domain you buy on Railway, with nothing to set up.</span>
-      {railway.error && <Problem title="Railway isn't connected">{railway.error}</Problem>}
-      {railway.oauth ? <ConnectRailway returnTo="settings" projectName={railway.projectName} /> : <RailwayTokenForm tokensUrl={railway.tokensUrl} />}
+    <section className="card card-pad stack" aria-labelledby="steps-title">
+      <div className="stack-sm" style={{ gap: 4 }}>
+        <h2 id="steps-title" className={styles.title}>{change ? `Setting up ${change.domain}` : "Use your own web address"}</h2>
+        <span className="muted">
+          {change
+            ? `Crewtavo stays at ${overview.current ? bare(overview.current) : "its current address"} until the new one works, so nothing changes for your team in the meantime.`
+            : "It's the address in every link Crewtavo sends: invites, quotes, invoices and the client hub. On your own domain, those links look like your business, and your website stays just as it is."}
+        </span>
+      </div>
+      <AddressMove from={overview.current} to={change?.domain ?? (picking ? draft : null)} />
+      <ol className={styles.timeline}>
+        {STEPS.map((step, i) => {
+          const state = i === current ? "current" : done[i] ? "done" : "todo";
+          return (
+            <li key={step.title} data-state={state} aria-current={state === "current" ? "step" : undefined}>
+              <span className={styles.dot} aria-hidden="true">{state === "done" ? <Icon name="check" size={14} strokeWidth={3} /> : i + 1}</span>
+              <div className="stack-sm" style={{ gap: 2, minWidth: 0 }}>
+                <strong className={styles.stepTitle}>{step.title}{state === "done" && <span className="sr-only">: done</span>}</strong>
+                {state === "current" ? <div className={styles.stepNow}>{now(i)}</div> : <span className="muted small" style={{ overflowWrap: "anywhere" }}>{state === "done" ? summaries[i] : step.ahead}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {change ? (
+        <div className={`row wrap ${styles.divided}`} style={{ justifyContent: "space-between" }}>
+          <StopButton overview={overview} domain={change.domain} />
+          <RailwayAccess overview={overview} />
+        </div>
+      ) : railway.connected ? (
+        <div className={styles.divided}><RailwayAccess overview={overview} /></div>
+      ) : null}
     </section>
+  );
+}
+
+/** Step 1: Railway's sign-in, with a sketch of the screen it opens. */
+function LoginStep({ railway, returnTo, onByHand }: { railway: Railway; returnTo: "setup" | "settings"; onByHand: () => void }) {
+  return (
+    <div className="stack">
+      {railway.error && <Problem title="Railway isn't connected">{railway.error}</Problem>}
+      {railway.oauth ? (
+        <div className={styles.split}>
+          <div className="stack-sm">
+            <span>Railway runs your Crewtavo. Once you log in, Crewtavo adds your address there and switches over by itself, so you never have to open Railway's settings.</span>
+            <ConnectRailway returnTo={returnTo} projectName={railway.projectName} />
+          </div>
+          <RailwaySketch projectName={railway.projectName} />
+        </div>
+      ) : (
+        <RailwayTokenForm tokensUrl={railway.tokensUrl} />
+      )}
+      <span className="row muted small" style={{ gap: 6, flexWrap: "nowrap", alignItems: "flex-start" }}>
+        <span style={{ flex: "none", marginTop: 1 }}><Icon name="lock" size={14} /></span>
+        Crewtavo only gets this one project, and you can take the access back any time in Settings.
+      </span>
+      <details className={styles.details}>
+        <summary>Can't log in with Railway?</summary>
+        <div className="stack-sm">
+          {railway.oauth && <RailwayTokenForm tokensUrl={railway.tokensUrl} />}
+          <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={onByHand}>Or set it all up by hand</button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+/** What Railway's sign-in asks, drawn small, so the real screen looks familiar. */
+function RailwaySketch({ projectName }: { projectName: string | null }) {
+  return (
+    <div className={styles.sketch} aria-hidden="true">
+      <div className={styles.sketchTop}><i /><i /><i /><span>On Railway</span></div>
+      <div className={styles.sketchBody}>
+        <span className={styles.sketchRow}><b>1</b>Choose<span className={styles.sketchSelect}><span className={styles.barText}>{projectName ?? "your project"}</span><Icon name="chevronDown" size={13} /></span></span>
+        <span className={styles.sketchRow}><b>2</b>Press<span className={styles.sketchAllow}>Allow</span></span>
+      </div>
+    </div>
+  );
+}
+
+/** Step 2: the domain they already have, or a new one bought on Railway (which needs no records). */
+function DomainChoice({ railway, buying, onBuying, onUseMine }: { railway: Railway; buying: boolean; onBuying: (buying: boolean) => void; onUseMine: () => void }) {
+  const { domains, settingsUrl } = railway;
+  if (buying) {
+    return (
+      <div className="stack">
+        {domains.length > 0 ? <RailwayDomainList domains={domains} /> : <span className="row"><Spinner size={14} />Waiting for your new domain. It shows up here a minute or so after you buy it.</span>}
+        <ol className={styles.steps}>
+          <li>On Railway, open the <strong>crewtavo</strong> service's <strong>Settings</strong> and find <strong>Networking</strong>.</li>
+          <li>Press <strong>Buy a Domain</strong> and buy the one you want. Railway bills it to your Railway account.</li>
+          <li>Back here, press <strong>Use this domain</strong> next to it.</li>
+        </ol>
+        <div className="row wrap" style={{ gap: 12 }}>
+          {settingsUrl && <ExternalButton href={settingsUrl}>Open Railway again</ExternalButton>}
+          <button type="button" className="link-btn small" onClick={() => onBuying(false)}>Back</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="stack">
+      {domains.length > 0 && (
+        <div className="stack-sm">
+          <strong className="small">Already on Railway</strong>
+          <RailwayDomainList domains={domains} />
+        </div>
+      )}
+      <span>Do you already have a domain for your business?</span>
+      <div className={styles.choices}>
+        <button type="button" className={styles.choice} onClick={onUseMine}>
+          <span className={styles.choiceIcon}><Icon name="globe" size={20} /></span>
+          <strong>Yes, use mine</strong>
+          <span className="muted small">The one your website or work email uses. Crewtavo goes on {ADDRESS_PREFIX}. in front of it, and you add two records where you bought it.</span>
+        </button>
+        {settingsUrl && (
+          <button
+            type="button"
+            className={styles.choice}
+            onClick={() => {
+              window.open(settingsUrl, "_blank", "noopener");
+              onBuying(true);
+            }}
+          >
+            <span className={styles.choiceIcon}><Icon name="sparkle" size={20} /></span>
+            <strong>No, get me one</strong>
+            <span className="muted small">Buy one on Railway, billed to your Railway account. Railway connects it for you.</span>
+            <StatusPill label="Nothing to set up" tone="good" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface StepProps { overview: AddressOverview; change: AddressChange; checking: boolean; onCheck: () => void }
+
+/** Step 3: the records to add where the domain is managed, or to send to whoever looks after it. */
+function ConnectStep({ overview, change, checking, onCheck }: StepProps) {
+  return (
+    <div className="stack">
+      {change.error && <Problem>{change.error}</Problem>}
+      <SendSteps change={change} />
+      <RecordsCard overview={overview} change={change} bare />
+      <span className="muted small">
+        Once the records are in, you can close this page. Crewtavo finishes by itself and lets you know when it's done.{" "}
+        <button type="button" className="link-btn small" disabled={checking} onClick={onCheck}>{checking ? "Checking…" : "Check now"}</button>
+      </span>
+    </div>
+  );
+}
+
+/** Step 4: waiting for the address to work, then the switch. */
+function SwitchStep({ overview, change, checking, onCheck }: StepProps) {
+  const finish = useAddressAction(() => api.post<AddressOverview>("/address/finish"), { inline: true });
+  if (change.status === "switching") {
+    return (
+      <div className="stack-sm" aria-live="polite">
+        <span className="row"><Spinner size={16} />Crewtavo is restarting at {addressUrl(change.domain)}. This takes a couple of minutes.</span>
+        <span className="muted small">This page keeps checking. If it stops updating, open <a href={addressUrl(change.domain)}>{change.domain}</a> and sign in there.</span>
+      </div>
+    );
+  }
+  const lastStep = !change.automatic && change.reachable && !change.live;
+  return (
+    <div className="stack">
+      {change.status === "failed" ? <Problem title="Switching didn't finish">{change.error ?? "Something went wrong. Try again."}</Problem> : change.error && <Problem>{change.error}</Problem>}
+      <span>{change.reachable ? "The new address works. Crewtavo is switching over to it." : "Your records are in. The new address usually starts working within a few minutes, sometimes up to an hour."}</span>
+      <Progress overview={overview} change={change} />
+      {lastStep ? (
+        <LastStep overview={overview} domain={change.domain} />
+      ) : change.status === "failed" ? (
+        <div className="stack-sm">
+          <FormError error={finish.error} />
+          <div className="row wrap"><Button variant="primary" icon="refresh" loading={finish.isPending} onClick={() => finish.mutate()}>Try again</Button></div>
+        </div>
+      ) : (
+        <span className="muted small">
+          You can close this page. Crewtavo finishes by itself and lets you know when it's done.{" "}
+          <button type="button" className="link-btn small" disabled={checking} onClick={onCheck}>{checking ? "Checking…" : "Check now"}</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Where Crewtavo is now, and the address it's moving to. */
+function AddressMove({ from, to }: { from: string | null; to: string | null }) {
+  return (
+    <div className={styles.move} aria-hidden="true">
+      <span className={styles.moveSide}>
+        <span className={styles.moveLabel}>Now</span>
+        <BrowserBar address={from ? bare(from) : "Not set yet"} tone="old" />
+      </span>
+      <span className={styles.moveArrow}><Icon name="arrowRight" size={18} /></span>
+      <span className={styles.moveSide}>
+        <span className={styles.moveLabel}>Your own</span>
+        <BrowserBar address={to ?? `${ADDRESS_PREFIX}.yourbusiness.com`} tone={to ? "new" : "example"} />
+      </span>
+    </div>
+  );
+}
+
+/** An address as a browser's address bar shows it. */
+function BrowserBar({ address, tone = "new" }: { address: string; tone?: "old" | "new" | "example" }) {
+  return (
+    <span className={styles.bar} data-tone={tone}>
+      <Icon name="lock" size={12} />
+      <span className={styles.barText}>{address}</span>
+    </span>
   );
 }
 
@@ -155,58 +429,70 @@ export function ConnectRailway({ returnTo, projectName, label = "Log in with Rai
  * Domains already on the crewtavo service in Railway, such as one just bought there. Railway runs
  * their DNS, so switching to one needs no records at all.
  */
-export function RailwayDomains({ overview, buying = false }: { overview: AddressOverview; buying?: boolean }) {
-  const queryClient = useQueryClient();
-  const use = useMutation({
-    meta: { inline: true },
-    mutationFn: (domain: string) => api.post<AddressOverview>("/address/start", { domain }),
-    onSuccess: (next) => queryClient.setQueryData(WEB_ADDRESS_KEY, next),
-  });
+export function RailwayDomains({ overview }: { overview: AddressOverview }) {
   const railway = overview.railway;
   if (!railway?.connected) return null;
   return (
     <section className="card card-pad stack-sm" aria-labelledby="railway-domains-title">
       <strong id="railway-domains-title" style={{ fontSize: 16 }}>Domains on Railway</strong>
       {railway.domains.length > 0 ? (
-        <ul className={styles.records}>
-          {railway.domains.map((d) => (
-            <li key={d.domain} className={`row-between wrap ${styles.record}`}>
-              <span className="stack-sm" style={{ gap: 2, minWidth: 0 }}>
-                <strong style={{ overflowWrap: "anywhere" }}>{d.domain}</strong>
-                <span className="muted small">{d.verified && d.certificate === "issued" ? "Ready to use" : "Railway is still setting it up. You can choose it now."}</span>
-              </span>
-              <Button size="sm" variant="primary" loading={use.isPending && use.variables === d.domain} onClick={() => use.mutate(d.domain)}>Use this domain</Button>
-            </li>
-          ))}
-        </ul>
-      ) : buying ? (
-        <span className="row muted"><Spinner size={14} />Waiting for your new domain. It shows here a minute or so after you buy it.</span>
+        <RailwayDomainList domains={railway.domains} />
       ) : (
         <span className="muted">Need a domain? Buy one on Railway and it shows here. Railway sets it up, so there's nothing to add.</span>
       )}
-      {!buying && railway.settingsUrl && (
+      {railway.settingsUrl && (
         <div className="stack-sm">
           <ExternalButton href={railway.settingsUrl}>Buy a domain on Railway</ExternalButton>
           <span className="muted small">On the crewtavo service's Settings, under Networking, press Buy a Domain.</span>
         </div>
       )}
-      <FormError error={use.error} />
     </section>
   );
 }
 
-export function ChooseAddress({ overview, onDone }: { overview: AddressOverview; onDone: () => void }) {
+function RailwayDomainList({ domains }: { domains: Railway["domains"] }) {
+  const queryClient = useQueryClient();
+  const use = useMutation({
+    meta: { inline: true },
+    mutationFn: (domain: string) => api.post<AddressOverview>("/address/start", { domain }),
+    onSuccess: (next) => queryClient.setQueryData(WEB_ADDRESS_KEY, next),
+  });
+  return (
+    <>
+      <ul className={styles.records}>
+        {domains.map((d) => (
+          <li key={d.domain} className={`row-between wrap ${styles.record}`}>
+            <span className="stack-sm" style={{ gap: 2, minWidth: 0 }}>
+              <strong style={{ overflowWrap: "anywhere" }}>{d.domain}</strong>
+              <span className="muted small">{d.verified && d.certificate === "issued" ? "Ready to use" : "Railway is still setting it up. You can choose it now."}</span>
+            </span>
+            <Button size="sm" variant="primary" loading={use.isPending && use.variables === d.domain} onClick={() => use.mutate(d.domain)}>Use this domain</Button>
+          </li>
+        ))}
+      </ul>
+      <FormError error={use.error} />
+    </>
+  );
+}
+
+/** `bare`: inside the steps, which already say what this is. `onDraft` hears the address as it's typed. */
+export function ChooseAddress({ overview, onDone, onDraft, bare = false }: { overview: AddressOverview; onDone: () => void; onDraft?: (domain: string | null) => void; bare?: boolean }) {
   const queryClient = useQueryClient();
   const currentDomain = normalizeDomain(overview.current ?? "");
-  const [text, setText] = useState(overview.suggestion && overview.suggestion !== currentDomain ? overview.suggestion : "");
+  // crm. is filled in and they type the rest, so nobody puts in the bare domain (their website) by
+  // mistake. `whole` is for anyone who wants a different name: they type the whole address.
+  const [whole, setWhole] = useState(false);
+  const suggested = overview.suggestion && overview.suggestion !== currentDomain ? overview.suggestion : "";
+  const [text, setText] = useState(afterPrefix(suggested));
   // Check as they type, once they pause.
   const [settledText, setSettledText] = useState(text);
   useEffect(() => {
     const timer = setTimeout(() => setSettledText(text), 500);
     return () => clearTimeout(timer);
   }, [text]);
-  const domain = normalizeDomain(text);
-  const settled = normalizeDomain(settledText);
+  const addressOf = (value: string) => (whole ? normalizeDomain(value) : prefixedAddress(value));
+  const domain = addressOf(text);
+  const settled = addressOf(settledText);
   const typing = settledText !== text;
   const check = useQuery({
     queryKey: ["web-address-check", settled],
@@ -219,9 +505,13 @@ export function ChooseAddress({ overview, onDone }: { overview: AddressOverview;
   const result = settled === domain ? check.data : undefined;
   const problem =
     domain && domain === currentDomain ? "That's already Crewtavo's address."
-    : !typing && text.trim() && !domain ? "That doesn't look like a web address. Type it like app.yourbusiness.com."
+    : !typing && text.trim() && !domain ? (whole ? `That doesn't look like a web address. Type it like ${ADDRESS_PREFIX}.yourbusiness.com.` : text.includes(".") ? "That doesn't look like a domain. Type it like yourbusiness.com." : "Type the whole domain, with its ending, like yourbusiness.com.")
     : result?.problem ?? null;
   const provider = knownProvider(result?.provider ?? null);
+  // More than the domain after crm. (crm.www2.greenlawn.com): offer crm. right in front of the domain.
+  const closer = !whole && result?.zone ? `${ADDRESS_PREFIX}.${result.zone}` : null;
+  const better = closer && closer !== domain && closer !== currentDomain ? closer : null;
+  useEffect(() => onDraft?.(domain && !problem ? domain : null), [domain, problem, onDraft]);
   const start = useMutation({
     meta: { inline: true },
     mutationFn: () => api.post<AddressOverview>("/address/start", { domain }),
@@ -230,32 +520,74 @@ export function ChooseAddress({ overview, onDone }: { overview: AddressOverview;
       onDone();
     },
   });
+  const fill = (value: string) => {
+    setText(value);
+    setSettledText(value);
+    start.reset();
+  };
+  const switchTo = (next: boolean) => {
+    setWhole(next);
+    fill(next ? domain ?? "" : afterPrefix(domain ?? ""));
+  };
+  const input = {
+    value: text,
+    onChange: (e: ChangeEvent<HTMLInputElement>) => { setText(e.target.value); start.reset(); },
+    inputMode: "url" as const,
+    autoCapitalize: "none",
+    autoCorrect: "off",
+    spellCheck: false,
+    autoFocus: true,
+    maxLength: 300,
+  };
 
   return (
-    <form className="card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); if (domain && !problem) start.mutate(); }}>
+    <form className={bare ? "stack" : "card card-pad stack"} onSubmit={(e: FormEvent) => { e.preventDefault(); if (domain && !problem) start.mutate(); }}>
+      {!bare && (
+        <div className="stack-sm">
+          <strong style={{ fontSize: 16 }}>Choose your address</strong>
+          <span className="muted">Crewtavo goes on {ADDRESS_PREFIX}. in front of your business's domain, so your website and email stay just as they are. To finish, you'll sign in where the domain is managed, usually where you bought it.</span>
+        </div>
+      )}
       <div className="stack-sm">
-        <strong style={{ fontSize: 16 }}>Choose your address</strong>
-        <span className="muted">Use a domain your business owns. To finish, you'll sign in where that domain is managed, usually where you bought it.</span>
+        {whole ? (
+          <Field label="Address" hint={`The whole address, like ${ADDRESS_PREFIX}.yourbusiness.com. Your domain on its own (yourbusiness.com) would replace your website.`} error={problem}>
+            <input {...input} className="input" placeholder={`${ADDRESS_PREFIX}.yourbusiness.com`} />
+          </Field>
+        ) : (
+          <Field label="Your address" hint={`${ADDRESS_PREFIX}. is filled in for you. Type the rest: your business's domain, the one your website or work email uses.`} error={problem}>
+            <div className={`input ${styles.prefixed}`} onClick={(e) => e.currentTarget.querySelector("input")?.focus()}>
+              <span className={styles.prefix} aria-hidden="true">{ADDRESS_PREFIX}.</span>
+              {/* Tidy a pasted website or email down to the domain once they move on. */}
+              <input {...input} placeholder="yourbusiness.com" onBlur={() => { if (domain && afterPrefix(domain) !== text) fill(afterPrefix(domain)); }} />
+            </div>
+          </Field>
+        )}
+        <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => switchTo(!whole)}>
+          {whole ? `Put ${ADDRESS_PREFIX}. in front for me` : `Use a different name than ${ADDRESS_PREFIX}`}
+        </button>
       </div>
-      <Field label="Address" hint="Most businesses put app. in front of the domain they already have, so their website keeps working." error={problem}>
-        <input
-          className="input"
-          value={text}
-          onChange={(e) => { setText(e.target.value); start.reset(); }}
-          placeholder="app.yourbusiness.com"
-          inputMode="url"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          autoFocus
-          maxLength={300}
-        />
-      </Field>
       {domain && !problem && (
         <div className="stack-sm">
-          {domain !== text.trim().toLowerCase() && <span className="muted small">Crewtavo will use {domain}.</span>}
+          {whole ? (
+            domain !== text.trim().toLowerCase() && <span className="muted small">Crewtavo will use {domain}.</span>
+          ) : (
+            <div className={styles.preview}>
+              <span className="small">Crewtavo will be at</span>
+              <BrowserBar address={domain} />
+              <span className="muted small">Your website stays at {result?.zone ?? afterPrefix(domain)}.</span>
+            </div>
+          )}
           {!result && !typing && check.isFetching && <span className="row muted small"><Spinner size={14} />Checking {domain}…</span>}
           {provider && <span className="row small"><Icon name="check" size={14} />Your domain's DNS is at {provider.label}.</span>}
+          {better && (
+            <div className="callout">
+              <Icon name="info" size={18} />
+              <div className="grow stack-sm">
+                <span style={{ fontWeight: 400 }}>Your domain is {result!.zone}. Most businesses use {better}.</span>
+                <Button size="sm" style={{ justifySelf: "start" }} onClick={() => fill(afterPrefix(better))}>Use {better}</Button>
+              </div>
+            </div>
+          )}
           {result && result.warnings.length > 0 && (
             <div className="callout">
               <Icon name="info" size={18} />
@@ -266,12 +598,15 @@ export function ChooseAddress({ overview, onDone }: { overview: AddressOverview;
       )}
       <FormError error={start.error} />
       <div className="form-actions">
-        <Button onClick={onDone}>Cancel</Button>
+        <Button onClick={onDone}>{bare ? "Back" : "Cancel"}</Button>
         <Button type="submit" variant="primary" icon="arrowRight" loading={start.isPending} disabled={!domain || Boolean(problem)}>Continue</Button>
       </div>
     </form>
   );
 }
+
+/** greenlawn.com for crm.greenlawn.com: what goes in the box after crm. */
+const afterPrefix = (address: string) => address.replace(/^crm\./, "");
 
 export function Waiting({ overview, change, checking, onCheck }: { overview: AddressOverview; change: AddressChange; checking: boolean; onCheck: () => void }) {
   const lastStep = !change.automatic && change.reachable && !change.live;
@@ -468,7 +803,8 @@ export function RailwayTokenForm({ tokensUrl, onLogin }: { tokensUrl: string | n
 }
 
 /** The records to add at the DNS host, each with its live status. */
-function RecordsCard({ overview, change }: { overview: AddressOverview; change: AddressChange }) {
+/** `bare`: inside the steps, under their own title. */
+function RecordsCard({ overview, change, bare = false }: { overview: AddressOverview; change: AddressChange; bare?: boolean }) {
   const [added, setAdded] = useState<number | null>(null);
   const provider = providerById(change.provider);
   const known = knownProvider(change.provider);
@@ -479,9 +815,9 @@ function RecordsCard({ overview, change }: { overview: AddressOverview; change: 
   const cloudflare = change.provider === "cloudflare" && change.automatic && records.length > 0 && records.every((r) => r.value !== null) && !recordsIn(change);
 
   return (
-    <section className="card card-pad stack" aria-labelledby="records-title">
+    <section className={bare ? "stack" : "card card-pad stack"} aria-labelledby={bare ? undefined : "records-title"}>
       <div className="stack-sm" style={{ gap: 4 }}>
-        <strong id="records-title" style={{ fontSize: 16 }}>{byHand ? "Add Railway's two records to your domain" : records.length === 1 ? "Add this record to your domain" : records.length ? `Add these ${records.length} records to your domain` : "Records for your domain"}</strong>
+        <strong id="records-title" style={{ fontSize: 16 }} hidden={bare}>{byHand ? "Add Railway's two records to your domain" : records.length === 1 ? "Add this record to your domain" : records.length ? `Add these ${records.length} records to your domain` : "Records for your domain"}</strong>
         {records.length > 0 && (
           <span className="muted">{known ? `Your domain's DNS is at ${known.label}. Sign in there and add ${byHand ? "both" : them}.` : `Sign in where your domain is managed (usually where you bought it) and add ${byHand ? "both" : them}.`}</span>
         )}
@@ -560,6 +896,47 @@ function RecordItem({ record, provider, number, unknown }: { record: DnsRecordCh
       )}
     </li>
   );
+}
+
+/**
+ * Many owners have someone who set up their website and looks after the domain: send them the
+ * records from the owner's own mail app, or copy them into a text.
+ */
+function SendSteps({ change }: { change: AddressChange }) {
+  const todo = change.records.filter((r) => r.status !== "ok");
+  if (!todo.length) return null;
+  const message = recordsMessage(change, todo);
+  const mailto = `mailto:?subject=${encodeURIComponent(`DNS records for ${change.domain}`)}&body=${encodeURIComponent(message)}`;
+  return (
+    <div className={`stack-sm ${styles.send}`}>
+      <span className="row" style={{ gap: 8, flexWrap: "nowrap", alignItems: "flex-start" }}>
+        <span className={styles.choiceIcon} style={{ flex: "none" }}><Icon name="users" size={18} /></span>
+        <span className="stack-sm" style={{ gap: 2 }}>
+          <strong>Someone else looks after your domain?</strong>
+          <span className="muted small">Send the steps to whoever set up your website. It takes them a couple of minutes, and Crewtavo notices when they're done. Or add the records yourself, below.</span>
+        </span>
+      </span>
+      <div className="row wrap">
+        <a className="btn btn-sm btn-primary" href={mailto}><Icon name="mail" size={14} />Email the steps</a>
+        <Button size="sm" icon="copy" onClick={() => copyText(message, "Steps copied")}>Copy the steps</Button>
+      </div>
+    </div>
+  );
+}
+
+function recordsMessage(change: AddressChange, records: DnsRecordCheck[]): string {
+  const provider = providerById(change.provider);
+  const known = knownProvider(change.provider);
+  const them = records.length === 1 ? "this DNS record" : `these ${records.length} DNS records`;
+  return [
+    "Hi,",
+    "",
+    `Could you add ${them} to ${change.zone ?? change.domain}${known ? ` (its DNS is at ${known.label})` : ""}? They point ${change.domain} at our Crewtavo.`,
+    "",
+    ...records.flatMap((r, i) => [`${i + 1}. Type: ${r.type}`, `   Name: ${r.host}`, `   Value: ${r.value ?? "the value Railway shows for it"}`, ""]),
+    ...(provider.hostNote ? [provider.hostNote, ""] : []),
+    "Crewtavo checks them by itself and switches over once they're in. Thanks!",
+  ].join("\n");
 }
 
 /** Cloudflare can take the records straight from Crewtavo, with a token used once. */

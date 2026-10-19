@@ -7,7 +7,7 @@ import type { DnsProvider } from "./address";
 
 /** The usual Name box: the provider puts the domain on the end itself. */
 const addsDomain = (provider: string, box: string, root = "type @") =>
-  `${provider} adds your domain to the ${box} itself: type just the part before it (app, not app.example.com). For the domain itself, ${root}.`;
+  `${provider} adds your domain to the ${box} itself: type just the part before it (crm, not crm.example.com). For the domain itself, ${root}.`;
 
 export const DNS_PROVIDERS: DnsProvider[] = [
   {
@@ -21,7 +21,7 @@ export const DNS_PROVIDERS: DnsProvider[] = [
       "Type {host} as the Name and {value} as the Target (Content for TXT).",
       "For a CNAME, set Proxy status to DNS only (grey cloud). Press Save.",
     ],
-    hostNote: "Cloudflare takes either the part before your domain (app) or the whole address (app.example.com). For the domain itself, type @.",
+    hostNote: "Cloudflare takes either the part before your domain (crm) or the whole address (crm.example.com). For the domain itself, type @.",
     rootCname: true,
     note: "Keep the record DNS only (grey cloud), not Proxied (orange cloud). Railway sets up the HTTPS certificate itself, and the orange cloud needs extra SSL settings to work with it.",
   },
@@ -253,7 +253,7 @@ export const GENERIC_DNS_PROVIDER: DnsProvider = {
     "Add a new {type} record.",
     "Type {host} in the Name or Host box and {value} in the Value, Target or Points to box, then save.",
   ],
-  hostNote: "Most providers add your domain to the name themselves: type just the part before it (app, not app.example.com), or @ for the domain itself. If the record ends up as app.example.com.example.com, take your domain off the end.",
+  hostNote: "Most providers add your domain to the name themselves: type just the part before it (crm, not crm.example.com), or @ for the domain itself. If the record ends up as crm.example.com.example.com, take your domain off the end.",
   rootCname: false,
 };
 

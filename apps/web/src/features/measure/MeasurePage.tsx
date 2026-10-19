@@ -112,7 +112,6 @@ export function MeasurePage() {
   // What someone picked (Auto unless they chose a source), and what's on the map now.
   const [choice, setChoice] = useState<ImageryChoice | null>(null);
   const [imagery, setImagery] = useState<ImageryId | null>(null);
-  const [autoNote, setAutoNote] = useState<string | null>(null);
   const [overlays, setOverlays] = useState<OverlayId[]>(savedOverlays);
   const [resolveTick, setResolveTick] = useState(0);
   // Sources that stopped answering, and until when Auto leaves them alone.
@@ -288,7 +287,6 @@ export function MeasurePage() {
       // aren't down, they just have nothing here.
       const abroad = passed.some((p) => p.id === "naip" && p.why === "empty");
       const failed = abroad ? undefined : passed.find((p) => p.why === "down");
-      setAutoNote(failed && id !== failed.id ? `${imageryInfo(failed.id).name} isn't answering right now, so it's showing ${imageryInfo(id).name}.` : null);
       // Nothing aerial here (outside the US, with no Esri key): say why it's the street map.
       setBanner(id === "street" && zoom >= 11 && !failed && !dismissed.includes("no-aerial") ? { kind: "no-aerial" } : null);
     }, 350);
@@ -336,7 +334,6 @@ export function MeasurePage() {
   const chooseImagery = (next: ImageryChoice, fromAbroad = false) => {
     autoImagery.current = fromAbroad;
     setBanner(null);
-    setAutoNote(null);
     setChoice(next);
     if (next === "auto") setResolveTick((n) => n + 1);
     else setImagery(next);
@@ -572,7 +569,6 @@ export function MeasurePage() {
   const p = ctx?.property;
   const rows = summary.sections.map((s, i) => ({ id: s.feature_id, kind: s.kind, value: s.value, unit: s.unit, color: shapes[i]?.color ?? "#999" }));
   const counts = rows.filter((r) => r.kind === "Count").length;
-  const info = imagery ? imageryInfo(imagery) : null;
 
   return (
     <>
@@ -689,12 +685,6 @@ export function MeasurePage() {
                   )}
                 </>
               )}
-            </div>
-          )}
-          {info && mapState === "ready" && (
-            <div className="measure-source muted small">
-              <Icon name="layers" size={13} />
-              <span>{choice === "auto" ? <><strong>{AUTO_NAME}</strong> is showing {info.name} ({info.detail}).</> : <>{info.name}: {info.detail}.</>}{autoNote && ` ${autoNote}`}</span>
             </div>
           )}
         </div>
