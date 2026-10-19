@@ -3,7 +3,7 @@
  * an install prompt, which we hold on to and open from our own button. Safari on an iPhone or iPad
  * has no prompt: the crew get a tip instead (Share, then Add to Home Screen). Nothing shows once
  * Crewtavo runs as an installed app, nor on the pages clients see. The crew can put the tip away for
- * good on this device; Settings keeps the button.
+ * good on this device; Settings keeps the button. Once installed, the app doesn't zoom.
  */
 import { useSyncExternalStore } from "react";
 
@@ -36,6 +36,24 @@ export const isIosSafari = (device: Device = navigator) =>
 /** Running as an installed app (from the home screen) rather than in a browser tab. */
 export const isStandalone = (win: Pick<Window, "matchMedia"> & { navigator: Partial<Navigator> & { standalone?: boolean } } = window) =>
   Boolean(win.matchMedia?.("(display-mode: standalone)").matches) || win.navigator.standalone === true;
+
+/**
+ * No pinch or double-tap zoom in the installed app, so it holds still like the phone's other apps
+ * (and an iPhone no longer zooms in on a form field when it's tapped). In a browser tab people still
+ * zoom as they like, and the phone's own accessibility zoom works everywhere. Call once, early.
+ */
+export function lockZoomInApp(win: Window = window) {
+  if (!isStandalone(win)) return;
+  const { document } = win;
+  const viewport = document.querySelector('meta[name="viewport"]');
+  viewport?.setAttribute("content", `${viewport.getAttribute("content")}, maximum-scale=1, user-scalable=no`);
+  // Safari on an iPhone ignores user-scalable=no, but lets its own pinch gesture be turned down.
+  // Maps pinch with touch events instead, so they still zoom.
+  const refuse = (event: Event) => event.preventDefault();
+  for (const type of ["gesturestart", "gesturechange"]) document.addEventListener(type, refuse, { passive: false });
+  // And double-tap zoom, which Safari keeps too.
+  document.documentElement.style.touchAction = "manipulation";
+}
 
 /** What to offer: our install button where the browser has a prompt, the tip in Safari on an iPhone or iPad, or nothing. */
 export function installHint(state: { standalone: boolean; installed: boolean; canPrompt: boolean; iosSafari: boolean; path: string }): InstallHint {
