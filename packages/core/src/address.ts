@@ -1,6 +1,6 @@
 /**
  * The instance's own web address (Settings → Web address): what the screen and the API share.
- * An owner picks an address like app.theirbusiness.com; Crewtavo adds it on Railway (or says what
+ * An owner picks an address like crm.theirbusiness.com; Crewtavo adds it on Railway (or says what
  * to do elsewhere), checks the DNS records as they go in, and switches APP_URL over once the new
  * address answers. DNS provider instructions live in dns.ts.
  */
@@ -146,19 +146,35 @@ export function normalizeDomain(input: string): string | null {
 
 /** Why an address can't be this instance's own, or null. */
 export function addressProblem(domain: string): string | null {
-  if (RAILWAY_HOSTS.test(domain)) return "That's a Railway address. Use a domain your business owns, like app.yourbusiness.com.";
+  if (RAILWAY_HOSTS.test(domain)) return "That's a Railway address. Use a domain your business owns, like crm.yourbusiness.com.";
   if (domain === "localhost" || domain.endsWith(".localhost") || domain.endsWith(".local") || domain.endsWith(".internal")) {
-    return "That address only works inside a network. Use a domain your business owns, like app.yourbusiness.com.";
+    return "That address only works inside a network. Use a domain your business owns, like crm.yourbusiness.com.";
   }
   return null;
 }
 
-/** app.<their domain>, from the company's website or else its email address (not a free mailbox). */
+/**
+ * The name Crewtavo goes on in front of the business's domain: crm.theirbusiness.com. A name under
+ * the domain leaves their website and email at the domain itself as they are.
+ */
+export const ADDRESS_PREFIX = "crm";
+
+/**
+ * The address for a domain typed after crm. in the address box. People paste their website
+ * ("https://www.greenlawn.com/about") or work email, or type crm. again: all come back as
+ * crm.greenlawn.com. Null until it's a whole domain.
+ */
+export function prefixedAddress(typed: string): string | null {
+  const domain = normalizeDomain(typed.split("@").pop()!)?.replace(/^(www|crm)\./, "");
+  return domain?.includes(".") ? `${ADDRESS_PREFIX}.${domain}` : null;
+}
+
+/** crm.<their domain>, from the company's website or else its email address (not a free mailbox). */
 export function suggestAddress(website: string | null | undefined, email: string | null | undefined): string | null {
-  const fromSite = website ? normalizeDomain(website)?.replace(/^(www|app)\./, "") : null;
-  if (fromSite && !NOT_THEIRS.test(fromSite) && !addressProblem(fromSite)) return `app.${fromSite}`;
+  const fromSite = website ? normalizeDomain(website)?.replace(/^(www|app|crm)\./, "") : null;
+  if (fromSite && !NOT_THEIRS.test(fromSite) && !addressProblem(fromSite)) return `${ADDRESS_PREFIX}.${fromSite}`;
   const fromEmail = email?.includes("@") ? normalizeDomain(email.split("@").pop()!) : null;
-  if (fromEmail && !FREE_MAIL.has(fromEmail) && !addressProblem(fromEmail)) return `app.${fromEmail}`;
+  if (fromEmail && !FREE_MAIL.has(fromEmail) && !addressProblem(fromEmail)) return `${ADDRESS_PREFIX}.${fromEmail}`;
   return null;
 }
 

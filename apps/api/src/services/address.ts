@@ -91,7 +91,7 @@ function expectedRecords(env: Env, domain: string): StoredRecord[] {
 
 export async function checkAddress(env: Env, input: string): Promise<AddressCheck> {
   const domain = normalizeDomain(input);
-  if (!domain) return { domain: input.trim(), zone: null, provider: null, root: false, warnings: [], problem: "That doesn't look like a web address. Type it like app.yourbusiness.com." };
+  if (!domain) return { domain: input.trim(), zone: null, provider: null, root: false, warnings: [], problem: "That doesn't look like a web address. Type it like crm.yourbusiness.com." };
   let problem = addressProblem(domain) ?? (isLive(env, domain) ? "Crewtavo already uses this address." : null);
   const found = await findZone(lookup, domain);
   const provider = found ? providerForNameservers(found.nameservers) : null;
@@ -100,10 +100,10 @@ export async function checkAddress(env: Env, input: string): Promise<AddressChec
   if (!found) warnings.push(`Crewtavo couldn't find the DNS for ${domain} yet. Check the spelling. A domain bought today can take a little while to show up.`);
   if (root) {
     if (platformOf(env) === "railway" && provider && !provider.rootCname) {
-      if (provider.id !== "other") problem ??= `${provider.label} can't point ${domain} itself at Railway. Use a name under it instead, like app.${domain}.`;
-      else warnings.push(`Pointing ${domain} itself at Railway only works with some DNS providers. A name under it, like app.${domain}, works with all of them.`);
+      if (provider.id !== "other") problem ??= `${provider.label} can't point ${domain} itself at Railway. Use a name under it instead, like crm.${domain}.`;
+      else warnings.push(`Pointing ${domain} itself at Railway only works with some DNS providers. A name under it, like crm.${domain}, works with all of them.`);
     }
-    warnings.push(`If your website is at ${domain}, using it for Crewtavo would replace it. A name like app.${domain} keeps both.`);
+    warnings.push(`If your website is at ${domain}, using it for Crewtavo would replace it. A name like crm.${domain} keeps both.`);
   } else {
     const target = await currentTarget(lookup, domain);
     if (target && !/\.railway\.app$/.test(target)) warnings.push(`${domain} already points somewhere else (${target}). Using it for Crewtavo replaces that.`);

@@ -39,17 +39,21 @@ of credit) is enough to try Crewtavo; to keep running, an instance needs Railway
 month, including $5 of usage). Use grows with data and traffic; check
 [Railway's pricing](https://railway.com/pricing).
 
-**Your own domain:** right after setting up the business, the owner sees **Connect Crewtavo to
-Railway** (Login with Railway: they're still signed in after deploying, so they pick this project and
-press Allow), then **Your web address**:
-- **Get a new domain** opens Railway's Buy a Domain on the crewtavo service. Railway attaches it and
-  runs its DNS, and Crewtavo offers to switch to it as soon as it shows up on the service.
-- **Use a domain I already have** is the flow below.
+**Your own domain:** right after setting up the business, the owner sees **Your web address**: four
+steps on a timeline, ticked off as they're done, with what to do now opened under the current one.
+1. **Log in with Railway.** They're still signed in after deploying, so they pick this project and
+   press Allow.
+2. **Choose your domain.** "Do you already have a domain?"
+   - **Yes, use mine:** the address box starts with `crm.` and they type their domain after it.
+   - **No, get me one:** opens Railway's Buy a Domain on the crewtavo service. Railway attaches it and
+     runs its DNS, and Crewtavo offers to switch to it as soon as it shows up on the service.
+3. **Connect your domain:** the two DNS records, with steps for their DNS provider, or **Email the
+   steps** to whoever looks after the domain. A domain bought on Railway skips this.
+4. **Crewtavo switches over** by itself.
 
-Both can be skipped. **Settings → Web address** does the same any time, and businesses set up before
-this see it only there. For a domain they already have, the owner types the address (like
-`app.yourbusiness.com`). With Railway connected, Crewtavo adds it to the crewtavo service and shows
-the two DNS records Railway wants, with steps for the domain's DNS provider. On Cloudflare it can add
+It can be skipped. **Settings → Web address** shows the same steps any time, and businesses set up
+before this see them only there. With Railway connected, Crewtavo adds the address to the crewtavo
+service and shows the two DNS records Railway wants, with steps for the domain's DNS provider. On Cloudflare it can add
 them itself, from a token used once and never stored. Then it checks the records live. Once Railway has verified the
 address and issued its certificate, and the address answers as this instance, Crewtavo does the rest:
 - sets `APP_URL`
@@ -62,7 +66,8 @@ assistant connectors keep working on both addresses.
 Crewtavo keeps its Railway access afterwards, encrypted, so later features don't ask again. A daily
 task refreshes it before Railway's sign-in runs out, and **Remove access** in Settings → Web address
 ends it. Each instance registers its own client with Railway, so there's no shared app to run. If
-Railway won't register it, the screen asks for a project token instead. By hand, the steps are:
+Railway won't register it, the screen asks for a project token instead. By hand (under **Can't log
+in with Railway?** in step 1), the steps are:
 1. In the crewtavo service, **Settings → Networking → Custom Domain**.
 2. Change its `APP_URL` variable to `https://your-domain`.
 3. Redeploy `crewtavo` and `auth`.

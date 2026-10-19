@@ -9,6 +9,15 @@
 .panel { padding: 14px; border-radius: 10px; background: var(--fill); }
 .divided { padding-top: 16px; border-top: 1px solid var(--divider); }
 
+/* The address box: crm. stays in front and they type their domain after it. */
+.prefixed { display: flex; align-items: center; cursor: text; }
+.prefixed:focus-within { border-color: var(--green); box-shadow: var(--ring); }
+.prefixed:has([aria-invalid="true"]) { border-color: var(--danger); }
+.prefixed:has([aria-invalid="true"]):focus-within { box-shadow: var(--ring-danger); }
+.prefix { flex: none; font-weight: 700; }
+.prefixed > input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; box-shadow: none; outline: none; font: inherit; color: inherit; }
+.prefixed > input:focus { box-shadow: none; }
+
 /* Where it stands: a ring per step, filled once it's done. */
 .progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .progress li { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: var(--text-3); }
@@ -33,3 +42,61 @@
 .details > summary::before { content: ""; width: 7px; height: 7px; margin-right: 4px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-fast); }
 .details[open] > summary { margin-bottom: 12px; }
 .details[open] > summary::before { transform: rotate(45deg); }
+
+/* The steps to your own address: a ring per step on a line, the current one opened up. */
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; }
+.timeline > li { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 14px; padding-bottom: 20px; }
+.timeline > li:last-child { padding-bottom: 0; }
+.timeline > li:not(:last-child)::before { content: ""; position: absolute; left: 13px; top: 32px; bottom: 4px; width: 2px; border-radius: 1px; background: var(--divider); }
+.timeline > li[data-state="done"]::before { background: var(--green-solid); }
+.dot { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border-strong); background: var(--surface); font-size: 13px; font-weight: 800; color: var(--text-3); }
+[data-state="done"] > .dot { background: var(--green-solid); border-color: var(--green-solid); color: var(--on-solid); }
+[data-state="current"] > .dot { border-color: var(--green); color: var(--green); box-shadow: 0 0 0 4px var(--green-tint); }
+.stepTitle { font-size: 15px; line-height: 28px; }
+[data-state="todo"] .stepTitle { color: var(--text-2); }
+.stepNow { position: relative; margin-top: 6px; padding: 16px; border-radius: 12px; background: var(--fill); min-width: 0; }
+@media (max-width: 520px) { .stepNow { margin-left: -42px; padding: 14px; } }
+
+/* Now → your own: two address bars. */
+.move { display: flex; align-items: flex-end; gap: 10px; }
+.moveSide { display: grid; gap: 4px; flex: 1 1 0; min-width: 0; }
+.moveLabel { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.moveArrow { flex: none; padding-bottom: 9px; color: var(--text-3); }
+@media (max-width: 520px) {
+  .move { flex-direction: column; align-items: stretch; gap: 6px; }
+  .moveSide { flex: none; }
+  .moveArrow { align-self: center; padding: 0; transform: rotate(90deg); }
+}
+.bar { display: flex; align-items: center; gap: 7px; min-width: 0; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--fill); font-size: 13px; font-weight: 700; }
+.bar > svg { flex: none; color: var(--text-3); }
+.barText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar[data-tone="old"] { color: var(--text-2); font-weight: 600; }
+.bar[data-tone="new"] { border-color: transparent; background: var(--green-tint); color: var(--green-dark); }
+.bar[data-tone="new"] > svg { color: var(--green); }
+.bar[data-tone="example"] { border-style: dashed; background: none; color: var(--text-3); }
+.preview { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.preview > .bar { flex: 0 1 auto; }
+
+/* Step 1: the sign-in, with a small sketch of Railway's screen beside it. */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 16px; align-items: start; }
+@media (max-width: 640px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.sketch { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-xs); font-size: 12px; }
+.sketchTop { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--divider); color: var(--text-3); font-weight: 700; }
+.sketchTop i { width: 7px; height: 7px; border-radius: 50%; background: var(--fill-2); }
+.sketchTop span { margin-left: 6px; }
+.sketchBody { display: grid; gap: 10px; padding: 12px; }
+.sketchRow { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-2); font-weight: 600; }
+.sketchRow b { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--green-solid); color: var(--on-solid); font-size: 11px; }
+.sketchSelect { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--ink); }
+.sketchAllow { display: inline-grid; place-items: center; height: 28px; padding: 0 16px; border-radius: 6px; background: var(--ink); color: var(--surface); font-weight: 700; }
+
+/* Step 2: the domain they have, or a new one. */
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+.choice { display: grid; align-content: start; justify-items: start; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-xs); text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color var(--dur-fast), transform var(--dur-fast); }
+.choice:hover { border-color: var(--green); transform: translateY(-1px); }
+.choice:focus-visible { outline: none; box-shadow: var(--ring); }
+.choice strong { font-size: 15px; }
+.choiceIcon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--green-tint); color: var(--green); }
+
+/* Step 3: send the records to whoever looks after the domain. */
+.send { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
