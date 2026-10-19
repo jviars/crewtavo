@@ -1,11 +1,11 @@
 /**
- * Other calendars on the schedule, managed from each calendar app's page: add one by its ICS link,
- * pick calendars from a connected Google account, assign a calendar to a crew, and (Google) put
- * visits on a Google calendar.
+ * Other calendars on the schedule, managed from each calendar app's page and Settings: add one by
+ * its ICS link or from a file, pick calendars from a connected Google account, assign a calendar
+ * to a crew, and (Google) put visits on a Google calendar.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type CSSProperties, type FormEvent } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, Spinner } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
@@ -13,13 +13,16 @@ import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
+import { CALENDAR_FILE_TYPES, pickCalendar, readCalendarFiles } from "./calendarFiles";
 import { CALENDAR_NOUNS } from "./catalog";
 
 export interface CalendarSource {
   id: string;
-  kind: "ics" | "google";
+  kind: "ics" | "google" | "file";
   app: string;
   name: string;
   color: string | null;
@@ -74,13 +77,24 @@ export function CalendarRow({ source }: { source: CalendarSource }) {
   const crews = useCrews();
   const refresh = useRefreshCalendars();
   const [editing, setEditing] = useState(false);
+  const file = source.kind === "file";
   const sync = useMutation({
     meta: { success: (s: CalendarSource) => `${s.name} is up to date` },
     mutationFn: () => api.post<CalendarSource>(`/calendars/${source.id}/refresh`),
     onSettled: refresh,
   });
+  // A file calendar changes when its file is uploaded again (a .zip's calendar of the same name).
+  const reupload = useMutation({
+    meta: { inline: true, success: (s: CalendarSource) => `${s.name} updated · ${s.event_count} ${s.event_count === 1 ? "event" : "events"}` },
+    mutationFn: async (chosen: File) => {
+      const picked = pickCalendar(await readCalendarFiles(chosen), source.name);
+      return api.post<CalendarSource>(`/calendars/${source.id}/file`, { text: picked.text });
+    },
+    onSettled: refresh,
+  });
   const crew = crews.data?.find((c) => c.id === source.crew_id);
-  const where = source.kind === "google" ? "Google" : source.host;
+  const where = source.kind === "google" ? "Google" : file ? "From a file" : source.host;
+  const when = source.last_synced_at ? `${file ? "uploaded" : "updated"} ${timeAgo(source.last_synced_at)}` : null;
   return (
     <div className="cal-source" data-off={!source.enabled || undefined}>
       <span className="cal-swatch" style={{ "--c": source.color ?? "var(--text-4)" } as CSSProperties} aria-hidden="true" />
@@ -89,14 +103,27 @@ export function CalendarRow({ source }: { source: CalendarSource }) {
         <span className="muted small">
           {!source.enabled
             ? "Off"
-            : [crew ? `${crew.name}'s time` : "Whole team", `${source.event_count} ${source.event_count === 1 ? "event" : "events"}`, source.last_synced_at ? `updated ${timeAgo(source.last_synced_at)}` : null, source.show_details ? null : "shown as Busy"]
+            : [crew ? `${crew.name}'s time` : "Whole team", `${source.event_count} ${source.event_count === 1 ? "event" : "events"}`, when, source.show_details ? null : "shown as Busy"]
                 .filter(Boolean)
                 .join(" · ")}
           {where && <span className="cal-host"> · {where}</span>}
         </span>
         {source.last_error && source.enabled && <span className="small" style={{ color: "var(--danger)", fontWeight: 600 }}><Icon name="alert" size={13} /> {source.last_error}</span>}
+        {reupload.error && <FormError error={reupload.error} />}
       </div>
-      {source.enabled && <Button size="sm" variant="ghost" icon="refresh" aria-label={`Refresh ${source.name} now`} title="Refresh now" loading={sync.isPending} onClick={() => sync.mutate()} />}
+      {file ? (
+        <label className="btn btn-ghost btn-sm btn-icon" title="Upload the file again" aria-busy={reupload.isPending || undefined}>
+          {reupload.isPending ? <Spinner size={14} /> : <Icon name="upload" size={14} />}
+          <span className="sr-only">Upload {source.name} again</span>
+          <input
+            type="file"
+            accept={CALENDAR_FILE_TYPES}
+            className="sr-only"
+            disabled={reupload.isPending}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) reupload.mutate(f); }}
+          />
+        </label>
+      ) : source.enabled && <Button size="sm" variant="ghost" icon="refresh" aria-label={`Refresh ${source.name} now`} title="Refresh now" loading={sync.isPending} onClick={() => sync.mutate()} />}
       <Button size="sm" variant="ghost" icon="edit" aria-label={`Change ${source.name}`} title="Change" onClick={() => setEditing(true)} />
       {editing && <EditCalendarDialog source={source} crews={crews.data ?? []} onClose={() => setEditing(false)} />}
     </div>
@@ -134,7 +161,8 @@ function EditCalendarDialog({ source, crews, onClose }: { source: CalendarSource
   const [enabled, setEnabled] = useState(source.enabled);
   const save = useMutation({
     meta: { inline: true, success: "Calendar saved" },
-    mutationFn: () => api.patch<CalendarSource>(`/calendars/${source.id}`, { name: name.trim(), color, crew_id: crewId || null, show_details: details, blocks_time: blocks, enabled }),
+    mutationFn: () =>
+      api.patch<CalendarSource>(`/calendars/${source.id}`, { name: name.trim(), color, crew_id: crewId || null, show_details: details, blocks_time: blocks, ...(source.kind === "file" ? {} : { enabled }) }),
     onSuccess: () => {
       refresh();
       onClose();
@@ -157,17 +185,21 @@ function EditCalendarDialog({ source, crews, onClose }: { source: CalendarSource
           <CrewSelect value={crewId} onChange={setCrewId} crews={crews} />
         </Field>
         <CalendarSwitches details={details} setDetails={setDetails} blocks={blocks} setBlocks={setBlocks} />
-        <label className="switch-row">
-          <input type="checkbox" className="switch" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          Show on the schedule
-        </label>
+        {source.kind === "file" ? (
+          details && !source.show_details && <span className="muted small">The names were never kept, so they come back when you upload the file again.</span>
+        ) : (
+          <label className="switch-row">
+            <input type="checkbox" className="switch" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            Show on the schedule
+          </label>
+        )}
         <FormError error={save.error ?? remove.error} />
         <div className="form-actions" style={{ justifyContent: "space-between" }}>
           <Button
             variant="danger"
             icon="trash"
             loading={remove.isPending}
-            onClick={async () => (await confirm({ title: `Remove ${source.name}?`, body: "Its events come off the schedule. The calendar itself isn't changed.", confirmLabel: "Remove", danger: true })) && remove.mutate()}
+            onClick={async () => (await confirm({ title: `Remove ${source.name}?`, body: source.kind === "file" ? "Its events come off the schedule. Upload the file again to bring them back." : "Its events come off the schedule. The calendar itself isn't changed.", confirmLabel: "Remove", danger: true })) && remove.mutate()}
           >
             Remove
           </Button>
@@ -200,7 +232,8 @@ function CalendarSwitches({ details, setDetails, blocks, setBlocks }: { details:
 // Calendars added by link (Zoho, Outlook, Apple, any ICS link, or Google's secret address)
 // ---------------------------------------------------------------------------------------------
 
-export function AddCalendarForm({ app, appName, steps, onAdded }: { app: string; appName: string; steps?: string[]; onAdded?: () => void }) {
+/** `addOnPaste`: a pasted link is added at once, so the last step is just pasting. */
+export function AddCalendarForm({ app, appName, steps, onAdded, addOnPaste }: { app: string; appName: string; steps?: string[]; onAdded?: () => void; addOnPaste?: boolean }) {
   const crews = useCrews();
   const refresh = useRefreshCalendars();
   const [url, setUrl] = useState("");
@@ -210,7 +243,7 @@ export function AddCalendarForm({ app, appName, steps, onAdded }: { app: string;
   const [blocks, setBlocks] = useState(true);
   const add = useMutation({
     meta: { inline: true, success: (s: CalendarSource) => (s.last_error ? `${s.name} added, but it couldn't be read yet` : `${s.name} added · ${s.event_count} ${s.event_count === 1 ? "event" : "events"}`) },
-    mutationFn: () => api.post<CalendarSource>("/calendars", { url: url.trim(), app, name: name.trim() || undefined, crew_id: crewId || null, show_details: details, blocks_time: blocks }),
+    mutationFn: (link: string) => api.post<CalendarSource>("/calendars", { url: link.trim(), app, name: name.trim() || undefined, crew_id: crewId || null, show_details: details, blocks_time: blocks }),
     onSuccess: () => {
       setUrl("");
       setName("");
@@ -219,7 +252,7 @@ export function AddCalendarForm({ app, appName, steps, onAdded }: { app: string;
     },
   });
   return (
-    <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); if (url.trim()) add.mutate(); }} aria-label={`Add ${CALENDAR_NOUNS[app] ?? `a ${appName} calendar`}`}>
+    <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); if (url.trim()) add.mutate(url); }} aria-label={`Add ${CALENDAR_NOUNS[app] ?? `a ${appName} calendar`}`}>
       {steps && steps.length > 0 && (
         <ol className="app-steps">
           {steps.map((s) => <li key={s}>{s}</li>)}
@@ -227,7 +260,26 @@ export function AddCalendarForm({ app, appName, steps, onAdded }: { app: string;
         </ol>
       )}
       <Field label="Calendar link" hint="Starts with https:// or webcal://. It's kept encrypted and never shown again.">
-        <input className="input" inputMode="url" autoComplete="off" spellCheck={false} placeholder="webcal://… or https://….ics" value={url} onChange={(e) => { setUrl(e.target.value); add.reset(); }} required />
+        <input
+          className="input"
+          inputMode="url"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="webcal://… or https://….ics"
+          value={url}
+          disabled={add.isPending}
+          onChange={(e) => { setUrl(e.target.value); add.reset(); }}
+          onPaste={(e) => {
+            const pasted = e.clipboardData.getData("text").trim();
+            // Links, and the calendar IDs people copy by mistake (the server says what to copy instead).
+            if (!addOnPaste || !(/^(https?|webcals?):\/\//i.test(pasted) || /^[^\s/]+@[^\s/]+$/.test(pasted))) return;
+            e.preventDefault();
+            setUrl(pasted);
+            add.reset();
+            add.mutate(pasted);
+          }}
+          required
+        />
       </Field>
       <div className="form-grid">
         <Field label="Name" optional><input className="input" value={name} maxLength={80} placeholder="Uses the calendar's own name" onChange={(e) => setName(e.target.value)} /></Field>
@@ -235,15 +287,109 @@ export function AddCalendarForm({ app, appName, steps, onAdded }: { app: string;
       </div>
       <CalendarSwitches details={details} setDetails={setDetails} blocks={blocks} setBlocks={setBlocks} />
       <FormError error={add.error} />
-      <div><Button type="submit" variant="primary" icon="plus" loading={add.isPending} disabled={!url.trim()}>Add calendar</Button></div>
+      <div><Button type="submit" variant="primary" icon="plus" loading={add.isPending} disabled={!url.trim()}>{add.isPending ? "Adding…" : "Add calendar"}</Button></div>
     </form>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Calendars from a file (an .ics, or the .zip Google Calendar's Export downloads)
+// ---------------------------------------------------------------------------------------------
+
+interface Uploaded {
+  name: string;
+  ok: boolean;
+  text: string;
+}
+
+export function UploadCalendarForm() {
+  const crews = useCrews();
+  const refresh = useRefreshCalendars();
+  const [crewId, setCrewId] = useState("");
+  const [details, setDetails] = useState(true);
+  const [blocks, setBlocks] = useState(true);
+  const [over, setOver] = useState(false);
+  const [results, setResults] = useState<Uploaded[]>([]);
+  const upload = useMutation({
+    meta: { inline: true },
+    mutationFn: async (chosen: File) => {
+      setResults([]);
+      const done: Uploaded[] = [];
+      // One calendar at a time: a .zip from Google has one file per calendar.
+      for (const file of await readCalendarFiles(chosen)) {
+        try {
+          const s = await api.post<CalendarSource & { truncated?: boolean }>("/calendars/file", {
+            text: file.text,
+            file_name: file.fileName,
+            crew_id: crewId || null,
+            show_details: details,
+            blocks_time: blocks,
+          });
+          done.push({ name: s.name, ok: true, text: `${s.event_count.toLocaleString()} ${s.event_count === 1 ? "event" : "events"}${s.truncated ? " (the earliest; the file has more)" : ""}` });
+        } catch (error) {
+          done.push({ name: file.name ?? file.fileName, ok: false, text: errorMessage(error) });
+        }
+      }
+      return done;
+    },
+    onSuccess: (done) => {
+      setResults(done);
+      const added = done.filter((d) => d.ok).length;
+      if (added) toast.success(added === 1 ? `${done.find((d) => d.ok)!.name} is on the schedule` : `${added} calendars are on the schedule`);
+    },
+    onSettled: refresh,
+  });
+  const choose = (file: File | undefined) => file && !upload.isPending && upload.mutate(file);
+  return (
+    <div className="stack">
+      <details className="app-details">
+        <summary>How to export a calendar</summary>
+        <ul className="app-steps" style={{ marginTop: 8 }}>
+          <li><strong>Google Calendar</strong>, on a computer: open Settings (the gear), then <strong>Import &amp; export</strong>, then <strong>Export</strong>. Choose the .zip file it downloads here. There's no need to open it.</li>
+          <li><strong>Apple Calendar</strong> on a Mac: click the calendar, then <strong>File → Export → Export</strong>.</li>
+          <li><strong>Outlook</strong> for Windows: <strong>File → Save Calendar</strong>.</li>
+        </ul>
+      </details>
+      <div className="form-grid">
+        <Field label="Whose time is it?"><CrewSelect value={crewId} onChange={setCrewId} crews={crews.data ?? []} /></Field>
+      </div>
+      <CalendarSwitches details={details} setDetails={setDetails} blocks={blocks} setBlocks={setBlocks} />
+      <label
+        className="dropzone"
+        data-over={over || undefined}
+        aria-busy={upload.isPending || undefined}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); choose(e.dataTransfer.files[0]); }}
+      >
+        {upload.isPending ? <Spinner size={28} /> : <Icon name="upload" size={28} />}
+        <strong>{upload.isPending ? "Reading your calendar…" : "Drop a calendar file here, or click to choose"}</strong>
+        <span className="small">An .ics file, or the .zip from Google Calendar's Export.</span>
+        <input type="file" accept={CALENDAR_FILE_TYPES} className="sr-only" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; choose(f); }} />
+      </label>
+      {results.length > 0 && (
+        <ul className="stack-sm" style={{ listStyle: "none", margin: 0, padding: 0 }} aria-label="Upload results">
+          {results.map((r, i) => (
+            <li key={`${r.name}-${i}`} className="row small" style={{ gap: 8, alignItems: "flex-start", color: r.ok ? undefined : "var(--danger)" }}>
+              <Icon name={r.ok ? "check" : "alert"} size={15} />
+              <span><strong>{r.name}</strong>: {r.ok ? `added, ${r.text}` : r.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <FormError error={upload.error} />
+      <span className="muted small">
+        A file shows the calendar as it is today, from last month through the next year. It doesn't change when the calendar does: upload it again to catch up, or
+        add the calendar by its link to keep it current.
+      </span>
+    </div>
   );
 }
 
 /** A calendar app's calendars and the form to add one. */
 export function LinkCalendarsPanel({ app, appName, steps }: { app: string; appName: string; steps?: string[] }) {
   const calendars = useCalendars();
-  const mine = (calendars.data?.calendars ?? []).filter((s) => s.app === app && s.kind === "ics");
+  const mine = (calendars.data?.calendars ?? []).filter((s) => s.app === app && s.kind !== "google");
   return (
     <>
       <section className="card" aria-labelledby={`${app}-calendars`}>
