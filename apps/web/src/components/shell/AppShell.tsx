@@ -2,12 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigation, useViewTransitionState } from "react-router-dom";
 import { supabase } from "@/lib/api";
-import { can, hasRole, useSession } from "@/lib/session";
+import { useSession } from "@/lib/session";
 import { prefetchScreens } from "@/routes";
 import { Icon } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { CommandPalette, openPalette } from "./CommandPalette";
-import { MOBILE_TABS, NAV_GROUPS, navVisible, SETTINGS_ITEM, type NavItem } from "./nav";
+import { createItems, MOBILE_TABS, NAV_GROUPS, navVisible, SETTINGS_ITEM, type NavItem } from "./nav";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
 
@@ -221,21 +221,7 @@ function Screen() {
 }
 
 function useCreateItems() {
-  const session = useSession();
-  const canSell = hasRole(session, "admin", "office", "estimator");
-  const canQuote = canSell && can(session, "sales");
-  return [
-    ...(canSell
-      ? [
-          { to: "/clients?new=1", label: "Client", icon: "clients" as const },
-          { to: "/requests?new=1", label: "Request", icon: "requests" as const },
-          ...(canQuote ? [{ to: "/quotes?new=1", label: "Quote", icon: "quote" as const }] : []),
-          { to: "/measure", label: "Measurement", icon: "area" as const },
-        ]
-      : []),
-    ...(hasRole(session, "admin", "office") && can(session, "invoices") ? [{ to: "/invoices?new=1", label: "Invoice", icon: "invoice" as const }] : []),
-    ...(hasRole(session, "admin", "office", "estimator", "crew_lead") && can(session, "schedule") ? [{ to: "/schedule?new=1", label: "Visit or task", icon: "calendar" as const }] : []),
-  ];
+  return createItems(useSession());
 }
 
 /** "Create" in the sidebar: the things people start most often. */

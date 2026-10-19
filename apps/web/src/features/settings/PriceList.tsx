@@ -1,6 +1,7 @@
 /** Products and services: prices and costs that fill quotes, with optional measurement formulas. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
@@ -19,7 +20,10 @@ export function PriceList() {
   const session = useSession();
   const queryClient = useQueryClient();
   const canEdit = hasRole(session, "admin", "office", "estimator") && can(session, "settings");
-  const [term, setTerm] = useState("");
+  // Search opens the price list on one service (?q=its name).
+  const linked = useSearchParams()[0].get("q") ?? "";
+  const [term, setTerm] = useState(linked);
+  useEffect(() => setTerm(linked), [linked]);
   const [showInactive, setShowInactive] = useState(false);
   const [importing, setImporting] = useState(false);
   const key = ["services", session.company.id, "all"];

@@ -1,17 +1,19 @@
 /**
- * ⌘K / Ctrl+K: search every client, address, request, quote, job, invoice and piece of equipment, jump to any screen,
- * or start something new. "/" also opens it when you're not typing in a field.
+ * ⌘K / Ctrl+K: search every client, address, request, quote, job, invoice, measurement, guide, campaign,
+ * automation, price list service and piece of equipment, jump to any screen or section of Settings, or
+ * start something new. "/" also opens it when you're not typing in a field.
  */
 import { kindLabel } from "@crewtavo/core/equipment";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { settingsGroups } from "@/features/settings/sections";
 import { getRecents } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { Spinner } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
-import { NAV_GROUPS, navVisible } from "./nav";
+import { createItems, NAV_GROUPS, navVisible, OTHER_SCREENS } from "./nav";
 
 let opener: (() => void) | null = null;
 export const openPalette = () => opener?.();
@@ -26,17 +28,28 @@ interface Item {
   run: () => void;
 }
 
-const KIND_ICON: Record<string, IconName> = { client: "clients", property: "pin", request: "requests", quote: "quote", job: "job", invoice: "invoice", equipment: "truck" };
-const KIND_PATH: Record<string, (id: string, clientId: string | null) => string> = {
-  client: (id) => `/clients/${id}`,
-  property: (_id, clientId) => `/clients/${clientId}`,
-  request: (id) => `/requests/${id}`,
-  quote: (id) => `/quotes/${id}`,
-  job: (id) => `/jobs/${id}`,
-  invoice: (id) => `/invoices/${id}`,
-  equipment: (id) => `/equipment/${id}`,
+const KIND_ICON: Record<string, IconName> = {
+  client: "clients", property: "pin", request: "requests", quote: "quote", job: "job", invoice: "invoice", equipment: "truck",
+  measurement: "area", kb: "book", campaign: "marketing", rule: "bolt", service: "list",
 };
-const KIND_LABEL: Record<string, string> = { client: "Client", property: "Property", request: "Request", quote: "Quote", job: "Job", invoice: "Invoice", equipment: "Equipment" };
+const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; title: string }) => string> = {
+  client: (r) => `/clients/${r.id}`,
+  property: (r) => `/clients/${r.client_id}`,
+  request: (r) => `/requests/${r.id}`,
+  quote: (r) => `/quotes/${r.id}`,
+  job: (r) => `/jobs/${r.id}`,
+  invoice: (r) => `/invoices/${r.id}`,
+  equipment: (r) => `/equipment/${r.id}`,
+  measurement: (r) => `/measure?measurement=${r.id}`,
+  kb: (r) => `/kb/${r.id}`,
+  campaign: (r) => `/marketing/campaigns/${r.id}`,
+  rule: (r) => `/automations/${r.id}`,
+  service: (r) => `/settings?tab=prices&q=${encodeURIComponent(r.title)}`,
+};
+const KIND_LABEL: Record<string, string> = {
+  client: "Client", property: "Property", request: "Request", quote: "Quote", job: "Job", invoice: "Invoice", equipment: "Equipment",
+  measurement: "Measurement", kb: "Guide", campaign: "Campaign", rule: "Automation", service: "Price list",
+};
 
 export function CommandPalette() {
   const session = useSession();
@@ -97,7 +110,7 @@ export function CommandPalette() {
       const equipment: Array<Omit<(typeof records)[number], "number" | "client_id"> & { number: number | null; client_id: string | null }> = unwrap(gear).map((g) => ({
         kind: "equipment", id: g.id, title: g.name, subtitle: [kindLabel(g.kind), g.make, g.model].filter(Boolean).join(" "), status: "", number: null, client_id: null,
       }));
-      return [...records, ...equipment];
+      return [...records.filter((r) => KIND_PATH[r.kind]), ...equipment];
     },
   });
 
@@ -107,43 +120,48 @@ export function CommandPalette() {
   };
 
   const items = useMemo<Item[]>(() => {
-    const canSell = hasRole(session, "admin", "office", "estimator");
     const isOffice = hasRole(session, "admin", "office");
+    const creates: Item[] = createItems(session).map((c) => ({ id: `new-${c.to}`, group: "Create", icon: c.icon, title: `New ${c.label.toLowerCase()}`, keywords: `add ${c.keywords}`, run: () => go(c.to) }));
     const actions: Item[] = [
-      ...(canSell
-        ? [
-            { id: "new-client", group: "Create", icon: "clients" as IconName, title: "New client", keywords: "add customer lead", run: () => go("/clients?new=1") },
-            { id: "new-request", group: "Create", icon: "requests" as IconName, title: "New request", keywords: "inquiry lead", run: () => go("/requests?new=1") },
-            ...(can(session, "sales") ? [{ id: "new-quote", group: "Create", icon: "quote" as IconName, title: "New quote", keywords: "estimate proposal", run: () => go("/quotes?new=1") }] : []),
-          ]
-        : []),
-      ...(isOffice && can(session, "invoices") ? [{ id: "new-invoice", group: "Create", icon: "invoice" as IconName, title: "New invoice", keywords: "bill", run: () => go("/invoices?new=1") }] : []),
-      ...(hasRole(session, "admin", "office", "estimator", "crew_lead") && can(session, "schedule")
-        ? [{ id: "new-visit", group: "Create", icon: "calendar" as IconName, title: "New visit or task", keywords: "schedule appointment", run: () => go("/schedule?new=1") }]
-        : []),
+      ...creates,
+      ...(isOffice && can(session, "kb_edit") ? [{ id: "new-guide", group: "Create", icon: "book" as IconName, title: "New guide", keywords: "add knowledge base sop procedure page", run: () => go("/kb/new") }] : []),
+      ...(isOffice && can(session, "automations") ? [{ id: "new-rule", group: "Create", icon: "bolt" as IconName, title: "New automation", keywords: "add rule reminder follow up", run: () => go("/automations/new") }] : []),
     ];
-    const screens: Item[] = NAV_GROUPS.flat()
+    const screens: Item[] = [...NAV_GROUPS.flat(), ...OTHER_SCREENS]
       .filter((n) => navVisible(session, n))
-      .map((n) => ({ id: `go-${n.to}`, group: "Go to", icon: n.icon, title: n.label, keywords: n.to, run: () => go(n.to) }));
-    screens.push({ id: "go-settings", group: "Go to", icon: "settings", title: "Settings", keywords: "company team crews price list profile", run: () => go("/settings") });
+      .map((n) => ({ id: `go-${n.to}`, group: "Go to", icon: n.icon, title: n.label, keywords: `${n.to} ${n.keywords ?? ""}`, run: () => go(n.to) }));
+    screens.push({ id: "go-settings", group: "Go to", icon: "settings", title: "Settings", keywords: "preferences options setup", run: () => go("/settings") });
+    const settings: Item[] = settingsGroups(session).flatMap((g) =>
+      g.items.map((s) => {
+        const to = "tab" in s ? `/settings?tab=${s.tab}` : s.to;
+        return { id: `go-${to}`, group: "Go to", icon: s.icon, title: s.label, subtitle: "Settings", keywords: `${g.title} ${s.keywords}`, run: () => go(to) };
+      }),
+    );
 
     const q = query.trim().toLowerCase();
     if (!q) {
       const recents: Item[] = getRecents(session.company.id).map((r) => ({
         id: `recent-${r.kind}-${r.id}`, group: "Recent", icon: KIND_ICON[r.kind] ?? "file", title: r.title, subtitle: r.subtitle, run: () => go(r.path),
       }));
-      return [...actions, ...recents, ...screens.slice(0, 6)];
+      return [...creates, ...recents, ...screens.slice(0, 6)];
     }
-    const match = (i: Item) => `${i.title} ${i.keywords ?? ""}`.toLowerCase().includes(q);
+    // Every word has to appear somewhere; a screen or action whose name starts with what was typed
+    // comes first, so "measure" or "price" opens the screen before records that mention it.
+    const words = q.split(/\s+/);
+    const local = [...actions, ...screens, ...settings].filter((i) => {
+      const text = `${i.title} ${i.subtitle ?? ""} ${i.keywords ?? ""}`.toLowerCase();
+      return words.every((w) => text.includes(w));
+    });
+    const best = local.filter((i) => i.title.toLowerCase().startsWith(q)).map((i) => ({ ...i, group: "Best match" }));
     const records: Item[] = (results.data ?? []).map((r) => ({
       id: `${r.kind}-${r.id}`,
       group: "Results",
       icon: KIND_ICON[r.kind] ?? "file",
       title: r.number ? `${r.title} · #${r.number}` : r.title,
       subtitle: [KIND_LABEL[r.kind], r.subtitle].filter(Boolean).join(" · "),
-      run: () => go(KIND_PATH[r.kind](r.id, r.client_id)),
+      run: () => go(KIND_PATH[r.kind](r)),
     }));
-    return [...records, ...actions.filter(match), ...screens.filter(match)];
+    return [...best, ...records, ...local.filter((i) => !best.some((b) => b.id === i.id))];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, results.data, session.company.id, session.role, session.permissions]);
 
@@ -189,7 +207,7 @@ export function CommandPalette() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Search clients, addresses, quotes, jobs, invoices… or type a command"
+              placeholder="Search anything: clients, jobs, measurements, settings… or type a command"
               aria-label="Search"
               role="combobox"
               aria-expanded="true"
