@@ -11,9 +11,10 @@ import { can, hasRole, useSession } from "@/lib/session";
 export interface AppRow {
   id: string;
   name: string;
-  category: "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging";
+  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging";
   description: string;
-  auth: "oauth" | "api_key" | "link" | "connector";
+  /** builtin: part of Crewtavo, turned on or off here (team chat). */
+  auth: "oauth" | "api_key" | "link" | "connector" | "builtin";
   docs: string;
   available: boolean;
   redirect_uri: string | null;
@@ -60,6 +61,7 @@ export function useApps() {
 }
 
 export const CATEGORY_LABELS: Record<AppRow["category"], string> = {
+  Team: "Built into Crewtavo",
   Calendar: "Calendars",
   AI: "AI assistants",
   Accounting: "Accounting",
@@ -69,6 +71,7 @@ export const CATEGORY_LABELS: Record<AppRow["category"], string> = {
 
 /** The row of related apps at the bottom of an app's page. */
 export const MORE_LABELS: Record<AppRow["category"], string> = {
+  Team: "More built-in apps",
   Calendar: "More calendars",
   AI: "More AI assistants",
   Accounting: "More accounting apps",
@@ -108,6 +111,20 @@ const CALENDAR_HIGHLIGHTS: AppInfo["highlights"] = [
 export const LINK_ACCESS = ["Read the events on the calendars you add", "Nothing else: it can't change the calendar"];
 
 export const APP_INFO: Record<string, AppInfo> = {
+  team_chat: {
+    developer: "Crewtavo",
+    tagline: "Channels for the whole team, each crew and the office",
+    about:
+      "Talk to your team where the work already is. Post news everyone reads in Announcements, keep each crew's day in its own channel, and keep quotes and billing in the office's. Who sees each channel goes by role, the same roles as Settings → Roles, so field crew only see what's theirs. Share photos from the job, link a job so everyone opens the same one, and @mention a person or a whole role to get their attention, with a push to their phone.",
+    highlights: [
+      { icon: "hash", title: "Channels by role", text: "Announcements, the whole team, each crew and the office. You decide who sees and posts in each." },
+      { icon: "mention", title: "@mentions", text: "Mention someone or a whole role, like @Field crew. They get a push on their phone." },
+      { icon: "camera", title: "Photos and jobs", text: "Send photos from the job site and link a job so everyone opens the same one." },
+    ],
+    access: ["Show chat to the people on your team, by their role", "Keep messages and photos in your own Crewtavo, like everything else", "Turning it off hides chat and keeps every message"],
+    connectsWith: "Built into Crewtavo",
+    website: "https://crewtavo.com/docs/connections/team-chat/",
+  },
   google_calendar: {
     developer: "Google",
     tagline: "Your Google calendars on the schedule, and visits on Google",

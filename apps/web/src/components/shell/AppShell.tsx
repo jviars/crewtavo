@@ -7,7 +7,8 @@ import { prefetchScreens } from "@/routes";
 import { Icon } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { CommandPalette, openPalette } from "./CommandPalette";
-import { createItems, MOBILE_TABS, NAV_GROUPS, navVisible, SETTINGS_ITEM, type NavItem } from "./nav";
+import { useChatBadge, useChatLive } from "@/features/chat/data";
+import { createItems, featureOn, MOBILE_TABS, NAV_GROUPS, navVisible, SETTINGS_ITEM, type NavItem } from "./nav";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
 
@@ -64,6 +65,9 @@ export function AppShell() {
   const navigation = useNavigation();
   const online = useOnline();
   const counts = useNewRequests();
+  const chat = useChatBadge();
+  useChatLive();
+  const tabs = MOBILE_TABS.filter((item) => !item.feature || featureOn(session.company.settings, item.feature));
 
   useEffect(() => {
     prefetchScreens();
@@ -87,7 +91,12 @@ export function AppShell() {
     setMoreOpen(false);
   }, [location.pathname]);
 
-  const badge = (item: NavItem) => (item.to === "/requests" && counts.data?.requests ? <span className="badge badge-green nav-badge">{counts.data.requests}</span> : null);
+  const badge = (item: NavItem) => {
+    if (item.to === "/requests" && counts.data?.requests) return <span className="badge badge-green nav-badge">{counts.data.requests}</span>;
+    if (item.to === "/chat" && chat.mentions) return <span className="badge badge-red nav-badge" aria-label={`${chat.mentions} ${chat.mentions === 1 ? "mention" : "mentions"}`}>{chat.mentions}</span>;
+    if (item.to === "/chat" && chat.unread) return <span className="nav-badge nav-dot" aria-label="New messages" />;
+    return null;
+  };
   // A section stays highlighted on its related screens (Settings while in Automations, and so on).
   const within = (item: NavItem) => (item.also ?? []).some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
   const navClass = (item: NavItem) => ({ isActive }: { isActive: boolean }) => `nav-link${isActive || within(item) ? " active" : ""}`;
@@ -168,10 +177,13 @@ export function AppShell() {
         <Screen key={location.pathname} />
       </div>
 
-      <nav className="mobile-nav" aria-label="Primary">
-        {MOBILE_TABS.map((item) => (
+      <nav className="mobile-nav" aria-label="Primary" style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, 1fr)` }}>
+        {tabs.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.to === "/"} viewTransition>
-            <Icon name={item.icon} size={22} />
+            <span className="mobile-tab-icon">
+              <Icon name={item.icon} size={22} />
+              {item.to === "/chat" && (chat.mentions ? <span className="badge badge-red mobile-tab-badge">{chat.mentions}</span> : chat.unread ? <span className="nav-dot mobile-tab-badge" /> : null)}
+            </span>
             {item.label}
           </NavLink>
         ))}
@@ -213,8 +225,10 @@ function Screen() {
   const location = useLocation();
   const transitioning = useViewTransitionState(location.pathname);
   const [crossFaded] = useState(transitioning);
+  // Team chat fills the screen edge to edge, like a messaging app; its settings are a normal page.
+  const flush = /^\/chat(\/|$)/.test(location.pathname) && !location.pathname.startsWith("/chat/settings");
   return (
-    <main className="content" data-crossfade={crossFaded || undefined}>
+    <main className={flush ? "content content-flush" : "content"} data-crossfade={crossFaded || undefined}>
       <Outlet />
     </main>
   );

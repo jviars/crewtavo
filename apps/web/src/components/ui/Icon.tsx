@@ -1,11 +1,11 @@
 /** Icons used across the app, from Lucide (24px grid, 2px stroke). Decorative unless given a label. */
 import {
-  Archive, ArrowLeft, ArrowRight, Bell, Bold, BookOpen, Calendar, CalendarCheck, Camera, ChartColumn, Check, ChevronDown, ChevronLeft,
-  ChevronRight, ChevronUp, ClipboardCheck, Clock, Cloud, Command, Copy, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileText,
-  Funnel, Gauge, Gift, Globe, GripVertical, Heading, Hexagon, History, House, Image, Inbox, Info, Italic, Kanban, Layers, LayoutGrid, Link,
-  List, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, Minus, Monitor, Moon, MousePointer2, Navigation,
-  Pause, Pencil, Percent, Phone, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Search, Send, SeparatorHorizontal,
-  Settings, Share, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Tag, ThumbsUp, Trash, TriangleAlert, Truck, Underline, Undo2, Upload,
+  Archive, ArchiveRestore, ArrowLeft, AtSign, ArrowRight, Bell, Bold, BookOpen, Calendar, CalendarCheck, Camera, ChartColumn, Check, ChevronDown, ChevronLeft,
+  ChevronRight, ChevronUp, CircleCheck, ClipboardCheck, Clock, Cloud, Command, Copy, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileText,
+  Funnel, Gauge, Gift, Globe, GripVertical, Hash, Heading, Hexagon, History, House, Image, Inbox, Info, Italic, Kanban, Layers, LayoutGrid, Link,
+  List, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, MessagesSquare, Minus, Monitor, Moon, MousePointer2, Navigation,
+  Pause, Pencil, Percent, Phone, Pin, PinOff, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Reply, Search, Send, SeparatorHorizontal,
+  Settings, Share, SmilePlus, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Tag, ThumbsUp, Trash, TriangleAlert, Truck, Underline, Undo2, Upload,
   User, Users, WifiOff, Wrench, X, Zap, type LucideIcon,
 } from "lucide-react";
 
@@ -107,6 +107,16 @@ const ICONS = {
   moon: Moon,
   monitor: Monitor,
   share: Share,
+  chat: MessagesSquare,
+  hash: Hash,
+  megaphone: Megaphone,
+  reply: Reply,
+  react: SmilePlus,
+  mention: AtSign,
+  onIt: CircleCheck,
+  pushpin: Pin,
+  unpin: PinOff,
+  restore: ArchiveRestore,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

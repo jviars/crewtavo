@@ -11,6 +11,7 @@
     "./money": "./src/money.ts",
     "./formulas": "./src/formulas.ts",
     "./roles": "./src/roles.ts",
+    "./chat": "./src/chat.ts",
     "./database": "./src/database.types.ts",
     "./time": "./src/time.ts",
     "./recurrence": "./src/recurrence.ts",

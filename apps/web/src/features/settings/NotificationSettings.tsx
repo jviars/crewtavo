@@ -15,6 +15,7 @@ import { disablePush, enablePush, pushState } from "@/lib/push";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { InstallAppButton } from "../field/InstallAppCard";
+import { chatOn } from "../chat/data";
 
 type Prefs = Record<NotificationChannel, NotificationTopic[]>;
 
@@ -96,7 +97,7 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
               </tr>
             </thead>
             <tbody>
-              {NOTIFICATION_TOPICS.map((t) => (
+              {NOTIFICATION_TOPICS.filter((t) => t.key !== "chat" || chatOn(session)).map((t) => (
                 <tr key={t.key}>
                   <th scope="row" style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", whiteSpace: "normal", padding: "10px 8px 10px 0" }}>
                     {t.label}

@@ -87,6 +87,12 @@ select.business-name:hover { background: var(--fill-2); }
 
 .content { padding: 20px max(48px, env(safe-area-inset-right)) 56px 48px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
 .content-narrow { max-width: 880px; }
+/* A screen that fills the space under the top bar itself (team chat). */
+.content.content-flush { padding: 0; gap: 0; max-width: none; animation: none; }
+.nav-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
+.mobile-tab-icon { position: relative; display: inline-grid; place-items: center; }
+.mobile-tab-badge { position: absolute; top: -5px; left: calc(100% - 8px); min-width: 18px; height: 18px; padding: 0 5px; font-size: 10.5px; box-shadow: 0 0 0 2px var(--page); }
+span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 0; top: -2px; left: calc(100% - 4px); }
 
 /* Main navigation cross-fades between screens (React Router's viewTransition, see AppShell). */
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 200ms; animation-timing-function: ease-out; }
