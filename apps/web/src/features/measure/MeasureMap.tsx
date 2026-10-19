@@ -21,7 +21,7 @@ import {
   type HexColor,
 } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
-import { KeyError, rasterSource, type ImageryId } from "./imagery";
+import { KeyError, OVERLAYS, overlaySource, rasterSource, type ImageryId, type OverlayId } from "./imagery";
 
 export type Tool = "polygon" | "linestring" | "point" | "select";
 /** The geometry each drawing mode makes; anything else in its layer (closing and snapping points) is a guide. */
@@ -53,8 +53,12 @@ export interface MeasureMapHandle {
   view(): { center: [number, number]; zoom: number };
   /** Puts saved shapes back on the map (reopening a measurement). Returns their new ids in order. */
   load(features: Feature[]): string[];
-  /** A JPEG of the shapes on the imagery, framed to fit them, or null when nothing is drawn. */
-  capture(): Promise<Blob | null>;
+  /**
+   * A JPEG of the shapes on the imagery, framed to fit them, or null when nothing is drawn. With
+   * `imagery`, the picture is taken on that source instead (for one whose terms don't allow keeping
+   * pictures of it), and the map goes back afterwards.
+   */
+  capture(options?: { imagery?: ImageryId }): Promise<Blob | null>;
 }
 
 export interface MeasureMapProps {
@@ -65,6 +69,8 @@ export interface MeasureMapProps {
   keys: MapKeys;
   labels: Record<string, string>;
   showStreetNames: boolean;
+  /** Slope and contours, on top of the imagery and under the drawing. */
+  overlays: OverlayId[];
   onReady: () => void;
   onFailed: (message: string) => void;
   onShapes: (shapes: Shape[], drawing: Shape | null) => void;
@@ -308,6 +314,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         draw.on("deselect", () => live.current.onSelect(null));
         draw.on("history", () => live.current.onHistory?.(draw.canUndo(), draw.canRedo()));
         trouble.current = { errors: 0, loaded: 0, since: Date.now() };
+        applyOverlays(live.current.overlays);
         live.current.onReady();
         // Where the map starts counts as a move, so the page checks the imagery there straight away.
         const c = map!.getCenter();
@@ -386,6 +393,23 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     trouble.current = { errors: 0, loaded: 0, since: Date.now() };
   }
 
+  function applyOverlays(list: OverlayId[]) {
+    const map = mapRef.current;
+    if (!map?.getLayer("measure-labels")) return;
+    for (const id of Object.keys(OVERLAYS) as OverlayId[]) {
+      const layer = `overlay-${id}`;
+      if (list.includes(id) && !map.getLayer(layer)) {
+        if (!map.getSource(layer)) map.addSource(layer, overlaySource(id));
+        // Over the imagery, under the street names and the drawing.
+        const below = nameLayers.current.find((l) => map.getLayer(l)) ?? (map.getLayer("td-polygon") ? "td-polygon" : "measure-labels");
+        map.addLayer({ id: layer, type: "raster", source: layer, paint: { "raster-opacity": OVERLAYS[id].opacity, "raster-fade-duration": 120 } }, below);
+      } else if (!list.includes(id) && map.getLayer(layer)) {
+        map.removeLayer(layer);
+        map.removeSource(layer);
+      }
+    }
+  }
+
   function applyStreetNames(show: boolean) {
     const map = mapRef.current;
     if (!map) return;
@@ -398,6 +422,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.imagery, props.imageryRevision, props.keys.esri_key, props.keys.google_key]);
   useEffect(() => applyStreetNames(props.showStreetNames), [props.showStreetNames]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => applyOverlays(props.overlays), [props.overlays.join()]);
   useEffect(paintLabels, [props.labels]);
 
   useImperativeHandle(ref, () => ({
@@ -471,15 +497,17 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       report();
       return ids.filter((_, i) => results[i]?.valid !== false);
     },
-    async capture() {
+    async capture(options = {}) {
       const map = mapRef.current;
       const draw = drawRef.current;
       const b = boundsOf(shapesRef.current);
       if (!map || !draw || !b) return null;
       const before = { center: map.getCenter(), zoom: map.getZoom() };
       const mode = draw.getMode();
+      const swap = options.imagery && options.imagery !== live.current.imagery ? options.imagery : null;
       // No handles or half-drawn shapes in the picture.
       draw.setMode("static");
+      if (swap) await applyImagery(swap);
       map.fitBounds(b, { padding: 60, maxZoom: 20, animate: false });
       await new Promise<void>((resolve) => {
         const done = setTimeout(resolve, 8000); // a slow tile shouldn't hold up saving
@@ -497,6 +525,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         }
       });
       map.jumpTo(before);
+      if (swap) await applyImagery(live.current.imagery);
       draw.setMode(mode === "static" ? toolRef.current : mode);
       return blob;
     },

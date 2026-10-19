@@ -1,10 +1,11 @@
 /**
  * Measure on aerial imagery: draw areas, lines and counts and see their sizes as you go (the server
  * recomputes them on save), keep a picture of the drawing, and put it on a quote or invoice for the
- * client. The map opens on free US imagery (NAIP); where a state publishes sharper imagery the map
- * offers it, and outside the US it offers Esri (with a key from Settings > Maps) or the street map.
+ * client. The map opens on the Crewtavo map (Auto): the state's own imagery where it has some, else
+ * US aerial (NAIP), else USGS, else (outside the US) Esri with a key from Settings > Maps, or the
+ * street map. Anyone can pick a source themselves instead, from the Imagery button.
  */
-import { inBounds, LOWER_48, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
+import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { roofingSquares, summarizeFeatureCollection, type Feature } from "@crewtavo/core/geo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -22,7 +23,7 @@ import { addressLine, formatNumber } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { ShareDrawing, type DrawingRow } from "./drawings";
-import { imageryInfo, mapKeys, probeImagery, stateId, type ImageryId } from "./imagery";
+import { AUTO_NAME, ELEVATION_CREDIT, imageryCredit, imageryInfo, mapKeys, OVERLAYS, probeImagery, resolveAuto, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
 import { ImageryPicker } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
@@ -35,13 +36,14 @@ const TOOLS: Array<{ tool: Tool; label: string; icon: IconName; key: string; wha
 ];
 
 type Banner =
+  | { kind: "no-aerial" }
   | { kind: "trouble"; imagery: ImageryId; message: string }
   | { kind: "empty"; imagery: ImageryId }
   | { kind: "sharper"; state: StateImagery }
   | { kind: "left-state"; state: StateImagery };
 
 interface SaveResult { id: string; total_area_sqft: number; total_area_sqyd: number; total_length_ft: number; roofing_squares: number | null }
-interface SavedView { center?: [number, number]; zoom?: number; imagery?: string }
+interface SavedView { center?: [number, number]; zoom?: number; imagery?: string; mode?: "auto" | "manual"; overlays?: string[] }
 interface Found { found: boolean; lat?: number; lng?: number; formatted?: string | null; country?: string | null }
 
 const safeSquares = (areaSqft: number, pitch: string, wastePct: number) => {
@@ -52,7 +54,17 @@ const safeSquares = (areaSqft: number, pitch: string, wastePct: number) => {
   }
 };
 const isImagery = (value: unknown): value is ImageryId =>
-  typeof value === "string" && (["naip", "esri", "google", "street"].includes(value) || (value.startsWith("state:") && Boolean(stateImagery(value.slice(6)))));
+  typeof value === "string" && (["naip", "usgs-naip", "usgs", "terrain", "esri", "google", "street"].includes(value) || (value.startsWith("state:") && Boolean(stateImagery(value.slice(6)))));
+// Slope and contours stay on (or off) between visits, per browser.
+const OVERLAYS_KEY = "crewtavo.measureOverlays";
+function savedOverlays(): OverlayId[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(OVERLAYS_KEY) ?? "[]") as string[];
+    return list.filter((o): o is OverlayId => o in OVERLAYS);
+  } catch {
+    return [];
+  }
+}
 const touchScreen = () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
@@ -96,7 +108,14 @@ export function MeasurePage() {
   const [title, setTitle] = useState("Measurement");
   const [mapState, setMapState] = useState<"loading" | "ready" | "error">("loading");
   const [mapError, setMapError] = useState<string | null>(null);
+  // What someone picked (Auto unless they chose a source), and what's on the map now.
+  const [choice, setChoice] = useState<ImageryChoice | null>(null);
   const [imagery, setImagery] = useState<ImageryId | null>(null);
+  const [autoNote, setAutoNote] = useState<string | null>(null);
+  const [overlays, setOverlays] = useState<OverlayId[]>(savedOverlays);
+  const [resolveTick, setResolveTick] = useState(0);
+  // Sources that stopped answering, and until when Auto leaves them alone.
+  const down = useRef(new Map<ImageryId, number>());
   const [streetNames, setStreetNames] = useState(true);
   const [streetMap, setStreetMap] = useState(true);
   const [center, setCenter] = useState<{ lng: number; lat: number; zoom: number } | null>(null);
@@ -166,15 +185,21 @@ export function MeasurePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
-  // First imagery: what the drawing was made on, else free US imagery (Esri when the start is
-  // outside the US and there's a key for it).
+  // First imagery: the Crewtavo map (Auto), unless the drawing being reopened was made on a source
+  // someone picked. Auto starts on a guess so the map can load, and settles once it has looked.
   useEffect(() => {
-    if (!start || imagery) return;
-    const savedOn = ((ctx?.measurement?.view ?? null) as SavedView | null)?.imagery;
+    if (!start || choice) return;
+    const view = (ctx?.measurement?.view ?? null) as SavedView | null;
     const usable = (id: ImageryId) => (id === "esri" ? Boolean(keys.esri_key) : id === "google" ? Boolean(keys.google_key) : true);
-    if (isImagery(savedOn) && usable(savedOn)) setImagery(savedOn);
-    else setImagery(!inBounds(LOWER_48, start.lng, start.lat) && start.zoom > 5 && keys.esri_key ? "esri" : "naip");
-  }, [start, imagery, ctx, keys]);
+    const savedOn = isImagery(view?.imagery) && usable(view.imagery) ? view.imagery : null;
+    if (view?.mode === "manual" && savedOn) {
+      setChoice(savedOn);
+      setImagery(savedOn);
+    } else {
+      setChoice("auto");
+      setImagery(savedOn ?? (start.zoom < 11 ? "usgs" : "naip"));
+    }
+  }, [start, choice, ctx, keys]);
 
   useEffect(() => {
     // A new drawing is named after the property until someone names it.
@@ -248,8 +273,35 @@ export function MeasurePage() {
   }, [keys]);
   const centerKey = center ? `${center.lng.toFixed(3)},${center.lat.toFixed(3)},${Math.floor(center.zoom)}` : "";
 
+  // Auto: look again after each move, and when a source stops answering.
   useEffect(() => {
-    if (mapState !== "ready" || !imagery || !center || center.zoom < 11) return;
+    if (choice !== "auto" || !center || mapState !== "ready") return;
+    let stale = false;
+    const timer = setTimeout(async () => {
+      const { lng, lat, zoom } = center;
+      const now = Date.now();
+      const { id, passed } = await resolveAuto(lng, lat, zoom, keys, (source) => probe(source, lng, lat), (source) => (down.current.get(source) ?? 0) > now);
+      if (stale) return;
+      setImagery(id);
+      // NAIP coming back empty means this spot is outside the US: the US-only servers after it
+      // aren't down, they just have nothing here.
+      const abroad = passed.some((p) => p.id === "naip" && p.why === "empty");
+      const failed = abroad ? undefined : passed.find((p) => p.why === "down");
+      setAutoNote(failed && id !== failed.id ? `${imageryInfo(failed.id).name} isn't answering right now, so it's showing ${imageryInfo(id).name}.` : null);
+      // Nothing aerial here (outside the US, with no Esri key): say why it's the street map.
+      setBanner(id === "street" && zoom >= 11 && !failed && !dismissed.includes("no-aerial") ? { kind: "no-aerial" } : null);
+    }, 350);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+    // centerKey stands in for center.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choice, centerKey, mapState, resolveTick, keys.esri_key, dismissed, probe]);
+
+  // A source someone picked: offer something better, or say when it doesn't cover this spot.
+  useEffect(() => {
+    if (choice === "auto" || mapState !== "ready" || !imagery || !center || center.zoom < 11) return;
     let stale = false;
     const timer = setTimeout(async () => {
       const { lng, lat } = center;
@@ -277,12 +329,32 @@ export function MeasurePage() {
     };
     // centerKey stands in for center.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapState, centerKey, imagery, dismissed, probe]);
+  }, [choice, mapState, centerKey, imagery, dismissed, probe]);
 
-  const chooseImagery = (id: ImageryId, auto = false) => {
-    autoImagery.current = auto;
+  /** Pick a source, or Auto. `fromAbroad`: picked because the address was outside the US. */
+  const chooseImagery = (next: ImageryChoice, fromAbroad = false) => {
+    autoImagery.current = fromAbroad;
     setBanner(null);
-    setImagery(id);
+    setAutoNote(null);
+    setChoice(next);
+    if (next === "auto") setResolveTick((n) => n + 1);
+    else setImagery(next);
+  };
+  const toggleOverlay = (id: OverlayId, on: boolean) => {
+    const next = on ? [...overlays.filter((o) => o !== id), id] : overlays.filter((o) => o !== id);
+    setOverlays(next);
+    try {
+      localStorage.setItem(OVERLAYS_KEY, JSON.stringify(next));
+    } catch {
+      /* remembered for this visit only */
+    }
+  };
+  const imageryTrouble = (id: ImageryId, message: string) => {
+    if (choice === "auto" && id !== "street") {
+      // Auto moves on by itself, and tries this one again in ten minutes.
+      down.current.set(id, Date.now() + 10 * 60_000);
+      setResolveTick((n) => n + 1);
+    } else setBanner({ kind: "trouble", imagery: id, message });
   };
 
   // ----- Find an address (US or anywhere) ---------------------------------------------------
@@ -296,10 +368,11 @@ export function MeasurePage() {
     onSuccess: (r) => {
       mapRef.current?.jumpTo(r.lng!, r.lat!, 19);
       if (r.country && r.country !== "US") {
-        if (imagery === "naip" || imagery?.startsWith("state:")) setAbroad({ place: r.formatted ?? "This address" });
-      } else if (autoImagery.current && imagery !== "naip") {
-        chooseImagery("naip");
-        toast.success("Back on the free US imagery");
+        // Auto finds the best there is by itself; a US-only source someone picked gets explained.
+        if (choice !== "auto" && (imagery === "naip" || imagery?.startsWith("state:") || imagery?.startsWith("usgs"))) setAbroad({ place: r.formatted ?? "This address" });
+      } else if (autoImagery.current && choice !== "auto") {
+        chooseImagery("auto");
+        toast.success(`Back on the ${AUTO_NAME}`);
       }
     },
   });
@@ -395,9 +468,17 @@ export function MeasurePage() {
       // A picture of the drawing for the quote, invoice and PDF. Saving goes ahead without one.
       let snapshot: string | undefined;
       let pictureProblem = false;
+      const shown = imagery ?? "naip";
+      // Google's terms don't allow keeping pictures of its imagery, so the saved picture uses the
+      // best free imagery here instead (Esri's allow it with the credit, which goes with it).
+      let pictureOn: ImageryId = shown;
+      if (shown === "google" && center) {
+        const now = Date.now();
+        pictureOn = (await resolveAuto(center.lng, center.lat, 19, { ...keys, esri_key: null }, (source) => probe(source, center.lng, center.lat), (source) => (down.current.get(source) ?? 0) > now)).id;
+      }
       setCapturing(true);
       try {
-        const blob = await mapRef.current?.capture();
+        const blob = await mapRef.current?.capture({ imagery: pictureOn });
         if (blob) {
           const path = `${company.id}/measurements/${crypto.randomUUID()}.jpg`;
           const { error } = await supabase().storage.from("files").upload(path, blob, { contentType: "image/jpeg", upsert: false });
@@ -417,16 +498,18 @@ export function MeasurePage() {
         request_id: ctx?.ids.request ?? undefined,
         quote_id: saved ? undefined : ctx?.ids.quote ?? undefined,
         invoice_id: saved ? undefined : ctx?.ids.invoice ?? undefined,
-        provider: imagery ?? "naip",
+        provider: shown,
         roof_pitch: pitch.trim() || null,
         waste_pct: Math.min(100, Math.max(0, Number(waste || 0))),
         geojson: { type: "FeatureCollection", features },
-        view: view ? { ...view, imagery: imagery ?? "naip", attribution: imageryInfo(imagery ?? "naip").name } : undefined,
+        view: view
+          ? { ...view, imagery: shown, mode: choice === "auto" ? "auto" : "manual", overlays, attribution: [imageryCredit(pictureOn), overlays.length && pictureOn !== "terrain" ? ELEVATION_CREDIT : null].filter(Boolean).join(" · ") }
+          : undefined,
         snapshot_path: snapshot,
       });
-      return { result, snapshot, pictureProblem, previous: saved?.snapshot_path ?? null };
+      return { result, snapshot, pictureProblem, previous: saved?.snapshot_path ?? null, swapped: pictureOn !== shown ? pictureOn : null };
     },
-    onSuccess: ({ result, snapshot, pictureProblem, previous }) => {
+    onSuccess: ({ result, snapshot, pictureProblem, previous, swapped }) => {
       setSavedSignature(signature);
       setSaved((s) => ({
         id: result.id,
@@ -444,6 +527,7 @@ export function MeasurePage() {
       const where = ctx?.quote ? ` on quote #${ctx.quote.number}` : ctx?.invoice ? ` on invoice #${ctx.invoice.number}` : "";
       toast.success(`Saved${where}: ${formatNumber(result.total_area_sqft)} sq ft${result.total_length_ft ? `, ${formatNumber(result.total_length_ft)} ft` : ""}`);
       if (pictureProblem) toast.error("Saved, but the map picture couldn't be kept, so clients would see the sizes only. Save again to retry.");
+      else if (swapped) toast.success(`The saved picture uses ${imageryInfo(swapped).name}, since Google's terms don't allow keeping pictures of its imagery.`);
     },
   });
 
@@ -489,7 +573,7 @@ export function MeasurePage() {
                 </div>
               </form>
               {imagery && (
-                <ImageryPicker value={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} onPick={(id) => chooseImagery(id)} onStreetNames={setStreetNames} />
+                <ImageryPicker choice={choice ?? "auto"} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} overlays={overlays} onPick={(next) => chooseImagery(next)} onStreetNames={setStreetNames} onOverlay={toggleOverlay} />
               )}
             </div>
           )}
@@ -510,12 +594,13 @@ export function MeasurePage() {
                   keys={keys}
                   labels={labels}
                   showStreetNames={streetNames}
+                  overlays={overlays}
                   onReady={onReady}
                   onFailed={(message) => { setMapError(message); setMapState("error"); }}
                   onShapes={(next, inProgress) => { setShapes(next); setDrawing(inProgress); }}
                   onSelect={setSelected}
                   onMoved={(c, zoom) => setCenter({ ...c, zoom })}
-                  onImageryTrouble={(id, message) => setBanner({ kind: "trouble", imagery: id, message })}
+                  onImageryTrouble={imageryTrouble}
                   onHistory={(undo, redo) => setHistory({ undo, redo })}
                   onStreetMap={setStreetMap}
                 />
@@ -553,6 +638,12 @@ export function MeasurePage() {
                     <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={17} /></button>
                   </div>
                   {banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
+                  {overlays.includes("slope") && (
+                    <div className="measure-legend" aria-label="Slope colors">
+                      <strong>Slope</strong>
+                      {SLOPE_CLASSES.map((c) => <span key={c.label}><i style={{ background: c.color }} />{c.label}<span className="muted"> · {c.note}</span></span>)}
+                    </div>
+                  )}
                   <div className="measure-hint" role="status" aria-live="polite">{hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>
                   {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
                   {center && center.zoom < 12 && !shapes.length && !banner && (
@@ -562,7 +653,12 @@ export function MeasurePage() {
               )}
             </div>
           )}
-          {info && mapState === "ready" && <div className="measure-source muted small"><Icon name="layers" size={13} /> {info.name}: {info.detail}</div>}
+          {info && mapState === "ready" && (
+            <div className="measure-source muted small">
+              <Icon name="layers" size={13} />
+              <span>{choice === "auto" ? <><strong>{AUTO_NAME}</strong> is showing {info.name} ({info.detail}).</> : <>{info.name}: {info.detail}.</>}{autoNote && ` ${autoNote}`}</span>
+            </div>
+          )}
         </div>
 
         <aside className="narrow stack" style={{ gap: 16 }}>
@@ -649,11 +745,24 @@ function ImageryBanner({
   keys: { esri_key?: string | null };
   isAdmin: boolean;
   streetMap: boolean;
-  onUse: (id: ImageryId, auto?: boolean) => void;
+  onUse: (id: ImageryChoice, fromAbroad?: boolean) => void;
   onDismiss: (key: string) => void;
   onRetry: () => void;
 }) {
   const settingsLink = isAdmin && <Link className="btn btn-sm" to="/settings?tab=maps" target="_blank" rel="noreferrer">Add an Esri key</Link>;
+  if (banner.kind === "no-aerial") {
+    return (
+      <div className="measure-banner" role="status">
+        <Icon name="info" size={16} />
+        <span className="grow">
+          <strong>No free aerial imagery here.</strong> It covers the US, so {AUTO_NAME} is showing the street map.{" "}
+          {isAdmin ? "For aerial imagery anywhere, add a free Esri key." : "An admin can add a free Esri key in Settings for aerial imagery anywhere."}
+        </span>
+        {settingsLink}
+        <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => onDismiss("no-aerial")} aria-label="Dismiss"><Icon name="x" size={14} /></button>
+      </div>
+    );
+  }
   if (banner.kind === "sharper") {
     const s = banner.state;
     return (
@@ -670,7 +779,7 @@ function ImageryBanner({
       <div className="measure-banner" role="status">
         <Icon name="info" size={16} />
         <span className="grow">{banner.state.name}'s imagery doesn't reach this spot.</span>
-        <Button size="sm" variant="primary" onClick={() => onUse("naip")}>Use US aerial</Button>
+        <Button size="sm" variant="primary" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
         <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => onDismiss(`left:${banner.state.state}`)} aria-label="Dismiss"><Icon name="x" size={14} /></button>
       </div>
     );
@@ -681,7 +790,7 @@ function ImageryBanner({
         <Icon name="alert" size={16} />
         <span className="grow"><strong>No free US imagery here.</strong> It covers the lower 48 states. {keys.esri_key ? "Esri covers the rest of the world." : isAdmin ? "For aerial imagery anywhere, add a free Esri key." : "An admin can add a free Esri key in Settings for imagery anywhere."}</span>
         {keys.esri_key ? <Button size="sm" variant="primary" onClick={() => onUse("esri", true)}>Use Esri</Button> : settingsLink}
-        {streetMap && <Button size="sm" onClick={() => onUse("street", true)}>Street map</Button>}
+        <Button size="sm" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
       </div>
     );
   }
@@ -692,7 +801,7 @@ function ImageryBanner({
       <Icon name="alert" size={16} />
       <span className="grow">{sentence ? banner.message : <><strong>{name}</strong> {banner.message}. Their server may be busy; you can switch for now.</>}</span>
       <Button size="sm" onClick={onRetry}>Try again</Button>
-      {banner.imagery !== "naip" && <Button size="sm" variant="primary" onClick={() => onUse("naip")}>Use US aerial</Button>}
+      <Button size="sm" variant="primary" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
       {banner.imagery === "naip" && keys.esri_key && <Button size="sm" variant="primary" onClick={() => onUse("esri", true)}>Use Esri</Button>}
       {streetMap && banner.imagery !== "street" && <Button size="sm" onClick={() => onUse("street", true)}>Street map</Button>}
     </div>
@@ -706,7 +815,7 @@ function OutsideUs({
   hasEsri: boolean;
   isAdmin: boolean;
   streetMap: boolean;
-  onUse: (id: ImageryId) => void;
+  onUse: (id: ImageryChoice) => void;
   onClose: () => void;
 }) {
   return (

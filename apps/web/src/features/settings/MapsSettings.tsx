@@ -63,15 +63,14 @@ export function MapsSettings() {
           <strong>Free imagery, nothing to set up</strong>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Measure opens on <strong>US aerial imagery (NAIP)</strong>: every lower-48 state, about 2 ft per pixel, re-flown every 2–3 years. It's
-          public domain, so nobody needs an account.
+          Measure opens on <strong>Auto</strong>, which picks the sharpest free imagery for wherever the map is: the state's own imagery where it publishes some
+          ({STATE_IMAGERY.filter((s) => s.state !== "DC").length} states and Washington, DC today, 3 in to 1 ft per pixel: {STATE_IMAGERY.map((s) => s.name).join(", ")}),
+          else US aerial imagery (NAIP, every lower-48 state, about 2 ft), else USGS. None of it needs an account.
         </p>
         <p className="muted" style={{ margin: 0 }}>
-          Where a state publishes sharper imagery for free, the map offers it when you're there ({STATE_IMAGERY.filter((s) => s.state !== "DC").length} states and
-          Washington, DC today, 3 in to 1 ft per pixel):{" "}
-          {STATE_IMAGERY.map((s) => s.name).join(", ")}.
+          Terrain, slope and 2 ft contour lines come free from USGS lidar across most of the US. Anywhere in the world you can also draw on the street map, which
+          shows streets and building outlines.
         </p>
-        <p className="muted" style={{ margin: 0 }}>Anywhere in the world you can also draw on the street map, which shows streets and building outlines.</p>
       </div>
 
       <KeyCard

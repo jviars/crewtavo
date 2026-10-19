@@ -250,11 +250,16 @@ Categories, pages, revisions, search and templates, built into our app:
 ## 9. Map measuring
 
 1. The estimator opens **Measure** from a request, quote, invoice or property, or searches any
-   address (US or worldwide). MapLibre shows free US aerial imagery (USDA NAIP, about 2 ft, via
-   Microsoft's Planetary Computer) centered on the property. Where a state publishes sharper imagery
-   for free (`packages/core/src/imagery.ts`: 17 states and DC, 3 in to 1 ft) the map offers it.
-   Outside the US it offers Esri World Imagery, with a key the company adds in **Settings → Maps**,
-   or the OpenStreetMap street map (OpenFreeMap), which needs no key.
+   address (US or worldwide). The map (MapLibre) starts on **Auto**, which picks the sharpest free
+   imagery for where it is and moves on when a source stops answering: the state's own imagery
+   (`packages/core/src/imagery.ts`: 17 states and DC, 3 in to 1 ft), else USDA NAIP (about 2 ft,
+   through Microsoft's Planetary Computer, a preview service with no uptime promise), else the same
+   NAIP from USGS's server, else the USGS basemap; outside the US, Esri World Imagery with a key the
+   company adds in **Settings → Maps**, else the OpenStreetMap street map (OpenFreeMap). Anyone can
+   pick a source instead. The source in use is always named and credited (`imageryCredit`); Google
+   is never picked automatically, and a drawing made on it is saved with a picture on free imagery,
+   since Google's terms don't allow keeping its imagery. Terrain (shaded relief), slope (colored by
+   grade) and 2 ft contours come from USGS 3DEP lidar, drawn by USGS for each tile.
 2. They draw areas (driveway, lawn, roof plane), lines (curb, edging, gutters) and points (drains,
    trees) with Terra Draw. Sizes show on each shape and update live, with the same math the server
    uses. Undo and redo cover points and whole shapes.
