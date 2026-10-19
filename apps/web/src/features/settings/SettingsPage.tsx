@@ -6,6 +6,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { can, hasRole, useSession } from "@/lib/session";
+import { CalendarSettings } from "./CalendarSettings";
 import { ChecklistSettings } from "./ChecklistSettings";
 import { CompanySettings } from "./CompanySettings";
 import { CrewSettings } from "./CrewSettings";
@@ -18,7 +19,7 @@ import { RolesSettings } from "./RolesSettings";
 import { TeamSettings } from "./TeamSettings";
 import { WebAddressSettings } from "./WebAddressSettings";
 
-type Tab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "maps" | "license";
+type Tab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "calendars" | "maps" | "license";
 type Item = { label: string; icon: IconName; hint?: string } & ({ tab: Tab } | { to: string });
 
 export function SettingsPage() {
@@ -54,6 +55,7 @@ export function SettingsPage() {
       title: "Automate and connect",
       items: [
         ...(managesEmail ? [{ tab: "email", label: "Email", icon: "mail" } as Item] : []),
+        ...(isAdmin && can(session, "apps") ? [{ tab: "calendars", label: "Calendars", icon: "calendar" } as Item] : []),
         ...(isOffice && can(session, "automations") ? [{ to: "/automations", label: "Automations", icon: "bolt" } as Item] : []),
         ...(isAdmin && can(session, "apps") ? [{ to: "/apps", label: "Apps", icon: "apps" } as Item] : []),
       ],
@@ -100,6 +102,7 @@ export function SettingsPage() {
           {tab === "prices" && <PriceList />}
           {tab === "checklists" && <ChecklistSettings />}
           {tab === "email" && <EmailSettings />}
+          {tab === "calendars" && <CalendarSettings />}
           {tab === "maps" && <MapsSettings />}
           {tab === "license" && <LicenseSettings />}
         </div>

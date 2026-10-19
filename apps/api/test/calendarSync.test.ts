@@ -6,7 +6,7 @@ import { addDays, localDate } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
-import { googleEventId, pushUpcomingVisits, runCalendarJob, syncSource } from "../src/integrations/calendars";
+import { googleEventId, pushUpcomingVisits, runCalendarJob, syncDueCalendars, syncSource } from "../src/integrations/calendars";
 import { encryptJson } from "../src/lib/crypto";
 import type { Db } from "../src/lib/supabase";
 
@@ -346,6 +346,81 @@ describe("turning a calendar's details off", () => {
     fakeGoogle().calendars.get("team-cal")!.set("evt1", appointment());
     await syncSource(env, db, SOURCE);
     expect(details(tables)).toEqual([BUSY]);
+  });
+});
+
+describe("calendar files", () => {
+  // A Google Calendar export: one calendar, its own name inside.
+  const file = (events: string[], extra: string[] = []) =>
+    ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Google Inc//Google Calendar 70.9054//EN", "X-WR-CALNAME:Mowing", ...extra, ...events, "END:VCALENDAR"].join("\r\n");
+  const event = (uid: string, day: string, summary: string, extra: string[] = []) =>
+    ["BEGIN:VEVENT", `UID:${uid}`, `DTSTART:${day.replace(/-/g, "")}T150000Z`, `DTEND:${day.replace(/-/g, "")}T160000Z`, `SUMMARY:${summary}`, "LOCATION:418 Pell Ave", ...extra, "END:VEVENT"].join("\r\n");
+  const weekly = event("mow@example.com", tomorrow, "Mow - Rivera", ["RRULE:FREQ=WEEKLY;COUNT=4"]);
+  const call = event("call@example.com", tomorrow, "Supplier call");
+
+  it("shows a file's events, repeats included, and replaces them when it's uploaded again", async () => {
+    const tables = await world();
+    const db = fakeDb(tables);
+    const res = await request("POST", "/calendars/file", { text: file([weekly, call]), file_name: "Mowing_c_8f1d@group.calendar.google.com.ics" });
+    expect(res.status).toBe(201);
+    const source = (await res.json()) as Row;
+    expect(source).toMatchObject({ kind: "file", app: "google_calendar", name: "Mowing", event_count: 5, last_error: null, truncated: false });
+    expect(tables.calendar_events).toHaveLength(5);
+    expect(tables.calendar_events!.filter((e) => e.title === "Mow - Rivera").map((e) => e.starts_on)).toEqual([0, 7, 14, 21].map((n) => addDays(tomorrow, n)));
+
+    // The 15-minute task leaves it alone: there's nothing to read again.
+    expect(await syncDueCalendars(env, db)).toMatchObject({ calendars: 0 });
+    expect(await syncSource(env, db, source.id)).toBe(5);
+
+    const again = await request("POST", `/calendars/${source.id}/file`, { text: file([weekly]) });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ event_count: 4 });
+    expect(tables.calendar_events!.map((e) => e.title)).toEqual(Array(4).fill("Mow - Rivera"));
+  });
+
+  it("names a calendar from its file when the file doesn't, and keeps a personal one as Busy", async () => {
+    const tables = await world();
+    fakeDb(tables);
+    const text = file([call]).replace("X-WR-CALNAME:Mowing\r\n", "").replace("Google Inc//Google Calendar", "Apple Inc.//macOS 15.1");
+    const res = await request("POST", "/calendars/file", { text, file_name: "Days off.ics", show_details: false });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ name: "Days off", app: "apple_calendar", show_details: false });
+    expect(details(tables)).toEqual([BUSY]);
+  });
+
+  it("turns down a file that isn't a calendar or has nothing to show, leaving nothing behind", async () => {
+    const tables = await world();
+    fakeDb(tables);
+    const notCalendar = await request("POST", "/calendars/file", { text: "Name,Phone\nJordan,555-0187\n" });
+    expect(notCalendar.status).toBe(400);
+    expect(await notCalendar.json()).toMatchObject({ error: expect.stringMatching(/isn't a calendar/) });
+    const old = await request("POST", "/calendars/file", { text: file([event("old@example.com", addDays(today, -400), "Spring cleanup")]) });
+    expect(old.status).toBe(400);
+    expect(await old.json()).toMatchObject({ error: expect.stringMatching(/No events from the last month through the next year/) });
+    expect(tables.calendar_sources).toEqual([]);
+    expect(tables.calendar_events).toEqual([]);
+  });
+
+  it("can't turn a file calendar off (its events couldn't come back), or upload a linked one", async () => {
+    const tables = await world({ source: {} });
+    fakeDb(tables);
+    const made = (await (await request("POST", "/calendars/file", { text: file([call]) })).json()) as Row;
+    const off = await request("PATCH", `/calendars/${made.id}`, { enabled: false });
+    expect(off.status).toBe(400);
+    expect(tables.calendar_events!.filter((e) => e.source_id === made.id)).toHaveLength(1);
+    expect((await request("PATCH", `/calendars/${made.id}`, { name: "Supplier calls", enabled: true })).status).toBe(200);
+    // The Google calendar in this world isn't from a file.
+    const linked = await request("POST", `/calendars/${SOURCE}/file`, { text: file([call]) });
+    expect(linked.status).toBe(400);
+    expect(await linked.json()).toMatchObject({ error: expect.stringMatching(/came from a file/) });
+  });
+
+  it("takes a calendar file bigger than other requests may be", async () => {
+    const tables = await world();
+    fakeDb(tables);
+    const big = file([call], [`X-NOTES:${"a".repeat(3 * 1024 * 1024)}`]);
+    expect((await request("POST", "/calendars/file", { text: big })).status).toBe(201);
+    expect((await request("POST", "/calendars", { url: `https://calendar.example.com/${"a".repeat(3 * 1024 * 1024)}` })).status).toBe(413);
   });
 });
 

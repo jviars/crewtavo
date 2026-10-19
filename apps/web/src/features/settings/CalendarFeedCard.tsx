@@ -1,6 +1,6 @@
 /** "Your schedule in your phone's calendar": a private subscribe link for Google, Apple or Outlook. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { FormError } from "@/components/ui/Field";
@@ -18,7 +18,7 @@ interface Feed {
   last_used_at: string | null;
 }
 
-export function CalendarFeedCard() {
+export function CalendarFeedCard({ title = "Your schedule in your phone's calendar" }: { title?: ReactNode }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const key = ["calendar-feed", session.company.id];
@@ -39,8 +39,11 @@ export function CalendarFeedCard() {
 
   return (
     <div className="card card-pad stack-sm">
-      <strong>Your schedule in your phone's calendar</strong>
-      <span className="muted small">Visits show up in Google, Apple or Outlook Calendar and update on their own (calendars check about every hour).</span>
+      <strong>{title}</strong>
+      <span className="muted small">
+        Visits show up in Google, Apple or Outlook Calendar and update on their own. Each calendar app checks for changes on its own schedule, from about an hour to a day
+        (Google is the slowest), so for a change made today, look in Crewtavo. Add it to Google on a computer: Google's phone app can't add calendars.
+      </span>
       {feed.isPending ? (
         <Skeleton height={38} radius={8} />
       ) : f ? (

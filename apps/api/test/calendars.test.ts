@@ -6,7 +6,7 @@ import { deflateSync, gzipSync } from "node:zlib";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
-import { CalendarError, clip, describeGoogleAccount, fetchIcs, googleEventId, normalizeLink } from "../src/integrations/calendars";
+import { CalendarError, clip, describeGoogleAccount, fetchIcs, fileApp, googleEventId, nameFromFile, normalizeLink } from "../src/integrations/calendars";
 import { CATALOG, OAUTH } from "../src/integrations/registry";
 
 /**
@@ -208,6 +208,24 @@ describe("calendar links", () => {
     expect(internet.requests.every((r) => r.options.signal instanceof AbortSignal)).toBe(true);
   });
 
+  it("says what to copy instead when Google's calendar ID, web link or public address is pasted", async () => {
+    expect(() => normalizeLink("jordan@gmail.com")).toThrow(/calendar ID or email address.*Secret address in iCal format/);
+    expect(() => normalizeLink(" abc123@group.calendar.google.com ")).toThrow(/calendar ID/);
+    expect(() => normalizeLink("https://calendar.google.com/calendar/embed?src=jordan%40gmail.com")).toThrow(/viewing the calendar in Google/);
+    expect(() => normalizeLink("https://calendar.google.com/calendar/u/0?cid=am9yZGFu")).toThrow(/viewing the calendar in Google/);
+    // The secret address goes through, and so does a link with a name and password in it.
+    const secret = "https://calendar.google.com/calendar/ical/jordan%40gmail.com/private-0123abcd/basic.ics";
+    expect(normalizeLink(secret).toString()).toBe(secret);
+    expect(normalizeLink("https://me:pass@dav.example.com/cal.ics").hostname).toBe("dav.example.com");
+
+    // The public address only works for a calendar shared with everyone; Google says it isn't there.
+    names.set("calendar.google.com", ["203.0.113.9"]);
+    handler = (_req, res) => res.writeHead(404).end("Not Found");
+    await expect(fetchIcs(`http://calendar.google.com:${port}/calendar/ical/jordan%40gmail.com/public/basic.ics`)).rejects.toThrow(/public address.*Secret address in iCal format/);
+    // Any other missing calendar is just missing.
+    await expect(fetchIcs(`http://calendar.google.com:${port}/calendar/ical/jordan%40gmail.com/private-0123abcd/basic.ics`)).rejects.toThrow(/No calendar at that link/);
+  });
+
   it("unpacks compressed calendars, and stops reading past 10 MB", async () => {
     const link = `http://calendar.example.com:${port}/cal.ics`;
     handler = (_req, res) => res.writeHead(200, { "Content-Encoding": "gzip" }).end(gzipSync(CALENDAR));
@@ -268,6 +286,21 @@ describe("Google Calendar", () => {
     expect(fetched.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("knows which app made a calendar file, and names one from its file", () => {
+    const made = (prodid: string) => fileApp(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:${prodid}\r\nEND:VCALENDAR`);
+    expect(made("-//Google Inc//Google Calendar 70.9054//EN")).toBe("google_calendar");
+    expect(made("-//Apple Inc.//macOS 15.1//EN")).toBe("apple_calendar");
+    expect(made("-//Microsoft Corporation//Outlook 16.0 MIMEDIR//EN")).toBe("outlook_calendar");
+    expect(made("-//Zoho Corporation//Zoho Calendar//EN")).toBe("zoho_calendar");
+    expect(made("-//Nextcloud//EN")).toBe("ics_calendar");
+    expect(fileApp("BEGIN:VCALENDAR\r\nEND:VCALENDAR")).toBe("ics_calendar");
+
+    expect(nameFromFile("Crew A_c_8f1d2e@group.calendar.google.com.ics")).toBe("Crew A");
+    expect(nameFromFile("Downloads/Office.ics")).toBe("Office");
+    expect(nameFromFile("jordan@gmail.com.ics")).toBeNull(); // the main calendar's file is its address
+    expect(nameFromFile(undefined)).toBeNull();
+  });
+
   it("lists every calendar app once, with a way in", () => {
     const ids = CATALOG.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -276,7 +309,7 @@ describe("Google Calendar", () => {
   });
 
   it("requires a session to manage calendars", async () => {
-    for (const [method, path] of [["GET", "/api/calendars"], ["POST", "/api/calendars"], ["GET", "/api/calendars/google"], ["PUT", "/api/calendars/google/visits"]] as const) {
+    for (const [method, path] of [["GET", "/api/calendars"], ["POST", "/api/calendars"], ["POST", "/api/calendars/file"], ["GET", "/api/calendars/google"], ["PUT", "/api/calendars/google/visits"]] as const) {
       expect((await app.request(path, { method }, env)).status, `${method} ${path}`).toBe(401);
     }
   });
