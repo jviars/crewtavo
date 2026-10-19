@@ -20,6 +20,7 @@ import { rows, TOOLS, type ToolContext } from "./assistant-tools";
 import type { AppEnv, Env } from "./env";
 import { ownOrigin } from "./lib/address";
 import { connectionAccess } from "./lib/assistants";
+import { authMetadata } from "./lib/authMetadata";
 import { bearerToken } from "./lib/auth";
 import { appUrl } from "./lib/http";
 import { allow } from "./lib/limit";
@@ -34,13 +35,15 @@ const SERVER_INFO = { name: "crewtavo", title: "Crewtavo", version: "0.1.0" };
 // OAuth discovery
 // ---------------------------------------------------------------------------------------------
 
+/** Where sign-in is. In an instance SUPABASE_URL is this server's own loopback address; sign-in is public at /auth/v1. */
+const authIssuer = (c: Context<AppEnv>) => `${c.env.CREWTAVO_GATEWAY ? appUrl(c) : c.env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`;
+
 // The resource is the address the client used (a connector added before a switch in Settings → Web
 // address keeps its old one); sign-in stays at APP_URL, the issuer Auth knows.
 const resourceMetadata = async (c: Context<AppEnv>) =>
   c.json({
     resource: `${await ownOrigin(c)}/mcp`,
-    // In an instance, SUPABASE_URL is this server's own loopback address; sign-in is public at /auth/v1.
-    authorization_servers: [`${c.env.CREWTAVO_GATEWAY ? appUrl(c) : c.env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`],
+    authorization_servers: [authIssuer(c)],
     bearer_methods_supported: ["header"],
     resource_name: "Crewtavo",
     resource_documentation: `${appUrl(c)}/apps`,
@@ -48,18 +51,21 @@ const resourceMetadata = async (c: Context<AppEnv>) =>
 mcp.get("/.well-known/oauth-protected-resource", resourceMetadata);
 mcp.get("/.well-known/oauth-protected-resource/mcp", resourceMetadata);
 
-// Older clients look for authorization-server metadata on the resource's own origin. Supabase serves
-// it at the RFC 8414 path (hosted) or appended to the issuer (local CLI); try both.
-mcp.get("/.well-known/oauth-authorization-server", async (c) => {
+// Clients look for the sign-in server's metadata on this origin: at the RFC 8414 address for an
+// issuer with a path (/auth/v1) first, then OpenID Connect's, and older ones at the bare address.
+// Supabase serves it at the RFC 8414 path (hosted) or appended to the issuer (an instance's gateway,
+// which fixes an instance's, and the local CLI). See lib/authMetadata.ts.
+const authServerMetadata = async (c: Context<AppEnv>) => {
   const base = c.env.SUPABASE_URL.replace(/\/$/, "");
-  for (const url of [`${base}/.well-known/oauth-authorization-server/auth/v1`, `${base}/auth/v1/.well-known/oauth-authorization-server`]) {
-    const upstream = await fetch(url).catch(() => null);
-    if (upstream?.ok && upstream.headers.get("content-type")?.includes("json")) {
-      return c.json(await upstream.json(), 200, { "Cache-Control": "public, max-age=3600" });
-    }
-  }
-  return c.json({ error: "Authorization server metadata unavailable. Is the Supabase OAuth server enabled?" }, 502);
-});
+  // In an instance, base is this server, which answers the RFC 8414 address with this very handler.
+  const urls = [...(c.env.CREWTAVO_GATEWAY ? [] : [`${base}/.well-known/oauth-authorization-server/auth/v1`]), `${base}/auth/v1/.well-known/oauth-authorization-server`];
+  const metadata = await authMetadata(urls, `${base}/auth/v1`, authIssuer(c));
+  if (!metadata) return c.json({ error: "Authorization server metadata unavailable. Is the Supabase OAuth server enabled?" }, 502);
+  return c.json(metadata, 200, { "Cache-Control": "public, max-age=300" });
+};
+mcp.get("/.well-known/oauth-authorization-server", authServerMetadata);
+mcp.get("/.well-known/oauth-authorization-server/auth/v1", authServerMetadata);
+mcp.get("/.well-known/openid-configuration/auth/v1", authServerMetadata);
 
 // ---------------------------------------------------------------------------------------------
 // Tools (assistant-tools/)

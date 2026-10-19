@@ -7,6 +7,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
 import { guardAssistant } from "./assistants";
+import { authMetadata, signsIdTokens, withoutOpenId } from "./authMetadata";
 import { guardSignIn, isGuessable } from "./signInGuard";
 import type { Stack } from "./stack";
 import { connectionOf, visitorIp } from "./visitor";
@@ -16,12 +17,25 @@ type Gateway = { Bindings: HttpBindings };
 export function gateway(env: Env, stack: Stack) {
   const routes = new Hono<Gateway>();
   const visitor = (c: Context<Gateway>) => visitorIp(env, c.req.raw.headers, connectionOf(c.env));
+  // Auth's discovery documents, fixed for AI assistants' connectors (lib/authMetadata.ts).
+  for (const doc of ["oauth-authorization-server", "openid-configuration"]) {
+    routes.get(`/auth/v1/.well-known/${doc}`, async (c) => {
+      const issuer = `${(env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "")}/auth/v1`;
+      const metadata = await authMetadata([`${stack.auth.replace(/\/$/, "")}/.well-known/${doc}`], stack.auth, issuer);
+      if (!metadata) return c.json({ message: "This part of Crewtavo is still starting. Try again in a moment." }, 503);
+      return c.json(metadata, 200, { "Cache-Control": "public, max-age=300" });
+    });
+  }
   // An AI assistant's token only reads here unless the person allowed it to change things, and never
   // changes their sign-in (lib/assistants.ts).
-  routes.all("/auth/v1/*", (c) => {
+  routes.all("/auth/v1/*", async (c) => {
     const address = visitor(c);
     const send = (request: Request) => forward(request, stack.auth, "/auth/v1", address);
-    return guardAssistant(env, c.req.raw, "/auth/v1", (request) => (isGuessable(request.method, new URL(request.url), "/auth/v1") ? guardSignIn(env, request, send) : send(request)));
+    let incoming = c.req.raw;
+    // A connector's sign-in asking for an ID token Auth can't sign goes ahead without one.
+    const plain = c.req.method === "GET" && c.req.path === "/auth/v1/oauth/authorize" ? withoutOpenId(new URL(incoming.url)) : null;
+    if (plain && !(await signsIdTokens(`${stack.auth.replace(/\/$/, "")}/.well-known/jwks.json`))) incoming = new Request(plain, incoming);
+    return guardAssistant(env, incoming, "/auth/v1", (request) => (isGuessable(request.method, new URL(request.url), "/auth/v1") ? guardSignIn(env, request, send) : send(request)));
   });
   routes.all("/rest/v1/*", (c) => guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c))));
   routes.all("/storage/v1/*", (c) => {
