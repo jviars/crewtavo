@@ -29,10 +29,11 @@ const GOOGLE_SIGNIN_GUIDE = "https://crewtavo.com/docs/connections/google-calend
 
 /**
  * What Crewtavo's Stripe key may do: add its webhook, customers and invoices (with their items),
- * and read payments, fees, deposits and the account's name. Stripe's create-key form ticks these
- * from its link. Stripe doesn't document that, so if it stops, people still land on the form.
+ * and read payments, fees, deposits and the account's name. Stripe's create-key form sets these
+ * from its link (each name is a row there; balance transactions come under Balance). Stripe doesn't
+ * document that, so if it stops, people still land on the form.
  */
-const STRIPE_KEY_PERMISSIONS = ["webhook_write", "customer_write", "invoice_write", "charge_read", "balance_transaction_read", "balance_transaction_source_read", "payout_read", "connected_account_read"];
+const STRIPE_KEY_PERMISSIONS = ["webhook_write", "customer_write", "invoice_write", "charge_read", "balance_read", "balance_transaction_source_read", "payout_read", "connected_account_read"];
 const STRIPE_NEW_KEY = `https://dashboard.stripe.com/apikeys/create?name=Crewtavo&${STRIPE_KEY_PERMISSIONS.map((p) => `permissions%5B%5D=rak_${p}`).join("&")}`;
 
 /** Where each assistant keeps its connector settings. */
@@ -360,9 +361,9 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
       {stripeSteps && (
         <>
           <ol className="app-steps">
-            <li>Click <strong>Get a key from Stripe</strong> and sign in if Stripe asks. A new key named Crewtavo opens with what it needs already ticked.</li>
-            <li>Click <strong>Create key</strong> and enter the code Stripe sends you.</li>
-            <li>Click the key to copy it, then paste it below.</li>
+            <li>Click <strong>Get a key from Stripe</strong> and sign in if Stripe asks. A new key named Crewtavo opens with what it needs already set, so leave the list as it is (most of it stays at None).</li>
+            <li>Scroll to the bottom of Stripe's page, click <strong>Create key</strong> and enter the code Stripe sends you.</li>
+            <li>Copy the key Stripe shows you, then paste it below.</li>
           </ol>
           <a className="btn btn-primary" style={{ justifySelf: "start" }} href={STRIPE_NEW_KEY} target="_blank" rel="noreferrer">
             <Icon name="external" size={16} />
