@@ -22,6 +22,7 @@ import { useSchedulingRights } from "../schedule/myCrews";
 import { ChangeOrders, useStartChangeOrder } from "./ChangeOrders";
 import { ExpensesCard } from "./ExpensesCard";
 import { MaterialsCard } from "./JobMaterials";
+import { PlansCard } from "../plans/PlansCard";
 import { InvoiceJobDialog, JobDetailsDialog, type JobRecord } from "./JobDialogs";
 import { ScopeOfWork } from "./ScopeOfWork";
 
@@ -246,6 +247,8 @@ export function JobPage() {
           )}
 
           {canSell && <ChangeOrders jobId={j.id} onStart={() => changeOrder.mutate()} starting={changeOrder.isPending} />}
+
+          <PlansCard scope={{ kind: "job", id: j.id, propertyId: j.property?.id ?? null }} />
 
           <MaterialsCard jobId={j.id} showCosts={seesCosts} />
 

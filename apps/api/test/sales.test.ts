@@ -90,6 +90,18 @@ describe("saving a measurement", () => {
     expect(state.writes[0].row).not.toHaveProperty("snapshot_path");
   });
 
+  it("keeps the plan sheet lined up on the map, and the imagery choice", async () => {
+    const corners = [[-79.8722, 37.0551], [-79.8712, 37.0551], [-79.8712, 37.0544], [-79.8722, 37.0544]];
+    const plan = { id: "0b5c9f1e-1d2a-4c3b-9e8f-7a6b5c4d3e2f", page: 3, corners, size: [4096, 2731], opacity: 0.7, paper: false };
+    const view = { center: [-79.8717, 37.0547], zoom: 19, imagery: "naip", mode: "manual", overlays: ["contours"], plan };
+    const res = await post("/measurements", { geojson: shapes({ type: "Polygon", coordinates: [RECT] }), view });
+    expect(res.status).toBe(201);
+    expect(state.writes[0].row).toMatchObject({ view });
+    // A plan without its corners isn't kept half-saved.
+    const bad = await post("/measurements", { geojson: shapes({ type: "Polygon", coordinates: [RECT] }), view: { ...view, plan: { ...plan, corners: corners.slice(0, 3) } } });
+    expect(bad.status).toBe(400);
+  });
+
   it("only takes a picture from this company's map pictures", async () => {
     // The Client Hub serves this file with the service key, so it can't point at a receipt or another company's file.
     for (const snapshot_path of [

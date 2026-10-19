@@ -10,6 +10,7 @@ import { handleStripeEvent, hubPayment, stripeAccess, stripeCheckout, type Webho
 import { kickAutomations, runInBackground } from "../lib/background";
 import { geocodeAddress } from "../services/external";
 import { firstName } from "../lib/email";
+import { signToken, verifyToken } from "../lib/crypto";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { clientLink, readClientLink, type LinkKind } from "../lib/links";
@@ -17,6 +18,7 @@ import { adminClient } from "../lib/supabase";
 import { clientIp } from "../lib/visitor";
 import { buildCalendar } from "../lib/ics";
 import { StripeError, verifyStripeSignature, type StripeEvent } from "../services/stripe";
+import { UPLOAD_LIMIT } from "../services/uploads";
 
 export const publicRoutes = new Hono<AppEnv>();
 
@@ -285,6 +287,16 @@ const formAnswers = z
   .record(z.string().max(100), z.union([z.string().max(4000), z.number(), z.boolean(), z.array(z.string().max(500)).max(50)]))
   .refine((answers) => Object.keys(answers).length <= 50 && JSON.stringify(answers).length <= 50_000, "Too many answers.");
 
+// Files sent with a request (a "Files" or "Photos" question): what the visitor picked, before uploading.
+const MAX_FORM_FILES = 10;
+const formFiles = z
+  .array(z.object({ question: z.string().max(100), name: z.string().trim().min(1).max(255), size: z.number().int().positive().max(UPLOAD_LIMIT), type: z.string().max(150).optional() }))
+  .max(MAX_FORM_FILES, `Send up to ${MAX_FORM_FILES} files with a request.`)
+  .default([]);
+interface FilesToken { purpose: "form-files"; c: string; r: string; f: Array<{ path: string; name: string; type?: string }>; exp: number }
+const fileExtension = (name: string) => name.match(/\.([a-z0-9]{1,8})$/i)?.[1]?.toLowerCase() ?? "bin";
+const fileTitle = (name: string) => name.replace(/\.[a-z0-9]{1,8}$/i, "").replace(/_+/g, " ").replace(/\s+/g, " ").trim().slice(0, 200) || "File";
+
 publicRoutes.post("/public/forms/:company/:form", async (c) => {
   const body = await readJson(
     c,
@@ -294,6 +306,7 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
       phone: z.string().trim().min(7).max(30).optional(),
       address: z.object({ line1: z.string().trim().min(3).max(200), city: z.string().max(100).optional(), postal_code: z.string().max(12).optional() }),
       answers: formAnswers.default({}),
+      files: formFiles,
       promo_code: z.string().trim().max(40).optional(),
       turnstile_token: z.string().optional(),
     }),
@@ -314,6 +327,9 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
   if (zips.length && !zips.includes((body.address.postal_code ?? "").slice(0, 5))) {
     throw new HttpError(400, `Sorry, ${company.name} doesn't serve that area yet.`);
   }
+  // Files only for this form's file questions.
+  const fileQuestions = new Set(((form.questions ?? []) as Array<{ key: string; type: string }>).filter((q) => q.type === "files" || q.type === "photos").map((q) => q.key));
+  if (body.files.some((f) => !fileQuestions.has(f.question))) throw new HttpError(400, "This form doesn't take files.");
 
   const client = must(
     await admin
@@ -341,7 +357,48 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
   );
   geocodeLater(c, property.id, body.address);
   kickAutomations(c, company.id);
-  return c.json({ ok: true, reference: request.number }, 201);
+  if (!body.files.length) return c.json({ ok: true, reference: request.number }, 201);
+
+  // The request is in. Each file goes straight to Storage on a link that works once (and is
+  // checked against Storage's size limit there); /files then records the ones that arrived.
+  const uploads = await Promise.all(
+    body.files.map(async (f) => {
+      const path = `${company.id}/plans/${crypto.randomUUID()}.${fileExtension(f.name)}`;
+      const { data, error } = await admin.storage.from("files").createSignedUploadUrl(path);
+      if (error || !data) return null;
+      return { name: f.name, type: f.type, path, token: data.token };
+    }),
+  );
+  const ready = uploads.filter((u): u is NonNullable<typeof u> => Boolean(u));
+  const filesToken = await signToken(c.env, {
+    purpose: "form-files", c: company.id, r: request.id, f: ready.map(({ path, name, type }) => ({ path, name, type })), exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60,
+  } satisfies FilesToken);
+  // In the order the files were sent, null where Storage couldn't make a link.
+  return c.json({ ok: true, reference: request.number, uploads: uploads.map((u) => u && { name: u.name, path: u.path, token: u.token }), files_token: filesToken }, 201);
+});
+
+/** After the uploads: the files that arrived go on the request (and its property) in Plans and files. */
+publicRoutes.post("/public/forms/:company/:form/files", async (c) => {
+  if (!(await allow(c.env, `form-files:ip:${clientIp(c)}`, 30, 60 * 60))) throw new HttpError(429, "Too many requests. Try again later, or call us.");
+  const body = await readJson(c, z.object({ files_token: z.string().max(12_000), uploaded: z.array(z.string().max(200)).max(MAX_FORM_FILES) }));
+  const token = await verifyToken<FilesToken>(c.env, body.files_token);
+  const { admin, company } = await findForm(c);
+  if (!token || token.purpose !== "form-files" || token.c !== company.id) throw new HttpError(400, "That upload has run out. Send the files to us another way.");
+  const rows = [];
+  for (const f of token.f.filter((f) => body.uploaded.includes(f.path))) {
+    // Only what's really there, at the size Storage took it.
+    const { data: info } = await admin.storage.from("files").info(f.path);
+    if (!info) continue;
+    rows.push({
+      company_id: company.id, request_id: token.r, title: fileTitle(f.name), path: f.path, file_name: f.name.slice(0, 255),
+      content_type: (info.contentType ?? f.type ?? null)?.slice(0, 150) ?? null, size_bytes: info.size ?? null, crew_visible: true, created_by: null,
+    });
+  }
+  if (rows.length) {
+    const { error } = await admin.from("plan_files").upsert(rows, { onConflict: "path", ignoreDuplicates: true });
+    if (error) throw dbError(error);
+  }
+  return c.json({ added: rows.length });
 });
 
 // ---------------------------------------------------------------------------------------------

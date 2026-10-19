@@ -341,11 +341,16 @@ describe("sign-in links", () => {
 
 describe("public submissions", () => {
   /** The database for one company's forms; rate limits whose key matches `full` are used up. */
-  function database(options: { full?: RegExp } = {}) {
+  function database(options: { full?: RegExp; questions?: unknown[] } = {}) {
     const calls = serve((call) => {
       if (call.path === "rpc/rate_limit_hit") return !options.full?.test(call.body.p_key);
       if (call.path === "companies") return [{ id: "co-1", name: "Acme Lawn Care", phone: null, timezone: "America/New_York", settings: {} }];
-      if (call.path === "intake_forms") return [{ id: "form-1", name: "Request a quote", kind: "request", questions: [], service_area_zips: [], lead_time_days: 0, slot_minutes: null }];
+      if (call.path === "intake_forms") return [{ id: "form-1", name: "Request a quote", kind: "request", questions: options.questions ?? [], service_area_zips: [], lead_time_days: 0, slot_minutes: null }];
+      // Storage: a link to upload each file, and what arrived (only the first file did).
+      if (call.url.pathname.startsWith("/storage/v1/object/upload/sign/")) return { url: `${call.url.pathname.replace("/storage/v1", "")}?token=tok-${call.url.pathname.slice(-8)}` };
+      if (call.url.pathname.startsWith("/storage/v1/object/info/")) {
+        return arrived.has(call.url.pathname.replace("/storage/v1/object/info/files/", "")) ? { size: 48_000_000, content_type: "application/pdf" } : Response.json({ statusCode: "404", error: "not_found", message: "Object not found" }, { status: 400 });
+      }
       if (call.method === "GET" && call.path === "clients") return [{ id: "client-1", display_name: "Ana Smith" }];
       if (call.method === "POST" && call.path === "clients") return Response.json({ id: "client-2" }, { status: 201 });
       if (call.method === "POST" && call.path === "properties") return Response.json({ id: "property-2" }, { status: 201 });
@@ -393,6 +398,46 @@ describe("public submissions", () => {
     // On Railway: the X-Real-IP its edge sets.
     const railway = { ...env, RAILWAY_PROJECT_ID: "proj-1" };
     expect(await visitorKey({ ...forged, "X-Real-IP": "203.0.113.9" }, connectedFrom("100.64.0.7", railway))).toBe("form:ip:203.0.113.9");
+  });
+
+  const arrived = new Set<string>();
+  const plansQuestion = { key: "plans", label: "Plans or photos", type: "files", required: false };
+
+  it("takes files with a request: a one-time upload link for each, then records the ones that arrived", async () => {
+    const db = database({ questions: [plansQuestion] });
+    const files = [{ question: "plans", name: "C-101 Site Plan.pdf", size: 48_000_000, type: "application/pdf" }, { question: "plans", name: "lot.jpg", size: 2_000_000, type: "image/jpeg" }];
+    const res = await post("/public/forms/acme/quote", { ...lead, answers: { plans: files.map((f) => f.name) }, files });
+    expect(res.status).toBe(201);
+    const sent = (await res.json()) as { reference: number; uploads: Array<{ name: string; path: string; token: string }>; files_token: string };
+    expect(sent.uploads.every(Boolean)).toBe(true);
+    expect(sent.reference).toBe(1042);
+    expect(sent.uploads.map((u) => u.name)).toEqual(["C-101 Site Plan.pdf", "lot.jpg"]);
+    expect(sent.uploads.every((u) => /^co-1\/plans\/[0-9a-f-]{36}\.(pdf|jpg)$/.test(u.path) && u.token.startsWith("tok-"))).toBe(true);
+    // The request says which files came with it.
+    expect(db.calls.find((c) => c.method === "POST" && c.path === "requests")?.body.answers).toEqual({ plans: ["C-101 Site Plan.pdf", "lot.jpg"] });
+
+    // Only the first upload got through.
+    arrived.add(sent.uploads[0]!.path);
+    const done = await post("/public/forms/acme/quote/files", { files_token: sent.files_token, uploaded: sent.uploads.map((u) => u.path) });
+    expect(done.status).toBe(200);
+    expect(await done.json()).toEqual({ added: 1 });
+    expect(db.calls.find((c) => c.method === "POST" && c.path === "plan_files")?.body).toEqual([
+      { company_id: "co-1", request_id: "request-2", title: "C-101 Site Plan", path: sent.uploads[0]!.path, file_name: "C-101 Site Plan.pdf", content_type: "application/pdf", size_bytes: 48_000_000, crew_visible: true, created_by: null },
+    ]);
+    // A made-up path isn't recorded, and the link only works for this company.
+    const forged = await post("/public/forms/acme/quote/files", { files_token: `${sent.files_token}x`, uploaded: [sent.uploads[0]!.path] });
+    expect(forged.status).toBe(400);
+  });
+
+  it("takes files only for a form's file questions, and no more than ten", async () => {
+    const noFiles = database();
+    expect((await post("/public/forms/acme/quote", { ...lead, files: [{ question: "plans", name: "a.pdf", size: 10 }] })).status).toBe(400);
+    expect(noFiles.made()).toEqual([]);
+    const many = database({ questions: [plansQuestion] });
+    const eleven = Array.from({ length: 11 }, (_, i) => ({ question: "plans", name: `sheet-${i}.pdf`, size: 10 }));
+    expect((await post("/public/forms/acme/quote", { ...lead, files: eleven })).status).toBe(400);
+    expect((await post("/public/forms/acme/quote", { ...lead, files: [{ question: "plans", name: "huge.pdf", size: 300 * 1024 * 1024 }] })).status).toBe(400);
+    expect(many.made()).toEqual([]);
   });
 
   it("keeps booking form answers to the size and shape of real ones", async () => {

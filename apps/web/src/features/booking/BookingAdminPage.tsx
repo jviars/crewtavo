@@ -16,10 +16,11 @@ import { copyText } from "@/lib/clipboard";
 import { can, hasRole, useSession } from "@/lib/session";
 
 const KIND: Record<string, string> = { request: "Request form", assessment: "Book an estimate", booking: "Book a service" };
-type QType = "text" | "long_text" | "number" | "yes_no" | "choice" | "multi_choice";
-interface Question { key: string; label: string; type: QType | "address" | "photos"; required: boolean; options?: string[] }
+type QType = "text" | "long_text" | "number" | "yes_no" | "choice" | "multi_choice" | "files" | "photos";
+interface Question { key: string; label: string; type: QType | "address"; required: boolean; options?: string[] }
 interface FormRow { id: string; slug: string; name: string; kind: string; active: boolean; questions: Question[]; service_area_zips: string[]; lead_time_days: number }
-const QTYPES: Array<[QType, string]> = [["text", "Short answer"], ["long_text", "Paragraph"], ["number", "Number"], ["yes_no", "Yes / no"], ["choice", "Pick one"], ["multi_choice", "Pick any"]];
+// Files and Photos: what people send go in Plans and files on the request (and on to its quote and job).
+const QTYPES: Array<[QType, string]> = [["text", "Short answer"], ["long_text", "Paragraph"], ["number", "Number"], ["yes_no", "Yes / no"], ["choice", "Pick one"], ["multi_choice", "Pick any"], ["files", "Files (plans, PDFs)"], ["photos", "Photos"]];
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "form";
 
@@ -106,7 +107,7 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
   const [slug, setSlug] = useState(form?.slug ?? "");
   const [kind, setKind] = useState(form?.kind ?? "request");
   const [zips, setZips] = useState((form?.service_area_zips ?? []).join(", "));
-  const [questions, setQuestions] = useState<Question[]>(form?.questions.filter((q) => q.type !== "address" && q.type !== "photos") ?? [{ key: "details", label: "What do you need done?", type: "long_text", required: true }]);
+  const [questions, setQuestions] = useState<Question[]>(form?.questions.filter((q) => q.type !== "address") ?? [{ key: "details", label: "What do you need done?", type: "long_text", required: true }]);
   const finalSlug = slug.trim() ? slugify(slug) : slugify(name);
   const clash = taken.filter((s) => s !== form?.slug).includes(finalSlug);
   const zipList = zips.split(/[\s,;]+/).map((z) => z.trim()).filter(Boolean);
@@ -157,12 +158,12 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
         </Field>
         <div className="form-section">
           <h3>Questions</h3>
-          <p className="muted small" style={{ margin: "-8px 0 0" }}>Name, email, phone and address are always asked.</p>
+          <p className="muted small" style={{ margin: "-8px 0 0" }}>Name, email, phone and address are always asked. Files people send (plans, photos) show on the request under Plans and files.</p>
           {questions.map((q, i) => (
             <div key={i} className="card" style={{ padding: 12, boxShadow: "none", background: "var(--fill)", display: "grid", gap: 8 }}>
               <div className="row">
                 <input className="input input-sm grow" value={q.label} onChange={(e) => setQ(i, { label: e.target.value })} placeholder="Question" maxLength={200} aria-label="Question" />
-                <select className="select input-sm" style={{ width: 140 }} value={q.type} onChange={(e) => setQ(i, { type: e.target.value as QType, options: ["choice", "multi_choice"].includes(e.target.value) ? q.options ?? ["Option 1"] : undefined })} aria-label="Answer type">
+                <select className="select input-sm" style={{ width: 170 }} value={q.type} onChange={(e) => setQ(i, { type: e.target.value as QType, options: ["choice", "multi_choice"].includes(e.target.value) ? q.options ?? ["Option 1"] : undefined })} aria-label="Answer type">
                   {QTYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>

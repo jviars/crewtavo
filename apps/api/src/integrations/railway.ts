@@ -262,10 +262,36 @@ export async function deleteCustomDomain(access: RailwayAccess, id: string): Pro
 
 /** Sets a variable on the crewtavo service without deploying; redeploy() then starts it with the new value. */
 export async function setVariable(env: Env, access: RailwayAccess, name: string, value: string): Promise<void> {
-  const { projectId, environmentId, serviceId } = ids(env);
+  await setServiceVariable(env, access, ids(env).serviceId, name, value);
+}
+
+/** Sets a variable on one of the project's services without deploying it. */
+export async function setServiceVariable(env: Env, access: RailwayAccess, serviceId: string, name: string, value: string): Promise<void> {
+  const { projectId, environmentId } = ids(env);
   await gql(access, "mutation ($input: VariableUpsertInput!) { variableUpsert(input: $input) }", {
     input: { projectId, environmentId, serviceId, name, value, skipDeploys: true },
   });
+}
+
+/** Another service in this instance's project, by the name the template gives it ("storage"). */
+export async function serviceIdByName(env: Env, access: RailwayAccess, name: string): Promise<string | null> {
+  const { project } = await gql<{ project: { services: { edges: { node: { id: string; name: string } }[] } } }>(
+    access,
+    "query ($id: String!) { project(id: $id) { services(first: 50) { edges { node { id name } } } } }",
+    { id: ids(env).projectId },
+  );
+  return project.services.edges.find((e) => e.node.name === name)?.node.id ?? null;
+}
+
+/** A service's variables in this environment, as name → value. */
+export async function serviceVariables(env: Env, access: RailwayAccess, serviceId: string): Promise<Record<string, string>> {
+  const { projectId, environmentId } = ids(env);
+  const { variables } = await gql<{ variables: Record<string, string> | null }>(
+    access,
+    "query ($projectId: String!, $environmentId: String!, $serviceId: String) { variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) }",
+    { projectId, environmentId, serviceId },
+  );
+  return variables ?? {};
 }
 
 export async function redeploy(env: Env, access: RailwayAccess, serviceId: string): Promise<void> {

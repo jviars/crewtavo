@@ -1208,6 +1208,56 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"plan_files": {
+                  Row: {
+                    "archived": boolean,"company_id": string,"content_type": string | null,"created_at": string,"created_by": string | null,"crew_visible": boolean,"file_name": string,"id": string,"job_id": string | null,"notes": string | null,"path": string,"property_id": string | null,"quote_id": string | null,"replaces_id": string | null,"request_id": string | null,"revision": string | null,"size_bytes": number | null,"superseded_at": string | null,"title": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "archived"?: boolean,"company_id": string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"crew_visible"?: boolean,"file_name": string,"id"?: string,"job_id"?: string | null,"notes"?: string | null,"path": string,"property_id"?: string | null,"quote_id"?: string | null,"replaces_id"?: string | null,"request_id"?: string | null,"revision"?: string | null,"size_bytes"?: number | null,"superseded_at"?: string | null,"title": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "archived"?: boolean,"company_id"?: string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"crew_visible"?: boolean,"file_name"?: string,"id"?: string,"job_id"?: string | null,"notes"?: string | null,"path"?: string,"property_id"?: string | null,"quote_id"?: string | null,"replaces_id"?: string | null,"request_id"?: string | null,"revision"?: string | null,"size_bytes"?: number | null,"superseded_at"?: string | null,"title"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "plan_files_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "plan_files_company_id_job_id_fkey"
+      columns: ["company_id","job_id"]
+isOneToOne: false
+      referencedRelation: "jobs"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "plan_files_company_id_property_id_fkey"
+      columns: ["company_id","property_id"]
+isOneToOne: false
+      referencedRelation: "properties"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "plan_files_company_id_quote_id_fkey"
+      columns: ["company_id","quote_id"]
+isOneToOne: false
+      referencedRelation: "quotes"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "plan_files_company_id_replaces_id_fkey"
+      columns: ["company_id","replaces_id"]
+isOneToOne: false
+      referencedRelation: "plan_files"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "plan_files_request_fk"
+      columns: ["company_id","request_id"]
+isOneToOne: false
+      referencedRelation: "requests"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"profiles": {
                   Row: {
                     "avatar_url": string | null,"color": string | null,"created_at": string,"email": string | null,"full_name": string,"phone": string | null,"updated_at": string,"user_id": string
