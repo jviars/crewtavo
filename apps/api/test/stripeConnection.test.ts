@@ -365,7 +365,7 @@ describe("replacing the Stripe key", () => {
     const res = await app.request("/api/apps/stripe/key", { method: "PUT", headers, body: JSON.stringify({ api_key: "rk_live_NEW" }) }, env);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe(
-      "That key can't add a webhook. Use your standard secret key, or a restricted key that can write webhook endpoints, customers, invoices and invoice items. Stripe stays connected as it was.",
+      "That key can't add a webhook. Make a new one with Get a key from Stripe, which gives it everything Crewtavo needs. Stripe stays connected as it was.",
     );
     // Nothing was taken out, and the old key and its webhook are still the ones in use.
     expect(stripe.calls.filter((c) => c.includes("DELETE"))).toEqual([]);

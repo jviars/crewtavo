@@ -27,6 +27,14 @@ import { StripePanel } from "./StripePanel";
 const GOOGLE_SETTINGS = "https://calendar.google.com/calendar/r/settings";
 const GOOGLE_SIGNIN_GUIDE = "https://crewtavo.com/docs/connections/google-calendar/#instant-updates-with-google-sign-in";
 
+/**
+ * What Crewtavo's Stripe key may do: add its webhook, customers and invoices (with their items),
+ * and read payments, fees, deposits and the account's name. Stripe's create-key form ticks these
+ * from its link. Stripe doesn't document that, so if it stops, people still land on the form.
+ */
+const STRIPE_KEY_PERMISSIONS = ["webhook_write", "customer_write", "invoice_write", "charge_read", "balance_transaction_read", "balance_transaction_source_read", "payout_read", "connected_account_read"];
+const STRIPE_NEW_KEY = `https://dashboard.stripe.com/apikeys/create?name=Crewtavo&${STRIPE_KEY_PERMISSIONS.map((p) => `permissions%5B%5D=rak_${p}`).join("&")}`;
+
 /** Where each assistant keeps its connector settings. */
 const CONNECTOR_STEPS: Record<string, string[]> = {
   anthropic: ["In Claude, open Settings, then Connectors.", "Choose Add custom connector and paste the link above.", "Sign in with your Crewtavo account when Claude asks."],
@@ -342,19 +350,35 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
     e.preventDefault();
     if (key.trim().length >= 10) save.mutate();
   };
+  // Until the company's own Stripe key is in: how to get one from the form Stripe fills in.
+  const stripeSteps = stripe && !app.stripe?.own;
   return (
     <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="key-title" style={{ gap: 10 }}>
       <h2 id="key-title" className="section-title" style={{ fontSize: 17 }}>
-        {app.id === "anthropic" ? "Your own Anthropic key (optional)" : stripe ? (app.stripe && !app.stripe.own ? "Use your own Stripe account" : "Stripe secret key") : `${app.name} key`}
+        {app.id === "anthropic" ? "Your own Anthropic key (optional)" : stripe ? (app.stripe?.own ? "Stripe key" : app.stripe ? "Use your own Stripe account" : "Connect your Stripe account") : `${app.name} key`}
       </h2>
+      {stripeSteps && (
+        <>
+          <ol className="app-steps">
+            <li>Click <strong>Get a key from Stripe</strong> and sign in if Stripe asks. A new key named Crewtavo opens with what it needs already ticked.</li>
+            <li>Click <strong>Create key</strong> and enter the code Stripe sends you.</li>
+            <li>Click the key to copy it, then paste it below.</li>
+          </ol>
+          <a className="btn btn-primary" style={{ justifySelf: "start" }} href={STRIPE_NEW_KEY} target="_blank" rel="noreferrer">
+            <Icon name="external" size={16} />
+            Get a key from Stripe
+          </a>
+        </>
+      )}
       <span className="muted small">
         {app.id === "anthropic" ? "Crewtavo's writing help and answers from your guides use this key when you add one. " : null}
-        {stripe ? "From Stripe: Developers, then API keys, then the secret key (it starts with sk_live_). Crewtavo adds the webhook it needs to your Stripe account. " : null}
+        {stripe ? "Crewtavo adds the webhook it needs to your Stripe account. " : null}
         {app.status === "connected" && app.account_label && (!stripe || app.stripe?.own) ? `Saved: ${app.account_label}.` : "It's stored encrypted and never shown again."}
+        {stripe && app.stripe?.own ? <> To switch keys, <a href={STRIPE_NEW_KEY} target="_blank" rel="noreferrer">get a new one from Stripe</a>.</> : null}
       </span>
       <form className="row" style={{ gap: 8 }} onSubmit={submit}>
         <div className="input-group grow">
-          <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} placeholder={(stripe ? app.stripe?.own : app.status === "connected") ? "Paste a new key to replace it" : stripe ? "sk_live_…" : "Paste your key"} value={key} onChange={(e) => { setKey(e.target.value); save.reset(); }} aria-label={`${app.name} ${stripe ? "secret key" : "API key"}`} style={{ paddingLeft: 12, paddingRight: 36 }} />
+          <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} placeholder={(stripe ? app.stripe?.own : app.status === "connected") ? "Paste a new key to replace it" : stripe ? "Paste the key from Stripe" : "Paste your key"} value={key} onChange={(e) => { setKey(e.target.value); save.reset(); }} aria-label={stripe ? "Key from Stripe" : `${app.name} API key`} style={{ paddingLeft: 12, paddingRight: 36 }} />
           <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide key" : "Show key"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={15} /></button>
         </div>
         <Button type="submit" loading={save.isPending} disabled={key.trim().length < 10}>{stripe ? "Connect" : "Save"}</Button>

@@ -253,11 +253,14 @@ the Sentry project's security settings so the server never infers them.
 
 ## Connecting Stripe
 
-Open **Apps** and paste your Stripe secret key (Stripe: **Developers → API keys**, the one that
-starts with `sk_live_`). Crewtavo checks it and adds the webhook it needs to your Stripe account, so
-there's nothing else to set up. A test key (`sk_test_`) works the same way, with no real money.
-A restricted key works too if it can write customers, invoices, invoice items and webhook
-endpoints, and read payouts and balance transactions.
+Open **Apps**, then **Stripe**, and click **Get a key from Stripe**. Stripe opens its form for a new
+restricted key named Crewtavo with the permissions it needs already ticked: click **Create key**,
+enter the code Stripe sends you, copy the key and paste it into Crewtavo. Crewtavo checks it and
+adds the webhook it needs to your Stripe account, so there's nothing else to set up. A sandbox key
+(`rk_test_` or `sk_test_`) works the same way, with no real money, and so does a secret key
+(`sk_live_`). A restricted key made by hand needs write access to webhook endpoints, customers and
+invoices, and read access to charges, balance transactions (and their sources), payouts and the
+account.
 
 Then:
 
