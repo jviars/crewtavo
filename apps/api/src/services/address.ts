@@ -222,8 +222,9 @@ export async function finishChange(env: Env, admin: Db, companyId: string): Prom
   const row = await loadRow(admin, companyId);
   if (!row) throw new HttpError(404, "There's no address being set up.");
   if (row.status === "failed") await update(admin, companyId, { status: "waiting", error: null, switching_at: null });
-  if (row.automatic && row.status !== "done" && row.status !== "switching" && !isLive(env, row.domain)) {
-    await refreshChange(env, admin, { ...row, status: "waiting" });
+  if (row.status !== "done" && row.status !== "switching" && !isLive(env, row.domain)) {
+    if (row.automatic) await refreshChange(env, admin, { ...row, status: "waiting" });
+    else await retryRailway(env, admin, row);
   }
   return addressOverview(env, admin, companyId);
 }
@@ -314,6 +315,16 @@ export async function adoptRailway(env: Env, admin: Db, companyId: string, acces
   }
 }
 
+/**
+ * A change Railway didn't take when the owner logged in (it refused, or wasn't reachable): asks
+ * again while Crewtavo has access. It also picks up the domain once the owner adds it in Railway.
+ */
+async function retryRailway(env: Env, admin: Db, row: Row): Promise<void> {
+  if (platformOf(env) !== "railway") return;
+  const access = await railwayAccess(env, admin, row.company_id).catch(() => null);
+  if (access) await adoptRailway(env, admin, row.company_id, access);
+}
+
 /** Asks Railway how the address is doing; once it's verified, secured and answering, switches over. */
 async function refreshChange(env: Env, admin: Db, row: Row): Promise<"waiting" | "switching"> {
   try {
@@ -373,6 +384,8 @@ export async function runAddressTask(env: Env, admin: Db): Promise<{ checked: nu
       });
     } else if (row.status === "waiting" && row.automatic) {
       if ((await refreshChange(env, admin, row)) === "switching") switching++;
+    } else if (row.status === "waiting") {
+      await retryRailway(env, admin, row);
     }
   }
   return { checked: rows?.length ?? 0, switching, done };
