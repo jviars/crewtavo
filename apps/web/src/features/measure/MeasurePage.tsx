@@ -8,7 +8,7 @@
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { roofingSquares, summarizeFeatureCollection, type Feature } from "@crewtavo/core/geo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -22,6 +22,7 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { addressLine, formatNumber } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { AddressSearch, type ClientSuggestion, type PlaceSuggestion } from "./AddressSearch";
 import { ShareDrawing, type DrawingRow } from "./drawings";
 import { AUTO_NAME, ELEVATION_CREDIT, imageryCredit, imageryInfo, mapKeys, OVERLAYS, probeImagery, resolveAuto, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
 import { ImageryPicker } from "./ImageryPicker";
@@ -366,21 +367,49 @@ export function MeasurePage() {
       return r;
     },
     onSuccess: (r) => {
-      mapRef.current?.jumpTo(r.lng!, r.lat!, 19);
-      if (r.country && r.country !== "US") {
-        // Auto finds the best there is by itself; a US-only source someone picked gets explained.
-        if (choice !== "auto" && (imagery === "naip" || imagery?.startsWith("state:") || imagery?.startsWith("usgs"))) setAbroad({ place: r.formatted ?? "This address" });
-      } else if (autoImagery.current && choice !== "auto") {
-        chooseImagery("auto");
-        toast.success(`Back on the ${AUTO_NAME}`);
-      }
+      // Somewhere else now, so the drawing is no longer for a client picked earlier.
+      unpick();
+      goTo({ lat: r.lat!, lng: r.lng!, zoom: 19, country: r.country ?? null, place: r.formatted ?? "This address" });
     },
   });
-  const onFind = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const address = String(new FormData(e.currentTarget).get("address") ?? "").trim();
-    if (address.length < 5) return;
-    find.mutate(address);
+  /** Move the map to a place found by search or picked from the suggestions. */
+  const goTo = (to: { lat: number; lng: number; zoom: number; country: string | null; place: string }) => {
+    mapRef.current?.jumpTo(to.lng, to.lat, to.zoom);
+    if (to.country && to.country !== "US") {
+      // Auto finds the best there is by itself; a US-only source someone picked gets explained.
+      if (choice !== "auto" && (imagery === "naip" || imagery?.startsWith("state:") || imagery?.startsWith("usgs"))) setAbroad({ place: to.place });
+    } else if (autoImagery.current && choice !== "auto") {
+      chooseImagery("auto");
+      toast.success(`Back on ${AUTO_NAME}`);
+    }
+  };
+  // A client's property picked from the suggestions. When Measure wasn't opened for a property,
+  // the drawing is for this one: it's saved with it, and offered to this client's quotes.
+  const [picked, setPicked] = useState<ClientSuggestion | null>(null);
+  const pickClient = async (s: ClientSuggestion) => {
+    find.reset();
+    let at = s.lat != null && s.lng != null ? { lat: s.lat, lng: s.lng } : null;
+    if (!at) {
+      const hit = await api.post<Found>(`/properties/${s.property_id}/geocode`).catch(() => null);
+      if (hit?.found) at = { lat: hit.lat!, lng: hit.lng! };
+    }
+    if (!ctx?.ids.property && !saved) {
+      setPicked(s);
+      setTitle((t) => (t === "Measurement" || t === picked?.label ? s.label : t));
+    }
+    if (!at) return toast.error(`Couldn't find ${s.label} on the map. Check the property's address on ${s.client ?? "the client"}'s page.`);
+    goTo({ ...at, zoom: 19, country: "US", place: s.label });
+  };
+  /** The drawing is no longer for the client picked earlier (and loses their address as its name). */
+  const unpick = () => {
+    if (!picked) return;
+    setTitle((t) => (t === picked.label ? "Measurement" : t));
+    setPicked(null);
+  };
+  const pickPlace = (s: PlaceSuggestion) => {
+    find.reset();
+    unpick();
+    goTo({ lat: s.lat, lng: s.lng, zoom: s.kind === "address" ? 19 : s.kind === "street" ? 17 : 15, country: s.country, place: [s.label, s.detail].filter(Boolean).join(", ") });
   };
   const locate = () => {
     if (!navigator.geolocation) return toast.error("This browser can't share its location. Search for the address instead.");
@@ -494,7 +523,7 @@ export function MeasurePage() {
       const result = await api.post<SaveResult>("/measurements", {
         id: saved?.id,
         title: title.trim() || "Measurement",
-        property_id: ctx?.ids.property ?? undefined,
+        property_id: ctx?.ids.property ?? picked?.property_id ?? undefined,
         request_id: ctx?.ids.request ?? undefined,
         quote_id: saved ? undefined : ctx?.ids.quote ?? undefined,
         invoice_id: saved ? undefined : ctx?.ids.invoice ?? undefined,
@@ -561,17 +590,26 @@ export function MeasurePage() {
         }
       />
       {p && <p className="page-subtitle">{addressLine(p)}{p.client && ` · ${p.client.display_name}`}{ctx?.quote && ` · for quote #${ctx.quote.number}`}{ctx?.invoice && ` · for invoice #${ctx.invoice.number}`}</p>}
+      {!p && picked && (
+        <p className="page-subtitle">
+          For {picked.label}{picked.client && ` · ${picked.client}`}
+          {!saved && <button type="button" className="link-btn" style={{ marginLeft: 8 }} onClick={unpick}>Not for this client</button>}
+        </p>
+      )}
       <FormError error={save.error} />
       <div className="two-col measure-layout">
         <div className="wide card measure-card">
           {mapState !== "error" && (
             <div className="measure-toolbar">
-              <form className="measure-find" onSubmit={onFind} role="search">
-                <div className="input-group">
-                  <span className="addon">{find.isPending ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={15} />}</span>
-                  <input name="address" className="input" placeholder="Search an address, US or worldwide" aria-label="Search an address" enterKeyHint="search" disabled={mapState !== "ready"} onChange={() => find.isError && find.reset()} />
-                </div>
-              </form>
+              <AddressSearch
+                disabled={mapState !== "ready"}
+                busy={find.isPending}
+                near={center && center.zoom >= 8 ? center : null}
+                onSubmit={(address) => find.mutate(address)}
+                onPickClient={pickClient}
+                onPickPlace={pickPlace}
+                onEdit={() => find.isError && find.reset()}
+              />
               {imagery && (
                 <ImageryPicker choice={choice ?? "auto"} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} overlays={overlays} onPick={(next) => chooseImagery(next)} onStreetNames={setStreetNames} onOverlay={toggleOverlay} />
               )}
@@ -665,7 +703,7 @@ export function MeasurePage() {
           {saved && (
             <ShareDrawing
               drawing={saved}
-              clientId={ctx?.clientId ?? null}
+              clientId={ctx?.clientId ?? picked?.client_id ?? null}
               hasPicture={Boolean(saved.snapshot_path)}
               onChange={(patch) => setSaved((s) => (s ? { ...s, ...patch } : s))}
             />

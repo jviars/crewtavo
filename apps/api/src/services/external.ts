@@ -108,6 +108,66 @@ export async function geocodeAddress(address: string, googleKey?: string | null,
   return options.world ? photon(query) : null;
 }
 
+export interface PlaceSuggestion {
+  label: string;
+  detail: string | null;
+  lat: number;
+  lng: number;
+  /** Two-letter country code. */
+  country: string | null;
+  /** How close in to zoom: a house, a street, or a town or landmark. */
+  kind: "address" | "street" | "place";
+}
+
+// Typeahead asks again on every few keystrokes; the same text near the same place gets the same
+// answer for a day, which also keeps us a fair user of the public server.
+const SUGGEST_CACHE = new Map<string, { at: number; places: PlaceSuggestion[] }>();
+const SUGGEST_TTL = 24 * 3600_000;
+
+/**
+ * Place suggestions as someone types (Photon, OpenStreetMap data, no key), leaning toward places
+ * near `near`. Good for streets, towns and landmarks; OpenStreetMap is missing many rural US house
+ * numbers, which is why a full address still goes to the Census geocoder on Enter.
+ */
+export async function suggestPlaces(text: string, near?: { lat: number; lng: number }): Promise<PlaceSuggestion[]> {
+  const query = text.replace(/\s+/g, " ").trim();
+  const key = `${query.toLowerCase()}|${near ? `${near.lat.toFixed(1)},${near.lng.toFixed(1)}` : ""}`;
+  const cached = SUGGEST_CACHE.get(key);
+  if (cached && Date.now() - cached.at < SUGGEST_TTL) return cached.places;
+  const params = new URLSearchParams({ q: query, limit: "6", lang: "en" });
+  if (near) {
+    params.set("lat", near.lat.toFixed(4));
+    params.set("lon", near.lng.toFixed(4));
+    // A strong pull toward the map, so "Diamond Av" finds the one in town before one across the country.
+    params.set("zoom", "12");
+    params.set("location_bias_scale", "0.1");
+  }
+  const res = await fetch(`https://photon.komoot.io/api/?${params}`, {
+    headers: { Accept: "application/json", "User-Agent": "Crewtavo (https://github.com/jviars/crewtavo)" },
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!res.ok) throw new Error(`Photon returned ${res.status}`);
+  const body = (await res.json()) as { features?: Array<{ geometry?: { coordinates?: [number, number] }; properties: Record<string, string | undefined> }> };
+  const seen = new Set<string>();
+  const places = (body.features ?? []).flatMap((f): PlaceSuggestion[] => {
+    const [lng, lat] = f.geometry?.coordinates ?? [];
+    if (typeof lat !== "number" || typeof lng !== "number") return [];
+    const p = f.properties;
+    const country = p.countrycode?.toUpperCase() ?? null;
+    const street = [p.housenumber, p.street].filter(Boolean).join(" ");
+    const kind = p.housenumber ? "address" : p.type === "street" || p.osm_key === "highway" ? "street" : "place";
+    const label = (kind === "address" ? street : p.name || street) || p.city || p.county || "";
+    const detail = [kind === "place" && street && street !== label ? street : null, p.city !== label ? p.city ?? p.county : null, p.state, country !== "US" ? p.country : null].filter(Boolean).join(", ") || null;
+    const id = `${label}|${detail}`;
+    if (!label || seen.has(id)) return [];
+    seen.add(id);
+    return [{ label, detail, lat, lng, country, kind }];
+  });
+  if (SUGGEST_CACHE.size > 2000) SUGGEST_CACHE.clear();
+  SUGGEST_CACHE.set(key, { at: Date.now(), places });
+  return places;
+}
+
 /** OpenStreetMap search through komoot's public Photon server (fair use, no key). */
 async function photon(query: string): Promise<GeocodeResult | null> {
   const res = await fetch(`https://photon.komoot.io/api/?${new URLSearchParams({ q: query, limit: "1" })}`, {

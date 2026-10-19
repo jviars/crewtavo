@@ -250,7 +250,12 @@ Categories, pages, revisions, search and templates, built into our app:
 ## 9. Map measuring
 
 1. The estimator opens **Measure** from a request, quote, invoice or property, or searches any
-   address (US or worldwide). The map (MapLibre) starts on **Auto**, which picks the sharpest free
+   address (US or worldwide). As they type, the box suggests the company's own clients'
+   properties first (picking one ties the drawing to that client), then places near the map from
+   OpenStreetMap (Photon, `GET /api/places/suggest`, cached a day and rate limited per company to
+   stay a fair user of the public server). Enter on a full address looks it up exactly: the
+   Census geocoder in the US, which knows the rural house numbers OpenStreetMap lacks, else
+   OpenStreetMap. The map (MapLibre) starts on **Auto**, which picks the sharpest free
    imagery for where it is and moves on when a source stops answering: the state's own imagery
    (`packages/core/src/imagery.ts`: 17 states and DC, 3 in to 1 ft), else USDA NAIP (about 2 ft,
    through Microsoft's Planetary Computer, a preview service with no uptime promise), else the same

@@ -5,8 +5,9 @@ import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { dbError, HttpError, isoDate, must, param, readJson, uuid } from "../lib/http";
+import { allow } from "../lib/limit";
 import { adminClient } from "../lib/supabase";
-import { geocodeAddress } from "../services/external";
+import { geocodeAddress, suggestPlaces } from "../services/external";
 import { materializeJob, recurringJob } from "../tasks";
 
 export const schedule = new Hono<AppEnv>();
@@ -140,6 +141,49 @@ schedule.post("/geocode", requireUser, requireCompany(), async (c) => {
   const body = await readJson(c, z.object({ address: z.string().trim().min(5).max(300), world: z.boolean().optional() }));
   const result = await geocodeAddress(body.address, c.env.GOOGLE_MAPS_SERVER_KEY, { world: body.world });
   return c.json(result ? { found: true, ...result } : { found: false });
+});
+
+/** `foo` as an ILIKE pattern that matches it literally anywhere (its own % and _ aren't wildcards). */
+const contains = (text: string) => `%${text.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+
+/**
+ * Suggestions while someone types an address on the measuring map: the company's own clients'
+ * properties first (by street or client name, as far as their role can see them), then places near
+ * the map from OpenStreetMap (Photon). Place suggestions failing never fails the clients' list.
+ */
+schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
+  const q = (c.req.query("q") ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  if (q.length < 3) return c.json({ clients: [], places: [] });
+  const lat = Number(c.req.query("lat"));
+  const lng = Number(c.req.query("lng"));
+  const near = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : undefined;
+  const { db, companyId } = c.var;
+  const fields = "id, line1, city, region, postal_code, lat, lng";
+  const [byStreet, byClient, places] = await Promise.all([
+    db.from("properties").select(`${fields}, client:clients(id, display_name)`).eq("company_id", companyId).ilike("line1", contains(q)).limit(6),
+    db.from("clients").select(`id, display_name, properties(${fields})`).eq("company_id", companyId).ilike("display_name", contains(q)).limit(4),
+    (async () => {
+      if (!(await allow(c.env, `place-suggest:${companyId}`, 2000, 60 * 60))) return null;
+      return suggestPlaces(q, near).catch(() => null);
+    })(),
+  ]);
+  type Row = { id: string; line1: string | null; city: string | null; region: string | null; postal_code: string | null; lat: number | null; lng: number | null };
+  const clients = new Map<string, { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null }>();
+  const add = (p: Row, client: { id: string; display_name: string } | null) => {
+    if (!p.line1 || clients.has(p.id) || clients.size >= 6) return;
+    clients.set(p.id, {
+      property_id: p.id,
+      client_id: client?.id ?? null,
+      client: client?.display_name ?? null,
+      label: p.line1,
+      detail: [p.city, p.region].filter(Boolean).join(", ") || null,
+      lat: p.lat,
+      lng: p.lng,
+    });
+  };
+  for (const p of (byStreet.data ?? []) as Array<Row & { client: { id: string; display_name: string } | null }>) add(p, p.client);
+  for (const client of (byClient.data ?? []) as Array<{ id: string; display_name: string; properties: Row[] }>) for (const p of client.properties) add(p, client);
+  return c.json({ clients: [...clients.values()], places: places ?? [], places_unavailable: places === null });
 });
 
 /** Find a property's map location from its address (for routing, weather and the measuring tool). */
