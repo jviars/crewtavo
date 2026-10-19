@@ -1,7 +1,8 @@
--- Database tests for 20261019001040_assistant_access.sql (and its followups): an AI assistant's
--- token (one with a client_id claim) only reads until the person who connected it turns on "Allow
--- changes", in the Data API (hooks.before_request, PostgREST's pre-request) and in Storage.
--- Ordinary sign-ins and visitors are left as they were.
+-- Database tests for AI assistant access (20261019001040_assistant_access.sql, its followups, and
+-- 20261019001900_assistant_areas.sql): an assistant's token (one with a client_id claim) only reads
+-- unless the person who connected it chose areas it may change, or gave it full access, in the Data
+-- API (hooks.before_request, PostgREST's pre-request) and in Storage. Ordinary sign-ins and visitors
+-- are left as they were.
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -36,6 +37,12 @@ create function t1040.as_request(p_user uuid, p_client text, p_method text defau
          set_config('request.method', p_method, true),
          set_config('request.path', p_path, true);
 $$;
+-- What the pre-request hook says to a request: 'none' when it goes through.
+create function t1040.hook(p_user uuid, p_client text, p_method text, p_path text) returns text language plpgsql as $$
+begin
+  perform t1040.as_request(p_user, p_client, p_method, p_path);
+  return t1040.error_of('select hooks.before_request()');
+end $$;
 grant execute on all functions in schema t1040 to anon, authenticated, service_role;
 
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -48,14 +55,18 @@ select t1040.as_request('b1040000-0000-0000-0000-000000000001', null, 'POST', '/
 select public.create_company('Kilo Gardens', 'general') as co \gset
 insert into public.memberships (company_id, user_id, role) values (:'co', 'b1040000-0000-0000-0000-000000000002', 'office');
 insert into public.clients (company_id, display_name) values (:'co', 'Kilo client');
+insert into public.crews (company_id, name) values (:'co', 'Kilo crew') returning id as crew \gset
+insert into public.crew_members (company_id, crew_id, user_id) values (:'co', :'crew', 'b1040000-0000-0000-0000-000000000002');
+insert into public.services (company_id, name) values (:'co', 'Kept service') returning id as service \gset
 commit;
 
 \set owner 'b1040000-0000-0000-0000-000000000001'
 \set office 'b1040000-0000-0000-0000-000000000002'
--- Three of the owner's assistants: one allowed to change things, one switched back to reading, and
--- one connected before the switch existed (no row).
-\set allowed 'c1040000-0000-0000-0000-00000000000a'
+-- The owner's assistants: one with full access, one that only reads, one that may change the price
+-- list and crews, and one connected before any of this existed (no row).
+\set full 'c1040000-0000-0000-0000-00000000000a'
 \set reading 'c1040000-0000-0000-0000-00000000000b'
+\set chosen 'c1040000-0000-0000-0000-00000000000d'
 \set earlier 'c1040000-0000-0000-0000-00000000000c'
 
 \o
@@ -66,20 +77,24 @@ commit;
 begin;
 set local role authenticated;
 select t1040.as_request(:'owner', null);
-insert into public.assistant_connections (client_id, allow_changes) values (:'allowed', true), (:'reading', true);
-update public.assistant_connections set allow_changes = false where client_id = :'reading';
-select t1040.check((select count(*) = 2 and bool_and(user_id = :'owner') from public.assistant_connections), 'a person''s connections are their own');
-select t1040.expect_error(format('insert into public.assistant_connections (user_id, client_id, allow_changes) values (%L, %L, true)', :'office', :'earlier'),
-  'nobody turns on changes for someone else''s assistant');
+insert into public.assistant_connections (client_id, level, areas) values (:'full', 'full', '{}'), (:'reading', 'full', '{}'), (:'chosen', 'areas', '{prices,crews}');
+update public.assistant_connections set level = 'read' where client_id = :'reading';
+select t1040.check((select count(*) = 3 and bool_and(user_id = :'owner') from public.assistant_connections), 'a person''s connections are their own');
+select t1040.expect_error(format('insert into public.assistant_connections (user_id, client_id, level) values (%L, %L, %L)', :'office', :'earlier', 'full'),
+  'nobody gives someone else''s assistant access');
+select t1040.expect_error(format('insert into public.assistant_connections (client_id, level, areas) values (%L, %L, %L)', :'earlier', 'areas', '{team}'),
+  'areas are only the ones there are');
+select t1040.expect_error(format('insert into public.assistant_connections (client_id, level) values (%L, %L)', :'earlier', 'admin'),
+  'and so are levels');
 commit;
 
 begin;
 set local role authenticated;
 select t1040.as_request(:'office', null);
 select t1040.check((select count(*) = 0 from public.assistant_connections), 'nobody else sees them');
-update public.assistant_connections set allow_changes = true where client_id = :'reading';
+update public.assistant_connections set level = 'full' where client_id = :'reading';
 commit;
-select t1040.check((select not allow_changes from public.assistant_connections where client_id = :'reading'), 'or changes them');
+select t1040.check((select level = 'read' from public.assistant_connections where client_id = :'reading'), 'or changes them');
 
 -- An ordinary sign-in is left as it was.
 begin;
@@ -106,66 +121,100 @@ reset role;
 select t1040.check(current_setting('transaction_read_only') = 'off', 'and so does the server''s');
 rollback;
 
--- An assistant that only reads: switched back, or connected before the switch existed.
+-- Reading: every assistant reads what its person can, in a request that can't change anything.
 begin;
 set local role authenticated;
-select t1040.as_request(:'owner', :'reading', 'GET', '/clients');
+select t1040.as_request(:'owner', :'full', 'GET', '/clients');
 select hooks.before_request();
-select t1040.check((select count(*) = 1 from public.clients where company_id = :'co'), 'an assistant that only reads still sees what its person sees');
-select t1040.check(current_setting('transaction_read_only') = 'on', 'in a request that can''t change anything');
+select t1040.check((select count(*) = 1 from public.clients where company_id = :'co'), 'an assistant sees what its person sees');
+select t1040.check(current_setting('transaction_read_only') = 'on', 'in a request that can''t change anything, even with full access');
 rollback;
 
+-- Read only: switched back, or connected before any of this existed.
 begin;
 set local role authenticated;
-select t1040.as_request(:'owner', :'reading', 'POST', '/clients');
-select t1040.check(e like 'PT403: This assistant can only read. To let it make changes, turn on "Allow changes" for it in Crewtavo, under Settings → Profile → AI assistants.',
-  'it can''t add to a table, and is told where to allow it (in the profile, which every role has): ' || e) from (select t1040.error_of('select hooks.before_request()') as e) x;
-select t1040.as_request(:'owner', :'reading', 'PATCH', '/clients');
-select t1040.check(t1040.error_of('select hooks.before_request()') like 'PT403:%', 'or change a row');
-select t1040.as_request(:'owner', :'reading', 'DELETE', '/clients');
-select t1040.check(t1040.error_of('select hooks.before_request()') like 'PT403:%', 'or delete one');
-select t1040.as_request(:'owner', :'earlier', 'POST', '/clients');
-select t1040.check(t1040.error_of('select hooks.before_request()') like 'PT403:%', 'nor can one connected before the switch existed');
+select t1040.check(e = 'PT403: This assistant can''t change the price list. To let it, choose what it can change in Crewtavo, under Settings → AI assistants.',
+  'a read-only assistant can''t add to the price list, and is told where to allow it: ' || e) from (select t1040.hook(:'owner', :'reading', 'POST', '/services') as e) x;
+select t1040.check(t1040.hook(:'owner', :'reading', 'PATCH', '/requests') like 'PT403: This assistant can''t change requests and notes.%', 'or change a request');
+select t1040.check(t1040.hook(:'owner', :'reading', 'DELETE', '/services') like 'PT403: This assistant can''t delete things.%', 'or delete anything');
+select t1040.check(t1040.hook(:'owner', :'earlier', 'POST', '/services') like 'PT403:%', 'nor can one connected before any of this');
 rollback;
 
--- A function it calls answers, but can't write.
+-- Chosen areas: adds and changes there, nowhere else, and doesn't delete.
 begin;
 set local role authenticated;
-select t1040.as_request(:'owner', :'earlier', 'POST', '/rpc/create_company');
+select t1040.check(t1040.hook(:'owner', :'chosen', 'POST', '/services') = 'none', 'an assistant may add to an area it was given');
+select t1040.check(current_setting('transaction_read_only') = 'off', 'in a request that can write');
+select t1040.check(t1040.error_of(format('insert into public.services (company_id, name) values (%L, %L)', :'co', 'By an assistant')) = 'none', 'and adds a service');
+select t1040.check(t1040.hook(:'owner', :'chosen', 'PATCH', '/crews') = 'none', 'and changes a crew');
+select t1040.check(t1040.hook(:'owner', :'chosen', 'DELETE', '/crew_members') = 'none', 'and takes someone off a crew, which isn''t deleting');
+select t1040.check(t1040.hook(:'owner', :'chosen', 'DELETE', '/services') like 'PT403: This assistant can''t delete things.%', 'but doesn''t delete a service');
+select t1040.check(t1040.hook(:'owner', :'chosen', 'POST', '/automation_rules') like 'PT403: This assistant can''t change automations.%', 'or change an area it wasn''t given');
+rollback;
+
+-- Full access: everything in every area, deleting too.
+begin;
+set local role authenticated;
+select t1040.check(t1040.hook(:'owner', :'full', 'DELETE', '/services') = 'none', 'full access deletes');
+select t1040.check(t1040.error_of(format('delete from public.services where id = %L', :'service')) = 'none', 'a service');
+select t1040.check(t1040.hook(:'owner', :'full', 'POST', '/sop_pages') = 'none', 'and writes guides');
+rollback;
+
+-- Outside every area, whatever it's been given.
+begin;
+set local role authenticated;
+select t1040.check(t1040.hook(:'owner', :'full', 'POST', '/clients') = 'PT403: An AI assistant can''t change this. Do it in Crewtavo itself.', 'not even full access adds a client directly');
+select t1040.check(t1040.hook(:'owner', :'full', 'PATCH', '/memberships') like 'PT403:%', 'or changes people');
+select t1040.check(t1040.hook(:'owner', :'full', 'POST', '/company_roles') like 'PT403:%', 'or roles');
+select t1040.check(t1040.hook(:'owner', :'full', 'PATCH', '/assistant_connections') like 'PT403:%', 'or anyone''s assistant access');
+rollback;
+
+-- Functions it calls answer, but can't write, whatever it's been given.
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'full', 'POST', '/rpc/create_company');
 select hooks.before_request();
-select t1040.check(e like '25006:%', 'a function a read-only assistant calls can''t write: ' || e)
+select t1040.check(e like '25006:%', 'a function an assistant calls can''t write: ' || e)
 from (select t1040.error_of(format('insert into public.clients (company_id, display_name) values (%L, %L)', :'co', 'By a function')) as e) x;
 select t1040.check(t1040.error_of('select public.create_company(''Sneaky'', ''general'')') like '25006:%', 'not even one that runs as its owner');
 select t1040.check(t1040.error_of($$select set_config('transaction_read_only', 'off', true)$$) <> 'none', 'and it can''t make the request writable again');
 rollback;
 
--- An assistant allowed to change things can, as its person could.
-begin;
-set local role authenticated;
-select t1040.as_request(:'owner', :'allowed', 'POST', '/clients');
-select hooks.before_request();
-select t1040.check(current_setting('transaction_read_only') = 'off', 'an assistant allowed to change things isn''t held to reading');
-select t1040.check(t1040.error_of(format('insert into public.clients (company_id, display_name) values (%L, %L)', :'co', 'By an assistant')) = 'none', 'and can add a client');
--- But not to the switches: its own, another assistant's, or a new one.
-update public.assistant_connections set allow_changes = true where client_id = :'reading';
-select t1040.expect_error(format('insert into public.assistant_connections (client_id, allow_changes) values (%L, true)', :'earlier'), 'an assistant can''t allow another one');
-select t1040.check((select count(*) = 1 from public.assistant_connections), 'and sees only its own connection');
-rollback;
-select t1040.check((select not allow_changes from public.assistant_connections where client_id = :'reading'), 'nor turn another''s switch on');
-
+-- An assistant doesn't change anyone's access, its own included.
 begin;
 set local role authenticated;
 select t1040.as_request(:'owner', :'reading', 'PATCH', '/assistant_connections');
-update public.assistant_connections set allow_changes = true where client_id = :'reading';
+update public.assistant_connections set level = 'full' where client_id = :'reading';
+update public.assistant_connections set level = 'full' where client_id = :'chosen';
 delete from public.assistant_connections where client_id = :'reading';
+select t1040.expect_error(format('insert into public.assistant_connections (client_id, level) values (%L, %L)', :'earlier', 'full'), 'an assistant can''t give another one access');
+select t1040.check((select count(*) = 1 from public.assistant_connections), 'and sees only its own connection');
 commit;
-select t1040.check((select not allow_changes from public.assistant_connections where client_id = :'reading'), 'an assistant can''t turn its own switch on, or remove it');
+select t1040.check((select level = 'read' from public.assistant_connections where client_id = :'reading'), 'an assistant can''t give itself access, or remove its row');
+select t1040.check((select level = 'areas' from public.assistant_connections where client_id = :'chosen'), 'or change another''s');
 
--- The same app connected by someone else isn't allowed because the owner allowed theirs.
+-- The same app connected by someone else isn't given anything because the owner gave theirs.
 begin;
 set local role authenticated;
-select t1040.as_request(:'office', :'allowed', 'POST', '/clients');
-select t1040.check(t1040.error_of('select hooks.before_request()') like 'PT403:%', 'allowing one person''s assistant doesn''t allow anyone else''s');
+select t1040.check(t1040.hook(:'office', :'full', 'POST', '/services') like 'PT403:%', 'giving one person''s assistant access doesn''t give anyone else''s');
+rollback;
+
+-- The company: details and the Settings → Company settings, nothing else.
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'full', 'PATCH', '/companies');
+select t1040.check(t1040.error_of(format($$update public.companies set name = 'Kilo Lawns', settings = settings || '{"quote_valid_days": 14, "branding": {"color": "#3b7d23"}}' where id = %L$$, :'co')) = 'none',
+  'an assistant with full access changes the company''s details and settings');
+select t1040.check(t1040.error_of(format($$update public.companies set settings = settings || '{"assistants": {"enabled": true, "read_only": false}}' where id = %L$$, :'co')) like '42501:%',
+  'but not the owner''s limits on assistants');
+select t1040.check(t1040.error_of(format($$update public.companies set settings = jsonb_set(settings, '{branding,logo}', '"x"') where id = %L$$, :'co')) like '42501:%',
+  'or anything else in its settings');
+select t1040.check(t1040.error_of(format($$update public.companies set slug = 'kilo-new' where id = %L$$, :'co')) like '42501:%', 'or its other columns');
+rollback;
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', null, 'PATCH', '/companies');
+select t1040.check(t1040.error_of(format($$update public.companies set settings = settings || '{"assistants": {"read_only": true}}' where id = %L$$, :'co')) = 'none', 'the owner still sets them');
 rollback;
 
 -- Files: Storage writes with the person's token, through the storage.objects policies.
@@ -174,12 +223,14 @@ set local role authenticated;
 select t1040.as_request(:'owner', null, 'POST', '/object/files');
 insert into storage.objects (bucket_id, name, owner) values ('files', :'co' || '/notes/kept.txt', :'owner');
 select t1040.as_request(:'owner', :'reading', 'POST', '/object/files');
-select t1040.check(e like '42501:%', 'an assistant that only reads can''t upload a file: ' || e)
+select t1040.check(e like '42501:%', 'a read-only assistant can''t upload a file: ' || e)
 from (select t1040.error_of(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'co' || '/notes/new.txt', :'owner')) as e) x;
+select t1040.as_request(:'owner', :'chosen', 'POST', '/object/files');
+select t1040.check(t1040.error_of(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'co' || '/notes/new.txt', :'owner')) like '42501:%', 'nor can one given areas');
 delete from storage.objects where name = :'co' || '/notes/kept.txt';
 select t1040.check((select count(*) = 1 from storage.objects where name = :'co' || '/notes/kept.txt'), 'or delete one');
-select t1040.as_request(:'owner', :'allowed', 'POST', '/object/files');
-select t1040.check(t1040.error_of(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'co' || '/notes/new.txt', :'owner')) = 'none', 'an allowed one can upload');
+select t1040.as_request(:'owner', :'full', 'POST', '/object/files');
+select t1040.check(t1040.error_of(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'co' || '/notes/new.txt', :'owner')) = 'none', 'one with full access can upload');
 delete from storage.objects where name = :'co' || '/notes/kept.txt';
 select t1040.check((select count(*) = 0 from storage.objects where name = :'co' || '/notes/kept.txt'), 'and delete');
 rollback;

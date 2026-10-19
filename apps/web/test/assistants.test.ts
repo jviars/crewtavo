@@ -1,9 +1,9 @@
 /**
- * The "Allow changes" switch for each connected AI assistant (features/apps/assistantConnections.ts,
- * in Settings → Profile → AI assistants, and on the assistant pages under Apps): an assistant only
- * reads until its person turns the switch on, including ones connected before the switch existed,
- * and disconnecting one takes the switch away first. Whatever their role, the person who connected
- * one finds the switch in their profile.
+ * What each connected AI assistant can change (features/apps/assistantConnections.ts, in Settings →
+ * AI assistants, and on the assistant pages under Apps): an assistant only reads until its person
+ * chooses areas or gives it full access, including ones connected before access could be chosen, and
+ * disconnecting one takes its access away first. Whatever their role, the person who connected one
+ * finds it in Settings; owners and admins also find the company's own limits there.
  */
 import type { Database } from "@crewtavo/core/database";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -11,18 +11,24 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { disconnect, loadConnections, setAllowChanges } from "../src/features/apps/assistantConnections";
+import { disconnect, loadConnections, setAccess } from "../src/features/apps/assistantConnections";
+import { AssistantSettings } from "../src/features/settings/AssistantSettings";
 import { ProfileSettings } from "../src/features/settings/ProfileSettings";
+import { settingsGroups } from "../src/features/settings/sections";
 
 const session = vi.hoisted(() => ({ current: null as unknown }));
-vi.mock("../src/lib/session", () => ({ useSession: () => session.current }));
+vi.mock("../src/lib/session", () => ({
+  useSession: () => session.current,
+  hasRole: (s: { role: string }, ...roles: string[]) => s.role === "owner" || roles.includes(s.role),
+  can: (s: { role: string; permissions: string[] }, p: string) => s.role === "owner" || s.permissions.includes(p),
+}));
 // The rest of the profile page, which needs a browser or other data.
 vi.mock("../src/lib/theme", () => ({ useTheme: () => "system", setTheme: () => undefined }));
 vi.mock("../src/components/shell/AppShell", () => ({ initials: (name: string) => name.slice(0, 2).toUpperCase() }));
 vi.mock("../src/features/settings/CalendarFeedCard", () => ({ CalendarFeedCard: () => null }));
 vi.mock("../src/features/settings/NotificationSettings", () => ({ NotificationSettings: () => null }));
 
-type Row = { user_id?: string; client_id: string; allow_changes: boolean };
+type Row = { user_id?: string; client_id: string; level: string; areas: string[] };
 const grant = (id: string, name: string, granted_at: string) => ({ client: { id, name, uri: "", logo_uri: "" }, scopes: ["openid"], granted_at });
 
 /** The person's grants on Supabase Auth's OAuth server and their assistant_connections rows. */
@@ -43,9 +49,9 @@ function fakeSupabase(grants: ReturnType<typeof grant>[], rows: Row[], options: 
     from: (table: string) => {
       expect(table).toBe("assistant_connections");
       return {
-        select: async () => ({ data: rows.map((r) => ({ client_id: r.client_id, allow_changes: r.allow_changes })), error: null }),
+        select: async () => ({ data: rows.map(({ client_id, level, areas }) => ({ client_id, level, areas })), error: null }),
         upsert: async (row: Row, { onConflict }: { onConflict: string }) => {
-          steps.push(`save ${row.user_id} ${row.client_id} ${row.allow_changes} on ${onConflict}`);
+          steps.push(`save ${row.user_id} ${row.client_id} ${row.level} [${row.areas.join(",")}] on ${onConflict}`);
           rows = [...rows.filter((r) => r.client_id !== row.client_id), row];
           return { data: null, error: null };
         },
@@ -65,43 +71,49 @@ function fakeSupabase(grants: ReturnType<typeof grant>[], rows: Row[], options: 
 const grants = [
   grant("claude", "Claude", "2026-10-10T09:00:00Z"),
   grant("chatgpt", "ChatGPT", "2026-10-12T09:00:00Z"),
-  // Connected before the switch existed: it has no row.
+  // Connected before access could be chosen: it has no row.
   grant("cursor", " ", "2026-09-01T09:00:00Z"),
 ];
 
 describe("connected assistants", () => {
-  it("only read until their switch is on, including ones connected before it existed", async () => {
+  it("only read until they're given more, including ones connected before access could be chosen", async () => {
     const { db } = fakeSupabase(grants, [
-      { client_id: "claude", allow_changes: true },
-      { client_id: "chatgpt", allow_changes: false },
+      { client_id: "claude", level: "full", areas: [] },
+      { client_id: "chatgpt", level: "areas", areas: ["prices", "crews"] },
       // A row for an assistant that's no longer connected doesn't bring it back.
-      { client_id: "gone", allow_changes: true },
+      { client_id: "gone", level: "full", areas: [] },
     ]);
-    expect((await loadConnections(db)).map((c) => [c.clientId, c.name, c.allowChanges])).toEqual([
-      ["chatgpt", "ChatGPT", false],
-      ["claude", "Claude", true],
-      ["cursor", "AI assistant", false],
+    expect((await loadConnections(db)).map((c) => [c.clientId, c.name, c.access])).toEqual([
+      ["chatgpt", "ChatGPT", { level: "areas", areas: ["prices", "crews"] }],
+      ["claude", "Claude", { level: "full", areas: [] }],
+      ["cursor", "AI assistant", { level: "read", areas: [] }],
     ]);
   });
 
-  it("can be allowed to change things, and switched back to reading, by the person who connected them", async () => {
+  it("can be given areas or full access, and put back to reading, by the person who connected them", async () => {
     const { db, steps } = fakeSupabase(grants, []);
-    await setAllowChanges(db, "user-1", "cursor", true);
-    expect((await loadConnections(db)).find((c) => c.clientId === "cursor")?.allowChanges).toBe(true);
-    await setAllowChanges(db, "user-1", "cursor", false);
-    expect((await loadConnections(db)).find((c) => c.clientId === "cursor")?.allowChanges).toBe(false);
-    expect(steps).toEqual(["save user-1 cursor true on user_id,client_id", "save user-1 cursor false on user_id,client_id"]);
+    await setAccess(db, "user-1", "cursor", { level: "areas", areas: ["guides"] });
+    expect((await loadConnections(db)).find((c) => c.clientId === "cursor")?.access).toEqual({ level: "areas", areas: ["guides"] });
+    // Areas only count when the level is "areas".
+    await setAccess(db, "user-1", "cursor", { level: "full", areas: ["guides"] });
+    await setAccess(db, "user-1", "cursor", { level: "read", areas: [] });
+    expect((await loadConnections(db)).find((c) => c.clientId === "cursor")?.access).toEqual({ level: "read", areas: [] });
+    expect(steps).toEqual([
+      "save user-1 cursor areas [guides] on user_id,client_id",
+      "save user-1 cursor full [] on user_id,client_id",
+      "save user-1 cursor read [] on user_id,client_id",
+    ]);
   });
 
-  it("lose the switch before they're disconnected, so one that fails to disconnect still only reads", async () => {
-    const ok = fakeSupabase(grants, [{ client_id: "claude", allow_changes: true }]);
+  it("lose their access before they're disconnected, so one that fails to disconnect still only reads", async () => {
+    const ok = fakeSupabase(grants, [{ client_id: "claude", level: "full", areas: [] }]);
     await disconnect(ok.db, "claude");
     expect(ok.steps).toEqual(["forget client_id=claude", "revoke claude"]);
     expect((await loadConnections(ok.db)).map((c) => c.clientId)).toEqual(["chatgpt", "cursor"]);
 
-    const failing = fakeSupabase(grants, [{ client_id: "claude", allow_changes: true }], { revokeFails: true });
+    const failing = fakeSupabase(grants, [{ client_id: "claude", level: "full", areas: [] }], { revokeFails: true });
     await expect(disconnect(failing.db, "claude")).rejects.toThrow("It couldn't be disconnected. It can only read now; try again in a moment.");
-    expect((await loadConnections(failing.db)).find((c) => c.clientId === "claude")?.allowChanges).toBe(false);
+    expect((await loadConnections(failing.db)).find((c) => c.clientId === "claude")?.access.level).toBe("read");
   });
 
   it("say plainly when they can't be loaded", async () => {
@@ -115,45 +127,57 @@ describe("connected assistants", () => {
   });
 });
 
-describe("Settings → Profile", () => {
-  /** The profile page as someone with this role sees it, once their assistants have loaded (or not). */
-  async function profile(role: string, db: SupabaseClient<Database>) {
+describe("Settings → AI assistants", () => {
+  const as = (role: string) => {
     session.current = {
       userId: "user-1",
       role,
-      // Only owners, and admins whose role has "apps", can open the Apps pages.
       permissions: role === "owner" ? [] : ["clients", "schedule"],
       company: { id: "company-1", name: "Kilo Gardens", settings: {} },
       profile: { full_name: "Fran Field", email: "fran@kilo.test", phone: null, color: null },
+      config: { singleCompany: true },
       refresh: async () => undefined,
     };
+  };
+  /** The tab as someone with this role sees it, once their assistants have loaded (or not). */
+  async function tab(role: string, db: SupabaseClient<Database>) {
+    as(role);
+    vi.stubGlobal("window", { location: { origin: "https://ops.example.com" } });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false } } });
     await client.prefetchQuery({ queryKey: ["assistant-connections", "user-1"], queryFn: () => loadConnections(db) });
-    return renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ProfileSettings)));
+    const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(AssistantSettings)));
+    vi.unstubAllGlobals();
+    return html;
   }
-  const toggle = (html: string, name: string) => new RegExp(`<input[^>]*aria-label="Allow changes for ${name}"[^>]*>`).exec(html)?.[0];
 
-  it("has the switch for each assistant its person connected, whatever their role", async () => {
-    for (const role of ["owner", "admin", "office", "estimator", "crew_lead", "field_crew", "custom"]) {
-      const html = await profile(role, fakeSupabase(grants, [{ client_id: "claude", allow_changes: true }]).db);
-      expect(html, role).toContain("<strong>AI assistants</strong>");
-      expect(toggle(html, "Claude"), role).toContain('checked=""');
-      expect(toggle(html, "ChatGPT"), role).not.toContain("checked");
-      expect(toggle(html, "AI assistant"), role).not.toContain("checked");
-      expect(html, role).toContain("Assistants connected before this switch");
+  it("is in everyone's settings, and the profile no longer has it", () => {
+    for (const role of ["owner", "admin", "office", "estimator", "crew_lead", "field_crew"]) {
+      as(role);
+      const items = settingsGroups(session.current as never).flatMap((g) => g.items);
+      expect(items.some((i) => "tab" in i && i.tab === "assistants"), role).toBe(true);
+    }
+    as("field_crew");
+    const client = new QueryClient();
+    expect(renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ProfileSettings)))).not.toContain("assistant");
+  });
+
+  it("gives the connector link and each assistant's access, whatever their role", async () => {
+    for (const role of ["owner", "admin", "office", "estimator", "crew_lead", "field_crew"]) {
+      const html = await tab(role, fakeSupabase(grants, [{ client_id: "claude", level: "full", areas: [] }, { client_id: "chatgpt", level: "areas", areas: ["prices", "crews"] }]).db);
+      expect(html, role).toContain("https://ops.example.com/mcp");
+      expect(html, role).toContain("Full access");
+      expect(html, role).toContain("Can change: Price list, Crews");
+      expect(html, role).toContain("Read only");
+      expect(html.match(/>Access</g), role).toHaveLength(3);
       expect(html.match(/>Disconnect</g), role).toHaveLength(3);
+      // The company's own limits are for owners and admins.
+      expect(html.includes("Let my team use AI assistants"), role).toBe(role === "owner" || role === "admin");
     }
   });
 
-  it("shows nothing about assistants until one is connected, or while Auth's OAuth server is off", async () => {
-    expect(await profile("field_crew", fakeSupabase([], []).db)).not.toContain("AI assistants");
-    const off = fakeSupabase(grants, [], { grantsFail: { message: "OAuth server is disabled", status: 404, code: "feature_disabled" } });
-    expect(await profile("field_crew", off.db)).not.toContain("assistant");
-  });
-
-  it("says so when they can't be loaded", async () => {
-    const html = await profile("field_crew", fakeSupabase(grants, [], { grantsFail: { message: "Failed to fetch", status: 0 } }).db);
-    expect(html).toContain("<strong>AI assistants</strong>");
+  it("says when none are connected yet, or they can't be loaded", async () => {
+    expect(await tab("field_crew", fakeSupabase([], []).db)).toContain("None yet.");
+    const html = await tab("field_crew", fakeSupabase(grants, [], { grantsFail: { message: "Failed to fetch", status: 0 } }).db);
     expect(html).toContain("Your connected assistants couldn&#x27;t be loaded. Try again in a moment.");
   });
 });

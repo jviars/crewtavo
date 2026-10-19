@@ -23,7 +23,10 @@
     "./notifications": "./src/notifications.ts",
     "./terms": "./src/terms.ts",
     "./address": "./src/address.ts",
-    "./dns": "./src/dns.ts"
+    "./dns": "./src/dns.ts",
+    "./assistants": "./src/assistants.ts",
+    "./forms": "./src/forms.ts",
+    "./markdown": "./src/markdown.ts"
   },
   "scripts": {
     "test": "vitest run",

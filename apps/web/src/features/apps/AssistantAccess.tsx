@@ -1,26 +1,21 @@
 /**
- * AI assistants (Claude, ChatGPT): the ones you've connected, each only reading until you let it
- * change things; and owner and admin controls for the company: on or off, read-only, and what
- * they did.
+ * AI assistants (Claude, ChatGPT): the ones you've connected, each only reading until you choose what
+ * it can change or give it full access; and owner and admin controls for the company: on or off,
+ * read-only, and what they did.
  */
+import { ASSISTANT_AREAS, ASSISTANT_TOOL_LABELS, areasForRole, describeAssistantAccess, type AssistantAccess as Access, type AssistantArea } from "@crewtavo/core/assistants";
+import { PERMISSIONS } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { Dialog } from "@/components/ui/Dialog";
+import { FormError } from "@/components/ui/Field";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { disconnect, loadConnections, setAllowChanges, type AssistantConnection } from "./assistantConnections";
-
-const TOOL_LABELS: Record<string, string> = {
-  search_clients: "Searched clients",
-  get_client: "Looked at a client",
-  list_requests: "Listed requests",
-  create_request: "Logged a request",
-  get_schedule: "Checked the schedule",
-  add_note: "Added a note",
-  search_sops: "Searched the knowledge base",
-};
+import { disconnect, loadConnections, setAccess, type AssistantConnection } from "./assistantConnections";
 
 export function AssistantAccess() {
   const session = useSession();
@@ -56,7 +51,7 @@ export function AssistantAccess() {
       </label>
       <label className="switch-row" style={{ fontWeight: 500, opacity: enabled ? 1 : 0.5 }}>
         <input type="checkbox" className="switch" checked={readOnly} disabled={!enabled || save.isPending} onChange={(e) => save.mutate({ read_only: e.target.checked })} />
-        Look things up only (no new requests or notes)
+        Look things up only, whatever each person allows
       </label>
       <span className="muted small">Each person signs in with their own Crewtavo account, and an assistant can only see and do what that person's role allows.</span>
       <details className="more-options">
@@ -70,7 +65,7 @@ export function AssistantAccess() {
             {calls.data.map((c) => (
               <div key={c.id} className="card-row" style={{ fontSize: 13 }}>
                 <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>{c.who}</strong> · {TOOL_LABELS[c.tool] ?? c.tool}
+                  <strong>{c.who}</strong> · {ASSISTANT_TOOL_LABELS[c.tool] ?? c.tool}
                   {!c.ok && <span style={{ color: "var(--danger)" }}> · didn't work{c.detail ? `: ${c.detail}` : ""}</span>}
                 </span>
                 <span className="muted small">{timeAgo(c.created_at)}</span>
@@ -84,55 +79,46 @@ export function AssistantAccess() {
 }
 
 /**
- * The assistants this person has connected. Each one only reads until they turn on Allow changes.
- * Everyone has it in Settings → Profile → AI assistants, whatever their role, once they've connected
- * one; owners and admins also see it on the Claude and ChatGPT pages, under the steps to connect.
+ * The assistants this person has connected, with what each can change. Everyone has it in Settings
+ * → AI assistants, whatever their role; owners and admins also see it on the Claude and ChatGPT
+ * pages, under the steps to connect.
  */
-export function ConnectedAssistants({ inProfile = false }: { inProfile?: boolean }) {
+export function ConnectedAssistants({ card = false }: { card?: boolean }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const key = ["assistant-connections", session.userId];
   const settings = (session.company.settings ?? {}) as { assistants?: { enabled?: boolean; read_only?: boolean } };
-  // The company's own setting comes first (AssistantAccess below).
+  // The company's own setting comes first (AssistantAccess above).
   const companyNote =
     settings.assistants?.enabled === false
       ? `AI assistants are turned off for ${session.company.name} for now.`
       : settings.assistants?.read_only === true
-        ? `For now ${session.company.name} only lets assistants look things up, however this is set.`
+        ? `For now ${session.company.name} only lets assistants look things up, whatever you choose here.`
         : null;
   const connections = useQuery({ queryKey: key, queryFn: () => loadConnections(supabase()) });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: key });
-  const toggle = useMutation({
-    meta: { success: (_: never, v: { allow: boolean }) => (v.allow ? "It can make changes now" : "It can only read now") },
-    mutationFn: (v: { clientId: string; allow: boolean }) => setAllowChanges(supabase(), session.userId, v.clientId, v.allow),
-    onSettled: refresh,
-  });
+  const [editing, setEditing] = useState<AssistantConnection | null>(null);
   const remove = useMutation({
     meta: { success: "Disconnected" },
     mutationFn: (clientId: string) => disconnect(supabase(), clientId),
-    onSettled: refresh,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
   });
   const askDisconnect = async (c: AssistantConnection) => {
     const body = "It stops working with Crewtavo. You can connect it again any time, and it starts out only reading.";
     if (await confirm({ title: `Disconnect ${c.name}?`, body, confirmLabel: "Disconnect", danger: true })) remove.mutate(c.clientId);
   };
 
-  // In the profile there's only something to show once they've connected one (or it didn't load).
-  if (inProfile && (connections.isPending || (!connections.error && !connections.data.length))) return null;
-
   return (
-    <div className={inProfile ? "card card-pad stack-sm" : "stack-sm"} style={inProfile ? undefined : { borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
-      <strong>{inProfile ? "AI assistants" : "Your connected assistants"}</strong>
+    <div className={card ? "card card-pad stack-sm" : "stack-sm"} style={card ? undefined : { borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
+      <strong>Your connected assistants</strong>
       <span className="muted small">
-        An assistant you connect can look things up, but can't add or change anything until you turn on Allow changes for it. Assistants connected before this switch
-        was added can only read too, until you turn it on.
+        An assistant you connect can look things up, but can't add or change anything until you choose what it can change. Only one with full access can delete.
       </span>
       {connections.isPending ? (
         <Skeleton height={52} radius={8} />
       ) : connections.error ? (
         <span className="muted small">{(connections.error as Error).message}</span>
       ) : !connections.data.length ? (
-        <span className="muted small">None yet. Once you connect one with the steps above, it shows up here.</span>
+        <span className="muted small">None yet. Once you connect one with the link above, it shows up here.</span>
       ) : (
         <div className="card" style={{ boxShadow: "none" }}>
           {connections.data.map((c) => (
@@ -143,21 +129,12 @@ export function ConnectedAssistants({ inProfile = false }: { inProfile?: boolean
               <span className="grow" style={{ minWidth: 0 }}>
                 <strong>{c.name}</strong>
                 <span className="muted small" style={{ display: "block" }}>
-                  Connected {timeAgo(c.connectedAt)} · {c.allowChanges ? "can make changes" : "can only read"}
+                  Connected {timeAgo(c.connectedAt)} · {describeAssistantAccess(c.access)}
                 </span>
               </span>
-              <label className="switch-row small">
-                <input
-                  type="checkbox"
-                  className="switch"
-                  // Shows the new setting while it saves.
-                  checked={toggle.isPending && toggle.variables.clientId === c.clientId ? toggle.variables.allow : c.allowChanges}
-                  disabled={toggle.isPending || remove.isPending}
-                  onChange={(e) => toggle.mutate({ clientId: c.clientId, allow: e.target.checked })}
-                  aria-label={`Allow changes for ${c.name}`}
-                />
-                Allow changes
-              </label>
+              <Button size="sm" icon="lock" disabled={remove.isPending} onClick={() => setEditing(c)} aria-label={`What ${c.name} can change`}>
+                Access
+              </Button>
               <Button size="sm" variant="ghost" loading={remove.isPending && remove.variables === c.clientId} disabled={remove.isPending} onClick={() => askDisconnect(c)}>
                 Disconnect
               </Button>
@@ -166,6 +143,93 @@ export function ConnectedAssistants({ inProfile = false }: { inProfile?: boolean
         </div>
       )}
       {companyNote && <span className="muted small">{companyNote}</span>}
+      {editing && <AccessDialog connection={editing} onClose={() => setEditing(null)} />}
     </div>
+  );
+}
+
+const LEVELS: Array<{ level: Access["level"]; label: string; hint: string }> = [
+  { level: "read", label: "Read only", hint: "Looks things up. Can't add or change anything." },
+  { level: "areas", label: "Choose what it can change", hint: "Adds and changes things in the areas you tick, but doesn't delete." },
+  { level: "full", label: "Full access", hint: "Everything you can change, including deleting." },
+];
+
+function savedMessage(name: string, access: Access) {
+  if (access.level === "full") return `${name} has full access now`;
+  if (access.level === "areas") return `${name} can change ${access.areas.map((a) => ASSISTANT_AREAS.find((x) => x.key === a)?.label.toLowerCase() ?? a).join(", ")} now`;
+  return `${name} can only read now`;
+}
+
+/** Read only, chosen areas, or full access, which asks first. Areas the person's role can't change aren't offered. */
+function AccessDialog({ connection, onClose }: { connection: AssistantConnection; onClose: () => void }) {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const offered = areasForRole(session.role, session.role === "owner" ? PERMISSIONS.map((p) => p.key) : session.permissions);
+  const [level, setLevel] = useState(connection.access.level);
+  const [areas, setAreas] = useState<AssistantArea[]>(connection.access.areas.filter((a) => offered.includes(a)));
+  const toggle = (area: AssistantArea, on: boolean) => setAreas(on ? [...areas, area] : areas.filter((a) => a !== area));
+  const save = useMutation({
+    meta: { inline: true, success: (saved: Access | null) => (saved ? savedMessage(connection.name, saved) : null) },
+    mutationFn: async (): Promise<Access | null> => {
+      const access: Access = level === "areas" && !areas.length ? { level: "read", areas: [] } : { level, areas: level === "areas" ? areas : [] };
+      if (access.level === "full" && connection.access.level !== "full") {
+        const yes = await confirm({
+          title: `Give ${connection.name} full access?`,
+          body: `${connection.name} will be able to add, change and delete anything you can in Crewtavo's setup and records: company details, price list, crews, checklists, booking forms, guides, automations, requests and notes. It still can't change your sign-in, people and roles, connected apps and keys, or its own access. Everything it does shows in Recent assistant activity, and you can switch it back to Read only any time.`,
+          confirmLabel: "Give full access",
+          danger: true,
+        });
+        if (!yes) return null;
+      }
+      await setAccess(supabase(), session.userId, connection.clientId, access);
+      return access;
+    },
+    onSuccess: (saved) => {
+      if (!saved) return;
+      queryClient.invalidateQueries({ queryKey: ["assistant-connections", session.userId] });
+      onClose();
+    },
+  });
+
+  return (
+    <Dialog open onClose={onClose} title={`What ${connection.name} can change`} description="It always sees only what your role lets you see.">
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+        <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend className="sr-only">Access</legend>
+          {LEVELS.map((l) => (
+            <label key={l.level} className="card-row" style={{ border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", borderColor: level === l.level ? "var(--green)" : undefined }}>
+              <input type="radio" name="access" checked={level === l.level} onChange={() => setLevel(l.level)} />
+              <span className="grow">
+                <strong style={{ display: "block" }}>{l.label}</strong>
+                <span className="muted small">{l.hint}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {level === "areas" && (
+          <fieldset className="stack-sm" style={{ border: 0, padding: "0 0 0 12px", margin: 0 }}>
+            <legend className="small strong" style={{ marginBottom: 6 }}>It can change</legend>
+            {ASSISTANT_AREAS.map((a) => {
+              const allowed = offered.includes(a.key);
+              return (
+                <label key={a.key} className="checkbox" style={{ opacity: allowed ? 1 : 0.55 }}>
+                  <input type="checkbox" checked={allowed && areas.includes(a.key)} disabled={!allowed} onChange={(e) => toggle(a.key, e.target.checked)} />
+                  <span>
+                    {a.label}
+                    {!allowed && <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Your role can't change this</span>}
+                  </span>
+                </label>
+              );
+            })}
+            {!areas.length && <span className="muted small">Tick at least one, or it stays read only.</span>}
+          </fieldset>
+        )}
+        <FormError error={save.error} />
+        <div className="form-actions">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>Save</Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }

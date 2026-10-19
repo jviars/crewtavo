@@ -20,6 +20,7 @@ import { useSession } from "@/lib/session";
 import { CalendarFeedCard } from "../settings/CalendarFeedCard";
 import { AppIcon, AppTile } from "./AppIcon";
 import { AssistantAccess, ConnectedAssistants } from "./AssistantAccess";
+import { CONNECTOR_STEPS } from "./assistantConnections";
 import { CalendarRow, GoogleCalendarPanel, LinkCalendarsPanel, AddCalendarForm, useCalendars, type CalendarSource } from "./CalendarPanels";
 import { CATEGORY_LABELS, infoFor, LINK_ACCESS, MORE_LABELS, useApps, type AppRow } from "./catalog";
 import { StripePanel } from "./StripePanel";
@@ -36,12 +37,6 @@ const GOOGLE_SIGNIN_GUIDE = "https://crewtavo.com/docs/connections/google-calend
  */
 const STRIPE_KEY_PERMISSIONS = ["webhook_write", "customer_write", "invoice_write", "charge_read", "balance_read", "balance_transaction_source_read", "payout_read", "connected_account_read"];
 const STRIPE_NEW_KEY = `https://dashboard.stripe.com/apikeys/create?name=Crewtavo&${STRIPE_KEY_PERMISSIONS.map((p) => `permissions%5B%5D=rak_${p}`).join("&")}`;
-
-/** Where each assistant keeps its connector settings. */
-const CONNECTOR_STEPS: Record<string, string[]> = {
-  anthropic: ["In Claude, open Settings, then Connectors.", "Choose Add custom connector and paste the link above.", "Sign in with your Crewtavo account when Claude asks."],
-  chatgpt: ["In ChatGPT, open Settings, then Apps and connectors.", "With developer mode on, add a connector and paste the link above.", "Sign in with your Crewtavo account when ChatGPT asks."],
-};
 
 /** Google Calendar on a server without Google sign-in: it works by secret address, like the link apps. */
 const byLinkOnly = (app: AppRow) => app.id === "google_calendar" && !app.available;

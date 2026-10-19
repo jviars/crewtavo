@@ -1,4 +1,5 @@
 /** Online booking: public request forms, their questions and service area, and links to share or embed. */
+import { formSlug as slugify, normalizeIntakeForm } from "@crewtavo/core/forms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -21,8 +22,6 @@ interface Question { key: string; label: string; type: QType | "address"; requir
 interface FormRow { id: string; slug: string; name: string; kind: string; active: boolean; questions: Question[]; service_area_zips: string[]; lead_time_days: number }
 // Files and Photos: what people send go in Plans and files on the request (and on to its quote and job).
 const QTYPES: Array<[QType, string]> = [["text", "Short answer"], ["long_text", "Paragraph"], ["number", "Number"], ["yes_no", "Yes / no"], ["choice", "Pick one"], ["multi_choice", "Pick any"], ["files", "Files (plans, PDFs)"], ["photos", "Photos"]];
-
-const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "form";
 
 export function BookingAdminPage() {
   const session = useSession();
@@ -117,19 +116,9 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
   const save = useMutation({
     meta: { inline: true, success: form ? "Form saved" : "Form created" },
     mutationFn: async () => {
-      if (!name.trim()) throw new Error("Name the form.");
-      if (clash) throw new Error("Another form already uses that link.");
-      if (badZips.length) throw new Error(`ZIP codes should be 5 digits: ${badZips.slice(0, 3).join(", ")}`);
-      if (questions.some((q) => !q.label.trim())) throw new Error("Every question needs a label.");
-      if (questions.some((q) => (q.type === "choice" || q.type === "multi_choice") && !(q.options?.filter(Boolean).length))) throw new Error("Choice questions need options.");
-      const keys = new Set<string>();
-      const clean = questions.map((q) => {
-        let key = q.key || slugify(q.label).replace(/-/g, "_");
-        while (keys.has(key)) key = `${key}_2`;
-        keys.add(key);
-        return { ...q, key, label: q.label.trim(), options: q.type === "choice" || q.type === "multi_choice" ? q.options?.map((o) => o.trim()).filter(Boolean) : undefined };
-      });
-      const row = { name: name.trim(), slug: finalSlug, kind, service_area_zips: [...new Set(zipList)], questions: clean as never };
+      // Checked and tidied the way an AI assistant's are too (packages/core/src/forms.ts).
+      const clean = normalizeIntakeForm({ name, slug, zips: zipList, questions }, taken.filter((s) => s !== form?.slug));
+      const row = { ...clean, kind, questions: clean.questions as never };
       if (form) unwrap(await supabase().from("intake_forms").update(row).eq("id", form.id));
       else unwrap(await supabase().from("intake_forms").insert({ ...row, company_id: company.id }));
     },

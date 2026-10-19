@@ -356,19 +356,19 @@ After any password reset, Crewtavo signs that account out everywhere else.
 
 ## Connecting Claude and ChatGPT
 
-Instances come with this turned on. Open **Apps** in Crewtavo and copy the connector address
-(`https://your-domain/mcp`):
+Instances come with this turned on. Open **Settings > AI assistants** in Crewtavo and copy the
+connector address (`https://your-domain/mcp`):
 
 - **Claude**: Settings > Connectors > Add custom connector.
 - **ChatGPT**: Settings > Apps and connectors > Add (developer mode).
 
 Each person signs in to Crewtavo and approves access on `/oauth/consent`. The assistant can then
-look up whatever that person can see, but can't add or change anything until they turn on **Allow
-changes** for it (Settings > Profile > AI assistants, which everyone has whatever their role; owners
-and admins also see it on the Claude and ChatGPT pages under Apps); connections made before that
-switch existed only read too. It never gets more than the person's own permissions, and it can't
-change their sign-in. The database holds it to reading as well, through PostgREST's pre-request
-setting (`pgrst.db_pre_request` on the `authenticator` role, which the migrations set). If the
+look up whatever that person can see, but can't add or change anything until they choose what it
+can change, or give it full access, which also lets it delete (Settings > AI assistants, which
+everyone has whatever their role). It never gets more than the person's own permissions, and it
+can't change their sign-in, people and roles, connected apps or its own access. The database holds
+it to the same areas as well, through PostgREST's pre-request setting (`pgrst.db_pre_request` on
+the `authenticator` role, which the migrations set). If the
 database role that runs the migrations isn't allowed to change `authenticator`, the update's log
 says so (`migrate: warning in 20261019001040_assistant_access.sql`) with the command to run as a
 superuser; then run `notify pgrst, 'reload config';` (or restart the Data API).

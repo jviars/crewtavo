@@ -232,9 +232,10 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   and notifications in the app, by email, by text or as phone push, each person's choice.
 - **Automations and marketing:** rules like "when a quote is sent, wait 3 days, then email the
   client", campaigns, promo codes, Google review requests and referrals.
-- **Claude and ChatGPT:** a built-in connector. Each person signs in with their own account, an
-  assistant only reads until that person allows it to make changes (and never does more than their
-  role allows), and every call is logged.
+- **Claude and ChatGPT:** a built-in connector that can look things up and set Crewtavo up (price
+  list, crews, checklists, booking forms, guides, automations). Each person signs in with their own
+  account; an assistant only reads until that person chooses what it can change or gives it full
+  access (and never does more than their role allows), and every call is logged.
 - **Every trade:** trade presets ([`packages/core/src/presets`](packages/core/src/presets)) load
   starter services, quote formulas, checklists, booking forms and SOP categories when a company
   signs up: lawn and exterior maintenance, paving and sitework, roofing and exteriors, or a general
