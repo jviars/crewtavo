@@ -9,11 +9,13 @@
  *   DELETE /api/calendar-feed          turn the link off
  *   GET    /api/calendar/<token>.ics   the feed itself (no sign-in; the token is the key)
  *
- * In: other calendars shown on the schedule (owners and admins, from the Apps page). See
- * integrations/calendars.ts for how they're read.
+ * In: other calendars shown on the schedule (owners and admins, from the Apps page and Settings).
+ * See integrations/calendars.ts for how they're read.
  *
  *   GET    /api/calendars                 the company's calendars, and Google Calendar's state
  *   POST   /api/calendars                 add a calendar by its ICS link
+ *   POST   /api/calendars/file            add a calendar from an uploaded file (one .ics's text)
+ *   POST   /api/calendars/:id/file        upload a file calendar again, replacing its events
  *   PATCH  /api/calendars/:id             rename, recolor, assign to a crew, details on/off...
  *   POST   /api/calendars/:id/refresh     read it again now
  *   DELETE /api/calendars/:id             stop showing it
@@ -37,11 +39,15 @@ import {
   createVisitsCalendar,
   deleteVisitsCalendar,
   fetchIcs,
+  fileApp,
   hideDetails,
   listGoogleCalendars,
+  nameFromFile,
   normalizeLink,
   pushUpcomingVisits,
+  readCalendarFile,
   SOURCE_FIELDS,
+  storeCalendarFile,
   syncSource,
 } from "../integrations/calendars";
 import { CALENDAR_APPS, catalogEntry } from "../integrations/registry";
@@ -294,6 +300,70 @@ calendar.post("/calendars", ...manage, async (c) => {
   return c.json(must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", source.id).single()), 201);
 });
 
+// A calendar file's text, as the browser read it (a .zip is opened there, one calendar at a time).
+// Up to 10 MB, so these two routes allow bigger bodies than the rest (see app.ts).
+const fileText = z.string().min(15, "That file is empty.").max(10 * 1024 * 1024, "That calendar file is too big to read (over 10 MB).");
+
+async function companyZone(c: Ctx) {
+  const { data } = await adminClient(c.env).from("companies").select("timezone").eq("id", c.var.companyId).single();
+  return data?.timezone ?? "UTC";
+}
+
+calendar.post("/calendars/file", ...manage, async (c) => {
+  const body = await readJson(
+    c,
+    z.object({
+      text: fileText,
+      file_name: z.string().max(300).optional(),
+      name: z.string().trim().max(80).optional(),
+      color: color.optional(),
+      crew_id: uuid.nullable().optional(),
+      show_details: z.boolean().default(true),
+      blocks_time: z.boolean().default(true),
+    }),
+  );
+  const tz = await companyZone(c);
+  // Read before anything's made, so a wrong file is turned down here.
+  const file = await readable(() => readCalendarFile(body.text, tz));
+  const admin = adminClient(c.env);
+  const { data: source, error } = await admin
+    .from("calendar_sources")
+    .insert({
+      company_id: c.var.companyId,
+      kind: "file",
+      app: fileApp(body.text),
+      name: clip(body.name || file.name?.trim() || nameFromFile(body.file_name) || "Calendar", 80),
+      color: body.color ?? null,
+      crew_id: body.crew_id ?? null,
+      show_details: body.show_details,
+      blocks_time: body.blocks_time,
+      created_by: c.var.userId,
+    })
+    .select("id")
+    .single();
+  if (error) throw dbError(error);
+  try {
+    await storeCalendarFile(admin, source.id, file.events, tz);
+  } catch (problem) {
+    // Nothing half-made: without its events, the calendar goes too.
+    await admin.from("calendar_sources").delete().eq("id", source.id);
+    throw problem;
+  }
+  return c.json({ ...must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", source.id).single()), truncated: file.truncated }, 201);
+});
+
+calendar.post("/calendars/:id/file", ...manage, async (c) => {
+  const id = param(c, "id");
+  const { text } = await readJson(c, z.object({ text: fileText }));
+  const admin = adminClient(c.env);
+  const source = must(await admin.from("calendar_sources").select("id, kind").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Calendar not found.");
+  if (source.kind !== "file") throw new HttpError(400, "Only a calendar that came from a file can be uploaded again.");
+  const tz = await companyZone(c);
+  const file = await readable(() => readCalendarFile(text, tz));
+  await readable(() => storeCalendarFile(admin, id, file.events, tz));
+  return c.json({ ...must(await admin.from("calendar_sources").select(SOURCE_FIELDS).eq("id", id).single()), truncated: file.truncated });
+});
+
 calendar.patch("/calendars/:id", ...manage, async (c) => {
   const id = param(c, "id");
   const body = await readJson(
@@ -308,7 +378,11 @@ calendar.patch("/calendars/:id", ...manage, async (c) => {
     }),
   );
   const admin = adminClient(c.env);
-  const before = must(await admin.from("calendar_sources").select("id, show_details, enabled").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Calendar not found.");
+  const before = must(await admin.from("calendar_sources").select("id, kind, show_details, enabled").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Calendar not found.");
+  // Off takes a calendar's events away, and a file's can't be read back.
+  if (before.kind === "file" && body.enabled !== undefined && body.enabled !== before.enabled) {
+    throw new HttpError(400, "A calendar from a file can't be turned off and on. Remove it, or upload the file again.");
+  }
   const { error } = await admin.from("calendar_sources").update(body.enabled === false ? { ...body, event_count: 0 } : body).eq("id", id);
   if (error) throw dbError(error);
   if (body.enabled === false) {

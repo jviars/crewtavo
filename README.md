@@ -159,7 +159,8 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
       drag to move or resize, double-booking warnings, rain-day shifts and route order. The board
       keeps itself up to date as others make changes, and everyone can add their schedule to
       Google, Apple or Outlook Calendar. Calendars from Google, Zoho, Outlook, iCloud or any ICS
-      link show alongside the visits, and Find a time steers around them.</p>
+      link (or an uploaded calendar file) show alongside the visits, and Find a time steers around
+      them.</p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/quote.png" alt="A quote with line items from the price list and an optional add-on">
@@ -277,7 +278,7 @@ Everything an instance needs is generated. These optional settings turn on extra
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email through Resend. Needed on Railway's trial and Hobby plans, which block SMTP; elsewhere, a default sender until the business connects its own mailbox. |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online sync. |
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books sync. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar sign-in: its calendars on the schedule, and visits on a Google calendar. Calendars added by ICS link (Zoho, Outlook, iCloud, Google's secret address) need nothing. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar sign-in: its calendars on the schedule, and visits on a Google calendar within minutes. Publish the OAuth app (Testing ends sign-ins after 7 days). Calendars added by ICS link (Zoho, Outlook, iCloud, Google's secret address) or uploaded as a file need nothing. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SENTRY_DSN` | Error reports to Sentry or a self-hosted GlitchTip, with personal data removed. |
 | `CREWTAVO_SCHEDULER` | Set to `off` on extra replicas so background tasks run in one place. |

@@ -65,6 +65,13 @@ select tcal.expect_error(format('insert into public.calendar_sources (company_id
   'a link calendar needs its (encrypted) link');
 select tcal.expect_error(format('insert into public.calendar_sources (company_id, kind, app, name, external_id) values (%L, %L, %L, %L, %L)', :'co', 'google', 'google_calendar', 'Again', 'quinn@example.com'),
   'a Google calendar is added once');
+-- A calendar from an uploaded file has no link or Google ID, and nothing else is a kind of calendar.
+insert into public.calendar_sources (company_id, kind, app, name) values (:'co', 'file', 'google_calendar', 'Mowing (file)')
+returning id as filecal \gset
+select tcal.check((select kind from public.calendar_sources where id = :'filecal') = 'file', 'a calendar can come from an uploaded file, with no link');
+delete from public.calendar_sources where id = :'filecal';
+select tcal.expect_error(format('insert into public.calendar_sources (company_id, kind, app, name) values (%L, %L, %L, %L)', :'co', 'caldav', 'ics_calendar', 'Other'),
+  'and nothing else is a kind of calendar');
 select tcal.expect_error(format('insert into public.calendar_events (company_id, source_id, key, title, starts_on, ends_on) values (%L, %L, %L, %L, current_date, current_date)', :'co', :'zoho', 'timed', 'No times'),
   'a timed event needs its times');
 
