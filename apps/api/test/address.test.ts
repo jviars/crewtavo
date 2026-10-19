@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { addCloudflareRecords } from "../src/integrations/cloudflare";
-import { certificateOf, railwayRecords, registerClient, type RailwayDomainStatus } from "../src/integrations/railway";
+import { addCustomDomain, certificateOf, railwayRecords, registerClient, type RailwayDomainStatus } from "../src/integrations/railway";
 import { forgetAddressHistory, forwardTo } from "../src/lib/address";
 import { decryptJson, encryptJson, instanceFingerprint, signToken } from "../src/lib/crypto";
 import { checkRecord, findZone, type Lookup } from "../src/lib/dns";
@@ -133,6 +133,42 @@ describe("Railway", () => {
     serve(() => Response.json({ error: "invalid_client_metadata", error_description: "registration closed" }, { status: 400 }));
     await expect(registerClient("https://x.up.railway.app/cb", "Crewtavo")).rejects.toThrow("Use a project token instead");
   });
+
+  describe("adding the address", () => {
+    const access = { method: "oauth" as const, token: "at" };
+    /** Railway's GraphQL, answering customDomainCreate with `create`. */
+    const railway = (create: () => unknown) =>
+      serve((call) => {
+        const q = call.body.query as string;
+        if (q.includes("domains(")) return { data: { domains: { customDomains: [] } } };
+        if (q.includes("customDomainCreate")) return create();
+        return { errors: [{ message: "Not Authorized" }], data: null };
+      });
+
+    it("adds it straight away, without the availability check a one-project sign-in can't make", async () => {
+      const calls = railway(() => ({ data: { customDomainCreate: { id: "dom-1", domain: "app.greenlawn.com", status } } }));
+      expect(await addCustomDomain(env, access, "app.greenlawn.com")).toMatchObject({ id: "dom-1", added: true });
+      expect(calls.some((c) => c.body.query.includes("customDomainAvailable"))).toBe(false);
+      expect(calls.find((c) => c.body.query.includes("customDomainCreate"))?.body.variables.input).toEqual({ projectId: "proj-1", environmentId: "env-1", serviceId: "svc-crewtavo", domain: "app.greenlawn.com", targetPort: 8080 });
+    });
+
+    it("says how to add it in Railway when Railway won't let Crewtavo, and logs why", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      railway(() => ({ errors: [{ message: "Not Authorized" }], data: null }));
+      const refused = await addCustomDomain(env, access, "app.greenlawn.com").catch((e: Error) => e.message);
+      expect(refused).toContain("Add it in Railway yourself");
+      expect(refused).not.toContain("Log in with Railway again");
+      expect(warn).toHaveBeenCalledWith("Railway refused customDomainCreate: Not Authorized");
+      warn.mockRestore();
+    });
+
+    it("explains the plan's domain limit, and passes Railway's other answers on", async () => {
+      railway(() => ({ errors: [{ message: "Custom domain limit reached for this plan" }], data: null }));
+      await expect(addCustomDomain(env, access, "app.greenlawn.com")).rejects.toThrow("doesn't allow another custom domain");
+      railway(() => ({ errors: [{ message: "Domain is already in use" }], data: null }));
+      await expect(addCustomDomain(env, access, "app.greenlawn.com")).rejects.toThrow("Railway can't use app.greenlawn.com: Domain is already in use");
+    });
+  });
 });
 
 describe("the switch-over task", () => {
@@ -188,6 +224,38 @@ describe("the switch-over task", () => {
     expect(done.body).toMatchObject({ status: "done", previous_urls: ["https://crewtavo-production.up.railway.app"] });
     expect(calls.find((c) => c.path === "notifications" && c.method === "POST")?.body).toHaveLength(2);
     expect(calls.some((c) => c.path === "integrations" && c.method === "DELETE")).toBe(false);
+  });
+
+  it("asks Railway again for an address it didn't take, and picks it up once it's on the service", async () => {
+    const before = { ...env, APP_URL: "https://crewtavo-production.up.railway.app" };
+    const secret = await encryptJson(before, { access_token: "at", refresh_token: "rt", expires_at: Date.now() + 3_600_000, extra: { method: "oauth" } });
+    const routed: RailwayDomainStatus = { ...readyStatus, verified: false, certificateStatus: "CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP", dnsRecords: [{ recordType: "DNS_RECORD_TYPE_CNAME", purpose: "DNS_RECORD_PURPOSE_TRAFFIC_ROUTE", hostlabel: "app", fqdn: "app.greenlawn.com", zone: "greenlawn.com", requiredValue: "abc123.up.railway.app", status: "DNS_RECORD_STATUS_REQUIRES_UPDATE" }] };
+    const calls = serve((call) => {
+      if (call.path === "web_address" && call.method === "GET") return [{ ...waiting, automatic: false, railway_domain_id: null, error: "Railway didn't let Crewtavo add app.greenlawn.com." }];
+      if (call.path === "integration_secrets") return [{ ciphertext: secret }];
+      if (call.path === "integrations") return [{ status: "connected" }];
+      if (call.url.host === "backboard.railway.com") return { data: { domains: { customDomains: [{ id: "dom-9", domain: "app.greenlawn.com", status: routed }] } } };
+      return [];
+    });
+    await runAddressTask(before, adminClient(before));
+    expect(calls.filter((c) => c.url.host === "backboard.railway.com").map((c) => c.body.query.match(/\{\s*(\w+)/)[1])).toEqual(["domains"]);
+    expect(calls.find((c) => c.path === "web_address" && c.method === "PATCH")?.body).toMatchObject({
+      automatic: true,
+      railway_domain_id: "dom-9",
+      railway_domain_added: false,
+      error: null,
+      records: expect.arrayContaining([expect.objectContaining({ type: "CNAME", host: "app", value: "abc123.up.railway.app" })]),
+    });
+  });
+
+  it("leaves an address set up by hand alone without Railway access", async () => {
+    const calls = serve((call) => {
+      if (call.path === "web_address" && call.method === "GET") return [{ ...waiting, automatic: false, railway_domain_id: null }];
+      if (call.path === "integrations") return [];
+      return [];
+    });
+    await runAddressTask({ ...env, APP_URL: "https://crewtavo-production.up.railway.app" }, adminClient(env));
+    expect(calls.some((c) => c.url.host === "backboard.railway.com" || c.method === "PATCH")).toBe(false);
   });
 
   it("gives up on a switch that never came back", async () => {

@@ -27,6 +27,9 @@ export const WEB_ADDRESS_KEY = ["web-address"];
 
 const bare = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 const recordsIn = (change: AddressChange) => change.records.length > 0 && change.records.every((r) => r.status === "ok");
+/** On Cloudflare, once Railway has said exactly what the records are, Crewtavo can add them itself. */
+const cloudflareCanAdd = (change: AddressChange) =>
+  change.provider === "cloudflare" && change.automatic && change.records.length > 0 && change.records.every((r) => r.value !== null) && !recordsIn(change);
 /** The DNS host, when Crewtavo could tell who it is. */
 const knownProvider = (id: string | null): DnsProvider | null => {
   const provider = providerById(id);
@@ -330,11 +333,14 @@ interface StepProps { overview: AddressOverview; change: AddressChange; checking
 
 /** Step 3: the records to add where the domain is managed, or to send to whoever looks after it. */
 function ConnectStep({ overview, change, checking, onCheck }: StepProps) {
+  // When Crewtavo can add the records itself, that comes first; sending them on is the fallback.
+  const quick = cloudflareCanAdd(change);
   return (
     <div className="stack">
       {change.error && <Problem>{change.error}</Problem>}
-      <SendSteps change={change} />
+      {!quick && <SendSteps change={change} />}
       <RecordsCard overview={overview} change={change} bare />
+      {quick && <SendSteps change={change} below={false} />}
       <span className="muted small">
         Once the records are in, you can close this page. Crewtavo finishes by itself and lets you know when it's done.{" "}
         <button type="button" className="link-btn small" disabled={checking} onClick={onCheck}>{checking ? "Checking…" : "Check now"}</button>
@@ -812,50 +818,71 @@ function RecordsCard({ overview, change, bare = false }: { overview: AddressOver
   const them = records.length === 1 ? "it" : "them";
   // Without Railway access Crewtavo can't see Railway's exact records, only that one should point there.
   const byHand = overview.platform === "railway" && !change.automatic;
-  const cloudflare = change.provider === "cloudflare" && change.automatic && records.length > 0 && records.every((r) => r.value !== null) && !recordsIn(change);
+  // Crewtavo adding them comes first; doing it in Cloudflare yourself folds away underneath.
+  const quick = cloudflareCanAdd(change) && added === null;
+
+  const list = (steps: boolean) => (
+    <ol className={styles.records}>
+      {records.map((record, i) => <RecordItem key={`${record.type} ${record.name}`} record={record} provider={provider} number={records.length > 1 ? i + 1 : null} unknown={overview.platform === "railway" ? "the value Railway shows" : "your server's IP address"} steps={steps} />)}
+    </ol>
+  );
+  const manual = (
+    <>
+      {(provider.dnsUrl || provider.hostNote) && (
+        <div className="stack-sm">
+          {provider.dnsUrl && <ExternalButton href={provider.dnsUrl}>{known ? `Open ${known.label}` : "Open help"}</ExternalButton>}
+          {provider.hostNote && <span className="muted small">{provider.hostNote}</span>}
+        </div>
+      )}
+      {provider.note && (
+        <div className="callout">
+          <Icon name="info" size={18} />
+          <span className="grow" style={{ fontWeight: 400 }}>{provider.note}</span>
+        </div>
+      )}
+      {list(true)}
+    </>
+  );
 
   return (
     <section className={bare ? "stack" : "card card-pad stack"} aria-labelledby={bare ? undefined : "records-title"}>
       <div className="stack-sm" style={{ gap: 4 }}>
         <strong id="records-title" style={{ fontSize: 16 }} hidden={bare}>{byHand ? "Add Railway's two records to your domain" : records.length === 1 ? "Add this record to your domain" : records.length ? `Add these ${records.length} records to your domain` : "Records for your domain"}</strong>
-        {records.length > 0 && (
-          <span className="muted">{known ? `Your domain's DNS is at ${known.label}. Sign in there and add ${byHand ? "both" : them}.` : `Sign in where your domain is managed (usually where you bought it) and add ${byHand ? "both" : them}.`}</span>
+        {records.length > 0 && added === null && (
+          <span className="muted">
+            {quick
+              ? `Your domain's DNS is at Cloudflare. Crewtavo can add ${records.length === 1 ? "the record" : `both records`} there for you.`
+              : known ? `Your domain's DNS is at ${known.label}. Sign in there and add ${byHand ? "both" : them}.` : `Sign in where your domain is managed (usually where you bought it) and add ${byHand ? "both" : them}.`}
+          </span>
         )}
         {byHand && <span className="muted small">Railway shows them once it has the address: the CNAME below, which points the address here, and a TXT record that proves the domain is yours. Crewtavo checks the CNAME; Railway shows a green check once both are in.</span>}
       </div>
-      {!records.length ? (
-        <span className="muted">
-          {overview.platform !== "railway" ? "The record to add shows up here in a moment." : change.automatic ? "Crewtavo is adding the address on Railway. The records to add show up here in a moment." : "The records to add show up here once Railway has the address."}
-        </span>
-      ) : (
-        <>
-          {(provider.dnsUrl || provider.hostNote) && (
-            <div className="stack-sm">
-              {provider.dnsUrl && <ExternalButton href={provider.dnsUrl}>{known ? `Open ${known.label}` : "Open help"}</ExternalButton>}
-              {provider.hostNote && <span className="muted small">{provider.hostNote}</span>}
-            </div>
-          )}
-          {provider.note && (
-            <div className="callout">
-              <Icon name="info" size={18} />
-              <span className="grow" style={{ fontWeight: 400 }}>{provider.note}</span>
-            </div>
-          )}
-          <ol className={styles.records}>
-            {records.map((record, i) => <RecordItem key={`${record.type} ${record.name}`} record={record} provider={provider} number={records.length > 1 ? i + 1 : null} unknown={overview.platform === "railway" ? "the value Railway shows" : "your server's IP address"} />)}
-          </ol>
-        </>
-      )}
       {added !== null && (
         <div className="callout callout-good" role="status">
           <Icon name="check" size={18} />
           <div className="grow">
             <div>{added === 1 ? "Added 1 record in Cloudflare" : `Added ${added} records in Cloudflare`}</div>
-            <div style={{ fontWeight: 400 }}>You can delete the token in Cloudflare now. Crewtavo used it once and didn't keep it.</div>
+            <div style={{ fontWeight: 400 }}>They usually show up as Done below within a few minutes. You can delete the token in Cloudflare now: Crewtavo used it once and didn't keep it.</div>
           </div>
         </div>
       )}
-      {cloudflare && <CloudflareAdd onAdded={setAdded} />}
+      {!records.length ? (
+        <span className="muted">
+          {overview.platform !== "railway" ? "The record to add shows up here in a moment." : change.automatic ? "Crewtavo is adding the address on Railway. The records to add show up here in a moment." : "The records to add show up here once Railway has the address."}
+        </span>
+      ) : added !== null ? (
+        list(false)
+      ) : quick ? (
+        <>
+          <CloudflareAdd onAdded={setAdded} />
+          <details className={styles.details}>
+            <summary>Or add them yourself in Cloudflare</summary>
+            <div className="stack">{manual}</div>
+          </details>
+        </>
+      ) : (
+        manual
+      )}
     </section>
   );
 }
@@ -867,7 +894,8 @@ const STATUS = {
 } as const;
 
 /** `unknown` names a value Crewtavo can't know: Railway's, or the server's address when self-hosted. */
-function RecordItem({ record, provider, number, unknown }: { record: DnsRecordCheck; provider: DnsProvider; number: number | null; unknown: string }) {
+/** `steps`: how to add it at the provider, while it isn't in yet. */
+function RecordItem({ record, provider, number, unknown, steps = true }: { record: DnsRecordCheck; provider: DnsProvider; number: number | null; unknown: string; steps?: boolean }) {
   const status = STATUS[record.status];
   return (
     <li className={styles.record} data-status={record.status}>
@@ -891,7 +919,7 @@ function RecordItem({ record, provider, number, unknown }: { record: DnsRecordCh
       ) : record.status === "missing" && record.hint ? (
         <span className="muted small">{record.hint}</span>
       ) : null}
-      {record.status !== "ok" && provider.steps.length > 0 && (
+      {steps && record.status !== "ok" && provider.steps.length > 0 && (
         <ol className={styles.steps}>{provider.steps.map((step) => <li key={step}>{fillStep(step, { type: record.type, host: record.host, value: record.value }, unknown)}</li>)}</ol>
       )}
     </li>
@@ -902,7 +930,8 @@ function RecordItem({ record, provider, number, unknown }: { record: DnsRecordCh
  * Many owners have someone who set up their website and looks after the domain: send them the
  * records from the owner's own mail app, or copy them into a text.
  */
-function SendSteps({ change }: { change: AddressChange }) {
+/** `below`: the records follow, so the owner can add them there instead. */
+function SendSteps({ change, below = true }: { change: AddressChange; below?: boolean }) {
   const todo = change.records.filter((r) => r.status !== "ok");
   if (!todo.length) return null;
   const message = recordsMessage(change, todo);
@@ -913,7 +942,7 @@ function SendSteps({ change }: { change: AddressChange }) {
         <span className={styles.choiceIcon} style={{ flex: "none" }}><Icon name="users" size={18} /></span>
         <span className="stack-sm" style={{ gap: 2 }}>
           <strong>Someone else looks after your domain?</strong>
-          <span className="muted small">Send the steps to whoever set up your website. It takes them a couple of minutes, and Crewtavo notices when they're done. Or add the records yourself, below.</span>
+          <span className="muted small">Send the steps to whoever set up your website. It takes them a couple of minutes, and Crewtavo notices when they're done.{below && " Or add the records yourself, below."}</span>
         </span>
       </span>
       <div className="row wrap">
@@ -953,16 +982,15 @@ function CloudflareAdd({ onAdded }: { onAdded: (count: number) => void }) {
     },
   });
   return (
-    <form className={`stack-sm ${styles.divided}`} onSubmit={(e: FormEvent) => { e.preventDefault(); if (token.trim()) add.mutate(); }}>
-      <strong>Or let Crewtavo add them for you</strong>
+    <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (token.trim()) add.mutate(); }}>
       <ol className={styles.steps}>
         <li>
           <div className="stack-sm">
-            <span>Make a token in Cloudflare. The link sets it up to change DNS records; create it and copy it.</span>
+            <span>Make a token in Cloudflare. The link opens Cloudflare's token page with everything filled in: press <strong>Continue to summary</strong>, then <strong>Create Token</strong>, and copy it.</span>
             <ExternalButton href={cloudflareTokenUrl()}>Make a Cloudflare token</ExternalButton>
           </div>
         </li>
-        <li>Paste it here. Crewtavo uses it once to add the records and doesn't keep it.</li>
+        <li>Paste it here. Crewtavo uses it once to add the records, set to DNS only, and doesn't keep it.</li>
       </ol>
       <Field label="Cloudflare token">
         <input className="input" type="password" value={token} onChange={(e) => { setToken(e.target.value); add.reset(); }} autoComplete="off" spellCheck={false} maxLength={500} />

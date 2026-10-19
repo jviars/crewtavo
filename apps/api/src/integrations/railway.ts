@@ -17,7 +17,8 @@ const SCOPE = "openid project:member offline_access";
 const timeout = () => AbortSignal.timeout(15_000);
 
 export class RailwayError extends Error {
-  constructor(message: string, readonly status = 0) {
+  /** `denied`: Railway refused the call for this access (401/403, or "Not Authorized"). */
+  constructor(message: string, readonly status = 0, readonly denied = false) {
     super(message);
   }
 }
@@ -153,10 +154,16 @@ async function gql<T>(access: RailwayAccess, query: string, variables: Record<st
   const res = await fetch(`${BACKBOARD}/graphql/v2`, { method: "POST", headers, body: JSON.stringify({ query, variables }), signal: timeout() }).catch(() => null);
   if (!res) throw new RailwayError("Couldn't reach Railway. Crewtavo tries again in a few minutes.");
   if (res.status === 429) throw new RailwayError("Railway asked Crewtavo to slow down. It tries again in a few minutes.", 429);
-  if (res.status === 401 || res.status === 403) throw new RailwayError(lostAccess(access), res.status);
+  // The screen gets words to act on; the log keeps which call Railway refused, and why.
+  const refused = (why: string) => {
+    console.warn(`Railway refused ${query.match(/\{\s*(\w+)/)?.[1] ?? "a call"}: ${why}`);
+    return new RailwayError(lostAccess(access), res.status, true);
+  };
+  if (res.status === 401 || res.status === 403) throw refused(`HTTP ${res.status}`);
   const json = (await res.json().catch(() => ({}))) as { data?: T; errors?: { message: string }[] };
   const problem = json.errors?.[0]?.message;
-  if (problem) throw new RailwayError(/not authorized/i.test(problem) ? lostAccess(access) : `Railway said: ${problem}`, res.status);
+  if (problem && /not authorized/i.test(problem)) throw refused(problem);
+  if (problem) throw new RailwayError(`Railway said: ${problem}`, res.status);
   if (!res.ok || !json.data) throw new RailwayError(`Railway answered with an error (${res.status}). Crewtavo tries again in a few minutes.`, res.status);
   return json.data;
 }
@@ -222,27 +229,35 @@ export async function serviceDomains(env: Env, access: RailwayAccess): Promise<R
   return domains.customDomains;
 }
 
-/** Adds the domain to the crewtavo service, or finds it there (`added` false) when it already is. */
+/**
+ * Adds the domain to the crewtavo service, or finds it there (`added` false) when it already is.
+ * Railway's customDomainAvailable isn't asked first: it isn't tied to a project, so a Login with
+ * Railway token (access to one project) is refused it. A domain Railway can't use is turned away
+ * by customDomainCreate instead, and its answer is passed on below.
+ */
 export async function addCustomDomain(env: Env, access: RailwayAccess, domain: string): Promise<RailwayDomain & { added: boolean }> {
   const { projectId, environmentId, serviceId } = ids(env);
   const existing = (await serviceDomains(env, access)).find((d) => d.domain === domain);
   if (existing) return { ...existing, added: false };
-  const { customDomainAvailable } = await gql<{ customDomainAvailable: { available: boolean; message: string | null } }>(
-    access,
-    "query ($domain: String!) { customDomainAvailable(domain: $domain) { available message } }",
-    { domain },
-  );
-  if (!customDomainAvailable.available) throw new RailwayError(`Railway can't use ${domain}${customDomainAvailable.message ? `: ${customDomainAvailable.message}` : "."}`);
   const { customDomainCreate } = await gql<{ customDomainCreate: RailwayDomain }>(
     access,
     `mutation ($input: CustomDomainCreateInput!) { customDomainCreate(input: $input) { id domain ${DOMAIN_STATUS} } }`,
     { input: { projectId, environmentId, serviceId, domain, targetPort: Number(env.PORT ?? 8080) } },
   ).catch((error) => {
-    // Railway's trial allows 1 custom domain and Hobby 2 per service.
-    if (error instanceof RailwayError && /limit|maximum|upgrade/i.test(error.message)) {
-      throw new RailwayError(`Railway's plan for this project doesn't allow another custom domain (${error.message.replace(/^Railway said: /, "")}). Remove one in Railway, or upgrade the plan, then try again.`);
+    if (!(error instanceof RailwayError)) throw error;
+    // The project itself is reachable (checked at sign-in), so this is Railway refusing this one step.
+    // Added by hand, the domain is found above next time and Crewtavo carries on from there.
+    if (error.denied) {
+      throw new RailwayError(`Railway didn't let Crewtavo add ${domain}. Add it in Railway yourself: open the crewtavo service, then Settings → Networking → Custom Domain. Crewtavo picks it up from there and does the rest.`, error.status, true);
     }
-    throw error;
+    // Only Railway's own answers; "couldn't reach Railway" and the like stay as they are.
+    if (!error.message.startsWith("Railway said: ")) throw error;
+    const said = error.message.replace(/^Railway said: /, "");
+    // Railway's trial allows 1 custom domain and Hobby 2 per service.
+    if (/limit|maximum|upgrade/i.test(said)) {
+      throw new RailwayError(`Railway's plan for this project doesn't allow another custom domain (${said}). Remove one in Railway, or upgrade the plan, then try again.`);
+    }
+    throw new RailwayError(`Railway can't use ${domain}: ${said}`, error.status);
   });
   return { ...customDomainCreate, added: true };
 }
