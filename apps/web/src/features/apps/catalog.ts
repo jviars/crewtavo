@@ -262,7 +262,7 @@ export const APP_INFO: Record<string, AppInfo> = {
       "Read invoices, payments, refunds, disputes and deposits",
       "Add one webhook to your account so payments show up right away",
     ],
-    connectsWith: "Secret key",
+    connectsWith: "Key from Stripe",
     website: "https://stripe.com/",
   },
   twilio: {
