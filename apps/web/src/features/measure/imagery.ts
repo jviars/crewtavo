@@ -2,6 +2,14 @@
  * Imagery for the measuring map: which picture is under the drawing, how MapLibre loads it, and
  * how we tell "this spot has no picture" from "the picture server is down". The free list itself
  * (NAIP and the states) lives in @crewtavo/core/imagery.
+ *
+ * Auto (the default) isn't imagery of its own: it picks the sharpest free source for wherever the
+ * map is (autoOrder), and moves down the list when one isn't answering. The source it picked is
+ * always named and credited, on the map and on saved drawings.
+ *
+ * Terrain, slope and contours come from the USGS 3D Elevation Program (3DEP, lidar, about 1 m in
+ * most of the US, public domain), drawn by USGS on request: Terrain is a map type, slope and
+ * contours lie on top of any of them.
  */
 import {
   esriImageryInfo,
@@ -9,14 +17,18 @@ import {
   GOOGLE_SESSION_URL,
   googleSatelliteTiles,
   stateImagery,
+  stateImageryAt,
   stateTileUrl,
   type MapKeys,
   type StateImagery,
 } from "@crewtavo/core/imagery";
 import type { RasterSourceSpecification } from "maplibre-gl";
 
-/** "naip", "esri", "google", "street", or "state:VA". */
-export type ImageryId = "naip" | "esri" | "google" | "street" | `state:${string}`;
+/** "naip", "usgs-naip", "usgs", "terrain", "esri", "google", "street", or "state:VA". */
+export type ImageryId = "naip" | "usgs-naip" | "usgs" | "terrain" | "esri" | "google" | "street" | `state:${string}`;
+/** What someone picked: a source, or Auto (the Crewtavo map). */
+export type ImageryChoice = ImageryId | "auto";
+export const AUTO_NAME = "Auto";
 
 export interface ImageryInfo {
   id: ImageryId;
@@ -40,9 +52,77 @@ export function imageryInfo(id: ImageryId): ImageryInfo {
       return { id, name: "Google satellite", detail: "Worldwide · needs a Google Maps key", needs: "google" };
     case "street":
       return { id, name: "Street map", detail: "Streets and building outlines, worldwide · free" };
+    case "usgs-naip":
+      return { id, name: "US aerial (NAIP) from USGS", detail: "The same photos, from USGS's own server · free" };
+    case "usgs":
+      return { id, name: "USGS imagery", detail: "Nationwide, less detail up close · free" };
+    case "terrain":
+      return { id, name: "Terrain", detail: "Shaded hills and hollows from USGS lidar · US · free" };
     default:
       return { id: "naip", name: "US aerial (NAIP)", detail: "All lower 48 states · about 2 ft · free" };
   }
+}
+
+/**
+ * The credit for a source, as shown on the map and under a saved drawing. Public-domain sources
+ * don't legally need one, but their publishers ask for it; DC's (CC BY), OpenStreetMap's (ODbL),
+ * Esri's and Google's terms require it.
+ */
+export function imageryCredit(id: ImageryId): string {
+  const state = stateOf(id);
+  if (state) return state.state === "VA" ? "Imagery courtesy of the Commonwealth of Virginia (VGIN)" : `Imagery: ${state.attribution}`;
+  switch (id) {
+    case "esri":
+      return "Powered by Esri · Imagery: Esri, Maxar, Earthstar Geographics, and the GIS User Community";
+    case "google":
+      return "Imagery ©Google";
+    case "street":
+      return "Map data © OpenStreetMap contributors · © OpenMapTiles · OpenFreeMap";
+    case "usgs-naip":
+      return "Imagery: USDA NAIP (public domain), courtesy of the U.S. Geological Survey";
+    case "usgs":
+      return "Imagery courtesy of the U.S. Geological Survey (The National Map)";
+    case "terrain":
+      return ELEVATION_CREDIT;
+    default:
+      return "Imagery: USDA NAIP (public domain), via Microsoft Planetary Computer";
+  }
+}
+
+/**
+ * Where Auto looks, best first. Zoomed out, the USGS basemap (fast, nationwide). Zoomed in: the
+ * state's own imagery, NAIP, the same NAIP photos from USGS's server (Microsoft's copy is a preview
+ * service with no uptime promise), the USGS basemap, then, outside the US, Esri when there's a key,
+ * and the street map, which loads anywhere. Google is never picked for you: its terms don't allow
+ * keeping pictures of it with a drawing.
+ */
+export function autoOrder(lng: number, lat: number, zoom: number, keys: MapKeys): ImageryId[] {
+  if (zoom < 11) return ["usgs", "street"];
+  return [...stateImageryAt(lng, lat).map(stateId), "naip", "usgs-naip", "usgs", ...(keys.esri_key ? (["esri"] as const) : []), "street"];
+}
+
+/**
+ * The first source in autoOrder that has a picture here, skipping ones that aren't answering.
+ * `probe` answers "ok", "empty" or "down" (the page caches it).
+ */
+export async function resolveAuto(
+  lng: number, lat: number, zoom: number, keys: MapKeys,
+  probe: (id: ImageryId) => Promise<"ok" | "empty" | "down">,
+  skip: (id: ImageryId) => boolean = () => false,
+): Promise<{ id: ImageryId; passed: Array<{ id: ImageryId; why: "empty" | "down" }> }> {
+  const passed: Array<{ id: ImageryId; why: "empty" | "down" }> = [];
+  for (const id of autoOrder(lng, lat, zoom, keys)) {
+    if (id === "street") return { id, passed };
+    if (skip(id)) {
+      passed.push({ id, why: "down" });
+      continue;
+    }
+    // Zoomed out there's nothing to check: the USGS basemap covers the country.
+    const result = zoom < 11 ? "ok" : await probe(id);
+    if (result === "ok") return { id, passed };
+    passed.push({ id, why: result });
+  }
+  return { id: "street", passed };
 }
 
 /** Keys from Settings > Maps, with the deployment's Google key as a fallback. */
@@ -153,23 +233,83 @@ export async function checkGoogleKey(key: string): Promise<string | null> {
 // MapLibre sources
 // ---------------------------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------------------------
+// Elevation (USGS 3DEP): terrain, slope and contours, drawn by USGS for each tile.
+// ---------------------------------------------------------------------------------------------
+
+export const ELEVATION_CREDIT = "Elevation courtesy of the U.S. Geological Survey (3D Elevation Program)";
+const DEP = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage";
+// 512px tiles: USGS draws each one on its own, so bigger tiles mean fewer seams between them.
+const depTiles = (rule: object, format: "jpg" | "png") =>
+  `${DEP}?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=512,512&format=${format}&transparent=true&renderingRule=${encodeURIComponent(JSON.stringify(rule))}&f=image`;
+/** 3DEP covers the US and its territories; nothing is asked for outside this box. */
+const US_BOX: [number, number, number, number] = [-179.5, 17.5, -64.5, 71.5];
+const depSource = (tiles: string, attribution: string): RasterSourceSpecification =>
+  // Drawn on request from about 1 m elevation, so it stays sharp up close.
+  ({ type: "raster", tiles: [tiles], tileSize: 512, minzoom: 10, maxzoom: 20, bounds: US_BOX, attribution });
+
+/** Slope classes, by grade (rise over run), with the colors the map and its legend use. */
+export const SLOPE_CLASSES = [
+  { upTo: 2, color: "#60a5fa", label: "Flat, under 2%", note: "water can sit" },
+  { upTo: 5, color: "#4ade80", label: "2–5%", note: "gentle" },
+  { upTo: 10, color: "#facc15", label: "5–10%", note: "noticeable" },
+  { upTo: 33.3, color: "#fb923c", label: "10–33%", note: "steep" },
+  { upTo: Infinity, color: "#ef4444", label: "Over 33%", note: "steeper than 3:1, hard to mow" },
+] as const;
+
+function slopeRule() {
+  const degrees = (grade: number) => (grade === Infinity ? 90 : (Math.atan(grade / 100) * 180) / Math.PI);
+  const ranges = SLOPE_CLASSES.flatMap((c, i) => [i ? degrees(SLOPE_CLASSES[i - 1].upTo) : 0, degrees(c.upTo)]);
+  const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return {
+    rasterFunction: "Colormap",
+    rasterFunctionArguments: {
+      Colormap: SLOPE_CLASSES.map((c, i) => [i + 1, ...rgb(c.color)]),
+      Raster: {
+        rasterFunction: "Remap",
+        rasterFunctionArguments: { InputRanges: ranges, OutputValues: SLOPE_CLASSES.map((_, i) => i + 1), Raster: { rasterFunction: "Slope", rasterFunctionArguments: { ZFactor: 1, SlopeType: 1 } } },
+        variableName: "Raster",
+      },
+    },
+    variableName: "Raster",
+  };
+}
+
+export type OverlayId = "slope" | "contours";
+export const OVERLAYS: Record<OverlayId, { name: string; detail: string; opacity: number }> = {
+  slope: { name: "Slope", detail: "How steep the ground is, by color · US", opacity: 0.5 },
+  contours: { name: "Contour lines", detail: "Every 2 ft of rise · US", opacity: 0.9 },
+};
+export function overlaySource(id: OverlayId): RasterSourceSpecification {
+  return depSource(id === "slope" ? depTiles(slopeRule(), "png") : depTiles({ rasterFunction: "Preset 2ft Contour Interval" }, "png"), ELEVATION_CREDIT);
+}
+
+const USGS = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}";
+const USGS_NAIP = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&f=image";
+
 export async function rasterSource(id: ImageryId, keys: MapKeys): Promise<RasterSourceSpecification | null> {
+  const attribution = imageryCredit(id);
   const state = stateOf(id);
-  if (state) {
-    return { type: "raster", tiles: [stateTileUrl(state)], tileSize: 256, maxzoom: state.maxZoom, bounds: state.bounds, attribution: `Imagery: ${state.attribution}` };
-  }
+  if (state) return { type: "raster", tiles: [stateTileUrl(state)], tileSize: 256, maxzoom: state.maxZoom, bounds: state.bounds, attribution };
   switch (id) {
     case "esri":
       if (!keys.esri_key) throw new KeyError("Esri imagery needs a key. An admin can add one in Settings > Maps.", "esri");
-      return { type: "raster", tiles: [esriImageryTiles(keys.esri_key)], tileSize: 512, maxzoom: 19, attribution: "Powered by Esri · Esri, Maxar, Earthstar Geographics, and the GIS User Community" };
+      return { type: "raster", tiles: [esriImageryTiles(keys.esri_key)], tileSize: 512, maxzoom: 19, attribution };
     case "google":
       if (!keys.google_key) throw new KeyError("Google satellite needs a key. An admin can add one in Settings > Maps.", "google");
-      return { type: "raster", tiles: [googleSatelliteTiles(keys.google_key, await googleSession(keys.google_key))], tileSize: 256, maxzoom: 21, attribution: "Imagery ©Google" };
+      return { type: "raster", tiles: [googleSatelliteTiles(keys.google_key, await googleSession(keys.google_key))], tileSize: 256, maxzoom: 21, attribution };
     case "street":
       return null; // drawn from the street map's own layers
+    case "usgs":
+      // USGS's cache stops at zoom 16; the map stretches it past that.
+      return { type: "raster", tiles: [USGS], tileSize: 256, maxzoom: 16, attribution };
+    case "usgs-naip":
+      return { type: "raster", tiles: [USGS_NAIP], tileSize: 256, maxzoom: 18, attribution };
+    case "terrain":
+      return { ...depSource(depTiles({ rasterFunction: "Hillshade Multidirectional" }, "jpg"), attribution), minzoom: 0 };
     default:
       // NAIP's pixels are about 2 ft, so past zoom 18 the map stretches what it has.
-      return { type: "raster", tiles: [naipTiles(await naipSearchId())], tileSize: 256, maxzoom: 18, attribution: "Imagery: USDA NAIP (public domain) via Microsoft Planetary Computer" };
+      return { type: "raster", tiles: [naipTiles(await naipSearchId())], tileSize: 256, maxzoom: 18, attribution };
   }
 }
 
