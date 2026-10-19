@@ -1,4 +1,4 @@
-import { LEVEL_SUMMARY, type Role } from "@crewtavo/core/roles";
+import { canMakeResetLink, LEVEL_SUMMARY, type Role } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -23,6 +23,7 @@ export function TeamSettings() {
   const session = useSession();
   const queryClient = useQueryClient();
   const [inviting, setInviting] = useState(false);
+  const [resetting, setResetting] = useState<Member | null>(null);
   const team = useQuery({ queryKey: ["team", session.company.id], queryFn: () => api.get<Member[]>("/team") });
   const roles = useCompanyRoles();
   const update = useMutation({
@@ -57,7 +58,12 @@ export function TeamSettings() {
                     <td>
                       <div className="row">
                         <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }}>{initials(name)}</span>
-                        <span><strong>{name}</strong>{me && <span className="chip" style={{ marginLeft: 6 }}>You</span>}<div className="muted small">{m.profile?.email}</div></span>
+                        <span>
+                          <strong>{name}</strong>{me && <span className="chip" style={{ marginLeft: 6 }}>You</span>}<div className="muted small">{m.profile?.email}</div>
+                          {m.active && !me && can(session, "team") && canMakeResetLink(session.role, m.role) && (
+                            <button type="button" className="link-btn small" onClick={() => setResetting(m)}>Reset password</button>
+                          )}
+                        </span>
                       </div>
                     </td>
                     <td>
@@ -90,7 +96,59 @@ export function TeamSettings() {
         </div>
       )}
       {inviting && <InviteDialog onClose={() => setInviting(false)} />}
+      {resetting && <ResetPasswordDialog member={resetting} onClose={() => setResetting(null)} />}
     </div>
+  );
+}
+
+/**
+ * A one-time link for someone to choose a new password, for when they're locked out (POST
+ * /api/team/:id/password-link). Emailed when the company can send email; otherwise the admin hands
+ * it over. Only for people below the admin's own level (canMakeResetLink).
+ */
+function ResetPasswordDialog({ member, onClose }: { member: Member; onClose: () => void }) {
+  const session = useSession();
+  const name = member.profile?.full_name || member.profile?.email || "this person";
+  const first = name.split(/\s+/)[0];
+  const reset = useMutation({
+    meta: { inline: true },
+    mutationFn: () => api.post<{ emailed: boolean; link: string | null }>(`/team/${member.user_id}/password-link`),
+  });
+  return (
+    <Dialog open onClose={onClose} title={reset.data ? (reset.data.emailed ? "Reset link sent" : "Reset link ready") : `Reset ${first}'s password?`}>
+      {reset.data ? (
+        <div className="dialog-body">
+          {reset.data.emailed ? (
+            <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
+              <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+              <p style={{ margin: 0 }}>We emailed {member.profile?.email ?? first} a link to choose a new password.</p>
+              {session.config.features.devMail && <span className="muted small">Test mode: the email is in the local Mailpit inbox (http://localhost:56324).</span>}
+            </div>
+          ) : (
+            <div className="stack-sm">
+              <div className="callout callout-warning">
+                <Icon name="lock" size={18} />
+                <div className="grow small">
+                  Give this link to {first} yourself, in person or by text. Whoever opens it can choose a new password for {first}'s account, so don't share it anywhere else. It works once and stops working within a day.
+                </div>
+              </div>
+              <Button icon="copy" onClick={() => copyText(reset.data!.link!, "Reset link copied")}>Copy reset link</Button>
+            </div>
+          )}
+          <p className="muted small" style={{ margin: 0 }}>{first} will see a note about this when they're back in, and it's in your activity log.</p>
+          <div className="form-actions"><Button variant="primary" onClick={onClose}>Done</Button></div>
+        </div>
+      ) : (
+        <div className="dialog-body">
+          <p style={{ margin: 0 }}>This makes a one-time link for {name} to choose a new password. Their current password keeps working until they do.</p>
+          <FormError error={reset.error} />
+          <div className="form-actions">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" icon="lock" loading={reset.isPending} onClick={() => reset.mutate()}>Make reset link</Button>
+          </div>
+        </div>
+      )}
+    </Dialog>
   );
 }
 
