@@ -17,6 +17,7 @@ import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { ContactLine } from "../clients/ContactsCard";
 import { PropertySelect } from "../clients/ClientForm";
+import { PlansCard } from "../plans/PlansCard";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
 import { REQUEST_SOURCES } from "./RequestsPage";
 
@@ -63,6 +64,8 @@ export function RequestPage() {
         await supabase().from("jobs").insert({ company_id: session.company.id, client_id: r!.client!.id, property_id: r!.property?.id ?? null, title: r!.title, instructions: r!.details }).select("id").single(),
       );
       unwrap(await supabase().from("requests").update({ status: "converted" }).eq("id", id));
+      // The request's plans and files go on the job too (a quote made from it gets them by itself).
+      unwrap(await supabase().from("plan_files").update({ job_id: job.id }).eq("request_id", id).is("job_id", null));
       return job.id;
     },
     onSuccess: (jobId) => {
@@ -150,6 +153,8 @@ export function RequestPage() {
               </dl>
             )}
           </section>
+
+          <PlansCard scope={{ kind: "request", id: r.id, propertyId: r.property?.id ?? null }} />
 
           <section className="stack">
             <div className="section-head">

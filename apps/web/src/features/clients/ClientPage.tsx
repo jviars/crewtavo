@@ -15,6 +15,7 @@ import { addressLine, formatDate, formatMoney } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { PlansCard } from "../plans/PlansCard";
 import { NewQuoteDialog } from "../quotes/NewQuoteDialog";
 import { NewRequestDialog } from "../requests/NewRequestDialog";
 import { EditClientDialog } from "./ClientForm";
@@ -248,6 +249,8 @@ export function ClientPage() {
               )}
             </div>
           </section>
+
+          {c.properties.length > 0 && <PlansCard scope={{ kind: "client", properties: c.properties.map((p) => ({ id: p.id, label: p.label || p.line1 })) }} />}
 
           <Timeline clientId={c.id} />
         </div>

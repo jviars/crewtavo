@@ -29,8 +29,8 @@
 
 Crewtavo is for lawn care, paving, roofing, cleaning, HVAC and any trade that quotes work, schedules
 crews, works at a property and gets paid. It does what Jobber does, plus an SOP knowledge base,
-equipment maintenance, satellite map measuring, and connections to QuickBooks, Zoho, Claude and
-ChatGPT.
+equipment maintenance, satellite map measuring, plan sets on jobs (lined up on the map to measure
+from), and connections to QuickBooks, Zoho, Claude and ChatGPT.
 
 Every business runs **its own instance**: the app, its own database and its own files, in an
 account the business owns. Nobody else holds its data, and there's no per-seat subscription.
@@ -220,6 +220,11 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   approves, batch invoicing, payment reminders, deposits, progress billing and retainage. Invoices
   go through Stripe for card and bank payments; invoices made in Stripe come in too, with the fees
   and bank deposits behind every payment. Refunds, expenses and job costing, timesheets.
+- **Plans and files:** plan sets, specs, permits and addenda on requests, quotes, jobs and
+  properties, up to 200 MB each. New versions replace old ones (with the history kept), the crew
+  sees only current sheets on their phones, and clients can attach plans to a booking request. A
+  site plan can go on the measuring map, lined up with the aerial by tapping two spots, to measure
+  new paving from it.
 - **People and roles:** General manager, Office manager, Operations manager, Foreman and Employee
   to start with, renamable, plus your own. A foreman runs their crew and never sees prices. The
   database enforces every rule, not just the screens.

@@ -24,11 +24,29 @@ export function gateway(env: Env, stack: Stack) {
     return guardAssistant(env, c.req.raw, "/auth/v1", (request) => (isGuessable(request.method, new URL(request.url), "/auth/v1") ? guardSignIn(env, request, send) : send(request)));
   });
   routes.all("/rest/v1/*", (c) => guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c))));
-  routes.all("/storage/v1/*", (c) => guardAssistant(env, c.req.raw, "/storage/v1", (request) => forward(request, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" })));
+  routes.all("/storage/v1/*", (c) => {
+    if (unsizedUpload(c.req.raw)) {
+      return c.json({ statusCode: "411", error: "Length Required", message: "Send the file's size (Content-Length) with the upload, or send it as a form." }, 411);
+    }
+    // The upload's size goes along: Storage checks a file sent as the bare body against
+    // FILE_SIZE_LIMIT by it (a form's file it checks as it arrives).
+    return guardAssistant(env, c.req.raw, "/storage/v1", (request) => forward(request, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" }, true));
+  });
   return routes;
 }
 
-async function forward(request: Request, upstream: string, prefix: string, visitor: string, extra: Record<string, string> = {}): Promise<Response> {
+/**
+ * A file sent to Storage as the bare body, without saying how big it is (a chunked upload).
+ * Storage would take it whatever its size, so it's refused here. Forms are fine without a length.
+ */
+export function unsizedUpload(request: Request): boolean {
+  if (!["POST", "PUT", "PATCH"].includes(request.method) || !request.body) return false;
+  if (request.headers.has("content-length")) return false;
+  return !(request.headers.get("content-type") ?? "").toLowerCase().startsWith("multipart/form-data");
+}
+
+/** `keepLength`: pass the body's length on (only where the body is passed on untouched). */
+async function forward(request: Request, upstream: string, prefix: string, visitor: string, extra: Record<string, string> = {}, keepLength = false): Promise<Response> {
   const incoming = new URL(request.url);
   const target = new URL(upstream);
   target.pathname = target.pathname.replace(/\/$/, "") + (incoming.pathname.slice(prefix.length) || "/");
@@ -36,7 +54,10 @@ async function forward(request: Request, upstream: string, prefix: string, visit
   const headers = new Headers(request.headers);
   // Hop-by-hop headers describe the browser's connection to this server, not the next one (fetch
   // refuses some of them outright, e.g. a chunked upload's transfer-encoding or expect: 100-continue).
-  for (const name of ["host", "connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "expect", "proxy-authorization", "proxy-connection", "accept-encoding", "content-length"]) headers.delete(name);
+  for (const name of ["host", "connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "expect", "proxy-authorization", "proxy-connection", "accept-encoding"]) headers.delete(name);
+  // A guard may have put a different body in (the sign-in guard does), so the length goes along only
+  // when asked; fetch then sends exactly that many bytes, or fails the request.
+  if (!keepLength) headers.delete("content-length");
   headers.set("x-forwarded-host", incoming.host);
   headers.set("x-forwarded-proto", request.headers.get("x-forwarded-proto") ?? incoming.protocol.replace(":", ""));
   // The visitor's address as this deployment's proxy gave it, not whatever the visitor sent: Auth

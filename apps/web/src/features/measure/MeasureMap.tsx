@@ -7,7 +7,7 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapKeys } from "@crewtavo/core/imagery";
 import { lineLengthM, mToFt, polygonAreaM2, sqmToSqft, type Feature } from "@crewtavo/core/geo";
-import maplibregl, { type GeoJSONSource, type LayerSpecification, type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
+import maplibregl, { type GeoJSONSource, type ImageSource, type LayerSpecification, type Map as MapLibreMap, type Marker, type StyleSpecification } from "maplibre-gl";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import {
   TerraDraw,
@@ -22,6 +22,7 @@ import {
 } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { KeyError, OVERLAYS, overlaySource, rasterSource, type ImageryId, type OverlayId } from "./imagery";
+import type { Corners, LngLat } from "./planAlign";
 
 export type Tool = "polygon" | "linestring" | "point" | "select";
 /** The geometry each drawing mode makes; anything else in its layer (closing and snapping points) is a guide. */
@@ -59,6 +60,14 @@ export interface MeasureMapHandle {
    * pictures of it), and the map goes back afterwards.
    */
   capture(options?: { imagery?: ImageryId }): Promise<Blob | null>;
+  /** A plan sheet on the map, over the imagery and under the drawing; null takes it off. */
+  setPlan(plan: { url: string; corners: Corners; opacity: number } | null): void;
+  /** While set, taps on the map go here instead of drawing (lining a plan up). */
+  pickSpots(onPick: ((at: LngLat) => void) | null): void;
+  /** Numbered pins for the spots picked so far. */
+  setPins(pins: Array<{ at: LngLat; label: string; tone: "plan" | "map" }>): void;
+  /** The view's middle and its west and east edges. */
+  viewBox(): { center: LngLat; west: number; east: number } | null;
 }
 
 export interface MeasureMapProps {
@@ -191,6 +200,10 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   const nameLayers = useRef<string[]>([]);
   const imageryToken = useRef(0);
   const trouble = useRef({ errors: 0, loaded: 0, since: 0 });
+  const planRef = useRef<{ url: string; corners: Corners; opacity: number } | null>(null);
+  const planUrl = useRef<string | null>(null);
+  const pickRef = useRef<((at: LngLat) => void) | null>(null);
+  const pins = useRef<Marker[]>([]);
   // Callbacks change every render; the map's listeners read the latest through this.
   const live = useRef(props);
   live.current = props;
@@ -313,8 +326,11 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         draw.on("select", (id) => live.current.onSelect(String(id)));
         draw.on("deselect", () => live.current.onSelect(null));
         draw.on("history", () => live.current.onHistory?.(draw.canUndo(), draw.canRedo()));
+        // Lining up a plan: taps pick spots instead of drawing.
+        map!.on("click", (e) => pickRef.current?.([e.lngLat.lng, e.lngLat.lat]));
         trouble.current = { errors: 0, loaded: 0, since: Date.now() };
         applyOverlays(live.current.overlays);
+        applyPlan();
         live.current.onReady();
         // Where the map starts counts as a move, so the page checks the imagery there straight away.
         const c = map!.getCenter();
@@ -400,14 +416,42 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       const layer = `overlay-${id}`;
       if (list.includes(id) && !map.getLayer(layer)) {
         if (!map.getSource(layer)) map.addSource(layer, overlaySource(id));
-        // Over the imagery, under the street names and the drawing.
-        const below = nameLayers.current.find((l) => map.getLayer(l)) ?? (map.getLayer("td-polygon") ? "td-polygon" : "measure-labels");
+        // Over the imagery, under a plan sheet, the street names and the drawing.
+        const below = map.getLayer("plan") ? "plan" : drawingBelow(map);
         map.addLayer({ id: layer, type: "raster", source: layer, paint: { "raster-opacity": OVERLAYS[id].opacity, "raster-fade-duration": 120 } }, below);
       } else if (!list.includes(id) && map.getLayer(layer)) {
         map.removeLayer(layer);
         map.removeSource(layer);
       }
     }
+  }
+
+  /** The first layer above the imagery that stays on top: street names, else the drawing. */
+  function drawingBelow(map: MapLibreMap) {
+    return nameLayers.current.find((l) => map.getLayer(l)) ?? (map.getLayer("td-polygon") ? "td-polygon" : "measure-labels");
+  }
+
+  function applyPlan() {
+    const map = mapRef.current;
+    if (!map?.getLayer("measure-labels")) return;
+    const plan = planRef.current;
+    const source = map.getSource("plan") as ImageSource | undefined;
+    if (!plan) {
+      if (map.getLayer("plan")) map.removeLayer("plan");
+      if (source) map.removeSource("plan");
+      planUrl.current = null;
+      return;
+    }
+    if (!source) {
+      map.addSource("plan", { type: "image", url: plan.url, coordinates: plan.corners });
+      map.addLayer({ id: "plan", type: "raster", source: "plan", paint: { "raster-opacity": plan.opacity, "raster-fade-duration": 0 } }, drawingBelow(map));
+    } else if (planUrl.current !== plan.url) {
+      source.updateImage({ url: plan.url, coordinates: plan.corners });
+    } else {
+      source.setCoordinates(plan.corners);
+    }
+    planUrl.current = plan.url;
+    map.setPaintProperty("plan", "raster-opacity", plan.opacity);
   }
 
   function applyStreetNames(show: boolean) {
@@ -528,6 +572,43 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       if (swap) await applyImagery(live.current.imagery);
       draw.setMode(mode === "static" ? toolRef.current : mode);
       return blob;
+    },
+    setPlan(plan) {
+      planRef.current = plan;
+      applyPlan();
+    },
+    pickSpots(onPick) {
+      pickRef.current = onPick;
+      const draw = drawRef.current;
+      const map = mapRef.current;
+      if (!draw || !map) return;
+      // Stops any shape half drawn, and taps stop adding corners.
+      draw.setMode(onPick ? "static" : toolRef.current);
+      map.getCanvas().style.cursor = onPick ? "crosshair" : "";
+    },
+    setPins(list) {
+      const map = mapRef.current;
+      for (const pin of pins.current) pin.remove();
+      pins.current = [];
+      if (!map) return;
+      for (const p of list) {
+        const el = document.createElement("div");
+        el.textContent = p.label;
+        el.setAttribute("aria-label", `${p.tone === "plan" ? "Spot on the plan" : "Spot on the map"} ${p.label}`);
+        Object.assign(el.style, {
+          width: "26px", height: "26px", display: "grid", placeItems: "center", borderRadius: "50%", border: "2px solid #fff",
+          background: p.tone === "plan" ? "#2563eb" : "#16a34a", color: "#fff", font: "700 13px/1 system-ui, sans-serif",
+          boxShadow: "0 1px 4px rgba(0, 0, 0, 0.45)", pointerEvents: "none",
+        });
+        pins.current.push(new maplibregl.Marker({ element: el }).setLngLat(p.at).addTo(map));
+      }
+    },
+    viewBox() {
+      const map = mapRef.current;
+      if (!map) return null;
+      const b = map.getBounds();
+      const c = map.getCenter();
+      return { center: [c.lng, c.lat], west: b.getWest(), east: b.getEast() };
     },
   }));
 

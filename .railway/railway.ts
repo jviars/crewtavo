@@ -117,7 +117,8 @@ export default defineRailway(() => {
       POSTGREST_URL: "http://${{rest.RAILWAY_PRIVATE_DOMAIN}}:3000",
       STORAGE_BACKEND: "file",
       FILE_STORAGE_BACKEND_PATH: "/var/lib/storage",
-      FILE_SIZE_LIMIT: "52428800",
+      // 200 MB per file: plan sets run big (apps/web/src/features/plans/plans.ts).
+      FILE_SIZE_LIMIT: "209715200",
       TENANT_ID: "crewtavo",
       REGION: "local",
       GLOBAL_S3_BUCKET: "crewtavo",

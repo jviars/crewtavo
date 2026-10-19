@@ -28,6 +28,8 @@ import { AUTO_NAME, ELEVATION_CREDIT, imageryCredit, imageryInfo, mapKeys, OVERL
 import { ImageryPicker } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
+import { useTooLarge } from "../plans/UploadLimit";
+import { isSavedPlan, LineUpBanner, PlanCard, usePlanOnMap } from "./PlanOnMap";
 
 const TOOLS: Array<{ tool: Tool; label: string; icon: IconName; key: string; what: string }> = [
   { tool: "polygon", label: "Area", icon: "area", key: "A", what: "Lawns, roofs, lots, driveways" },
@@ -91,6 +93,7 @@ export function MeasurePage() {
   const session = useSession();
   const { company } = session;
   const isAdmin = hasRole(session, "admin");
+  const canAddPlans = hasRole(session, "admin", "office", "estimator", "crew_lead");
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const linkIds = { property: params.get("property"), quote: params.get("quote"), request: params.get("request"), invoice: params.get("invoice"), measurement: params.get("measurement") };
@@ -231,7 +234,7 @@ export function MeasurePage() {
   const cubicYards = depthIn ? (summary.total_area_sqft * (depthIn / 12)) / 27 : 0;
   const asphaltTons = depthIn ? (summary.total_area_sqyd * depthIn * 110) / 2000 : 0;
   const signature = JSON.stringify([shapes.map((s) => s.geometry), shapes.map((s) => labels[s.id] ?? ""), title, depth, pitch, waste]);
-  const dirty = shapes.length > 0 && signature !== savedSignature;
+  const shapesDirty = shapes.length > 0 && signature !== savedSignature;
   // A reopened drawing starts out saved.
   useEffect(() => {
     if (baseline.current !== null && shapes.length === baseline.current) {
@@ -418,6 +421,33 @@ export function MeasurePage() {
     );
   };
 
+  // ----- A plan sheet on the map (PlanOnMap.tsx) --------------------------------------------------
+  const savedPlan = useMemo(() => {
+    const plan = (ctx?.measurement?.view as { plan?: unknown } | null)?.plan;
+    return isSavedPlan(plan) ? plan : null;
+  }, [ctx?.measurement]);
+  const tooLarge = useTooLarge();
+  const plan = usePlanOnMap({
+    map: mapRef,
+    ready: mapState === "ready",
+    companyId: company.id,
+    where: { property: ctx?.ids.property ?? picked?.property_id ?? null, quote: ctx?.ids.quote ?? null },
+    saved: savedPlan,
+    open: params.get("plan"),
+    onTooLarge: tooLarge.report,
+  });
+  const aligning = Boolean(plan.step);
+  // The plan's place counts as a change to save, once a reopened drawing's plan is back on the map.
+  const planSig = JSON.stringify(plan.savedPlan);
+  const [planSavedSig, setPlanSavedSig] = useState<string | null>(null);
+  useEffect(() => {
+    if (planSavedSig !== null || !ctx) return;
+    if (!savedPlan) setPlanSavedSig("null");
+    else if (plan.savedPlan) setPlanSavedSig(planSig);
+  }, [planSavedSig, ctx, savedPlan, plan.savedPlan, planSig]);
+  const planDirty = planSavedSig !== null && planSig !== planSavedSig;
+  const dirty = shapesDirty || (shapes.length > 0 && planDirty);
+
   // ----- Tools ---------------------------------------------------------------------------------
   const pickTool = (next: Tool) => {
     setTool(next);
@@ -437,6 +467,10 @@ export function MeasurePage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target) || mapState !== "ready") return;
+      if (aligning) {
+        if (e.key === "Escape") plan.cancelLineUp();
+        return;
+      }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -490,6 +524,7 @@ export function MeasurePage() {
     mutationFn: async () => {
       if (!shapes.length) throw new Error("Draw at least one shape first.");
       if (drawing) throw new Error("Finish or cancel the shape you're drawing first.");
+      if (aligning) throw new Error("Finish lining up the plan first, or cancel it.");
       if (pitch && squares === null) throw new Error("Roof pitch should look like 7/12.");
       // A picture of the drawing for the quote, invoice and PDF. Saving goes ahead without one.
       let snapshot: string | undefined;
@@ -529,14 +564,15 @@ export function MeasurePage() {
         waste_pct: Math.min(100, Math.max(0, Number(waste || 0))),
         geojson: { type: "FeatureCollection", features },
         view: view
-          ? { ...view, imagery: shown, mode: choice === "auto" ? "auto" : "manual", overlays, attribution: [imageryCredit(pictureOn), overlays.length && pictureOn !== "terrain" ? ELEVATION_CREDIT : null].filter(Boolean).join(" · ") }
+          ? { ...view, imagery: shown, mode: choice === "auto" ? "auto" : "manual", overlays, plan: plan.savedPlan ?? undefined, attribution: [imageryCredit(pictureOn), overlays.length && pictureOn !== "terrain" ? ELEVATION_CREDIT : null].filter(Boolean).join(" · ") }
           : undefined,
         snapshot_path: snapshot,
       });
-      return { result, snapshot, pictureProblem, previous: saved?.snapshot_path ?? null, swapped: pictureOn !== shown ? pictureOn : null };
+      return { result, snapshot, pictureProblem, previous: saved?.snapshot_path ?? null, swapped: pictureOn !== shown ? pictureOn : null, planSig };
     },
-    onSuccess: ({ result, snapshot, pictureProblem, previous, swapped }) => {
+    onSuccess: ({ result, snapshot, pictureProblem, previous, swapped, planSig: savedPlanSig }) => {
       setSavedSignature(signature);
+      setPlanSavedSig(savedPlanSig);
       setSaved((s) => ({
         id: result.id,
         quote_id: s?.quote_id ?? ctx?.ids.quote ?? null,
@@ -579,7 +615,7 @@ export function MeasurePage() {
           <>
             <Button variant="ghost" icon="info" onClick={() => setHelp(true)}>How it works</Button>
             {!dirty && saved && back && <Link to={back.to} className="btn">Back to {back.label}</Link>}
-            <Button variant="primary" icon={!dirty && saved ? "check" : undefined} loading={save.isPending} disabled={!shapes.length || (!dirty && Boolean(saved))} onClick={() => save.mutate()}>
+            <Button variant="primary" icon={!dirty && saved ? "check" : undefined} loading={save.isPending} disabled={!shapes.length || aligning || (!dirty && Boolean(saved))} onClick={() => save.mutate()}>
               {!dirty && saved ? "Saved" : saved ? "Save changes" : "Save measurement"}
             </Button>
           </>
@@ -641,7 +677,7 @@ export function MeasurePage() {
               )}
               {mapState === "ready" && (
                 <>
-                  <div className="measure-rail" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
+                  {!aligning && <div className="measure-rail" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
                     {TOOLS.map((t) => (
                       <button key={t.tool} type="button" className="measure-tool" aria-pressed={tool === t.tool} onClick={() => pickTool(t.tool)} title={touch ? t.what : `${t.label} (${t.key}): ${t.what}`}>
                         <Icon name={t.icon} size={18} />
@@ -665,22 +701,22 @@ export function MeasurePage() {
                         <Icon name="trash" size={18} /><span>Delete</span>
                       </button>
                     )}
-                  </div>
+                  </div>}
                   <div className="measure-corner">
                     <button type="button" className="measure-round" onClick={locate} title="Go to where I am" aria-label="Go to where I am"><Icon name="navigation" size={17} /></button>
                     {shapes.length > 0 && <button type="button" className="measure-round" onClick={() => mapRef.current?.fitShapes()} title={touch ? "Show all shapes" : "Show all shapes (F)"} aria-label="Show all shapes"><Icon name="eye" size={17} /></button>}
                     <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={17} /></button>
                   </div>
-                  {banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
+                  {aligning ? <LineUpBanner plan={plan} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
                   {overlays.includes("slope") && (
                     <div className="measure-legend" aria-label="Slope colors">
                       <strong>Slope</strong>
                       {SLOPE_CLASSES.map((c) => <span key={c.label}><i style={{ background: c.color }} />{c.label}<span className="muted"> · {c.note}</span></span>)}
                     </div>
                   )}
-                  <div className="measure-hint" role="status" aria-live="polite">{hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>
+                  {!aligning && <div className="measure-hint" role="status" aria-live="polite">{hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>}
                   {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
-                  {center && center.zoom < 12 && !shapes.length && !banner && (
+                  {center && center.zoom < 12 && !shapes.length && !banner && !aligning && (
                     <div className="measure-zoom-note">Search an address or zoom in to the property to start measuring.</div>
                   )}
                 </>
@@ -740,6 +776,10 @@ export function MeasurePage() {
             </div>
           </div>
 
+          {(plan.shown || plan.plans.data?.length || plan.sending || company.trade_preset !== "lawn_exterior") && (
+            <PlanCard plan={plan} canAdd={canAddPlans} hasPlace={Boolean(ctx?.ids.property || picked?.property_id || ctx?.ids.quote)} />
+          )}
+
           <details className="card measure-extra" open={Boolean(depth || pitch)}>
             <summary className="card-pad"><strong>Depth, roof pitch and waste</strong><span className="muted small">For mulch, gravel, asphalt and roofing math</span></summary>
             <div className="card-pad form-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, paddingTop: 0 }}>
@@ -752,6 +792,7 @@ export function MeasurePage() {
       </div>
 
       <MeasureHelp open={help} touch={touch} onClose={() => { markHelpSeen(); setHelp(false); }} />
+      {tooLarge.dialog}
       {abroad && (
         <OutsideUs
           place={abroad.place}

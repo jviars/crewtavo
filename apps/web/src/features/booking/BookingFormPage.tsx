@@ -7,11 +7,17 @@ import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
+import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
+
+/** The most files a request can bring (the API's limit too). */
+const MAX_FILES = 10;
+const isFileQuestion = (q: Question) => q.type === "files" || q.type === "photos";
+interface Sent { reference: number; uploads?: Array<{ name: string; path: string; token: string } | null>; files_token?: string }
 
 interface Question {
   key: string;
   label: string;
-  type: "address" | "text" | "long_text" | "number" | "yes_no" | "choice" | "multi_choice" | "photos";
+  type: "address" | "text" | "long_text" | "number" | "yes_no" | "choice" | "multi_choice" | "photos" | "files";
   required: boolean;
   options?: string[];
 }
@@ -28,6 +34,10 @@ export function BookingFormPage() {
   const view = useQuery({ queryKey: ["booking", company, form], retry: false, queryFn: () => publicFetch<FormView>(path) });
   const [contact, setContact] = useState({ name: "", email: "", phone: "", line1: "", city: "", postal_code: "" });
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  // Files picked for "Files" and "Photos" questions; they go up after the request is in.
+  const [files, setFiles] = useState<Record<string, File[]>>({});
+  const [sending, setSending] = useState<{ done: number; total: number; progress: number } | null>(null);
+  const fileCount = Object.values(files).reduce((n, list) => n + list.length, 0);
   const [touched, setTouched] = useState(false);
   // A promo code from the link (?promo=SPRING10) or typed in, checked before sending.
   const [promo, setPromo] = useState({ code: (params.get("promo") ?? "").toUpperCase().slice(0, 24), offer: "" as string, open: Boolean(params.get("promo")) });
@@ -39,8 +49,10 @@ export function BookingFormPage() {
     if (view.data && promo.code && !promo.offer && !checkPromo.isPending && !checkPromo.isError && !checkPromo.isSuccess) checkPromo.mutate(promo.code);
   }, [view.data]);
   const turnstile = useTurnstile(Boolean(view.data));
-  const questions = (view.data?.form.questions ?? []).filter((q) => q.type !== "address" && q.type !== "photos");
-  const unanswered = questions.filter((q) => q.required && (q.type === "multi_choice" ? !(answers[q.key] as string[] | undefined)?.length : !String(answers[q.key] ?? "").trim()));
+  const questions = (view.data?.form.questions ?? []).filter((q) => q.type !== "address");
+  const unanswered = questions.filter(
+    (q) => q.required && (isFileQuestion(q) ? !files[q.key]?.length : q.type === "multi_choice" ? !(answers[q.key] as string[] | undefined)?.length : !String(answers[q.key] ?? "").trim()),
+  );
   const noContact = !contact.email.trim() && !contact.phone.trim();
 
   useEffect(() => {
@@ -48,16 +60,45 @@ export function BookingFormPage() {
   }, [view.data]);
 
   const submit = useMutation({
-    mutationFn: () =>
-      publicFetch<{ reference: number }>(path, {
+    mutationFn: async () => {
+      const picked = Object.entries(files).flatMap(([question, list]) => list.map((file) => ({ question, file })));
+      const sent = await publicFetch<Sent>(path, {
         name: contact.name.trim(),
         email: contact.email.trim() || undefined,
         phone: contact.phone.trim() || undefined,
         address: { line1: contact.line1.trim(), city: contact.city.trim() || undefined, postal_code: contact.postal_code.trim() || undefined },
-        answers,
+        // Which files came with each question, by name.
+        answers: { ...answers, ...Object.fromEntries(Object.entries(files).filter(([, list]) => list.length).map(([key, list]) => [key, list.map((f) => f.name)])) },
+        files: picked.map(({ question, file }) => ({ question, name: file.name, size: file.size, type: file.type || undefined })),
         promo_code: promo.offer ? promo.code : undefined,
         turnstile_token: turnstile.token || undefined,
-      }),
+      });
+      // The request is in. Now the files, one at a time, each on its own one-time link.
+      const failed: string[] = [];
+      const uploaded: Array<{ path: string; name: string }> = [];
+      const links = sent.uploads ?? [];
+      for (const [i, { file }] of picked.entries()) {
+        const link = links[i]?.name === file.name ? links[i] : undefined;
+        if (!link) {
+          failed.push(file.name);
+          continue;
+        }
+        setSending({ done: i, total: picked.length, progress: 0 });
+        try {
+          uploaded.push({ path: await uploadToLink(link, file, (progress) => setSending({ done: i, total: picked.length, progress })).promise, name: file.name });
+        } catch (error) {
+          if (!isAbort(error)) failed.push(file.name);
+        }
+      }
+      let recorded = 0;
+      if (uploaded.length && sent.files_token) {
+        recorded = (await publicFetch<{ added: number }>(`${path}/files`, { files_token: sent.files_token, uploaded: uploaded.map((u) => u.path) }).catch(() => ({ added: 0 }))).added;
+        // Sent but not recorded: as good as not sent.
+        if (!recorded) failed.push(...uploaded.map((u) => u.name));
+      }
+      return { reference: sent.reference, sentFiles: recorded, failed };
+    },
+    onSettled: () => setSending(null),
     onSuccess: () => window.scrollTo({ top: 0, behavior: "smooth" }),
   });
   const set = (key: keyof typeof contact) => (e: { target: { value: string } }) => setContact({ ...contact, [key]: e.target.value });
@@ -74,6 +115,16 @@ export function BookingFormPage() {
             <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
             <h1 style={{ fontSize: 24, fontWeight: 800 }}>Thanks, {contact.name.trim().split(" ")[0]}!</h1>
             <p style={{ margin: 0 }}>{view.data.company.name} got your request (reference #{submit.data.reference}) and will be in touch soon.</p>
+            {submit.data.sentFiles > 0 && <p className="muted" style={{ margin: 0 }}>{submit.data.sentFiles === 1 ? "Your file came with it." : `Your ${submit.data.sentFiles} files came with it.`}</p>}
+            {submit.data.failed.length > 0 && (
+              <div className="callout callout-warning" style={{ textAlign: "left", width: "100%" }}>
+                <Icon name="alert" size={18} />
+                <div className="grow">
+                  <div>{submit.data.failed.length === 1 ? "One file didn't come through:" : `${submit.data.failed.length} files didn't come through:`} {submit.data.failed.join(", ")}</div>
+                  <div className="small" style={{ fontWeight: 400 }}>Your request is in. Email {submit.data.failed.length === 1 ? "it" : "them"} to {view.data.company.name}{view.data.company.phone ? `, or call ${view.data.company.phone}` : ""}.</div>
+                </div>
+              </div>
+            )}
             {view.data.company.phone && <p className="muted" style={{ margin: 0 }}>Questions? Call <a href={`tel:${view.data.company.phone}`}>{view.data.company.phone}</a>.</p>}
           </div>
         )}
@@ -107,7 +158,11 @@ export function BookingFormPage() {
               <Field label="ZIP"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" inputMode="numeric" /></Field>
             </div>
             {questions.map((q) => (
-              <QuestionField key={q.key} q={q} value={answers[q.key]} invalid={touched && unanswered.includes(q)} onChange={(v) => setAnswers({ ...answers, [q.key]: v })} />
+              isFileQuestion(q) ? (
+                <FileQuestion key={q.key} q={q} files={files[q.key] ?? []} room={MAX_FILES - fileCount} invalid={touched && unanswered.includes(q)} disabled={submit.isPending} onChange={(list) => setFiles((all) => ({ ...all, [q.key]: list }))} />
+              ) : (
+                <QuestionField key={q.key} q={q} value={answers[q.key]} invalid={touched && unanswered.includes(q)} onChange={(v) => setAnswers({ ...answers, [q.key]: v })} />
+              )
             ))}
             {promo.offer ? (
               <div className="callout callout-good">
@@ -127,10 +182,64 @@ export function BookingFormPage() {
             )}
             <div ref={turnstile.ref} />
             <FormError error={submit.error} />
+            {sending && (
+              <div className="stack-sm" role="status" aria-live="polite">
+                <div className="row-between small"><span className="strong">Sending your files: {sending.done + 1} of {sending.total}</span><span className="muted tabular">{Math.round(sending.progress * 100)}%</span></div>
+                <div className="progress"><span style={{ width: `${Math.round(((sending.done + sending.progress) / sending.total) * 100)}%` }} /></div>
+                <span className="muted small">Keep this page open until they're done.</span>
+              </div>
+            )}
             <Button type="submit" variant="primary" size="lg" icon="send" loading={submit.isPending} disabled={turnstile.required && !turnstile.token}>Send request</Button>
           </form>
         )}
       </div>
+    </div>
+  );
+}
+
+/** A "Files" or "Photos" question: pick or drop files; they're sent once the request is in. */
+function FileQuestion({ q, files, room, invalid, disabled, onChange }: { q: Question; files: File[]; room: number; invalid: boolean; disabled: boolean; onChange: (files: File[]) => void }) {
+  const [problem, setProblem] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+  const photos = q.type === "photos";
+  const add = (picked: File[]) => {
+    const fitting = picked.filter((f) => f.size > 0 && f.size <= PLAN_MAX_BYTES && (!photos || f.type.startsWith("image/")));
+    const tooBig = picked.filter((f) => f.size > PLAN_MAX_BYTES);
+    const taken = fitting.slice(0, Math.max(0, room));
+    setProblem(
+      tooBig.length ? new TooLargeError(`${tooBig[0]!.name} is larger than ${fileSize(PLAN_MAX_BYTES)}. Split it into smaller files, or send it another way.`).message
+        : fitting.length > taken.length ? `You can send up to ${MAX_FILES} files with a request.`
+          : picked.length > fitting.length ? (photos ? "Only pictures here." : "Some of those files are empty.") : null,
+    );
+    if (taken.length) onChange([...files, ...taken]);
+  };
+  const label = <>{q.label}{!q.required && <span className="optional"> (optional)</span>}</>;
+  return (
+    <div
+      className="field"
+      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); if (!disabled) add([...e.dataTransfer.files]); }}
+      style={over ? { outline: "2px dashed var(--green)", outlineOffset: 4, borderRadius: 8 } : undefined}
+    >
+      <span>{label}</span>
+      {files.length > 0 && (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+          {files.map((f, i) => (
+            <li key={`${f.name}-${i}`} className="row" style={{ gap: 8 }}>
+              <Icon name={f.type.startsWith("image/") ? "image" : "file"} size={16} />
+              <span className="grow" style={{ overflowWrap: "anywhere" }}>{f.name} <span className="muted small">{fileSize(f.size)}</span></span>
+              <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={`Remove ${f.name}`} disabled={disabled} onClick={() => onChange(files.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <label className="btn" style={{ justifySelf: "start" }} aria-disabled={disabled || room <= 0}>
+        <Icon name={photos ? "camera" : "upload"} size={16} />{photos ? "Add photos" : "Add files"}
+        <input type="file" multiple hidden accept={photos ? "image/*" : undefined} disabled={disabled || room <= 0} onChange={(e) => { const picked = [...(e.target.files ?? [])]; e.target.value = ""; add(picked); }} />
+      </label>
+      <span className="muted small">{photos ? "Pictures" : "Plans, PDFs or pictures"}, up to {fileSize(PLAN_MAX_BYTES)} each. You can also drop them here.</span>
+      {(problem || invalid) && <span className="field-error">{problem ?? "Please add a file"}</span>}
     </div>
   );
 }

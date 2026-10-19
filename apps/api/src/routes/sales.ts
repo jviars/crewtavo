@@ -333,11 +333,28 @@ const featureCollection = z.object({
 });
 
 /** Where the map was when the drawing was saved, so reopening it starts there. */
+const lngLat = z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]);
 const mapView = z.object({
-  center: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]),
+  center: lngLat,
   zoom: z.number().min(0).max(24),
   imagery: z.string().max(40).optional(),
+  // Auto, or a source someone picked; and slope or contours on top.
+  mode: z.enum(["auto", "manual"]).optional(),
+  overlays: z.array(z.string().max(20)).max(5).optional(),
   attribution: z.string().max(300).optional(),
+  // A plan sheet lined up on the map (apps/web/src/features/measure/PlanOnMap.tsx): which file and
+  // page, where its corners are, and the size of the picture those corners were worked out for.
+  plan: z
+    .object({
+      id: uuid,
+      page: z.number().int().min(1).max(10_000),
+      corners: z.tuple([lngLat, lngLat, lngLat, lngLat]),
+      size: z.tuple([z.number().positive().max(100_000), z.number().positive().max(100_000)]),
+      opacity: z.number().min(0).max(1),
+      paper: z.boolean(),
+      hidden: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"]), async (c) => {

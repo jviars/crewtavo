@@ -49,6 +49,7 @@ export function MeasureHelp({ open, onClose, touch }: { open: boolean; onClose: 
               <li>Made a mistake? Undo takes back the last point while you draw{touch ? "" : " (Ctrl+Z or ⌘Z)"}. {touch ? "Cancel" : "Esc"} drops the shape you're drawing.</li>
               <li>Edit lets you drag corners. Drag the small dots between corners to add one.</li>
               <li>The map starts on Auto, which picks the sharpest free imagery for wherever you are. The Imagery button lets you choose a source yourself, switch to Terrain, or lay slope and 2 ft contour lines over the map (US).</li>
+              <li>New site where the aerial still shows dirt? Under Plan on the map, put the site plan on the map, line it up by {touch ? "tapping" : "clicking"} the same two spots on the plan and the aerial, and draw over it.</li>
               {!touch && <li>Shortcuts: A area, L line, C count, E edit, F fit to shapes, Delete removes the selected shape.</li>}
             </ul>
           </div>

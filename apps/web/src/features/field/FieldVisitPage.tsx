@@ -18,6 +18,7 @@ import { toast } from "@/lib/toast";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
+import { FieldPlans } from "../plans/FieldPlans";
 import { pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
 import { directionsUrl, formatDuration } from "./fieldData";
 import { FIELD_SCOPE } from "@/lib/offline";
@@ -37,7 +38,7 @@ export function FieldVisitPage() {
       const row = unwrapOne(
         await supabase()
           .from("visits")
-          .select("id, title, kind, status, starts_at, ends_at, scheduled_on, notes, hold_reason, completed_at, series_day, series_total, equipment:visit_equipment(equipment:equipment(id, name, kind)), job:jobs(id, number, title, instructions, client:clients(display_name, phone)), request:requests(id, title, details, client:clients(display_name, phone)), property:properties(id, line1, city, region, postal_code, lat, lng, notes)")
+          .select("id, title, kind, status, starts_at, ends_at, scheduled_on, notes, hold_reason, completed_at, series_day, series_total, equipment:visit_equipment(equipment:equipment(id, name, kind)), job:jobs(id, number, title, instructions, property_id, client:clients(display_name, phone)), request:requests(id, title, details, client:clients(display_name, phone)), property:properties(id, line1, city, region, postal_code, lat, lng, notes)")
           .eq("id", id)
           .maybeSingle(),
         "This visit",
@@ -153,6 +154,7 @@ export function FieldVisitPage() {
         </section>
       )}
       {v.job && <section className="card card-pad"><ScopeOfWork jobId={v.job.id} title="The work" bare /></section>}
+      <FieldPlans visitId={v.id} jobId={v.job?.id ?? null} propertyId={v.property?.id ?? v.job?.property_id ?? null} />
       {v.equipment.length > 0 && (
         <section className="card card-pad stack-sm">
           <strong>Bring</strong>

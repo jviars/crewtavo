@@ -19,6 +19,7 @@ import { addressLine, formatDate, formatMoneyCents, formatTaxRate, timeAgo, toda
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { DrawingsCard } from "../measure/drawings";
+import { PlansCard } from "../plans/PlansCard";
 import { LineItems } from "./LineItems";
 import { DiscountRows } from "./PromoRow";
 import { SendDialog } from "./SendDialog";
@@ -218,6 +219,7 @@ export function QuotePage() {
         <div className="wide stack-lg">
           <LineItems table="quote_line_items" parent="quote_id" parentId={q.id} lines={q.lines} editable={editable} onChanged={refresh} withOptions />
           <MessageCard value={q.message} editable={editable} onSave={(message) => update.mutate({ message })} />
+          {canSell && <PlansCard scope={{ kind: "quote", id: q.id, propertyId: q.property?.id ?? null }} />}
         </div>
         <aside className="narrow stack">
           <div className="card card-pad totals">

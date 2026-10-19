@@ -6,6 +6,8 @@
  *   POST   /api/railway/token     or a project token instead
  *   DELETE /api/railway           forget the access
  *   POST   /api/railway/setup     the setup step is done or skipped
+ *   GET    /api/railway/uploads   the largest file the storage service takes
+ *   POST   /api/railway/uploads   raise it to 200 MB and restart storage
  * Only owners and admins, only in an instance on Railway.
  */
 import { ADMINS } from "@crewtavo/core";
@@ -22,6 +24,7 @@ import { adminClient } from "../lib/supabase";
 import { authorizationUrl, exchangeCode, pkce, RailwayError } from "../integrations/railway";
 import { addressOverview, adoptRailway, stopAutomatic } from "../services/address";
 import { forgetRailway, noteRailwayError, railwayClient, saveRailwayAccess, setRailwaySetup } from "../services/railway";
+import { raiseUploadLimit, uploadLimit } from "../services/uploads";
 
 export const railway = new Hono<AppEnv>();
 
@@ -97,6 +100,10 @@ railway.delete("/railway", ...admins, async (c) => {
   await stopAutomatic(admin, c.var.companyId);
   return c.json(await addressOverview(c.env, admin, c.var.companyId));
 });
+
+/** The largest file this Crewtavo takes, and raising it to 200 MB for plan sets (services/uploads.ts). */
+railway.get("/railway/uploads", ...admins, async (c) => c.json(await uploadLimit(c.env, adminClient(c.env), c.var.companyId).catch(plain)));
+railway.post("/railway/uploads", ...admins, async (c) => c.json(await raiseUploadLimit(c.env, adminClient(c.env), c.var.companyId).catch(plain)));
 
 /** The setup step after "Set up your business" is over, either way. */
 railway.post("/railway/setup", ...admins, async (c) => {

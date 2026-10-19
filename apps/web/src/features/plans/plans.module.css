@@ -1,0 +1,42 @@
+/* Plans and files: the card on quotes, jobs and clients, and the list on a crew's visit. */
+
+.list { display: grid; }
+.row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--row-divider); }
+.list > .row:first-child, .list > .upload:first-child { border-top: 0; padding-top: 2px; }
+.icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 9px; background: var(--fill-2); color: var(--text-2); }
+.icon[data-kind="pdf"] { background: var(--danger-tint); color: var(--danger); }
+.icon[data-kind="image"] { background: var(--info-tint); color: var(--info); }
+.body { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.title { color: inherit; font-weight: 700; overflow-wrap: anywhere; text-decoration: none; }
+a.title:hover { color: var(--green-dark); }
+.meta { color: var(--text-3); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.notes { margin: 2px 0 0; color: var(--text-2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.actions { display: flex; align-items: center; gap: 4px; flex: none; }
+
+.olderToggle { justify-self: start; padding: 0; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.olderToggle:hover { color: var(--ink); }
+.older { display: grid; gap: 6px; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--fill); }
+.olderRow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; }
+.olderRow > span:first-child { flex: 1; min-width: 160px; color: var(--text-2); }
+.olderRow a { font-weight: 600; }
+
+.group { margin: 14px 0 0; color: var(--text-3); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
+.group:first-child { margin-top: 0; }
+
+.upload { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--row-divider); font-size: 13px; }
+.uploadHead { display: flex; align-items: center; gap: 8px; }
+.uploadHead > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+
+.dropping { outline: 2px dashed var(--green); outline-offset: -6px; background: color-mix(in srgb, var(--green) 6%, var(--surface)); }
+.dropHint { color: var(--text-3); font-size: 12px; }
+
+.fieldRow { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; padding: 12px 0; border-top: 1px solid var(--row-divider); }
+.fieldRow:first-of-type { border-top: 0; padding-top: 4px; }
+.fieldRow .body { gap: 2px; flex: 1 1 180px; }
+.fieldButtons { display: flex; gap: 8px; flex: none; }
+/* On a phone the buttons go under the name, big enough for a thumb (or a glove). */
+@media (max-width: 560px) {
+  .fieldButtons { flex-basis: 100%; padding-left: 50px; }
+  .fieldButtons > :first-child { flex: 1; }
+}

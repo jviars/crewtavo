@@ -279,6 +279,26 @@ Categories, pages, revisions, search and templates, built into our app:
    pitch; squares = plan area × pitch factor × (1 + waste) ÷ 100.
 6. Quote line quantities use preset formulas, for example asphalt tons =
    `area_sqyd * depth_in * 110 / 2000`, evaluated by a small safe parser (no `eval`).
+7. For new paving, where the aerial still shows dirt or the old site, a plan sheet goes on the map
+   (`features/measure/PlanOnMap.tsx`): pdf.js renders a page of the PDF (or a picture of a plan)
+   to an image, with a "lines only" copy whose white paper is made see-through, and MapLibre shows
+   it as an image source. Lining it up is two pairs of taps (a spot on the plan, the same spot on
+   the aerial), which fix a similarity transform in Web Mercator (`planAlign.ts`: move, turn and
+   size, never stretch). The scale it lines up at ("1 in = 30 ft") is shown so it can be checked
+   against the plan's printed scale. The drawing saves the plan, page and corners in
+   `measurements.view.plan`.
+
+### Plans and files
+
+`plan_files` (migrations `20261019001700_plan_files.sql`, `20261019001800_request_files.sql`)
+holds plan sets, specs, permits and addenda on a request, quote, job and property, in the files
+bucket at `<company>/plans/<uuid>.<ext>`, up to 200 MB (the storage service's `FILE_SIZE_LIMIT`).
+A new version (`replaces_id`) supersedes the one before; crews only ever see current files marked
+for the crew, on the work they're on, and the office sees everything. A request's files go on the
+quote made from it, a quote's on its job; people on upcoming visits for the job are told about new
+files. Booking forms take files too: the public form gets a one-time upload link per file
+(`createSignedUploadUrl`), and `POST /api/public/forms/:company/:form/files` records the ones that
+arrived. The daily `plans` task removes files left on nothing and uploads never recorded.
 
 Keys: none are needed to measure. Esri (free ArcGIS Location Platform account, 2 million tiles a
 month) or Google (Map Tiles API) keys are browser keys a company adds in **Settings → Maps**; a
