@@ -1,5 +1,5 @@
 /** The Hono app. server.ts serves it, with the web app and the background-task scheduler. */
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
@@ -31,8 +31,13 @@ export const app = new Hono<AppEnv>();
 
 app.use(secureHeaders({ crossOriginResourcePolicy: false }));
 // Bodies are read into memory, so one huge request could exhaust it. The biggest real one is a
-// quote approval with a drawn signature (a few hundred KB); files go straight to Storage.
-app.use(bodyLimit({ maxSize: 2 * 1024 * 1024, onError: (c) => c.json({ error: "That's too large to send." }, 413) }));
+// quote approval with a drawn signature (a few hundred KB); files go straight to Storage. Calendar
+// files are the exception: their events are read from them (up to 10 MB of text, sent as JSON).
+const tooLarge = (c: Context) => c.json({ error: "That's too large to send." }, 413);
+const smallBody = bodyLimit({ maxSize: 2 * 1024 * 1024, onError: tooLarge });
+const calendarFile = bodyLimit({ maxSize: 12 * 1024 * 1024, onError: tooLarge });
+const CALENDAR_FILE = /^\/api\/calendars\/(file|[0-9a-f-]{36}\/file)$/i;
+app.use((c, next) => (c.req.method === "POST" && CALENDAR_FILE.test(c.req.path) ? calendarFile(c, next) : smallBody(c, next)));
 // MCP clients may run in a browser (for example the MCP Inspector).
 app.use(
   "/mcp",

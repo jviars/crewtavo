@@ -105,7 +105,7 @@ const CALENDAR_HIGHLIGHTS: AppInfo["highlights"] = [
   { icon: "refresh", title: "Always current", text: "Read again every 15 minutes, with repeats, moved meetings and cancellations." },
 ];
 
-const LINK_ACCESS = ["Read the events on the calendars you add", "Nothing else: it can't change the calendar"];
+export const LINK_ACCESS = ["Read the events on the calendars you add", "Nothing else: it can't change the calendar"];
 
 export const APP_INFO: Record<string, AppInfo> = {
   google_calendar: {
@@ -116,7 +116,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     highlights: [
       { icon: "calendar", title: "Pick your calendars", text: "Choose which calendars show on the schedule. Each one can belong to a crew." },
       { icon: "clock", title: "Find a time knows", text: "Busy time on those calendars counts when Crewtavo suggests an open slot." },
-      { icon: "calendarCheck", title: "Visits on Google", text: "New, moved and finished visits update on Google within a few minutes." },
+      { icon: "calendarCheck", title: "Visits on Google", text: "New, moved and finished visits show up in Google Calendar too, so the day is on everyone's phone." },
     ],
     access: [
       "See the list of your calendars",

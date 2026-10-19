@@ -6,6 +6,9 @@
  * for the next six months (and last month) replace what we had. Links are secrets: they're stored
  * encrypted, and only fetched from public addresses (checked as each connection is made).
  *
+ * A calendar can also come from an uploaded file (an export). It's read once, for the next year,
+ * and only changes when it's uploaded again.
+ *
  * With Google Calendar connected, visits can also go onto a calendar Crewtavo makes in that
  * account: the outbox (see the calendar_sync migration) brings each change across.
  */
@@ -19,6 +22,7 @@ import { addDays, eventDays, localDate, looksLikeIcs, parseIcs, plainText, type 
 import type { Env } from "../env";
 import { decryptJson } from "../lib/crypto";
 import type { Db } from "../lib/supabase";
+import type { CalendarApp } from "./registry";
 import { accessToken, IntegrationError } from "./tokens";
 
 /** A problem with a calendar that the person who added it can act on. */
@@ -30,6 +34,8 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_EVENTS = 5000;
 export const WINDOW_BACK_DAYS = 30;
 export const WINDOW_AHEAD_DAYS = 180;
+/** A file isn't read again, so its repeats go further ahead. */
+export const FILE_AHEAD_DAYS = 365;
 
 /**
  * At most `max` characters, never cutting one in half: an emoji is two UTF-16 units, and half of
@@ -50,9 +56,13 @@ export function clip(text: string, max: number): string {
 // Fetching an ICS link
 // ---------------------------------------------------------------------------------------------
 
+const GOOGLE_SECRET = "Copy the Secret address in iCal format instead: it's under Integrate calendar in that calendar's settings, and has \"private\" in it.";
+
 /** A pasted link, tidied: webcal:// becomes https://, and a missing scheme means https. */
 export function normalizeLink(input: string): URL {
   let text = input.trim().replace(/^<|>$/g, "").replace(/^"|"$/g, "");
+  // Google Calendar's settings show the calendar's ID (an address like name@gmail.com) just above its links.
+  if (/^[^\s/:]+@[^\s/]+$/.test(text)) throw new CalendarError(`That's a calendar ID or email address, not a calendar link. ${GOOGLE_SECRET}`);
   if (/^webcals?:\/\//i.test(text)) text = text.replace(/^webcals?:/i, "https:");
   if (!/^[a-z][a-z0-9+.-]*:/i.test(text)) text = `https://${text}`;
   let url: URL;
@@ -63,9 +73,16 @@ export function normalizeLink(input: string): URL {
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new CalendarError("Use a calendar link that starts with https:// or webcal://.");
   if (text.length > 2000) throw new CalendarError("That link is too long to be a calendar link.");
+  // Google's links for looking at a calendar (embed, share, the page itself) open a web page.
+  if (/^(www\.)?calendar\.google\.com$/i.test(url.hostname) && !url.pathname.startsWith("/calendar/ical/")) {
+    throw new CalendarError(`That's a link for viewing the calendar in Google, not its calendar address. ${GOOGLE_SECRET}`);
+  }
   url.hash = "";
   return url;
 }
+
+/** Google's public address works only for a calendar shared with everyone. */
+const googlePublic = (url: URL) => /^(www\.)?calendar\.google\.com$/i.test(url.hostname) && /\/public\/[^/]+\.ics$/i.test(url.pathname);
 
 const PRIVATE = "That link points at a private address. Use the calendar's public ICS link.";
 const UNREACHABLE = "Couldn't reach that calendar. Check the link, or try again in a few minutes.";
@@ -186,6 +203,9 @@ export async function fetchIcs(link: string | URL): Promise<string> {
     const status = response.statusCode ?? 0;
     const location = response.headers.location;
     if (status < 200 || status > 299) response.destroy();
+    if ((status === 401 || status === 403 || status === 404) && googlePublic(target)) {
+      throw new CalendarError(`That's the calendar's public address, which only works when the calendar is shared with everyone. ${GOOGLE_SECRET}`);
+    }
     if (status >= 300 && status < 400 && location) {
       url = new URL(location, target);
       if (url.protocol !== "https:" && url.protocol !== "http:") break;
@@ -385,19 +405,25 @@ async function detailsOn(admin: Db, sourceId: string): Promise<boolean> {
   return Boolean(data?.show_details);
 }
 
+/** From the start of the day `back` days ago to the start of the day `ahead` days on, in the company's zone. */
+function daysAround(tz: string, back: number, ahead: number) {
+  const today = localDate(new Date(), tz);
+  return { from: new Date(`${addDays(today, -back)}T00:00:00Z`), to: new Date(`${addDays(today, ahead)}T00:00:00Z`) };
+}
+
 /** Read a calendar's events now (ICS link or Google) and keep them. Returns how many there are. */
 export async function syncSource(env: Env, admin: Db, sourceId: string): Promise<number> {
   const { data: source, error } = await admin
     .from("calendar_sources")
-    .select("id, company_id, kind, show_details, enabled, url_sealed, external_id, company:companies(timezone)")
+    .select("id, company_id, kind, show_details, enabled, url_sealed, external_id, event_count, company:companies(timezone)")
     .eq("id", sourceId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!source || !source.enabled) return 0;
+  // A file has nothing to read again: its events change when it's uploaded again.
+  if (source.kind === "file") return source.event_count ?? 0;
   const tz = (source.company as unknown as { timezone: string } | null)?.timezone ?? "UTC";
-  const today = localDate(new Date(), tz);
-  const from = new Date(`${addDays(today, -WINDOW_BACK_DAYS)}T00:00:00Z`);
-  const to = new Date(`${addDays(today, WINDOW_AHEAD_DAYS)}T00:00:00Z`);
+  const { from, to } = daysAround(tz, WINDOW_BACK_DAYS, WINDOW_AHEAD_DAYS);
   try {
     let items: IcsItem[];
     if (source.kind === "ics") {
@@ -420,13 +446,55 @@ export async function syncSource(env: Env, admin: Db, sourceId: string): Promise
   }
 }
 
-/** The 15-minute task: every calendar not read in the last 14 minutes, a few at a time. */
+// ---- Calendar files ------------------------------------------------------------------------------
+
+/** Which calendar app made an exported file, from its PRODID ("-//Google Inc//Google Calendar 70.9054//EN"). */
+export function fileApp(text: string): CalendarApp {
+  const made = /^PRODID:(.*)$/im.exec(text.slice(0, 8000))?.[1] ?? "";
+  if (/google/i.test(made)) return "google_calendar";
+  if (/apple|icloud/i.test(made)) return "apple_calendar";
+  if (/microsoft|outlook/i.test(made)) return "outlook_calendar";
+  if (/zoho/i.test(made)) return "zoho_calendar";
+  return "ics_calendar";
+}
+
+/** "Work_c_abc123@group.calendar.google.com.ics" -> "Work": a file's name, for a calendar that doesn't name itself. */
+export function nameFromFile(fileName: string | undefined): string | null {
+  const stem = (fileName ?? "").replace(/^.*[\\/]/, "").replace(/\.(ics|ical|ifb|icalendar)$/i, "").replace(/_(?:c_)?[^_@\s]*@\S*$/, "").replace(/[_]+/g, " ").trim();
+  return stem && !stem.includes("@") ? stem : null;
+}
+
+/** An uploaded file's name and events from last month through the next year, in the company's zone. */
+export function readCalendarFile(text: string, tz: string) {
+  if (!looksLikeIcs(text)) throw new CalendarError("That file isn't a calendar. Choose an .ics file, or the .zip file Google Calendar's Export downloads.");
+  if (text.length > MAX_BYTES) throw new CalendarError("That calendar file is too big to read (over 10 MB). Try exporting a calendar with fewer past events.");
+  const { from, to } = daysAround(tz, WINDOW_BACK_DAYS, FILE_AHEAD_DAYS);
+  const calendar = parseIcs(text, { from, to, zone: tz, limit: MAX_EVENTS });
+  if (!calendar.events.length) throw new CalendarError("No events from the last month through the next year, so there's nothing to put on the schedule.");
+  return calendar;
+}
+
+/** A file calendar's events become `items` (read with readCalendarFile), in place of what it had. Returns how many. */
+export async function storeCalendarFile(admin: Db, sourceId: string, items: IcsItem[], tz: string): Promise<number> {
+  const { data: source, error } = await admin.from("calendar_sources").select("id, company_id, kind, show_details, url_sealed, external_id").eq("id", sourceId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!source || source.kind !== "file") throw new CalendarError("Only a calendar that came from a file can be uploaded again.");
+  const details = await detailsOn(admin, source.id);
+  const count = await storeEvents(admin, { ...source, show_details: details }, items, tz);
+  if (details && !(await detailsOn(admin, source.id))) await hideDetails(admin, source.id);
+  const { error: saved } = await admin.from("calendar_sources").update({ last_synced_at: new Date().toISOString(), last_error: null, event_count: count }).eq("id", source.id);
+  if (saved) throw new Error(saved.message);
+  return count;
+}
+
+/** The 15-minute task: every calendar not read in the last 14 minutes, a few at a time (files aren't read again). */
 export async function syncDueCalendars(env: Env, admin: Db) {
   const due = new Date(Date.now() - 14 * 60_000).toISOString();
   const { data, error } = await admin
     .from("calendar_sources")
     .select("id")
     .eq("enabled", true)
+    .not("kind", "in", "(file)")
     .or(`last_synced_at.is.null,last_synced_at.lt.${due}`)
     .order("last_synced_at", { ascending: true, nullsFirst: true })
     .limit(200);

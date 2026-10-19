@@ -17,11 +17,15 @@ import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { CalendarFeedCard } from "../settings/CalendarFeedCard";
 import { AppIcon, AppTile } from "./AppIcon";
 import { AssistantAccess, ConnectedAssistants } from "./AssistantAccess";
-import { CalendarRow, GoogleCalendarPanel, LinkCalendarsPanel, AddCalendarForm, useCalendars } from "./CalendarPanels";
-import { CATEGORY_LABELS, infoFor, MORE_LABELS, useApps, type AppRow } from "./catalog";
+import { CalendarRow, GoogleCalendarPanel, LinkCalendarsPanel, AddCalendarForm, useCalendars, type CalendarSource } from "./CalendarPanels";
+import { CATEGORY_LABELS, infoFor, LINK_ACCESS, MORE_LABELS, useApps, type AppRow } from "./catalog";
 import { StripePanel } from "./StripePanel";
+
+const GOOGLE_SETTINGS = "https://calendar.google.com/calendar/r/settings";
+const GOOGLE_SIGNIN_GUIDE = "https://crewtavo.com/docs/connections/google-calendar/#instant-updates-with-google-sign-in";
 
 /** Where each assistant keeps its connector settings. */
 const CONNECTOR_STEPS: Record<string, string[]> = {
@@ -29,10 +33,13 @@ const CONNECTOR_STEPS: Record<string, string[]> = {
   chatgpt: ["In ChatGPT, open Settings, then Apps and connectors.", "With developer mode on, add a connector and paste the link above.", "Sign in with your Crewtavo account when ChatGPT asks."],
 };
 
+/** Google Calendar on a server without Google sign-in: it works by secret address, like the link apps. */
+const byLinkOnly = (app: AppRow) => app.id === "google_calendar" && !app.available;
+
 function statusOf(app: AppRow): { label: string; tone: Tone } {
-  if (!app.available) return { label: "Not available yet", tone: "muted" };
+  if (!app.available && !byLinkOnly(app)) return { label: "Not available yet", tone: "muted" };
   if (app.status === "error" || app.calendar_errors) return { label: "Needs attention", tone: "danger" };
-  if (app.auth === "link") return app.calendars ? { label: `${app.calendars} ${app.calendars === 1 ? "calendar" : "calendars"}`, tone: "good" } : { label: "Not added", tone: "muted" };
+  if (app.auth === "link" || byLinkOnly(app)) return app.calendars ? { label: `${app.calendars} ${app.calendars === 1 ? "calendar" : "calendars"}`, tone: "good" } : { label: "Not added", tone: "muted" };
   if (app.auth === "connector") return { label: "Ready to connect", tone: "info" };
   // Claude connects by link like ChatGPT; its key is optional.
   if (app.id === "anthropic") return app.status === "connected" ? { label: "Ready · your key added", tone: "good" } : { label: "Ready to connect", tone: "info" };
@@ -103,7 +110,8 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
 
   // The button next to the name, like "Get" in an app store.
   let action: ReactNode = null;
-  if (!app.available) action = <Button className="app-get" disabled>Not available</Button>;
+  if (byLinkOnly(app)) action = <Button className="app-get" variant="primary" icon="plus" onClick={() => scrollTo("google-setup")}>{app.calendars ? "Add another" : "Set up"}</Button>;
+  else if (!app.available) action = <Button className="app-get" disabled>Not available</Button>;
   else if (app.auth === "oauth") {
     action = app.status === "connected"
       ? <Button className="app-get" loading={disconnect.isPending} onClick={askDisconnect}>Disconnect</Button>
@@ -114,7 +122,9 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   else action = <Button className="app-get" variant={app.status === "connected" ? "secondary" : "primary"} onClick={() => scrollTo("app-setup")}>{app.status === "connected" ? "Replace key" : "Add key"}</Button>;
 
   const others = all.filter((a) => a.category === app.category && a.id !== app.id);
-  const googleSources = (calendars.data?.calendars ?? []).filter((s) => s.app === "google_calendar" && s.kind === "ics");
+  const googleSources = (calendars.data?.calendars ?? []).filter((s) => s.app === "google_calendar" && s.kind !== "google");
+  const access = byLinkOnly(app) ? LINK_ACCESS : info.access;
+  const connectsWith = byLinkOnly(app) ? "Secret address (ICS)" : info.connectsWith;
 
   return (
     <>
@@ -135,7 +145,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       <dl className="app-facts" aria-label="About this app">
         <div><dt>Category</dt><dd>{CATEGORY_LABELS[app.category] ?? app.category}</dd></div>
         <div><dt>Made by</dt><dd>{info.developer}</dd></div>
-        {info.connectsWith && <div><dt>Connects with</dt><dd>{info.connectsWith}</dd></div>}
+        {connectsWith && <div><dt>Connects with</dt><dd>{connectsWith}</dd></div>}
         <div><dt>Status</dt><dd>{status.label}</dd></div>
       </dl>
 
@@ -151,17 +161,18 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       )}
 
       {/* ---- Managing it ---- */}
-      {!app.available && app.auth === "oauth" && <NotAvailable app={app} />}
+      {byLinkOnly(app) && <GoogleBySecretAddress app={app} sources={googleSources} />}
+      {!app.available && app.auth === "oauth" && !byLinkOnly(app) && <NotAvailable app={app} />}
       {app.auth === "oauth" && app.available && <AccountCard app={app} />}
       {app.id === "google_calendar" && app.status === "connected" && <GoogleCalendarPanel />}
-      {app.id === "google_calendar" && (
-        <details className="card card-pad app-details" open={!app.available || googleSources.length > 0 || undefined}>
-          <summary>{app.available ? "Or add a calendar by its secret address" : "Add a Google calendar by its secret address"}</summary>
+      {app.id === "google_calendar" && app.available && (
+        <details className="card card-pad app-details" open={googleSources.length > 0 || undefined}>
+          <summary>Or add a calendar by its secret address</summary>
           <div className="stack" style={{ marginTop: 12 }}>
-            <span className="muted small">Works without signing in. It only shows that calendar on your schedule; visits can't go to Google this way.</span>
+            <span className="muted small">Works without signing in, and only shows that calendar on your schedule. For visits in Google without signing in, use <Link to="/settings?tab=calendars">Settings → Calendars</Link>.</span>
             {googleSources.map((s) => <CalendarRow key={s.id} source={s} />)}
             <span id="google_calendar-add" />
-            <AddCalendarForm app="google_calendar" appName="Google" steps={info.steps} />
+            <AddCalendarForm app="google_calendar" appName="Google" steps={info.steps} addOnPaste />
           </div>
         </details>
       )}
@@ -197,11 +208,11 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
         <dl className="card app-info">
           <div><dt>Made by</dt><dd>{info.developer}</dd></div>
           <div><dt>Category</dt><dd>{CATEGORY_LABELS[app.category] ?? app.category}</dd></div>
-          {info.connectsWith && <div><dt>Connects with</dt><dd>{info.connectsWith}</dd></div>}
-          {info.access.length > 0 && (
+          {connectsWith && <div><dt>Connects with</dt><dd>{connectsWith}</dd></div>}
+          {access.length > 0 && (
             <div>
               <dt>Crewtavo can</dt>
-              <dd><ul className="app-access">{info.access.map((a) => <li key={a}>{a}</li>)}</ul></dd>
+              <dd><ul className="app-access">{access.map((a) => <li key={a}>{a}</li>)}</ul></dd>
             </div>
           )}
           <div><dt>Who can change it</dt><dd>Owners and admins of {session.company.name}</dd></div>
@@ -215,6 +226,48 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           <div className="app-grid">{others.map((a) => <AppTile key={a.id} app={a} />)}</div>
         </section>
       )}
+    </>
+  );
+}
+
+/**
+ * Google Calendar with nothing to set up: its secret address brings a calendar onto the schedule,
+ * and the subscribe link puts visits on Google Calendar. Google sign-in (instant, but a Google
+ * Cloud project for whoever runs the server) stays as a footnote.
+ */
+function GoogleBySecretAddress({ app, sources }: { app: AppRow; sources: CalendarSource[] }) {
+  return (
+    <>
+      <section id="google-setup" className="card card-pad stack" aria-labelledby="google-in">
+        <div className="stack-sm" style={{ gap: 4 }}>
+          <h2 id="google-in" className="section-title" style={{ fontSize: 17 }}>1. Show your Google Calendar on the schedule</h2>
+          <span className="muted small">About a minute, on a computer: Google's phone app doesn't show this address.</span>
+        </div>
+        <ol className="app-steps">
+          <li>
+            <a className="btn btn-sm" href={GOOGLE_SETTINGS} target="_blank" rel="noreferrer">Open Google Calendar settings <Icon name="external" size={12} /></a>
+          </li>
+          <li>On the left, under <strong>Settings for my calendars</strong>, click your calendar.</li>
+          <li>Scroll down to <strong>Integrate calendar</strong> and copy the <strong>Secret address in iCal format</strong>.</li>
+          <li>Paste it here. It's added as soon as you paste.</li>
+        </ol>
+        {sources.map((s) => <CalendarRow key={s.id} source={s} />)}
+        <span id="google_calendar-add" />
+        <AddCalendarForm app="google_calendar" appName="Google" addOnPaste />
+        <span className="muted small">Each calendar has its own address: repeat this for the others you want to see. Have a calendar file instead? <Link to="/settings?tab=calendars">Upload it in Settings</Link>.</span>
+      </section>
+      <CalendarFeedCard title="2. Show your visits in Google Calendar" />
+      <details className="card card-pad app-details">
+        <summary>Instant updates with Google sign-in</summary>
+        <div className="stack-sm small" style={{ marginTop: 10 }}>
+          <span>
+            Whoever runs your Crewtavo server can turn on Google sign-in. Then you pick calendars from your account instead of pasting addresses, and visits reach Google within
+            minutes instead of whenever Google next checks. It takes a Google Cloud project, so most businesses don't need it.
+          </span>
+          <a href={GOOGLE_SIGNIN_GUIDE} target="_blank" rel="noreferrer">Setup guide <Icon name="external" size={12} /></a>
+          {app.redirect_uri && <span>Redirect address: <button type="button" className="link-btn small" onClick={() => copyText(app.redirect_uri!, "Copied")}>{app.redirect_uri}</button></span>}
+        </div>
+      </details>
     </>
   );
 }

@@ -56,7 +56,8 @@ export function AppIcon({ id, name, size = "md" }: { id: string; name: string; s
 /** Connected, or needs attention: a small badge on the icon's corner. */
 export function appBadge(app: AppRow): { tone: "good" | "danger"; label: string } | null {
   if (app.status === "error" || app.calendar_errors) return { tone: "danger", label: "Needs attention" };
-  if (app.status === "connected") return { tone: "good", label: app.calendars ? `${app.calendars} ${app.calendars === 1 ? "calendar" : "calendars"}` : "Connected" };
+  // Google Calendar can have calendars by secret address without being signed in.
+  if (app.status === "connected" || app.calendars) return { tone: "good", label: app.calendars ? `${app.calendars} ${app.calendars === 1 ? "calendar" : "calendars"}` : "Connected" };
   return null;
 }
 
