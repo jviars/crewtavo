@@ -372,3 +372,11 @@ the `authenticator` role, which the migrations set). If the
 database role that runs the migrations isn't allowed to change `authenticator`, the update's log
 says so (`migrate: warning in 20261019001040_assistant_access.sql`) with the command to run as a
 superuser; then run `notify pgrst, 'reload config';` (or restart the Data API).
+
+An instance's Supabase Auth has no issuer set and signs tokens with the HS256 `JWT_SECRET`, so its
+own discovery document has an empty issuer and bare-path endpoints, and it lists the `openid` scope
+though it can only sign ID tokens with an RS256 or ES256 key. Crewtavo serves that document fixed
+instead (`apps/api/src/lib/authMetadata.ts`), at `/auth/v1/.well-known/*` and the RFC 8414 and
+OpenID addresses on its own origin: the issuer connectors are given, full endpoint addresses, and
+`openid` only once Auth can sign ID tokens. A connector that asks for `openid` anyway signs in
+without an ID token, which MCP doesn't use.
