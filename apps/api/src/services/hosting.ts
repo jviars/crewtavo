@@ -3,27 +3,23 @@
  * the owner's Railway connection (services/railway.ts), and warnings before Crewtavo stops.
  *
  * Railway reports this project's usage in vCPU-minutes, GB-minutes and GB sent; Crewtavo prices it
- * at Railway's published rates (RATES), so this Crewtavo's dollars are close estimates. The
- * account's figures (usage so far, credit, trial, card) are Railway's own, from its billing, which
- * only a Login with Railway made by a workspace admin can read. Each part is optional: whatever
- * Railway doesn't share is left out and named in `missing`.
- *
- * Railway's API can't change plans or take payments, so the screen links to Railway's pages for
- * those; the usage limit it changes itself (changeLimit).
+ * at Railway's published rates (RATES). Priced that way, a trial project's usage matched Railway's
+ * own "$4.39 left" (2026-10-20). The forecast is this month so far plus the last day's rate for the
+ * rest of it. The connection reaches the project, not the account's billing (that takes
+ * workspace:admin, which Railway shows owners in red), so the trial's days and credit are counted
+ * from when the project was made, and plans, credit, the card and the usage limit are Railway's
+ * pages. Each part is optional: whatever Railway doesn't share is left out and named in `missing`.
  *
  * The task runs twice a day and tells the owner and admins about each warning once (the bell, plus
  * email and push by the "hosting" notification topic); the keys of those already sent are kept in
  * companies.settings.hosting_alerts.
  */
-import { ADMINS, RAILWAY_PLANS, serviceLabel, type HostingOverview, type HostingService, type HostingWarning, type RailwayPlan } from "@crewtavo/core";
+import { ADMINS, RAILWAY_PLANS, RAILWAY_TRIAL, serviceLabel, type HostingOverview, type HostingService, type HostingWarning, type RailwayPlan } from "@crewtavo/core";
 import type { Env } from "../env";
 import { platformOf } from "../lib/address";
 import { asJson, HttpError } from "../lib/http";
 import type { Db } from "../lib/supabase";
-import {
-  projectDetails, projectIdOf, projectUsage, RailwayError, setUsageLimit, usageForecast, usageMetrics, volumeSizes, workspaceBilling,
-  type Billed, type RailwayAccess, type RailwayBilling,
-} from "../integrations/railway";
+import { projectDetails, projectIdOf, projectUsage, RailwayError, usageMetrics, volumeSizes, type Billed, type RailwayAccess } from "../integrations/railway";
 import { railwayAccess } from "./railway";
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -31,6 +27,8 @@ const DAY_MS = 24 * 60 * 60_000;
 const STEP_SECONDS = 3 * 60 * 60;
 /** The screen asks again after this long; "Check again" and the task don't wait. */
 const CACHE_MS = 5 * 60_000;
+/** A rate from less than this much use isn't worth a forecast. */
+const MIN_RATE_MS = 60 * 60_000;
 
 /** Railway's prices per unit it reports (railway.com/pricing). A 30-day month is 43,200 minutes. */
 export const RATES: Record<Billed, number> = {
@@ -45,8 +43,6 @@ export const priced = (rows: Array<{ measurement: Billed; value: number }>) => r
 const cents = (n: number) => Math.round(n * 100) / 100;
 const money = (n: number) => `$${n.toFixed(2)}`;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-const PROBLEMS: Record<string, NonNullable<HostingOverview["account"]>["problem"]> = { PAST_DUE: "past_due", UNPAID: "unpaid", CANCELLED: "cancelled" };
 
 /** null: Railway didn't give that part (refused, or didn't answer). Anything else is a bug, and is thrown. */
 async function optional<T>(work: Promise<T>): Promise<T | null> {
@@ -64,11 +60,10 @@ function monthOf(now: Date) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-function planOf(billing: RailwayBilling | null, projectPlan: string | null): RailwayPlan | null {
-  if (billing?.trialing) return "trial";
-  const plan = (billing?.plan ?? projectPlan ?? "").toLowerCase();
-  return plan in RAILWAY_PLANS ? (plan as RailwayPlan) : null;
-}
+const planOf = (plan: string | null): RailwayPlan | null => {
+  const name = (plan ?? "").toLowerCase();
+  return name in RAILWAY_PLANS ? (name as RailwayPlan) : null;
+};
 
 const cache = new Map<string, { at: number; overview: HostingOverview }>();
 export const forgetHosting = () => cache.clear();
@@ -88,13 +83,17 @@ export async function hostingOverview(env: Env, admin: Db, companyId: string, { 
 export async function readHosting(env: Env, access: RailwayAccess, now = new Date()): Promise<HostingOverview> {
   // The project has to answer: without it the connection itself is broken, and the error says what to do.
   const project = await projectDetails(env, access);
-  const workspaceId = access.method === "oauth" ? project.workspaceId : null;
-  const billing = workspaceId ? await optional(workspaceBilling(access, workspaceId)) : null;
-  const period = billing?.period ? { ...billing.period, billing: true } : { ...monthOf(now), billing: false };
-  const [usage, forecast, accountForecast, metrics, volumes] = await Promise.all([
+  const plan = planOf(project.plan);
+  const period = monthOf(now);
+  const created = project.createdAt ? Date.parse(project.createdAt) : Number.NaN;
+  // The last day's rate, or since the project was made when that's sooner.
+  const rateFrom = new Date(Math.max(now.getTime() - DAY_MS, Number.isNaN(created) ? 0 : created));
+  // The trial's credit is spent from when the project was made, which may be last month.
+  const trialFrom = plan === "trial" && !Number.isNaN(created) && created < Date.parse(period.start) ? new Date(created) : null;
+  const [usage, recent, sinceMade, metrics, volumes] = await Promise.all([
     optional(projectUsage(env, access, new Date(period.start), now)),
-    optional(usageForecast(access, { projectId: projectIdOf(env) })),
-    billing && workspaceId ? optional(usageForecast(access, { workspaceId })) : null,
+    now.getTime() - rateFrom.getTime() >= MIN_RATE_MS ? optional(projectUsage(env, access, rateFrom, now)) : null,
+    trialFrom ? optional(projectUsage(env, access, trialFrom, now)) : null,
     optional(usageMetrics(env, access, new Date(now.getTime() - 7 * DAY_MS), STEP_SECONDS)),
     optional(volumeSizes(env, access)),
   ]);
@@ -110,6 +109,8 @@ export async function readHosting(env: Env, access: RailwayAccess, now = new Dat
 
   const points = new Map<number, { memory: number; cpu: number }>();
   for (const series of metrics ?? []) {
+    // A series without a service (one that's gone) is all zeros.
+    if (!series.serviceId) continue;
     for (const { ts, value } of series.values) {
       const at = Math.round(ts / STEP_SECONDS) * STEP_SECONDS;
       const point = points.get(at) ?? { memory: 0, cpu: 0 };
@@ -119,34 +120,29 @@ export async function readHosting(env: Env, access: RailwayAccess, now = new Dat
     }
   }
 
-  const credit = billing && (billing.trialing || billing.prepaid || (billing.credit ?? 0) > 0) ? billing.credit : null;
+  const cost = usage ? priced(usage) : 0;
+  const perDay = recent ? priced(recent) / ((now.getTime() - rateFrom.getTime()) / DAY_MS) : null;
+  const forecast = usage && perDay !== null ? cost + perDay * ((Date.parse(period.end) - now.getTime()) / DAY_MS) : null;
+  const spentOnTrial = trialFrom ? (sinceMade ? priced(sinceMade) : null) : usage ? cost : null;
   const overview: Omit<HostingOverview, "warnings"> = {
     projectName: project.name,
-    plan: planOf(billing, project.plan),
+    plan,
     period,
     project: usage
       ? {
-          cost: cents(priced(usage)),
-          forecast: forecast ? cents(priced(forecast)) : null,
+          cost: cents(cost),
+          perDay: perDay === null ? null : cents(perDay),
+          forecast: forecast === null ? null : cents(forecast),
           services: [...services.values()].map((s) => ({ ...s, cost: cents(s.cost) })).filter((s) => s.cost > 0).sort((a, b) => b.cost - a.cost),
         }
       : null,
-    account: billing
-      ? {
-          usage: cents(billing.usage ?? (usage ? priced(usage) : 0)),
-          forecast: accountForecast ? cents(priced(accountForecast)) : null,
-          others: (billing.projectCount ?? 1) > 1,
-          credit: credit === null ? null : cents(credit),
-          prepaid: billing.prepaid,
-          trialDaysLeft: billing.trialing ? billing.trialDaysLeft : null,
-          limit: billing.limit,
-          alertAt: billing.alertAt,
-          problem: PROBLEMS[billing.state ?? ""] ?? null,
-        }
-      : null,
+    trial:
+      plan === "trial" && !Number.isNaN(created) && spentOnTrial !== null
+        ? { daysLeft: Math.max(0, Math.ceil(RAILWAY_TRIAL.days - (now.getTime() - created) / DAY_MS)), creditLeft: cents(Math.max(0, RAILWAY_TRIAL.credit - spentOnTrial)) }
+        : null,
     disks: (volumes ?? []).map((v) => ({ service: names.get(v.serviceId ?? "") ?? "Volume", usedGb: Math.round(v.usedMb / 10) / 100, sizeGb: Math.round(v.sizeMb / 10) / 100 })),
     week: [...points.entries()].sort(([a], [b]) => a - b).map(([at, p]) => ({ at: new Date(at * 1000).toISOString(), memory: Math.round(p.memory * 1000) / 1000, cpu: Math.round(p.cpu * 1000) / 1000 })),
-    missing: [...(usage ? [] : ["usage" as const]), ...(billing ? [] : ["billing" as const]), ...(metrics ? [] : ["charts" as const])],
+    missing: [...(usage ? [] : ["usage" as const]), ...(metrics ? [] : ["charts" as const])],
     links: {
       usage: "https://railway.com/workspace/usage",
       billing: "https://railway.com/workspace/billing",
@@ -156,56 +152,36 @@ export async function readHosting(env: Env, access: RailwayAccess, now = new Dat
     },
     checkedAt: now.toISOString(),
   };
-  return { ...overview, warnings: hostingWarnings(overview, now) };
+  return { ...overview, warnings: hostingWarnings(overview) };
 }
 
 /** What needs doing before Railway stops Crewtavo or bills more than the plan includes, most urgent first. */
-export function hostingWarnings(o: Omit<HostingOverview, "warnings">, now = new Date()): HostingWarning[] {
+export function hostingWarnings(o: Omit<HostingOverview, "warnings">): HostingWarning[] {
   const warnings: HostingWarning[] = [];
-  const period = o.period.start.slice(0, 10);
-  const { account, plan } = o;
-  // Dollars a day so far this period, for "runs out in about N days".
-  const spent = account?.usage ?? o.project?.cost ?? 0;
-  const perDay = spent / Math.max(1, (now.getTime() - Date.parse(o.period.start)) / DAY_MS);
-  const daysOf = (dollars: number) => (perDay > 0 ? Math.floor(dollars / perDay) : null);
+  const period = o.period.start.slice(0, 7);
+  const { plan, trial } = o;
+  const perDay = o.project?.perDay ?? null;
 
-  if (account?.problem === "past_due" || account?.problem === "unpaid") {
-    warnings.push({ key: `card:${period}`, level: "urgent", title: "Railway couldn't charge your card", body: "Update your card in Railway's billing settings. If Railway can't charge it, it stops Crewtavo and your team can't use it.", action: "billing" });
-  } else if (account?.problem === "cancelled") {
-    warnings.push({ key: `stopped:${period}`, level: "urgent", title: "Your Railway plan isn't active", body: "Railway stops Crewtavo without an active plan. Choose one in Railway's billing settings to keep Crewtavo running.", action: "plans" });
-  }
-
-  if (plan === "trial") {
-    const left = account?.trialDaysLeft;
-    if (left != null && left <= 7) {
+  if (trial) {
+    const left = trial.daysLeft;
+    if (left <= 7) {
       const step = left <= 1 ? 1 : left <= 3 ? 3 : 7;
       warnings.push({
         key: `trial-${step}`,
         level: left <= 3 ? "urgent" : "warning",
-        title: left <= 0 ? "Your Railway trial ends today" : `Your Railway trial ends in ${plural(left, "day")}`,
+        title: left <= 0 ? "Your Railway trial ends today" : `Your Railway trial ends in about ${plural(left, "day")}`,
         body: "Crewtavo stops when it does. To keep it running, choose Railway's Hobby plan: $5 a month, including $5 of usage.",
         action: "upgrade",
       });
     }
-    const days = account?.credit != null ? daysOf(account.credit) : null;
-    if (account?.credit != null && (account.credit <= 1 || (days !== null && days <= 3))) {
+    const days = perDay ? Math.floor(trial.creditLeft / perDay) : null;
+    if (trial.creditLeft <= 1 || (days !== null && days <= 3 && days < left)) {
       warnings.push({
         key: "trial-credit",
         level: "urgent",
         title: "Your Railway trial credit is almost used up",
-        body: `${money(account.credit)} is left${days !== null ? `, about ${plural(days, "day")} at this rate` : ""}. Crewtavo stops when it runs out, so choose Railway's Hobby plan before then.`,
+        body: `About ${money(trial.creditLeft)} of the $5 is left${days !== null ? `, about ${plural(days, "day")} at this rate` : ""}. Crewtavo stops when it runs out, so choose Railway's Hobby plan before then.`,
         action: "upgrade",
-      });
-    }
-  } else if (account?.prepaid && account.credit != null) {
-    const days = daysOf(account.credit);
-    if (days !== null && days <= 7) {
-      warnings.push({
-        key: `credit:${period}:${days <= 1 ? 1 : days <= 3 ? 3 : 7}`,
-        level: days <= 3 ? "urgent" : "warning",
-        title: days <= 0 ? "Your Railway credit runs out today" : `Your Railway credit runs out in about ${plural(days, "day")}`,
-        body: "When it does, Railway cancels the plan and stops Crewtavo. Add credit, or a card, in Railway's billing settings.",
-        action: "billing",
       });
     }
   }
@@ -214,20 +190,7 @@ export function hostingWarnings(o: Omit<HostingOverview, "warnings">, now = new 
     warnings.push({ key: "free", level: "warning", title: "Crewtavo is on Railway's Free plan", body: "Free includes $1 of usage a month, less than Crewtavo needs, so Railway stops it partway through the month. Choose the Hobby plan ($5 a month, including $5 of usage) to keep it running.", action: "upgrade" });
   }
 
-  const forecast = account?.forecast ?? o.project?.forecast ?? null;
-  if (account?.limit && forecast !== null && forecast >= account.limit) {
-    const days = daysOf(account.limit - spent);
-    const when = days !== null ? new Date(Math.min(now.getTime() + days * DAY_MS, Date.parse(o.period.end))) : null;
-    const date = when ? when.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : null;
-    warnings.push({
-      key: `limit:${period}`,
-      level: "urgent",
-      title: date ? `Railway will stop Crewtavo around ${date}` : "Railway is set to stop Crewtavo this month",
-      body: `Your Railway account stops its projects at ${money(account.limit)} of usage a month, and it's on track for about ${money(forecast)}. Raise the limit in Settings → Hosting to keep Crewtavo running.`,
-      action: "limit",
-    });
-  }
-
+  const forecast = o.project?.forecast ?? null;
   if ((plan === "hobby" || plan === "pro") && forecast !== null) {
     const { name, price, included } = RAILWAY_PLANS[plan];
     const over = forecast - included;
@@ -258,28 +221,12 @@ export function hostingWarnings(o: Omit<HostingOverview, "warnings">, now = new 
   return warnings.sort((a, b) => (a.level === b.level ? 0 : a.level === "urgent" ? -1 : 1));
 }
 
-/**
- * POST /api/railway/limit: Railway stops the account's projects at `stopAt` dollars of usage a month
- * (null removes the limit). Railway also wants a level to email at: the one already set if it's
- * still below, or else three quarters of the way.
- */
-export async function changeLimit(env: Env, admin: Db, companyId: string, stopAt: number | null): Promise<HostingOverview> {
-  const access = await railwayAccess(env, admin, companyId);
-  if (!access) throw new HttpError(409, "Connect Railway first.");
-  const project = await projectDetails(env, access);
-  const billing = access.method === "oauth" && project.workspaceId ? await optional(workspaceBilling(access, project.workspaceId)) : null;
-  if (!billing?.customerId) throw new HttpError(400, "Railway doesn't let Crewtavo change the limit with this connection. Change it in Railway's usage settings instead.");
-  const alertAt = billing.alertAt && stopAt && billing.alertAt < stopAt ? billing.alertAt : stopAt ? Math.max(1, Math.floor(stopAt * 0.75)) : 0;
-  await setUsageLimit(access, billing.customerId, stopAt ? { stopAt, alertAt } : null);
-  return hostingOverview(env, admin, companyId, { fresh: true });
-}
-
 /** Railway stopped accepting Crewtavo's sign-in: nothing else can be checked until the owner logs in again. */
 const LAPSED: HostingWarning = {
   key: "lapsed",
   level: "urgent",
   title: "Crewtavo lost its Railway connection",
-  body: "Log in with Railway again in Settings → Hosting, so Crewtavo can warn you before your Railway trial, credit or card runs out.",
+  body: "Log in with Railway again in Settings → Hosting, so Crewtavo can warn you before your Railway trial runs out or the bill goes over your plan.",
   action: null,
 };
 

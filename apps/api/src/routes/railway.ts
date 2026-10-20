@@ -8,7 +8,6 @@
  *   POST   /api/railway/setup     the setup step is done or skipped
  *   POST   /api/railway/later     "Ask me tomorrow" about connecting
  *   GET    /api/railway/usage     what Railway charges, for Settings → Hosting (?fresh=1 to ask Railway now)
- *   POST   /api/railway/limit     change or remove the account's usage limit
  *   GET    /api/railway/uploads   the largest file the storage service takes
  *   POST   /api/railway/uploads   raise it to 200 MB and restart storage
  * Only owners and admins, only in an instance on Railway.
@@ -26,7 +25,7 @@ import { appUrl, HttpError, readJson } from "../lib/http";
 import { adminClient } from "../lib/supabase";
 import { authorizationUrl, exchangeCode, pkce, RailwayError } from "../integrations/railway";
 import { addressOverview, adoptRailway, stopAutomatic } from "../services/address";
-import { changeLimit, forgetHosting, hostingOverview } from "../services/hosting";
+import { forgetHosting, hostingOverview } from "../services/hosting";
 import { connectRailwayLater, forgetRailway, noteRailwayError, railwayClient, saveRailwayAccess, setRailwaySetup } from "../services/railway";
 import { raiseUploadLimit, uploadLimit } from "../services/uploads";
 
@@ -125,16 +124,10 @@ railway.post("/railway/later", ...admins, async (c) => {
   return c.json({ ok: true });
 });
 
-/** Settings → Hosting: this Crewtavo's Railway usage and the account's billing (services/hosting.ts). */
+/** Settings → Hosting: this Crewtavo's Railway usage, plan and trial (services/hosting.ts). */
 railway.get("/railway/usage", ...admins, async (c) =>
   c.json(await hostingOverview(c.env, adminClient(c.env), c.var.companyId, { fresh: c.req.query("fresh") === "1" }).catch(plain)),
 );
-
-/** Settings → Hosting: raise the usage limit (whole dollars a month) so Railway doesn't stop Crewtavo, or remove it. */
-railway.post("/railway/limit", ...admins, async (c) => {
-  const { stop_at } = await readJson(c, z.object({ stop_at: z.number().int("Use whole dollars.").min(1).max(100_000).nullable() }));
-  return c.json(await changeLimit(c.env, adminClient(c.env), c.var.companyId, stop_at).catch(plain));
-});
 
 /** Railway's reasons are written for people; anything else stays generic. */
 function plain(error: unknown): never {

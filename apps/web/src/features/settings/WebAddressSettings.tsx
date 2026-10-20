@@ -254,7 +254,7 @@ function LoginStep({ railway, returnTo, onByHand }: { railway: Railway; returnTo
       )}
       <span className="row muted small" style={{ gap: 6, flexWrap: "nowrap", alignItems: "flex-start" }}>
         <span style={{ flex: "none", marginTop: 1 }}><Icon name="lock" size={14} /></span>
-        Crewtavo only makes changes in this project, and only reads your Railway billing. You can take the access back any time in Settings.
+        Crewtavo only uses its own project, and you can take the access back any time in Settings.
       </span>
       <details className={styles.details}>
         <summary>Can't log in with Railway?</summary>
@@ -273,9 +273,8 @@ export function RailwaySketch({ projectName }: { projectName: string | null }) {
     <div className={styles.sketch} aria-hidden="true">
       <div className={styles.sketchTop}><i /><i /><i /><span>On Railway</span></div>
       <div className={styles.sketchBody}>
-        <span className={styles.sketchRow}><b>1</b>Choose<span className={styles.sketchSelect}><span className={styles.barText}>your workspace</span><Icon name="chevronDown" size={13} /></span></span>
-        <span className={styles.sketchRow}><b>2</b>Choose<span className={styles.sketchSelect}><span className={styles.barText}>{projectName ?? "your project"}</span><Icon name="chevronDown" size={13} /></span></span>
-        <span className={styles.sketchRow}><b>3</b>Press<span className={styles.sketchAllow}>Allow</span></span>
+        <span className={styles.sketchRow}><b>1</b>Projects<span className={styles.sketchSelect}><span className={styles.barText}>{projectName ?? "your project"}</span><Icon name="chevronDown" size={13} /></span></span>
+        <span className={styles.sketchRow}><b>2</b>Press<span className={styles.sketchAllow}>Authorize</span></span>
       </div>
     </div>
   );
@@ -431,7 +430,9 @@ export function ConnectRailway({ returnTo, projectName, label = "Log in with Rai
       <div className="row wrap">
         <Button variant="primary" icon="arrowRight" loading={connect.isPending || connect.isSuccess} onClick={() => connect.mutate()}>{label}</Button>
       </div>
-      <span className="muted small">On Railway's screen, choose your workspace and {projectName ? <strong>{projectName}</strong> : "this project"}, then press Allow.</span>
+      <span className="muted small">
+        On Railway's screen, press Authorize. To give Crewtavo only {projectName ? <strong>{projectName}</strong> : "this project"}, choose Change, then Selected projects, first.
+      </span>
       <FormError error={connect.error} />
     </div>
   );
@@ -1109,7 +1110,7 @@ export function RailwayAccess({ overview }: { overview: AddressOverview }) {
   if (!overview.railway?.connected) return null;
   const busy = overview.change?.status === "waiting" || overview.change?.status === "switching";
   const ask = async () => {
-    const body = `${busy ? "Crewtavo won't be able to finish the new address by itself; you'd do the last steps on Railway by hand. " : ""}Crewtavo also stops warning you before Railway's trial, credit or card runs out, and the owner is asked to connect again when they next open Crewtavo.`;
+    const body = `${busy ? "Crewtavo won't be able to finish the new address by itself; you'd do the last steps on Railway by hand. " : ""}Crewtavo also stops warning you before Railway's trial runs out or the bill goes over your plan, and the owner is asked to connect again when they next open Crewtavo.`;
     if (await confirm({ title: "Remove Crewtavo's Railway access?", body, confirmLabel: "Remove access", danger: true })) forget.mutate();
   };
   return (

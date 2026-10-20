@@ -1,11 +1,12 @@
 /**
  * Settings → Hosting: what Railway charges for this Crewtavo, read through the owner's Railway
- * connection (GET /api/railway/usage, apps/api/src/services/hosting.ts), and the warnings the daily
- * check sends before the trial, the credit or the card runs out. Dollars throughout.
+ * connection (GET /api/railway/usage, apps/api/src/services/hosting.ts), and the warnings the
+ * twice-daily check sends before the trial runs out or the bill goes over the plan. Dollars
+ * throughout.
  *
- * Railway's API can't change a plan or take a payment, so upgrading, buying credit and updating the
- * card open Railway's own pages (`links`). The usage limit Crewtavo can change itself
- * (POST /api/railway/limit).
+ * The connection reaches this one project, not the Railway account's billing, so the trial is
+ * worked out from the project, and plans, credit, the card and the usage limit open Railway's own
+ * pages (`links`).
  */
 
 export type RailwayPlan = "trial" | "free" | "hobby" | "pro";
@@ -17,6 +18,9 @@ export const RAILWAY_PLANS: Record<RailwayPlan, { name: string; price: number; i
   hobby: { name: "Hobby", price: 5, included: 5 },
   pro: { name: "Pro", price: 20, included: 20 },
 };
+
+/** Railway's trial: whichever runs out first. */
+export const RAILWAY_TRIAL = { days: 30, credit: 5 };
 
 /** The template's five services, in words for people who've never heard of Postgres. */
 export const RAILWAY_SERVICES: Record<string, string> = {
@@ -48,43 +52,30 @@ export interface HostingWarning {
   level: "urgent" | "warning";
   title: string;
   body: string;
-  /** What fixes it: a Railway page (`links`), or raising the usage limit right in Crewtavo. */
-  action: "upgrade" | "billing" | "plans" | "limit" | "project" | null;
+  /** The Railway page (`links`) that fixes it. */
+  action: "upgrade" | "project" | null;
 }
 
 export interface HostingOverview {
   /** Railway's name for the project Crewtavo runs in. */
   projectName: string | null;
   plan: RailwayPlan | null;
-  /** The billing period (or, when Railway doesn't share it, the calendar month so far). */
-  period: { start: string; end: string; billing: boolean };
-  /** This Crewtavo: usage so far this period, Railway's forecast for all of it, and what each service used. */
-  project: { cost: number; forecast: number | null; services: HostingService[] } | null;
+  /** The calendar month so far: Railway doesn't share the billing period with a project's sign-in. */
+  period: { start: string; end: string };
+  /** Usage so far this month, the last day's rate, a forecast for the month at that rate, and what each service used. */
+  project: { cost: number; perDay: number | null; forecast: number | null; services: HostingService[] } | null;
   /**
-   * The whole Railway account, from its billing: only with the workspace access Login with Railway
-   * asks for (a project token can't see it). `others` when other projects share the account's usage.
+   * On Railway's trial, counted from when this project was made: right for a Railway account made to
+   * run Crewtavo, which is how crewtavo.com/start sets one up. Railway's dashboard has the exact figures.
    */
-  account: {
-    usage: number;
-    forecast: number | null;
-    others: boolean;
-    /** Credit left, for an account that's on the trial or pays with credits. */
-    credit: number | null;
-    prepaid: boolean;
-    trialDaysLeft: number | null;
-    /** Railway stops the account's projects at this much usage a month, and emails at `alertAt`. */
-    limit: number | null;
-    alertAt: number | null;
-    /** Railway couldn't charge the card, or stopped the plan. */
-    problem: "past_due" | "unpaid" | "cancelled" | null;
-  } | null;
+  trial: { daysLeft: number; creditLeft: number } | null;
   disks: HostingDisk[];
   /** The last seven days, every few hours, across all the services: memory in GB and CPU in vCPUs. */
   week: Array<{ at: string; memory: number; cpu: number }>;
   warnings: HostingWarning[];
-  /** Parts Railway didn't share with this connection. */
-  missing: Array<"usage" | "billing" | "charts">;
-  /** Railway's pages: usage, billing (card and credit), upgrading from the trial or Free, and changing plans. */
+  /** Parts Railway didn't share just now. */
+  missing: Array<"usage" | "charts">;
+  /** Railway's pages: usage (and its limit), billing (card and credit), upgrading from the trial or Free, and changing plans. */
   links: { usage: string; billing: string; upgrade: string; plans: string; project: string | null };
   checkedAt: string;
 }

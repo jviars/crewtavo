@@ -1,9 +1,9 @@
 /**
  * Railway's API, for Settings → Web address (adding the owner's domain to this instance's crewtavo
  * service, watching Railway verify it, and switching APP_URL over) and Settings → Hosting (what
- * Railway charges, and the account's billing for the daily warnings). Crewtavo gets access one of
- * two ways: Login with Railway (OAuth; each instance registers its own client with Railway, so
- * nobody runs a shared app) or a project token the owner pastes, which can't see billing.
+ * Railway charges, for the twice-daily warnings). Crewtavo gets access one of two ways: Login with
+ * Railway (OAuth; each instance registers its own client with Railway, so nobody runs a shared app)
+ * or a project token the owner pastes.
  *
  * The project, environment and service come from the variables Railway sets on every deployment
  * (RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT_ID, RAILWAY_SERVICE_ID).
@@ -14,11 +14,11 @@ import type { WantedRecord } from "../lib/dns";
 
 const BACKBOARD = "https://backboard.railway.com";
 /**
- * Member of the project, to make changes there; admin of its workspace, because only admins can
- * read billing (the trial, credit and card for the warnings). A sign-in made with less is asked
- * again (services/railway.ts).
+ * Member of the project: it reads the project's usage, forecast inputs and volumes too. Not the
+ * workspace's billing: that takes workspace:admin, which Railway shows owners as "full control of
+ * your account" in red, and a sign-in asking for both was refused the project (tried 2026-10-20).
  */
-export const SCOPE = "openid project:member workspace:admin offline_access";
+export const SCOPE = "openid project:member offline_access";
 const timeout = () => AbortSignal.timeout(15_000);
 
 export class RailwayError extends Error {
@@ -33,7 +33,7 @@ export interface RailwayClient {
   client_id: string;
   client_secret: string;
   redirect_uri: string;
-  /** What it was registered to ask for: a client registered before SCOPE grew is registered again. */
+  /** What it was registered to ask for, when that was recorded: a client made for a different SCOPE is registered again. */
   scope?: string;
   registration_access_token?: string;
   registration_client_uri?: string;
@@ -45,6 +45,8 @@ export interface RailwayAccess {
   token: string;
   refresh_token?: string;
   expires_at?: number; // ms since epoch
+  /** What Railway granted, from the token response: for the log when a call is refused. */
+  granted?: string;
 }
 
 interface Ids {
@@ -130,9 +132,9 @@ async function tokenRequest(client: RailwayClient, form: Record<string, string>)
     body: new URLSearchParams(form),
     signal: timeout(),
   }).catch(() => null);
-  const json = (await res?.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
+  const json = (await res?.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string; error?: string };
   if (!res?.ok || !json.access_token) throw new RailwayError(`Railway didn't accept the sign-in${json.error ? ` (${json.error})` : ""}. Try logging in with Railway again.`, res?.status ?? 0);
-  return { method: "oauth", token: json.access_token, refresh_token: json.refresh_token, expires_at: Date.now() + (json.expires_in ?? 3600) * 1000 };
+  return { method: "oauth", token: json.access_token, refresh_token: json.refresh_token, expires_at: Date.now() + (json.expires_in ?? 3600) * 1000, granted: json.scope };
 }
 
 export const exchangeCode = (client: RailwayClient, code: string, verifier: string) =>
@@ -196,6 +198,7 @@ export async function projectAccess(env: Env, access: RailwayAccess): Promise<{ 
     { id: projectId },
   ).catch((error) => {
     if (error instanceof RailwayError && access.method === "oauth") {
+      console.warn(`Railway didn't show Crewtavo its project: ${error.message} (granted: ${access.granted ?? "not said"})`);
       throw new RailwayError(`Crewtavo can't see ${env.RAILWAY_PROJECT_NAME ? `the ${env.RAILWAY_PROJECT_NAME} project` : "this Railway project"}. Log in with Railway again and choose it on Railway's screen.`);
     }
     throw error;
@@ -327,11 +330,15 @@ export async function redeploy(env: Env, access: RailwayAccess, serviceId: strin
 export const crewtavoServiceId = (env: Env) => ids(env).serviceId;
 
 // ---------------------------------------------------------------------------------------------
-// Usage and billing (Settings → Hosting). These queries are the ones Railway's own dashboard uses;
-// they aren't in Railway's API docs, so services/hosting.ts treats each as optional.
+// Usage (Settings → Hosting). These queries are the ones Railway's own dashboard uses; they aren't
+// in Railway's API docs, so services/hosting.ts treats each as optional.
 // ---------------------------------------------------------------------------------------------
 
-/** What Railway bills by. usage() and estimatedUsage() count CPU and memory in vCPU- and GB-minutes. */
+/**
+ * What Railway bills by. usage() counts CPU and memory in vCPU- and GB-minutes: priced that way, a
+ * trial's usage matched Railway's own "$4.39 left" (2026-10-20). Railway's estimatedUsage isn't a
+ * forecast for the month (it came to less than was already used), so services/hosting.ts makes one.
+ */
 export const BILLED = ["CPU_USAGE", "MEMORY_USAGE_GB", "NETWORK_TX_GB", "DISK_USAGE_GB", "BACKUP_USAGE_GB"] as const;
 export type Billed = (typeof BILLED)[number];
 
@@ -339,17 +346,17 @@ export interface RailwayProject {
   name: string;
   /** trial, free, hobby or pro. */
   plan: string | null;
-  workspaceId: string | null;
+  createdAt: string | null;
   services: { id: string; name: string }[];
 }
 
 export async function projectDetails(env: Env, access: RailwayAccess): Promise<RailwayProject> {
-  const { project } = await gql<{ project: { name: string; subscriptionType: string | null; workspaceId: string | null; services: { edges: { node: { id: string; name: string } }[] } } }>(
+  const { project } = await gql<{ project: { name: string; subscriptionType: string | null; createdAt: string | null; services: { edges: { node: { id: string; name: string } }[] } } }>(
     access,
-    "query ($id: String!) { project(id: $id) { name subscriptionType workspaceId services(first: 50) { edges { node { id name } } } } }",
+    "query ($id: String!) { project(id: $id) { name subscriptionType createdAt services(first: 50) { edges { node { id name } } } } }",
     { id: ids(env).projectId },
   );
-  return { name: project.name, plan: project.subscriptionType, workspaceId: project.workspaceId, services: project.services.edges.map((e) => e.node) };
+  return { name: project.name, plan: project.subscriptionType, createdAt: project.createdAt, services: project.services.edges.map((e) => e.node) };
 }
 
 /** This project's usage between two times, per service. */
@@ -362,18 +369,6 @@ export async function projectUsage(env: Env, access: RailwayAccess, start: Date,
     { projectId: ids(env).projectId, start: start.toISOString(), end: end.toISOString(), measurements: BILLED },
   );
   return usage.map((u) => ({ measurement: u.measurement, serviceId: u.tags?.serviceId ?? null, value: u.value }));
-}
-
-/** Railway's forecast for the whole billing period, for this project or the whole workspace. */
-export async function usageForecast(access: RailwayAccess, of: { projectId: string } | { workspaceId: string }): Promise<Array<{ measurement: Billed; value: number }>> {
-  const { estimatedUsage } = await gql<{ estimatedUsage: Array<{ measurement: Billed; estimatedValue: number }> }>(
-    access,
-    `query ($projectId: String, $workspaceId: String, $measurements: [MetricMeasurement!]!) {
-      estimatedUsage(projectId: $projectId, workspaceId: $workspaceId, measurements: $measurements) { measurement estimatedValue }
-    }`,
-    { projectId: null, workspaceId: null, ...of, measurements: BILLED },
-  );
-  return estimatedUsage.map((e) => ({ measurement: e.measurement, value: e.estimatedValue }));
 }
 
 export const projectIdOf = (env: Env) => ids(env).projectId;
@@ -405,77 +400,6 @@ export async function volumeSizes(env: Env, access: RailwayAccess): Promise<Arra
     .map((e) => e.node)
     .filter((v) => v.sizeMB)
     .map((v) => ({ serviceId: v.serviceId, usedMb: v.currentSizeMB ?? 0, sizeMb: v.sizeMB ?? 0 }));
-}
-
-export interface RailwayBilling {
-  /** Railway's billing customer for the workspace, for changing its usage limit. */
-  customerId: string | null;
-  /** FREE, HOBBY or PRO. */
-  plan: string | null;
-  projectCount: number | null;
-  /** Railway's figure for the period so far, in dollars (cached on Railway's side). */
-  usage: number | null;
-  credit: number | null;
-  prepaid: boolean;
-  trialing: boolean;
-  trialDaysLeft: number | null;
-  /** ACTIVE, PAST_DUE, UNPAID, CANCELLED or INACTIVE. */
-  state: string | null;
-  period: { start: string; end: string } | null;
-  /** The usage limit, in dollars a month: Railway stops the projects at `limit` and emails at `alertAt`. */
-  limit: number | null;
-  alertAt: number | null;
-}
-
-/** The workspace's billing. Only a workspace admin's sign-in may read it. */
-export async function workspaceBilling(access: RailwayAccess, workspaceId: string): Promise<RailwayBilling> {
-  type Customer = {
-    id: string;
-    currentUsage: number | null;
-    creditBalance: number | null;
-    isPrepaying: boolean | null;
-    isTrialing: boolean | null;
-    trialDaysRemaining: number | null;
-    state: string | null;
-    billingPeriod: { start: string; end: string } | null;
-    usageLimit: { hardLimit: number | null; softLimit: number | null } | null;
-  };
-  const { workspace } = await gql<{ workspace: { plan: string | null; projectCount: number | null; customer: Customer | null } }>(
-    access,
-    `query ($id: String!) {
-      workspace(workspaceId: $id) {
-        plan projectCount
-        customer { id currentUsage creditBalance isPrepaying isTrialing trialDaysRemaining state billingPeriod { start end } usageLimit { hardLimit softLimit } }
-      }
-    }`,
-    { id: workspaceId },
-  );
-  const customer = workspace.customer;
-  return {
-    customerId: customer?.id ?? null,
-    plan: workspace.plan,
-    projectCount: workspace.projectCount,
-    usage: customer?.currentUsage ?? null,
-    credit: customer?.creditBalance ?? null,
-    prepaid: Boolean(customer?.isPrepaying),
-    trialing: Boolean(customer?.isTrialing),
-    trialDaysLeft: customer?.trialDaysRemaining ?? null,
-    state: customer?.state ?? null,
-    period: customer?.billingPeriod ?? null,
-    limit: customer?.usageLimit?.hardLimit || null,
-    alertAt: customer?.usageLimit?.softLimit || null,
-  };
-}
-
-/** Sets the workspace's usage limit in whole dollars a month (Railway emails at `alertAt`), or removes it. */
-export async function setUsageLimit(access: RailwayAccess, customerId: string, limit: { stopAt: number; alertAt: number } | null): Promise<void> {
-  if (!limit) {
-    await gql(access, "mutation ($input: UsageLimitRemoveInput!) { usageLimitRemove(input: $input) }", { input: { customerId } });
-    return;
-  }
-  await gql(access, "mutation ($input: UsageLimitSetInput!) { usageLimitSet(input: $input) }", {
-    input: { customerId, hardLimitDollars: limit.stopAt, softLimitDollars: limit.alertAt },
-  });
 }
 
 // ---------------------------------------------------------------------------------------------
