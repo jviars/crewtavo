@@ -91,6 +91,8 @@ export interface MeasureMapProps {
   /** Sizes for the labels when they differ from the shape's own: areas after cutouts, what each cutout took out, roof edges at true length. */
   values?: Record<string, number>;
   showStreetNames: boolean;
+  /** House numbers from the street map's tiles (OpenStreetMap addresses), zoomed in close. */
+  showHouseNumbers: boolean;
   /** Slope and contours, on top of the imagery and under the drawing. */
   overlays: OverlayId[];
   onReady: () => void;
@@ -380,6 +382,19 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         drawRef.current = draw;
         // Under Terra Draw's own layers, so corners and outlines stay on top.
         map!.addLayer({ id: "measure-fill", type: "fill", source: "measure-fill", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.28 } }, map!.getLayer("td-polygon") ? "td-polygon" : undefined);
+        // House numbers: in the street map's tiles, but its style doesn't draw them. Light on a dark
+        // halo, like the shapes' labels, so they read on aerial imagery; under the drawing.
+        if (map!.getSource("street-openmaptiles")) {
+          map!.addLayer({
+            id: "measure-housenumbers",
+            type: "symbol",
+            source: "street-openmaptiles",
+            "source-layer": "housenumber",
+            minzoom: 17,
+            layout: { "text-field": ["get", "housenumber"], "text-font": LABEL_FONT, "text-size": 12, visibility: live.current.showHouseNumbers ? "visible" : "none" },
+            paint: { "text-color": "#ffffff", "text-halo-color": "rgba(15, 42, 53, 0.9)", "text-halo-width": 1.6 },
+          }, "measure-fill");
+        }
         map!.addLayer({
           id: "measure-labels",
           type: "symbol",
@@ -560,6 +575,10 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.imagery, props.imageryRevision, props.keys.esri_key, props.keys.google_key]);
   useEffect(() => applyStreetNames(props.showStreetNames), [props.showStreetNames]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map?.getLayer("measure-housenumbers")) map.setLayoutProperty("measure-housenumbers", "visibility", props.showHouseNumbers ? "visible" : "none");
+  }, [props.showHouseNumbers]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => applyOverlays(props.overlays), [props.overlays.join()]);
   useEffect(paintLabels, [props.labels, props.values]);

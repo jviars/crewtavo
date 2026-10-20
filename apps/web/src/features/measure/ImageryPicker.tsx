@@ -1,7 +1,7 @@
 /**
  * The Imagery button on the measuring map, like a model picker: Auto at the top (the sharpest free
  * imagery for wherever the map is), then sources to choose yourself, then what lies on top (slope,
- * contours, street names). A state's sharper imagery is listed when the map is over that state;
+ * contours, street names, house numbers). A state's sharper imagery is listed when the map is over that state;
  * Esri and Google say how to turn them on when there's no key. What Measure opens on is marked
  * Default, and whatever's picked can become this person's default.
  */
@@ -16,7 +16,7 @@ import {
 } from "./imagery";
 
 export function ImageryPicker({
-  choice, opening, showing, center, keys, isAdmin, streetMap, streetNames, overlays, onPick, onMakeDefault, onStreetNames, onOverlay,
+  choice, opening, showing, center, keys, isAdmin, streetMap, streetNames, houseNumbers, overlays, onPick, onMakeDefault, onStreetNames, onHouseNumbers, onOverlay,
 }: {
   choice: ImageryChoice;
   /** What Measure opens on for this person (their default, the team's, or Auto). */
@@ -29,10 +29,12 @@ export function ImageryPicker({
   /** The street map loaded (it's an outside service, so it may not have). */
   streetMap: boolean;
   streetNames: boolean;
+  houseNumbers: boolean;
   overlays: OverlayId[];
   onPick: (next: ImageryChoice) => void;
   onMakeDefault: (choice: ImageryChoice) => void;
   onStreetNames: (show: boolean) => void;
+  onHouseNumbers: (show: boolean) => void;
   onOverlay: (id: OverlayId, on: boolean) => void;
 }) {
   const id = useId();
@@ -148,6 +150,10 @@ export function ImageryPicker({
         <label className="imagery-toggle">
           <input type="checkbox" className="switch" checked={streetNames || showing === "street"} disabled={showing === "street" || !streetMap} onChange={(e) => onStreetNames(e.target.checked)} />
           <span className="grow"><span>Street names</span></span>
+        </label>
+        <label className="imagery-toggle">
+          <input type="checkbox" className="switch" checked={houseNumbers && streetMap} disabled={!streetMap} onChange={(e) => onHouseNumbers(e.target.checked)} />
+          <span className="grow"><span>House numbers</span><span className="muted small">Zoomed in close, where OpenStreetMap has them</span></span>
         </label>
       </div>
     </>
