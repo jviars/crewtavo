@@ -12,6 +12,7 @@ import { adminClient } from "../lib/supabase";
 import { companyAnthropicKey, complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
+import { checkFalKey } from "../integrations/fal";
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, zohoAccountsServer, type Provider } from "../integrations/registry";
 import { beginStripeImport, canImportStripe, connectStripe, disconnectStripe, IMPORT_STALE_MS, importFromStripe, SHARED_STRIPE_IMPORT, stripeAccess, type ImportState } from "../integrations/stripe";
 import { appKeysOf, exchangeCode, loadSecret, oauthClient, revoke, saveSecret, SignInRefused } from "../integrations/tokens";
@@ -264,6 +265,11 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
     const { settled, ...connected } = await connectStripe(c.env, admin, { companyId: c.var.companyId, userId: c.var.userId, key: body.api_key, baseUrl: appUrl(c) });
     runInBackground(c, settled);
     return c.json({ provider, status: "connected", ...connected });
+  }
+  // fal.ai: checked against its free price list first, so a key pasted wrong says so now.
+  if (provider === "fal") {
+    const problem = await checkFalKey(body.api_key);
+    if (problem) throw new HttpError(400, problem);
   }
   const { error } = await admin.from("integrations").upsert({
     company_id: c.var.companyId,

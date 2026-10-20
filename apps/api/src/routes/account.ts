@@ -73,17 +73,18 @@ account.get("/me", requireUser, async (c) => {
   const roles = roleIds.length ? must(await db.from("company_roles").select("id, name, permissions").in("id", roleIds)) : [];
   const byId = new Map(roles.map((r) => [r.id, r]));
   // Which companies send email from their own mailbox (Settings → Email) and which added their own
-  // Anthropic key (Apps → Claude), so email and AI are on for them; integrations is admin-only.
+  // Anthropic or fal.ai key (Apps), so email and AI are on for them; integrations is admin-only.
   const companyIds = rows.map((m) => (m.company as { id: string } | null)?.id).filter((id): id is string => Boolean(id));
   // ...and which have agreed to the current license (only owners and admins can read agreements).
   const [connected, agreements] = companyIds.length
     ? await Promise.all([
-        adminClient(c.env).from("integrations").select("company_id, provider").in("provider", ["email", "anthropic"]).neq("status", "disconnected").in("company_id", companyIds),
+        adminClient(c.env).from("integrations").select("company_id, provider").in("provider", ["email", "anthropic", "fal"]).neq("status", "disconnected").in("company_id", companyIds),
         adminClient(c.env).from("terms_acceptances").select("company_id").eq("version", TERMS_VERSION).in("company_id", companyIds),
       ]).then(([apps, terms]) => [must(apps), must(terms)] as const)
     : [[], []];
   const withMailbox = new Set(connected.filter((r) => r.provider === "email").map((r) => r.company_id));
   const withClaudeKey = new Set(connected.filter((r) => r.provider === "anthropic").map((r) => r.company_id));
+  const withFal = new Set(connected.filter((r) => r.provider === "fal").map((r) => r.company_id));
   const agreed = new Set(agreements.map((r) => r.company_id));
   return c.json({
     profile: must(profile, "Profile not found."),
@@ -96,6 +97,8 @@ account.get("/me", requireUser, async (c) => {
         permissions: memberPermissions(m.role as Role, custom ? custom.permissions : null),
         email_connected: withMailbox.has((m.company as { id: string } | null)?.id ?? ""),
         ai_connected: withClaudeKey.has((m.company as { id: string } | null)?.id ?? ""),
+        // Apps → fal.ai: Find paving on the measuring map.
+        fal_connected: withFal.has((m.company as { id: string } | null)?.id ?? ""),
         terms_accepted: agreed.has((m.company as { id: string } | null)?.id ?? ""),
       };
     }),
@@ -188,6 +191,8 @@ async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
           name: s.name,
           unit: s.unit,
           unit_price: s.unit_price,
+          unit_cost: s.unit_cost ?? null,
+          category: s.category ?? null,
           formula: formula?.formula ?? null,
           formula_target: formula?.sets ?? "quantity",
           sort: i,

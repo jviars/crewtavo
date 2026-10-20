@@ -4,6 +4,7 @@ import { Icon } from "@/components/ui/Icon";
 import chatgptLogo from "@/assets/apps/chatgpt.svg";
 import claudeLogo from "@/assets/apps/claude.svg";
 import crewtavoLogo from "@/assets/apps/crewtavo.svg";
+import falLogo from "@/assets/apps/fal.svg";
 import googleCalendarLogo from "@/assets/apps/google-calendar.svg";
 import outlookLogo from "@/assets/apps/outlook.svg";
 import quickbooksLogo from "@/assets/apps/quickbooks.svg";
@@ -22,6 +23,7 @@ const LOGOS: Record<string, string> = {
   stripe: stripeLogo,
   twilio: twilioLogo,
   anthropic: claudeLogo,
+  fal: falLogo,
   chatgpt: chatgptLogo,
 };
 /** Wordmark-shaped logos get more width. */

@@ -4,53 +4,129 @@
   "description": "Residential, commercial and municipal paving, sealcoating, striping, grading, stonework, and subcontract work for general contractors.",
   "services": [
     {
-      "name": "Remove and haul existing asphalt",
+      "name": "Sealcoat",
+      "category": "Sealcoat and repair",
       "unit": "sq ft",
-      "unit_price": 0.78
+      "unit_price": 0.28,
+      "unit_cost": 0.14,
+      "formula_name": "Sealcoat area"
+    },
+    {
+      "name": "Hot-pour crack seal",
+      "category": "Sealcoat and repair",
+      "unit": "ft",
+      "unit_price": 2.0,
+      "unit_cost": 0.85,
+      "formula_name": "Crack seal length"
+    },
+    {
+      "name": "Asphalt patch",
+      "category": "Sealcoat and repair",
+      "unit": "sq ft",
+      "unit_price": 6.5,
+      "unit_cost": 3.5,
+      "formula_name": "Patch area"
+    },
+    {
+      "name": "Line striping",
+      "category": "Striping",
+      "unit": "ft",
+      "unit_price": 0.3,
+      "unit_cost": 0.12,
+      "formula_name": "Striping length"
+    },
+    {
+      "name": "ADA stall package",
+      "category": "Striping",
+      "unit": "ea",
+      "unit_price": 95,
+      "unit_cost": 40,
+      "formula_name": "ADA stalls"
+    },
+    {
+      "name": "Arrows and stencils",
+      "category": "Striping",
+      "unit": "ea",
+      "unit_price": 35,
+      "unit_cost": 12,
+      "formula_name": "Arrows and stencils"
+    },
+    {
+      "name": "Crosswalks and stop bars",
+      "category": "Striping",
+      "unit": "ft",
+      "unit_price": 1.5,
+      "unit_cost": 0.6,
+      "formula_name": "Crosswalks and stop bars"
+    },
+    {
+      "name": "Wheel stops",
+      "category": "Curb and site",
+      "unit": "ea",
+      "unit_price": 65,
+      "unit_cost": 30,
+      "formula_name": "Wheel stops"
+    },
+    {
+      "name": "Mill and overlay 2 inch",
+      "category": "Paving",
+      "unit": "sq ft",
+      "unit_price": 3.1,
+      "unit_cost": 2.0,
+      "formula_name": "Overlay area"
+    },
+    {
+      "name": "Remove and haul existing asphalt",
+      "category": "Paving",
+      "unit": "sq ft",
+      "unit_price": 0.78,
+      "unit_cost": 0.4
     },
     {
       "name": "Grade and compact stone base",
+      "category": "Paving",
       "unit": "ton",
       "unit_price": 46.8,
+      "unit_cost": 28,
       "formula_name": "Stone base tons"
     },
     {
       "name": "Hot-mix asphalt surface",
+      "category": "Paving",
       "unit": "ton",
       "unit_price": 143,
+      "unit_cost": 92,
       "formula_name": "Hot-mix asphalt tons"
     },
     {
-      "name": "Asphalt overlay 2 inch",
-      "unit": "sq ft",
-      "unit_price": 3.1
-    },
-    {
       "name": "Tar and chip surface",
+      "category": "Paving",
       "unit": "sq ft",
-      "unit_price": 2.75
+      "unit_price": 2.75,
+      "unit_cost": 1.6
     },
     {
-      "name": "Sealcoat",
+      "name": "Concrete flatwork",
+      "category": "Curb and site",
       "unit": "sq ft",
-      "unit_price": 0.28,
-      "formula_name": "Sealcoat area"
+      "unit_price": 8.5,
+      "unit_cost": 5.0,
+      "formula_name": "Concrete area"
     },
     {
-      "name": "Crack seal",
+      "name": "Curb and gutter",
+      "category": "Curb and site",
       "unit": "ft",
-      "unit_price": 2.0,
-      "formula_name": "Crack seal length"
-    },
-    {
-      "name": "Line striping",
-      "unit": "stall",
-      "unit_price": 5.0
+      "unit_price": 28,
+      "unit_cost": 16,
+      "formula_name": "Curb length"
     },
     {
       "name": "Mobilization and trucking",
+      "category": "Paving",
       "unit": "hr",
-      "unit_price": 132
+      "unit_price": 132,
+      "unit_cost": 85
     }
   ],
   "job_types": [
@@ -64,19 +140,55 @@
   "formulas": [
     {
       "name": "Hot-mix asphalt tons",
-      "formula": "area_sqyd * depth_in * 110 / 2000"
+      "formula": "asphalt_sqyd * depth_in * 110 / 2000"
     },
     {
       "name": "Stone base tons",
-      "formula": "area_sqyd * depth_in * 100 / 2000"
+      "formula": "asphalt_sqyd * depth_in * 100 / 2000"
     },
     {
       "name": "Sealcoat area",
-      "formula": "area_sqft"
+      "formula": "sealcoat_sqft"
     },
     {
       "name": "Crack seal length",
-      "formula": "length_ft"
+      "formula": "crack_ft"
+    },
+    {
+      "name": "Patch area",
+      "formula": "patch_sqft"
+    },
+    {
+      "name": "Striping length",
+      "formula": "stripe_ft"
+    },
+    {
+      "name": "ADA stalls",
+      "formula": "ada_stalls"
+    },
+    {
+      "name": "Arrows and stencils",
+      "formula": "arrows + symbols"
+    },
+    {
+      "name": "Crosswalks and stop bars",
+      "formula": "crosswalk_ft + stop_bar_ft"
+    },
+    {
+      "name": "Wheel stops",
+      "formula": "wheel_stops"
+    },
+    {
+      "name": "Overlay area",
+      "formula": "overlay_sqft"
+    },
+    {
+      "name": "Concrete area",
+      "formula": "concrete_sqft"
+    },
+    {
+      "name": "Curb length",
+      "formula": "curb_ft"
     }
   ],
   "checklists": [

@@ -15,6 +15,7 @@ export * from "./markdown";
 export * from "./money";
 export * from "./notifications";
 export * from "./pay";
+export * from "./paving";
 export * from "./presets";
 export * from "./privacy";
 export * from "./recurrence";

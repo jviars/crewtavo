@@ -5,6 +5,9 @@ from svgl.app; QuickBooks and Zoho are Simple Icons (CC0) in each brand's color.
 simplified mark in Outlook's colors drawn for Crewtavo. Apple Calendar and "Other calendars" have no
 file: AppIcon.tsx draws today's date and a calendar glyph instead.
 
+fal.svg is fal.ai's mark from @lobehub/icons-static-svg 1.95.1 (MIT), in fal's red, for the fal.ai app
+(Find paving).
+
 Settings → AI assistants shows each connected assistant's logo (assistantConnections.ts): claude.svg
 for Claude and Claude Code, chatgpt.svg for ChatGPT, and codex.svg for Codex, OpenAI's Codex mark
 from svgl.app (MIT) in the blue-violet gradient of Codex's app icon (from @lobehub/icons 1.95.1).

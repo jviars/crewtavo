@@ -67,7 +67,7 @@ export function useApps() {
 export const CATEGORY_LABELS: Record<AppRow["category"], string> = {
   Team: "Built into Crewtavo",
   Calendar: "Calendars",
-  AI: "AI assistants",
+  AI: "AI",
   Accounting: "Accounting",
   Payments: "Payments",
   Messaging: "Messaging",
@@ -80,7 +80,7 @@ export const categoryName = (category: AppRow["category"]) => (category === "Tea
 export const MORE_LABELS: Record<AppRow["category"], string> = {
   Team: "More built-in apps",
   Calendar: "More calendars",
-  AI: "More AI assistants",
+  AI: "More AI apps",
   Accounting: "More accounting apps",
   Payments: "More payment apps",
   Messaging: "More messaging apps",
@@ -236,6 +236,21 @@ export const APP_INFO: Record<string, AppInfo> = {
     access: ["Search clients and see their details", "See requests, the schedule, your guides and your setup", "Log requests and add notes, once you allow it", "Change company details, the price list, crews, checklists, booking forms, guides and automations, once you allow it", "Delete things, only with full access"],
     connectsWith: "Connector link",
     website: "https://claude.ai/",
+  },
+  fal: {
+    developer: "fal",
+    tagline: "Find paving on the aerial in one tap",
+    about:
+      "Find paving outlines the asphalt and concrete on the aerial, cuts the islands and buildings out of the lot, and counts the striped stalls, so a takeoff starts drawn and you check it instead of tracing it. It runs Meta's Segment Anything model (SAM 3) on fal.ai, with your own fal.ai account: about half a cent for each thing it looks for, billed by fal. Only the aerial picture of the lot you're measuring goes to fal.ai.",
+    highlights: [
+      { icon: "sparkle", title: "Outlined for you", text: "Asphalt and concrete come back as shapes on the map, each marked as its takeoff item and ready to edit." },
+      { icon: "scissors", title: "Islands cut out", text: "Planted islands and buildings in the lot come out of the asphalt, so sealcoat isn't priced on grass." },
+      { icon: "pin", title: "Stalls counted", text: "Striped stalls are counted where the imagery is sharp enough to see the lines." },
+    ],
+    access: ["Send fal.ai the aerial picture of the lot when someone taps Find paving", "Nothing else: no clients, prices or anything else from Crewtavo", "fal.ai bills your account directly, about half a cent per thing found"],
+    connectsWith: "Key from fal.ai",
+    website: "https://fal.ai/",
+    open: "/measure",
   },
   chatgpt: {
     developer: "OpenAI",

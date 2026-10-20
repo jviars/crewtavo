@@ -4,3 +4,7 @@ light and a dark copy, shown with the app's theme.
 The team chat ones are the real chat screen (features/chat/ChatPage.tsx) with made-up people and
 messages for a lawn care business, rendered at 1440×900 and saved as WebP. To retake them after the
 chat screen changes, render it with sample data and screenshot it with Playwright in both themes.
+
+The fal.ai ones are the real measuring map and Paving project page, with a demo paving business's
+takeoff of a parking lot in Radford, VA on Virginia's state imagery (VGIN), taken from a local
+instance with Playwright at 1440×900 in both themes and saved as WebP from Chromium's canvas.

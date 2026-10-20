@@ -9,6 +9,8 @@
  * tighter than unary minus, so -2 ** 2 is -4.
  */
 
+import { PAVING_VARIABLE_NAMES } from "./paving";
+
 export class FormulaError extends Error {
   override name = "FormulaError";
 }
@@ -21,6 +23,8 @@ export const FORMULA_VARIABLES = [
   "area_sqft", "area_sqyd", "length_ft", "count", "depth_in", "pitch_factor", "waste", "waste_pct",
   // Lines marked as roof edges, at true length (ROOF_EDGES in geo.ts).
   "eave_ft", "rake_ft", "ridge_ft", "hip_ft", "valley_ft",
+  // A paving takeoff's items: asphalt_sqft, stripe_ft, stalls and the rest (PAVING_VARIABLES in paving.ts).
+  ...PAVING_VARIABLE_NAMES,
 ] as const;
 export type FormulaVariable = (typeof FORMULA_VARIABLES)[number];
 

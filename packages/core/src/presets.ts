@@ -12,6 +12,9 @@ export interface PresetService {
   name: string;
   unit: string;
   unit_price: number;
+  /** What it costs the business, for the margin on quotes. */
+  unit_cost?: number;
+  category?: string;
   formula_name?: string;
 }
 

@@ -12,6 +12,7 @@ export interface NavItem {
   also?: string[]; // other screens that count as this section (highlighted in the sidebar)
   keywords?: string; // other words people search for it by
   feature?: "team_chat"; // only while the business has this app on (Apps)
+  trade?: string; // only for businesses set up for this trade (companies.trade_preset)
 }
 
 /**
@@ -21,6 +22,7 @@ export interface NavItem {
 export const NAV_GROUPS: NavItem[][] = [
   [
     { to: "/", label: "Home", icon: "home", keywords: "dashboard today overview" },
+    { to: "/paving", label: "Paving", icon: "paving", roles: ["admin", "office", "estimator"], perm: "sales", trade: "paving", keywords: "takeoff asphalt sealcoat striping stalls parking lot estimate proposal find paving" },
     { to: "/field", label: "My day", icon: "clock", only: ["crew_lead", "field_crew"], keywords: "today my visits route" },
     { to: "/schedule", label: "Schedule", icon: "calendar", keywords: "calendar visits appointments dispatch route crews tasks" },
     { to: "/chat", label: "Team chat", icon: "chat", feature: "team_chat", keywords: "chat channels messages talk team crew announcements" },
@@ -80,8 +82,9 @@ export function createItems(session: Pick<Session, "role" | "permissions">): Arr
 }
 
 /** Whether a person sees a navigation item. */
-export function navVisible(session: { role: string; permissions: readonly string[]; company?: { settings?: Record<string, unknown> | null } }, item: NavItem): boolean {
+export function navVisible(session: { role: string; permissions: readonly string[]; company?: { settings?: Record<string, unknown> | null; trade_preset?: string } }, item: NavItem): boolean {
   if (item.feature && !featureOn(session.company?.settings, item.feature)) return false;
+  if (item.trade && session.company?.trade_preset !== item.trade) return false;
   if (item.only) return item.only.includes(session.role);
   if (session.role === "owner") return true;
   if (item.roles && !item.roles.includes(session.role)) return false;

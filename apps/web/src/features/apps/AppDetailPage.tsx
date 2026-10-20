@@ -33,6 +33,9 @@ import { StripePanel } from "./StripePanel";
 import { TeamChatPanel, useTeamChatSwitch } from "./TeamChatPanel";
 
 const GOOGLE_SETTINGS = "https://calendar.google.com/calendar/r/settings";
+// fal.ai: where a key is made, and where credit is added.
+const FAL_KEYS = "https://fal.ai/dashboard/keys";
+const FAL_BILLING = "https://fal.ai/dashboard/billing";
 const GOOGLE_SIGNIN_GUIDE = "https://crewtavo.com/docs/connections/google-calendar/#instant-updates-with-google-sign-in";
 
 /**
@@ -115,8 +118,9 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   const setup = phase === "waiting";
   const refresh = () => {
     for (const key of ["apps", "calendars", "google-calendars"]) queryClient.invalidateQueries({ queryKey: [key] });
-    // The company's own Anthropic key turns on Ask and the other AI buttons (lib/session.tsx).
-    if (app.id === "anthropic") session.refresh();
+    // The company's own Anthropic key turns on Ask and the other AI buttons, and a fal.ai key Find
+    // paving on the measuring map (lib/session.tsx).
+    if (app.id === "anthropic" || app.id === "fal") session.refresh();
   };
   const connect = useMutation({
     mutationFn: () => api.post<{ authorization_url: string }>(`/apps/${app.id}/connect`),
@@ -389,6 +393,7 @@ function uninstallBody(app: AppRow, counts: { assistants: number; calendars: num
     const keys = app.app_keys ? ` Your ${app.id === "quickbooks" ? "Intuit" : "Zoho"} app's keys stay, so installing it again is one sign-in.` : "";
     return `Syncing stops right away. Nothing already synced is deleted.${keys} ${again}`;
   }
+  if (app.id === "fal") return `Find paving stops working, and your fal.ai key is removed from Crewtavo. Shapes it already found stay on your drawings. ${again}`;
   if (app.category === "AI") {
     const parts = [];
     if (counts.assistants) parts.push(`${app.name} stops working with your Crewtavo account. Anyone else on your team who connected it keeps theirs.`);
@@ -526,10 +531,12 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
   };
   // Until the company's own Stripe key is in: how to get one from the form Stripe fills in.
   const stripeSteps = stripe && !app.stripe?.own;
+  const fal = app.id === "fal";
+  const falSteps = fal && app.status !== "connected";
   return (
     <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="key-title" style={{ gap: 10 }}>
       <h2 id="key-title" className="section-title" style={{ fontSize: 17 }}>
-        {app.id === "anthropic" ? "Your own Anthropic key (optional)" : stripe ? (app.stripe?.own ? "Stripe key" : app.stripe ? "Use your own Stripe account" : "Connect your Stripe account") : `${app.name} key`}
+        {app.id === "anthropic" ? "Your own Anthropic key (optional)" : stripe ? (app.stripe?.own ? "Stripe key" : app.stripe ? "Use your own Stripe account" : "Connect your Stripe account") : fal ? (falSteps ? "Connect your fal.ai account" : "fal.ai key") : `${app.name} key`}
       </h2>
       {stripeSteps && (
         <>
@@ -544,8 +551,24 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
           </a>
         </>
       )}
+      {falSteps && (
+        <>
+          <span className="muted small">About two minutes. fal.ai bills you directly: Find paving costs about half a cent for each thing it looks for, so $5 of credit covers hundreds of lots.</span>
+          <ol className="app-steps">
+            <li>Click <strong>Get a key from fal.ai</strong> and sign in with Google or GitHub (or make an account).</li>
+            <li>Click <strong>Create Key</strong>, name it Crewtavo, keep the <strong>API</strong> scope, and copy the key. fal.ai only shows it once.</li>
+            <li>Add a few dollars of credit under <a href={FAL_BILLING} target="_blank" rel="noreferrer">Billing</a>.</li>
+            <li>Paste the key below. Crewtavo checks it with fal.ai before saving, at no cost.</li>
+          </ol>
+          <a className="btn btn-primary" style={{ justifySelf: "start" }} href={FAL_KEYS} target="_blank" rel="noreferrer">
+            <Icon name="external" size={16} />
+            Get a key from fal.ai
+          </a>
+        </>
+      )}
       <span className="muted small">
         {app.id === "anthropic" ? "Crewtavo's writing help and answers from your guides use this key when you add one. " : null}
+        {fal && !falSteps ? <>Find paving is on the measuring map, next to the takeoff items. <a href={FAL_BILLING} target="_blank" rel="noreferrer">Check your fal.ai credit</a>. </> : null}
         {stripe ? "Crewtavo adds the webhook it needs to your Stripe account. " : null}
         {app.status === "connected" && app.account_label && (!stripe || app.stripe?.own) ? `Saved: ${app.account_label}.` : "It's stored encrypted and never shown again."}
         {stripe && app.stripe?.own ? <> To switch keys, <a href={STRIPE_NEW_KEY} target="_blank" rel="noreferrer">get a new one from Stripe</a>.</> : null}
