@@ -1,7 +1,7 @@
 /** One SOP: read it, confirm you've read it, see who has, and (for the office) edit, restore or delete. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -13,8 +13,9 @@ import { ErrorState, PageError } from "@/components/ui/States";
 import { Face } from "@/components/ui/Avatar";
 import { ApiError, api, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
-import { hasContent, htmlToText, sanitizeHtml } from "@/lib/html";
+import { hasContent, htmlToText, sanitizeHtml, withSections } from "@/lib/html";
 import { useSession } from "@/lib/session";
+import { GuideContents, goToSection, useCurrentSection } from "./GuideContents";
 import { ROLE_LABELS, useIsEditor } from "./kbData";
 
 interface TeamMember { user_id: string; role: string; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null }
@@ -26,6 +27,7 @@ export function SopPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [history, setHistory] = useState(false);
+  const inlineContents = useRef<HTMLDetailsElement>(null);
 
   const page = useQuery({
     queryKey: ["kb", company.id, "page", pageId],
@@ -63,7 +65,19 @@ export function SopPage() {
     mutationFn: async () => unwrap(await supabase().from("sop_pages").update({ status: "published" }).eq("id", pageId)),
     onSettled: refresh,
   });
-  const html = useMemo(() => sanitizeHtml(page.data?.body_html ?? ""), [page.data?.body_html]);
+  const body = useMemo(() => {
+    const html = sanitizeHtml(page.data?.body_html ?? "");
+    return { empty: !hasContent(html), ...withSections(html) };
+  }, [page.data?.body_html]);
+  const sections = body.sections.length > 1 ? body.sections : [];
+  const current = useCurrentSection(sections);
+  // A link to a section (…/kb/id#mixing-ratio): go there once the guide is showing. A frame later, so the new screen's scroll to the top goes first.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash.length < 2 || body.empty) return;
+    const frame = requestAnimationFrame(() => document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView());
+    return () => cancelAnimationFrame(frame);
+  }, [hash, body]);
 
   if (page.isPending) return <DetailSkeleton />;
   if (page.error || !page.data) return <PageError error={page.error ?? new ApiError("This guide doesn't exist, or it was deleted.", 404)} onRetry={page.error ? () => page.refetch() : undefined} back={<BackLink to="/kb">Knowledge base</BackLink>} />;
@@ -73,6 +87,15 @@ export function SopPage() {
   const acknowledged = readers.some((r) => r.user_id === userId);
   const audience = (team.data ?? []).filter((m) => m.active && (!sop.audience?.length || (sop.audience as string[]).includes(m.role)));
   const outstanding = audience.filter((m) => !readers.some((r) => r.user_id === m.user_id));
+  const showReads = sop.required && sop.status === "published";
+  // "#" beside a heading copies a link to it; the contents links just go there.
+  const onArticleClick = (e: MouseEvent) => {
+    const link = (e.target as Element).closest("a");
+    const href = link?.getAttribute("href");
+    if (!link || !href?.startsWith("#")) return;
+    e.preventDefault();
+    goToSection(decodeURIComponent(href.slice(1)), link.classList.contains("heading-anchor"));
+  };
 
   return (
     <>
@@ -107,42 +130,55 @@ export function SopPage() {
         {sop.status === "draft" && <span className="pill" data-tone="warning">Draft · only the office can see this</span>}
         {sop.required && <span className="pill" data-tone="warning">Required reading{sop.audience?.length ? ` for ${sop.audience.map((r) => ROLE_LABELS[r] ?? r).join(", ")}` : ""}</span>}
         <span className="muted small">Revision {sop.revision} · Updated {timeAgo(sop.updated_at)}{sop.updated_by && team.data ? ` by ${name(sop.updated_by)}` : ""}</span>
+        {sop.tags.map((t) => <Link key={t} to={`/kb?q=${encodeURIComponent(t)}`} className="chip no-print" title="Guides tagged with this">{t}</Link>)}
       </div>
-      <div className="two-col">
-        <article className="wide card card-pad prose sop-body" style={{ padding: "24px 28px" }}>
-          {hasContent(html) ? <div dangerouslySetInnerHTML={{ __html: html }} /> : <p className="muted">This guide is empty.{editor && <> <Link to={`/kb/${sop.id}/edit`}>Add content</Link></>}</p>}
-        </article>
-        <aside className="narrow stack no-print" style={{ gap: 16 }}>
-          {sop.tags.length > 0 && (
-            <div className="card card-pad stack-sm">
-              <strong className="small">Tags</strong>
-              <div className="row wrap" style={{ gap: 6 }}>{sop.tags.map((t) => <Link key={t} to={`/kb?q=${encodeURIComponent(t)}`} className="chip">{t}</Link>)}</div>
-            </div>
-          )}
-          {sop.required && sop.status === "published" && (
-            <div className="card card-pad stack-sm">
-              <div className="row-between"><strong className="small">Read this revision</strong><span className="muted small">{readers.length}{team.data ? ` of ${audience.length}` : ""}</span></div>
-              {team.data && audience.length > 0 && <div className="progress"><span style={{ width: `${Math.min(100, (readers.length / audience.length) * 100)}%` }} /></div>}
-              {reads.isPending ? <Skeleton height={28} /> : readers.length === 0 ? <p className="muted small" style={{ margin: 0 }}>No one has confirmed this revision yet.</p> : (
-                <div className="stack-sm" style={{ gap: 8 }}>
-                  {readers.map((r) => (
-                    <div key={r.user_id} className="row" style={{ gap: 8 }}>
-                      <span className="avatar" style={{ width: 26, height: 26, fontSize: 10 }}><Face name={name(r.user_id)} photo={team.data?.find((m) => m.user_id === r.user_id)?.profile?.avatar_url} /></span>
-                      <span className="grow small strong">{name(r.user_id)}</span>
-                      <span className="muted small" title={formatDateTime(r.acknowledged_at)}>{formatDate(r.acknowledged_at)}</span>
+      <div className="sop-reader">
+        <div className="sop-layout">
+          <div className="sop-main">
+            {sections.length > 0 && (
+              <details ref={inlineContents} className="card sop-toc-inline no-print">
+                <summary>On this page<span className="muted"> · {sections.length} sections</span></summary>
+                <GuideContents sections={sections} current={current} onPick={() => inlineContents.current?.removeAttribute("open")} />
+              </details>
+            )}
+            <article className="card prose sop-body" onClick={onArticleClick}>
+              {body.empty ? <p className="muted">This guide is empty.{editor && <> <Link to={`/kb/${sop.id}/edit`}>Add content</Link></>}</p> : <div dangerouslySetInnerHTML={{ __html: body.html }} />}
+            </article>
+          </div>
+          {(showReads || sections.length > 0) && (
+            <aside className="sop-aside no-print">
+              {showReads && (
+                <div className="card card-pad stack-sm">
+                  <div className="row-between"><strong className="small">Read this revision</strong><span className="muted small">{readers.length}{team.data ? ` of ${audience.length}` : ""}</span></div>
+                  {team.data && audience.length > 0 && <div className="progress"><span style={{ width: `${Math.min(100, (readers.length / audience.length) * 100)}%` }} /></div>}
+                  {reads.isPending ? <Skeleton height={28} /> : readers.length === 0 ? <p className="muted small" style={{ margin: 0 }}>No one has confirmed this revision yet.</p> : (
+                    <div className="stack-sm" style={{ gap: 8 }}>
+                      {readers.map((r) => (
+                        <div key={r.user_id} className="row" style={{ gap: 8 }}>
+                          <span className="avatar" style={{ width: 26, height: 26, fontSize: 10 }}><Face name={name(r.user_id)} photo={team.data?.find((m) => m.user_id === r.user_id)?.profile?.avatar_url} /></span>
+                          <span className="grow small strong">{name(r.user_id)}</span>
+                          <span className="muted small" title={formatDateTime(r.acknowledged_at)}>{formatDate(r.acknowledged_at)}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  {editor && outstanding.length > 0 && (
+                    <div className="stack-sm" style={{ gap: 6, marginTop: 6 }}>
+                      <span className="muted small strong">Still to read</span>
+                      <div className="row wrap" style={{ gap: 6 }}>{outstanding.map((m) => <span key={m.user_id} className="chip">{m.profile?.full_name ?? "Team member"}</span>)}</div>
+                    </div>
+                  )}
                 </div>
               )}
-              {editor && outstanding.length > 0 && (
-                <div className="stack-sm" style={{ gap: 6, marginTop: 6 }}>
-                  <span className="muted small strong">Still to read</span>
-                  <div className="row wrap" style={{ gap: 6 }}>{outstanding.map((m) => <span key={m.user_id} className="chip">{m.profile?.full_name ?? "Team member"}</span>)}</div>
-                </div>
+              {sections.length > 0 && (
+                <nav className="sop-toc" aria-label="On this page">
+                  <strong className="small">On this page</strong>
+                  <GuideContents sections={sections} current={current} />
+                </nav>
               )}
-            </div>
+            </aside>
           )}
-        </aside>
+        </div>
       </div>
       {history && <HistoryDialog pageId={sop.id} current={sop.revision} names={name} onClose={() => setHistory(false)} />}
     </>

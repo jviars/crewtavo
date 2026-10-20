@@ -1,6 +1,6 @@
-/** SOP library: required reading, categories, full-text search, and questions answered from the SOPs. */
+/** SOP library: required reading, categories, search as you type (titles here, full text on the server), and questions answered from the SOPs. */
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
@@ -12,6 +12,7 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { CategoriesDialog } from "./CategoriesDialog";
+import { guideFinder } from "./finder";
 import { useCategories, useIsEditor, useSopIndex, type SopIndexRow } from "./kbData";
 
 interface Answer { answer: string; sources: Array<{ id: string; title: string }> }
@@ -26,7 +27,9 @@ export function KnowledgeBasePage() {
   const categoryId = params.get("category");
   const [draft, setDraft] = useState(query);
   const [managing, setManaging] = useState(false);
-  useEffect(() => setDraft(query), [query]);
+  // From a tag link or Back; not while typing, where the address follows the box (and would drop a trailing space).
+  useEffect(() => setDraft((d) => (d.trim() === query ? d : query)), [query]);
+  const term = draft.trim();
 
   const categories = useCategories();
   const index = useSopIndex();
@@ -38,11 +41,18 @@ export function KnowledgeBasePage() {
   });
   const ask = useMutation({ meta: { inline: true }, mutationFn: (question: string) => api.post<Answer>("/kb/ask", { question }) });
 
-  const set = (next: Record<string, string | null>) => {
+  const set = (next: Record<string, string | null>, replace = false) => {
     const p = new URLSearchParams(params);
     for (const [k, v] of Object.entries(next)) v ? p.set(k, v) : p.delete(k);
-    setParams(p);
+    setParams(p, { replace });
   };
+  // Typing searches the words inside guides too, once it pauses.
+  useEffect(() => {
+    if (term === query) return;
+    const timer = setTimeout(() => set({ q: term || null, category: null }, true), 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [term, query]);
   const onSearch = (e: FormEvent) => {
     e.preventDefault();
     ask.reset();
@@ -50,6 +60,23 @@ export function KnowledgeBasePage() {
   };
   const category = categories.data?.find((c) => c.id === categoryId) ?? (categoryId === "none" ? { id: "none", name: "Uncategorized" } : null);
   const pages = index.data?.pages ?? [];
+  const find = useMemo(() => guideFinder(pages, categories.data ?? []), [pages, categories.data]);
+  const searching = term.length > 1;
+  // Title, tag and category matches straight away; matches inside guides (with a snippet) once the server answers for these words.
+  const hits = useMemo(() => {
+    if (!searching) return [];
+    const server = query === term && !results.isPlaceholderData ? (results.data ?? []) : [];
+    const byId = new Map(pages.map((p) => [p.id, p]));
+    const names = new Map((categories.data ?? []).map((c) => [c.id, c.name]));
+    const snippet = new Map(server.map((r) => [r.id, r.snippet]));
+    const listed = find(term)
+      .map((id) => byId.get(id))
+      .filter((p) => p !== undefined)
+      .map((p) => ({ id: p.id, title: p.title, category: names.get(p.category_id ?? "") ?? null, required: p.required, acknowledged: index.data?.isRead(p) ?? false, snippet: snippet.get(p.id) ?? null }));
+    const seen = new Set(listed.map((h) => h.id));
+    return [...listed, ...server.filter((r) => !seen.has(r.id)).map((r) => ({ id: r.id, title: r.title, category: r.category, required: r.required, acknowledged: r.acknowledged, snippet: r.snippet }))].slice(0, 30);
+  }, [searching, term, query, results.data, results.isPlaceholderData, find, pages, categories.data, index.data]);
+  const fullTextPending = searching && (query !== term || results.isFetching);
   const countFor = (id: string | null) => pages.filter((p) => p.category_id === id).length;
   const uncategorized = countFor(null);
 
@@ -93,7 +120,7 @@ export function KnowledgeBasePage() {
         </section>
       )}
 
-      {index.data && index.data.toRead.length > 0 && !query && !category && (
+      {index.data && index.data.toRead.length > 0 && !searching && !category && (
         <section className="sop-required" aria-label="Required reading">
           <Icon name="alert" size={20} />
           <div className="grow stack-sm" style={{ gap: 4 }}>
@@ -106,22 +133,22 @@ export function KnowledgeBasePage() {
         </section>
       )}
 
-      {query ? (
+      {searching ? (
         <section className="stack-sm" aria-labelledby="kb-results">
           <div className="row-between">
-            <h2 id="kb-results" className="section-title">Results for “{query}”</h2>
+            <h2 id="kb-results" className="section-title">Results for “{term}”</h2>
             <Button size="sm" variant="ghost" icon="x" onClick={() => { setDraft(""); ask.reset(); set({ q: null }); }}>Clear</Button>
           </div>
-          <div className={`card${results.isPlaceholderData ? " is-stale" : ""}`}>
-            {results.isPending && <PageRowsSkeleton />}
+          <div className="card" aria-busy={fullTextPending}>
+            {hits.length === 0 && (index.isPending || fullTextPending) && <PageRowsSkeleton />}
             {results.error && <ErrorState compact error={results.error} onRetry={() => results.refetch()} />}
-            {results.data?.length === 0 && <EmptyState compact icon="search" title="No matches" />}
-            {results.data?.map((hit) => (
+            {hits.length === 0 && !index.isPending && !fullTextPending && !results.error && <EmptyState compact icon="search" title="No matches" />}
+            {hits.map((hit) => (
               <Link key={hit.id} to={`/kb/${hit.id}`} className="card-row" style={{ alignItems: "flex-start" }}>
                 <span className="kb-doc"><Icon name="file" size={16} /></span>
                 <span className="grow stack-sm" style={{ gap: 3, minWidth: 0 }}>
                   <span className="row wrap" style={{ gap: 8 }}><strong>{hit.title}</strong>{hit.required && <span className="pill" data-tone={hit.acknowledged ? "success" : "warning"}>{hit.acknowledged ? "Read" : "Required"}</span>}</span>
-                  <span className="muted small">{hit.category && <>{hit.category} · </>}{hit.snippet}</span>
+                  <span className="muted small">{[hit.category, hit.snippet].filter(Boolean).join(" · ")}</span>
                 </span>
               </Link>
             ))}

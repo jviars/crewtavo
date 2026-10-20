@@ -150,7 +150,7 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
           <RichTextEditor
             initialHtml={initial.html}
             label="Guide content"
-            placeholder="Write the steps. Tip: type “## ” for a heading, “- ” for a list, “1. ” for numbered steps."
+            placeholder="Write the steps. Tip: type “# ” for a heading, “1. ” for numbered steps, “- ” for a list, “[] ” for a checklist."
             minHeight={420}
             onChange={(html, plain) => {
               text.current = plain;

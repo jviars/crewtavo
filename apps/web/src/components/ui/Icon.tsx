@@ -3,9 +3,9 @@ import {
   Archive, ArchiveRestore, ArrowLeft, AtSign, ArrowRight, Banknote, Bell, Bold, BookOpen, Calendar, CalendarCheck, Camera, ChartColumn, ChartLine, Check, ChevronDown, ChevronLeft,
   ChevronRight, ChevronUp, CircleCheck, Construction, ClipboardCheck, Clock, Cloud, CodeXml, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileText,
   Funnel, Gauge, Gift, Globe, GripVertical, Hash, Heading, Hexagon, History, House, Image, Inbox, Info, Italic, Kanban, Landmark, Layers, LayoutGrid, Link,
-  List, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, MessagesSquare, Minus, Monitor, Moon, MousePointer2, Navigation,
+  List, ListChecks, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, MessageSquareWarning, MessagesSquare, Minus, Monitor, Moon, MousePointer2, Navigation,
   Pause, Pencil, Percent, Phone, Pin, PinOff, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Reply, Ruler, Scissors, Search, Send, SeparatorHorizontal,
-  Settings, Share, Smartphone, SmilePlus, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Tag, ThumbsUp, Trash, TriangleAlert, TriangleRight, Truck, Underline, Undo2, Upload,
+  Settings, Share, Smartphone, SmilePlus, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Table, Tag, ThumbsUp, Trash, TriangleAlert, TriangleRight, Truck, Underline, Undo2, Upload,
   User, Users, Video, WifiOff, Wrench, X, Zap, type LucideIcon,
 } from "lucide-react";
 
@@ -128,6 +128,9 @@ const ICONS = {
   pitch: TriangleRight,
   ruler: Ruler,
   paving: Construction,
+  checklist: ListChecks,
+  callout: MessageSquareWarning,
+  table: Table,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
