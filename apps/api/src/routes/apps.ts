@@ -11,6 +11,7 @@ import { randomId, signToken, verifyToken } from "../lib/crypto";
 import { appUrl, dbError, HttpError, isoDate, must, readJson } from "../lib/http";
 import { adminClient } from "../lib/supabase";
 import { companyAnthropicKey, complete } from "../services/ai";
+import { analyticsSettings } from "../services/analytics";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, zohoAccountsServer, type Provider } from "../integrations/registry";
@@ -40,6 +41,8 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   // The website's editor, by its address (integrations/website.ts).
   const website = websiteOf(company.data?.settings as Record<string, unknown> | null);
   const byProvider = new Map(integrations.map(({ settings, ...r }) => [r.provider, r]));
+  // Website analytics, while it counts visits (routes/analytics.ts).
+  builtinOn.website_analytics = analyticsSettings(company.data?.settings).enabled === true;
   const calendarRows = must(calendars);
   const ownKey = Boolean(stripeKey.count);
   const stripeSettings = (integrations.find((r) => r.provider === "stripe")?.settings ?? {}) as { webhook?: boolean; livemode?: boolean; import?: ImportState };

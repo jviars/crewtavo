@@ -11,6 +11,7 @@ import { HttpError } from "./lib/http";
 import { reportError } from "./lib/monitoring";
 import { mcp } from "./mcp";
 import { account } from "./routes/account";
+import { analytics, pageViews } from "./routes/analytics";
 import { address, addressWellKnown } from "./routes/address";
 import { apps } from "./routes/apps";
 import { automations } from "./routes/automations";
@@ -64,8 +65,11 @@ app.route("/api", email);
 app.route("/api", push);
 app.route("/api", address);
 app.route("/api", railway);
+app.route("/api", analytics);
 app.route("/", addressWellKnown);
 app.route("/", mcp);
+// Website analytics: the script for the business's website, and its page views (routes/analytics.ts).
+app.route("/", pageViews);
 
 /** Scheduled tasks over HTTP, for running one by hand (server.ts's scheduler calls runTask directly). */
 app.on(["GET", "POST"], "/api/cron/:task", async (c) => {

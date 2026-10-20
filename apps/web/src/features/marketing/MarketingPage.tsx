@@ -1,6 +1,9 @@
-/** Marketing: email campaigns to client segments, promo codes, Google review requests and referral rewards. */
+/**
+ * Marketing: email campaigns to client segments, promo codes, Google review requests and referral rewards,
+ * and visits to the business's website once Website Analytics is installed (WebsiteSection).
+ */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -8,7 +11,7 @@ import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { CardSkeleton, StatsSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
+import { CardSkeleton, Loading, StatsSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
@@ -18,16 +21,21 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { PromoCodes } from "./PromoCodes";
+import { analyticsOn } from "./website";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 
-type Tab = "campaigns" | "promos" | "reviews" | "referrals";
+type Tab = "campaigns" | "promos" | "reviews" | "referrals" | "website";
+// Charts load with the tab, not with the rest of Marketing.
+const WebsiteSection = lazy(() => import("./WebsiteSection").then((m) => ({ default: m.WebsiteSection })));
 export const CAMPAIGN_TONES: Record<string, Tone> = { draft: "muted", scheduled: "info", sending: "info", sent: "good", cancelled: "danger" };
 export const CAMPAIGN_LABELS: Record<string, string> = { draft: "Draft", scheduled: "Scheduled", sending: "Sending", sent: "Sent", cancelled: "Stopped" };
 
 export function MarketingPage() {
   const session = useSession();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get("tab") as Tab) || "campaigns";
+  const website = analyticsOn(session);
+  const asked = (params.get("tab") as Tab) || "campaigns";
+  const tab = asked === "website" && !website ? "campaigns" : asked;
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   const summary = useQuery({
     queryKey: ["marketing-summary", session.company.id],
@@ -56,11 +64,17 @@ export function MarketingPage() {
         <button type="button" role="tab" aria-selected={tab === "promos"} onClick={() => setTab("promos")}><Icon name="tag" size={16} />Promo codes</button>
         <button type="button" role="tab" aria-selected={tab === "reviews"} onClick={() => setTab("reviews")}><Icon name="star" size={16} />Reviews</button>
         <button type="button" role="tab" aria-selected={tab === "referrals"} onClick={() => setTab("referrals")}><Icon name="gift" size={16} />Referrals</button>
+        {website && <button type="button" role="tab" aria-selected={tab === "website"} onClick={() => setTab("website")}><Icon name="globe" size={16} />Website</button>}
       </div>
       {tab === "campaigns" && <Campaigns />}
       {tab === "promos" && <PromoCodes />}
       {tab === "reviews" && <Reviews />}
       {tab === "referrals" && <Referrals />}
+      {tab === "website" && (
+        <Suspense fallback={<Loading label="Loading website visits" className="stack"><CardSkeleton height={320} /></Loading>}>
+          <WebsiteSection />
+        </Suspense>
+      )}
     </>
   );
 }

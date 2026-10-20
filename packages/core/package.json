@@ -31,6 +31,7 @@
     "./markdown": "./src/markdown.ts",
     "./clientImport": "./src/clientImport.ts",
     "./reports": "./src/reports.ts",
+    "./analytics": "./src/analytics.ts",
     "./pay": "./src/pay.ts",
     "./video": "./src/video.ts",
     "./website": "./src/website.ts"

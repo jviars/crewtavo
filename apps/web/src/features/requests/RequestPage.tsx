@@ -1,3 +1,4 @@
+import { CHANNEL_LABELS } from "@crewtavo/core/analytics";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -17,6 +18,7 @@ import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { ContactLine } from "../clients/ContactsCard";
 import { PropertySelect } from "../clients/ClientForm";
+import type { WebVisit } from "../marketing/website";
 import { PlansCard } from "../plans/PlansCard";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
 import { REQUEST_SOURCES } from "./RequestsPage";
@@ -36,7 +38,7 @@ export function RequestPage() {
       unwrapOne(
         await supabase()
           .from("requests")
-          .select("id, number, title, details, status, source, answers, promo_code, created_at, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code, lat, lng), form:intake_forms(name, questions), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, assignees:visit_assignees(user_id)), quotes(id, number, title, status, total)")
+          .select("id, number, title, details, status, source, answers, promo_code, web_visit, created_at, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code, lat, lng), form:intake_forms(name, questions), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, assignees:visit_assignees(user_id)), quotes(id, number, title, status, total)")
           .eq("id", id)
           .maybeSingle(),
         "This request",
@@ -206,6 +208,7 @@ export function RequestPage() {
               <dt>Property</dt><dd>{r.property ? addressLine(r.property) : "—"}</dd>
               <dt>Received</dt><dd>{formatDateTime(r.created_at)}{r.form ? ` via ${r.form.name}` : ""}</dd>
               {r.promo_code && <><dt>Promo code</dt><dd><span className="promo-code">{r.promo_code}</span></dd></>}
+              {r.web_visit && <WebVisitRows visit={r.web_visit as unknown as WebVisit} />}
             </dl>
           </div>
         </aside>
@@ -242,5 +245,17 @@ function EditRequestDialog({ request, onClose, onSaved }: { request: { id: strin
         </div>
       </form>
     </Dialog>
+  );
+}
+
+/** A booking-form request: the website visit that brought it in (Website Analytics). */
+function WebVisitRows({ visit }: { visit: WebVisit }) {
+  return (
+    <>
+      <dt>Came from</dt>
+      <dd>{visit.source}{visit.channel !== "direct" && CHANNEL_LABELS[visit.channel] ? ` (${CHANNEL_LABELS[visit.channel].toLowerCase()})` : ""}{visit.campaign ? `, campaign ${visit.campaign}` : ""}</dd>
+      <dt>First page</dt>
+      <dd style={{ overflowWrap: "anywhere" }}>{visit.landing_page}{visit.page !== visit.landing_page ? `, then booked from ${visit.page}` : ""}</dd>
+    </>
   );
 }

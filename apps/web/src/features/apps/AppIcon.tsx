@@ -15,6 +15,7 @@ import type { AppRow } from "./catalog";
 
 const LOGOS: Record<string, string> = {
   team_chat: crewtavoLogo,
+  website_analytics: crewtavoLogo,
   google_calendar: googleCalendarLogo,
   zoho_calendar: zohoLogo,
   outlook_calendar: outlookLogo,

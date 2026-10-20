@@ -11,6 +11,7 @@ import { supabase } from "@/lib/api";
 import { formatDate, formatMoney, formatMoneyCompact, formatNumber, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { CATEGORY_LABELS } from "../field/fieldData";
+import { leadSource } from "../marketing/website";
 import { HBars, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart } from "../finance/Charts";
 import { bucketize, bucketsFor, hoursBetween, type Range } from "../finance/range";
 import { fetchAll, hrs, pct, plural, RangeHeader, sum, TabBody, timeRates, useRangeParams, useTeam } from "../finance/shared";
@@ -54,8 +55,8 @@ function Sales({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [quotes, clients] = await Promise.all([
-        fetchAll((a, b) => db.from("quotes").select("id, status, total, sent_at, approved_at, salesperson_id, created_by, lost_reason, client:clients(lead_source)").eq("company_id", cid).gte("sent_at", range.start).lt("sent_at", range.end).range(a, b)),
-        fetchAll((a, b) => db.from("clients").select("id, lead_source, status").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end).range(a, b)),
+        fetchAll((a, b) => db.from("quotes").select("id, status, total, sent_at, approved_at, salesperson_id, created_by, lost_reason, client:clients(lead_source, requests(web_visit))").eq("company_id", cid).gte("sent_at", range.start).lt("sent_at", range.end).range(a, b)),
+        fetchAll((a, b) => db.from("clients").select("id, lead_source, status, requests(web_visit)").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end).range(a, b)),
       ]);
       return { quotes, clients };
     },
@@ -80,14 +81,15 @@ function Sales({ range }: { range: Range }) {
           people.set(id, row);
         }
         const sources = new Map<string, { source: string; clients: number; quotes: number; won: number; value: number }>();
-        const src = (s: string | null | undefined) => s?.trim() || "Not recorded";
+        // Website-form leads by where their visit came from, once the website counts visits ("Website form · Google").
         for (const c of d.clients) {
-          const row = sources.get(src(c.lead_source)) ?? { source: src(c.lead_source), clients: 0, quotes: 0, won: 0, value: 0 };
+          const key = leadSource(c.lead_source, c.requests);
+          const row = sources.get(key) ?? { source: key, clients: 0, quotes: 0, won: 0, value: 0 };
           row.clients++;
           sources.set(row.source, row);
         }
         for (const q of d.quotes) {
-          const key = src(q.client?.lead_source);
+          const key = leadSource(q.client?.lead_source, q.client?.requests);
           const row = sources.get(key) ?? { source: key, clients: 0, quotes: 0, won: 0, value: 0 };
           row.quotes++;
           if (["approved", "converted"].includes(q.status)) { row.won++; row.value += Number(q.total); }
@@ -295,7 +297,7 @@ function Clients({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [created, active, leads, jobs] = await Promise.all([
-        fetchAll((a, b) => db.from("clients").select("created_at, lead_source").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end).range(a, b)),
+        fetchAll((a, b) => db.from("clients").select("created_at, lead_source, requests(web_visit)").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end).range(a, b)),
         db.from("clients").select("id", { count: "exact", head: true }).eq("company_id", cid).eq("status", "active"),
         db.from("clients").select("id", { count: "exact", head: true }).eq("company_id", cid).eq("status", "lead"),
         fetchAll((a, b) => db.from("jobs").select("status, updated_at, client:clients(id, display_name, status, email, marketing_opt_out)").eq("company_id", cid).neq("status", "archived").range(a, b)),
@@ -320,7 +322,7 @@ function Clients({ range }: { range: Range }) {
     <TabBody query={query}>
       {(d) => {
         const sources = new Map<string, number>();
-        for (const c of d.created) sources.set(c.lead_source?.trim() || "Not recorded", (sources.get(c.lead_source?.trim() || "Not recorded") ?? 0) + 1);
+        for (const c of d.created) sources.set(leadSource(c.lead_source, c.requests), (sources.get(leadSource(c.lead_source, c.requests)) ?? 0) + 1);
         return (
           <>
             <KpiStrip label="Clients">

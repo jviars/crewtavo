@@ -62,35 +62,44 @@ export type RangeParams = ReturnType<typeof useRangeParams>;
 /** Carries the date range to another page's address: "range=month", or a custom range's dates. */
 export const rangeQuery = (range: Range) => (range.key === "custom" ? `range=custom&from=${range.from}&to=${range.to}` : `range=${range.key}`);
 
+/** The date range picker: a preset, or two dates for a custom range. */
+export function RangePicker({ state }: { state: RangeParams }) {
+  const { presetKey, range, update } = state;
+  return (
+    <div className="row wrap" style={{ gap: 8 }}>
+      <label className="select-pill range-pill">
+        <Icon name="calendar" size={15} />
+        <span className="range-pill-label">Date range</span>
+        <select value={presetKey} onChange={(e) => update(e.target.value === "custom" ? { range: "custom", from: range.from, to: range.to } : { range: e.target.value, from: null, to: null })}>
+          {PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+        </select>
+        <Icon name="chevronDown" size={14} />
+      </label>
+      {presetKey === "custom" && (
+        <div className="row" style={{ gap: 6 }}>
+          <input className="input" type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && update({ from: e.target.value })} aria-label="From" style={{ width: 150 }} />
+          <span className="muted">to</span>
+          <input className="input" type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && update({ to: e.target.value })} aria-label="To" style={{ width: 150 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The range in words: "Oct 1 – Oct 20 · 20 days", with the year when it isn't this one. */
+export function rangeWords(range: Range, today: string): string {
+  const year = range.to.slice(0, 4) !== today.slice(0, 4) || range.from.slice(0, 4) !== today.slice(0, 4) ? `, ${range.to.slice(0, 4)}` : "";
+  return `${shortDate(range.from)}${range.from !== range.to ? ` – ${shortDate(range.to)}` : ""}${year} · ${plural(range.days, "day")}`;
+}
+
 /** The page title with its date range picker, the range in words, and the tab bar. */
 export function RangeHeader<K extends string>({ title, state, tabs, tab }: { title: string; state: RangeParams; tabs: ReadonlyArray<{ key: K; label: string }>; tab: K }) {
-  const { presetKey, range, today, update } = state;
+  const { range, today, update } = state;
   const first = tabs[0]?.key;
   return (
     <>
-      <PageHeader
-        title={title}
-        actions={
-          <div className="row wrap" style={{ gap: 8 }}>
-            <label className="select-pill range-pill">
-              <Icon name="calendar" size={15} />
-              <span className="range-pill-label">Date range</span>
-              <select value={presetKey} onChange={(e) => update(e.target.value === "custom" ? { range: "custom", from: range.from, to: range.to } : { range: e.target.value, from: null, to: null })}>
-                {PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-              </select>
-              <Icon name="chevronDown" size={14} />
-            </label>
-            {presetKey === "custom" && (
-              <div className="row" style={{ gap: 6 }}>
-                <input className="input" type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && update({ from: e.target.value })} aria-label="From" style={{ width: 150 }} />
-                <span className="muted">to</span>
-                <input className="input" type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && update({ to: e.target.value })} aria-label="To" style={{ width: 150 }} />
-              </div>
-            )}
-          </div>
-        }
-      />
-      <p className="page-subtitle">{shortDate(range.from)}{range.from !== range.to && ` – ${shortDate(range.to)}`}{range.to.slice(0, 4) !== today.slice(0, 4) || range.from.slice(0, 4) !== today.slice(0, 4) ? `, ${range.to.slice(0, 4)}` : ""} · {plural(range.days, "day")}</p>
+      <PageHeader title={title} actions={<RangePicker state={state} />} />
+      <p className="page-subtitle">{rangeWords(range, today)}</p>
       <div className="underline-tabs" role="tablist" aria-label={title}>
         {tabs.map((t) => <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => update({ tab: t.key === first ? null : t.key })}>{t.label}</button>)}
       </div>

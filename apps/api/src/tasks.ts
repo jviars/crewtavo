@@ -10,6 +10,7 @@ import { syncStripeInvoice } from "./integrations/stripe";
 import { reportError } from "./lib/monitoring";
 import { adminClient, type Db } from "./lib/supabase";
 import { runAddressTask } from "./services/address";
+import { rollUpVisits } from "./services/analytics";
 import { tidyPlanFiles } from "./services/planFiles";
 import { keepRailwayAlive } from "./services/railway";
 import { processAutomations } from "./services/automations";
@@ -18,7 +19,7 @@ import { deliverNotifications } from "./services/delivery";
 import { dailyOutlook } from "./services/external";
 import { autoRoutes } from "./services/routes";
 
-export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "plans", "routes"] as const;
+export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "plans", "routes", "website"] as const;
 export type TaskName = (typeof TASKS)[number];
 
 /** Cron expressions -> tasks, run by server.ts's scheduler. */
@@ -30,6 +31,7 @@ export const CRON_TASKS: Record<string, TaskName[]> = {
   "0 * * * *": ["followups"],
   "0 */6 * * *": ["weather"],
   "30 * * * *": ["routes"],
+  "10 * * * *": ["website"],
   "15 6 * * *": ["recurrence"],
   "40 5 * * *": ["railway"],
   "20 4 * * *": ["plans"],
@@ -61,6 +63,8 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return tidyPlanFiles(adminClient(env));
     case "routes":
       return autoRoutes(env);
+    case "website":
+      return rollUpVisits(adminClient(env));
   }
 }
 

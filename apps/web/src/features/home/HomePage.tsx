@@ -15,8 +15,10 @@ import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { monthToDate } from "@/lib/trends";
 import { managesEquipment, useEquipmentDue } from "../equipment/equipmentData";
+import { seesWebsite } from "../marketing/website";
 import { InstallAppCard } from "../field/InstallAppCard";
 import type { Dashboard } from "./types";
+import { WebsiteCard } from "./WebsiteCard";
 import { WorkflowStrip } from "./WorkflowStrip";
 
 function greeting(timeZone: string) {
@@ -171,6 +173,7 @@ export function HomePage() {
                   ))}
                 </div>
               )}
+              {seesWebsite(session) && <WebsiteCard />}
               <div className="card">
                 <div className="card-head"><strong>Needs attention</strong>{attention.length > 0 && <span className="badge">{attention.length}</span>}</div>
                 {attention.length === 0 ? (

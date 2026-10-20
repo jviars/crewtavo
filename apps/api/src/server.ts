@@ -63,6 +63,9 @@ server.all("/api/*", api);
 server.all("/mcp", api);
 server.all("/mcp/*", api);
 server.all("/.well-known/*", api);
+// Website analytics: the script on the business's website, and the page views it sends (routes/analytics.ts).
+server.get("/v.js", api);
+server.post("/v", api);
 
 // Gateway to the instance's Supabase services (lib/gateway.ts).
 if (stack) server.route("/", gateway(env, stack));

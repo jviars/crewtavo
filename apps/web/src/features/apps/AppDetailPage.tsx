@@ -20,6 +20,7 @@ import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { CalendarFeedCard } from "../settings/CalendarFeedCard";
+import { AnalyticsPanel, useAnalyticsSwitch } from "./AnalyticsPanel";
 import { AppIcon, AppTile } from "./AppIcon";
 import { AppKeysCard } from "./AppKeysCard";
 import { AssistantAccess, ConnectedAssistants, useAssistantConnections } from "./AssistantAccess";
@@ -125,6 +126,9 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
     onSuccess: (res) => window.location.assign(res.authorization_url), // the provider sends the person back to this page
   });
   const chatSwitch = useTeamChatSwitch();
+  const analyticsSwitch = useAnalyticsSwitch();
+  // Built-in apps turn on and off in the company's settings.
+  const builtinSwitch = app.id === "website_analytics" ? analyticsSwitch : chatSwitch;
 
   // Uninstall takes this app's own assistants and calendars with it.
   const assistants = connections.filter((c) => assistantAppFor(c.name) === app.id);
@@ -148,7 +152,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   const canUninstall = installed && (app.auth === "builtin" || app.auth === "site" || hasAccount(app) || assistants.length > 0 || sources.length > 0);
 
   const askUninstall = async () => {
-    if (app.auth === "builtin") return chatSwitch.turnOff();
+    if (app.auth === "builtin") return builtinSwitch.turnOff();
     const body = uninstallBody(app, { assistants: assistants.length, calendars: sources.length });
     if (await confirm({ title: `Uninstall ${app.name}?`, body, confirmLabel: "Uninstall", danger: true })) uninstall.mutate();
   };
@@ -158,7 +162,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
     const failed = { onError: () => setPhase(null) };
     if (app.auth === "builtin") {
       setPhase("working");
-      return chatSwitch.toggle.mutate(true, failed);
+      return builtinSwitch.toggle.mutate(true, failed);
     }
     // Signing in is the setup; Google also offers adding a calendar by its address instead.
     if (app.auth === "oauth" && app.available && app.id !== "google_calendar" && !keysFirst(app)) {
@@ -203,7 +207,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
     actions = (
       <>
         {canUninstall && (
-          <Button className="app-get" variant="danger-solid" loading={uninstall.isPending || chatSwitch.toggle.isPending} onClick={askUninstall}>Uninstall</Button>
+          <Button className="app-get" variant="danger-solid" loading={uninstall.isPending || builtinSwitch.toggle.isPending} onClick={askUninstall}>Uninstall</Button>
         )}
         {needsReconnect ? (
           <Button className="app-get" variant="primary" icon="refresh" loading={connect.isPending} onClick={() => connect.mutate()}>Reconnect</Button>
@@ -318,6 +322,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           {(app.auth === "connector" || app.id === "anthropic") && <ConnectorCard app={app} mcpUrl={mcpUrl} />}
           {app.id === "stripe" && app.stripe && <StripePanel app={app} onChanged={refresh} />}
           {app.auth === "api_key" && <KeyCard app={app} onSaved={refresh} />}
+          {app.id === "website_analytics" && <AnalyticsPanel />}
           {app.id === "team_chat" && <TeamChatPanel />}
           {app.auth === "site" && <WebsitePanel app={app} onSaved={refresh} />}
         </>
