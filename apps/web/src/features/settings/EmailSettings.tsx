@@ -1,9 +1,10 @@
 /**
  * Settings → Email: send quotes, invoices, reminders, invites and team notifications from the
- * company's own mailbox. Pick the provider, paste an app password, and Crewtavo signs in and sends
- * a test before saving. Nothing to install and no DNS changes for Gmail, Zoho and the rest.
+ * company's own address. Resend comes first (it works on every Railway plan) with a step-by-step
+ * guide; Gmail, Zoho and the other mailboxes take an app password and need no DNS changes. Crewtavo
+ * signs in and sends a test before saving.
  */
-import { MAIL_PRESETS, mailPreset, type MailPreset } from "@crewtavo/core/email";
+import { emailDomain, isPersonalMailDomain, MAIL_PRESETS, mailPreset, type MailPreset, type MailStep } from "@crewtavo/core/email";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import gmailLogo from "@/assets/apps/gmail.svg";
@@ -39,7 +40,7 @@ interface Mailbox {
   last_error: string | null;
   connected_at: string | null;
 }
-interface EmailState { mailbox: Mailbox | null; fallback: "server" | "dev" | null }
+interface EmailState { mailbox: Mailbox | null; fallback: "server" | "dev" | null; on_railway?: boolean }
 
 /** Each provider's own logo on a white tile, like the Apps page (see assets/apps/README.md). */
 const LOGOS: Partial<Record<MailPreset["id"], string>> = {
@@ -91,7 +92,7 @@ export function EmailSettings() {
 
   if (state.error) return <div className="card"><ErrorState error={state.error} onRetry={() => state.refetch()} /></div>;
   if (state.isPending) return <div className="card card-pad stack"><Skeleton width="40%" /><Skeleton height={120} radius={10} /></div>;
-  const { mailbox, fallback } = state.data;
+  const { mailbox, fallback, on_railway: onRailway = false } = state.data;
   const preset = mailPreset(mailbox?.preset);
 
   return (
@@ -99,7 +100,7 @@ export function EmailSettings() {
       <div className="card card-pad stack-sm">
         <strong style={{ fontSize: 16 }}>Send email from your own address</strong>
         <span className="muted">
-          Quotes, invoices, reminders, team invites and notifications go out from your business mailbox, so clients see your name and replies land in your inbox. You use the email account you already have; there's nothing to buy.
+          Quotes, invoices, reminders, team invites and notifications go out from your business address, so clients see your name and replies land in your inbox. Resend is free for up to 100 emails a day, or you can use the email account you already have; there's nothing to buy.
         </span>
       </div>
 
@@ -118,11 +119,19 @@ export function EmailSettings() {
               <Icon name="alert" size={18} />
               <div className="grow">
                 <div>Emails aren't going out</div>
-                <div className="small" style={{ fontWeight: 400 }}>{mailbox.last_error ?? "The mail server stopped accepting the sign-in."} If you changed the account's password or deleted the app password, connect it again.</div>
+                <div className="small" style={{ fontWeight: 400 }}>
+                  {mailbox.kind === "resend"
+                    ? `${mailbox.last_error ?? "Resend stopped accepting the API key."} Once it's fixed in Resend, connect again with the new key.`
+                    : `${mailbox.last_error ?? "The mail server stopped accepting the sign-in."} If you changed the account's password or deleted the app password, connect it again.`}
+                </div>
               </div>
             </div>
           )}
-          {preset?.dailyLimit && <span className="muted small">{preset.label} lets one mailbox send {preset.dailyLimit}. For big email campaigns, Resend handles more.</span>}
+          {preset?.dailyLimit && (
+            <span className="muted small">
+              {preset.kind === "resend" ? `Resend sends ${preset.dailyLimit}.` : `${preset.label} lets one mailbox send ${preset.dailyLimit}. For big email campaigns, Resend handles more.`}
+            </span>
+          )}
           <FormError error={test.error} />
           <div className="row wrap" style={{ gap: 8 }}>
             <Button icon="send" loading={test.isPending} onClick={() => test.mutate()}>Send me a test</Button>
@@ -140,7 +149,7 @@ export function EmailSettings() {
           </div>
         </div>
       ) : (
-        <ConnectForm existing={mailbox} onCancel={mailbox ? () => setEditing(false) : undefined} onSaved={() => { setEditing(false); refresh(); }} />
+        <ConnectForm existing={mailbox} onRailway={onRailway} onCancel={mailbox ? () => setEditing(false) : undefined} onSaved={() => { setEditing(false); refresh(); }} />
       )}
 
       {!mailbox && fallback && (
@@ -155,7 +164,24 @@ export function EmailSettings() {
   );
 }
 
-function ConnectForm({ existing, onSaved, onCancel }: { existing: Mailbox | null; onSaved: () => void; onCancel?: () => void }) {
+/** One choice in "How do you want to send email?". The recommended one is wider, with its reason. */
+function ProviderButton({ preset: p, pressed, onChoose }: { preset: MailPreset; pressed: boolean; onChoose: (p: MailPreset) => void }) {
+  return (
+    <button type="button" className={styles.provider} data-featured={p.recommended || undefined} aria-pressed={pressed} onClick={() => onChoose(p)}>
+      <ProviderMark preset={p.id} />
+      <span className="grow">
+        <span className={styles.providerName}>
+          {p.label}
+          {p.recommended && <span className="chip chip-green">Recommended</span>}
+        </span>
+        {p.summary && <small>{p.summary}</small>}
+        {p.id === "other" && <small>Any SMTP server</small>}
+      </span>
+    </button>
+  );
+}
+
+function ConnectForm({ existing, onRailway, onSaved, onCancel }: { existing: Mailbox | null; onRailway: boolean; onSaved: () => void; onCancel?: () => void }) {
   const session = useSession();
   const [presetId, setPresetId] = useState<MailPreset["id"] | null>(existing?.preset ?? null);
   const preset = mailPreset(presetId);
@@ -168,6 +194,7 @@ function ConnectForm({ existing, onSaved, onCancel }: { existing: Mailbox | null
   const [username, setUsername] = useState(existing?.username ?? "");
   const [advanced, setAdvanced] = useState(false);
   const keepsPassword = Boolean(existing && existing.preset === presetId);
+  const resend = preset?.kind === "resend";
 
   const choose = (p: MailPreset) => {
     setPresetId(p.id);
@@ -175,6 +202,9 @@ function ConnectForm({ existing, onSaved, onCancel }: { existing: Mailbox | null
     setPort(p.port ? String(p.port) : "");
     setSecurity(p.security ?? "");
     setAdvanced(p.id === "other");
+    // Resend sends from your own domain, never Gmail or Yahoo; a mailbox starts from your sign-in address.
+    if (p.kind === "resend" && isPersonalMailDomain(emailDomain(fromEmail))) setFromEmail("");
+    if (p.kind === "smtp" && !fromEmail) setFromEmail(session.profile.email ?? "");
     save.reset();
   };
 
@@ -195,43 +225,76 @@ function ConnectForm({ existing, onSaved, onCancel }: { existing: Mailbox | null
     },
   });
 
+  // Catch the two usual Resend slips before sending: a key copied only partly, and a Gmail-style address.
+  const fromDomain = emailDomain(fromEmail);
+  const keyProblem = resend && password.trim() && !password.trim().startsWith("re_") ? "Resend API keys start with re_. Copy the key itself (shown once, right after you create it), not its name or ID." : null;
+  const fromProblem = resend && isPersonalMailDomain(fromDomain) ? `Resend can't send from a ${fromDomain} address. Use one on the domain you added in Resend, like office@yourcompany.com.` : null;
+
   return (
-    <form className="card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-      <div className="stack-sm">
-        <strong id="provider-label">Where is your business email?</strong>
-        <div className={styles.providers} role="group" aria-labelledby="provider-label">
-          {MAIL_PRESETS.map((p) => (
-            <button key={p.id} type="button" className={styles.provider} aria-pressed={presetId === p.id} onClick={() => choose(p)}>
-              <ProviderMark preset={p.id} />
-              <span>{p.label}{p.id === "resend" && <small>For large campaigns</small>}{p.id === "other" && <small>Any SMTP server</small>}</span>
-            </button>
-          ))}
+    <form className="card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); if (!keyProblem && !fromProblem) save.mutate(); }}>
+      <div className="stack-sm" role="group" aria-labelledby="provider-label">
+        <strong id="provider-label">How do you want to send email?</strong>
+        {MAIL_PRESETS.filter((p) => p.recommended).map((p) => <ProviderButton key={p.id} preset={p} pressed={presetId === p.id} onChoose={choose} />)}
+        <span className={styles.or}>Or send from a mailbox you already have</span>
+        <div className={styles.providers}>
+          {MAIL_PRESETS.filter((p) => !p.recommended).map((p) => <ProviderButton key={p.id} preset={p} pressed={presetId === p.id} onChoose={choose} />)}
         </div>
+        {onRailway && <span className="muted small">Crewtavo is running on Railway. Railway's trial and Hobby plans block sending from a mailbox, so choose Resend unless you're on Railway Pro.</span>}
       </div>
 
       {preset && (
         <>
-          <div className="callout">
-            <Icon name="info" size={18} />
-            <div className="grow stack-sm" style={{ fontWeight: 400 }}>
-              <ol className={styles.steps}>{preset.steps.map((s) => <li key={s}>{s}</li>)}</ol>
-              {preset.helpUrl && (
-                <a className="btn btn-sm" style={{ justifySelf: "start" }} href={preset.helpUrl} target="_blank" rel="noreferrer">
-                  <Icon name="external" size={14} />{preset.helpLabel ?? "Open help"}
-                </a>
-              )}
-              {preset.note && <span className="muted small">{preset.note}</span>}
+          {preset.steps.some((s) => typeof s !== "string") ? (
+            <ol className={styles.guide} aria-label={`Set up ${preset.label}`}>
+              {(preset.steps as MailStep[]).map((s, i) => (
+                <li key={s.title}>
+                  <span className={styles.stepNumber} aria-hidden="true">{i + 1}</span>
+                  <div className="stack-sm" style={{ gap: 4 }}>
+                    <strong>{s.title}</strong>
+                    <span className="muted">{s.text}</span>
+                    {s.url && (
+                      <a className="btn btn-sm" style={{ justifySelf: "start", marginTop: 4 }} href={s.url} target="_blank" rel="noreferrer">
+                        <Icon name="external" size={14} />{s.urlLabel ?? "Open"}
+                      </a>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="callout">
+              <Icon name="info" size={18} />
+              <div className="grow stack-sm" style={{ fontWeight: 400 }}>
+                <ol className={styles.steps}>{preset.steps.map((s) => <li key={String(s)}>{String(s)}</li>)}</ol>
+                {preset.helpUrl && (
+                  <a className="btn btn-sm" style={{ justifySelf: "start" }} href={preset.helpUrl} target="_blank" rel="noreferrer">
+                    <Icon name="external" size={14} />{preset.helpLabel ?? "Open help"}
+                  </a>
+                )}
+                {preset.note && <span className="muted small">{preset.note}</span>}
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="form-grid">
-            <Field label={preset.kind === "resend" ? "Send from" : "Email address"} hint={preset.kind === "resend" ? "An address on the domain you verified in Resend." : "The mailbox you're connecting. Emails come from this address."}>
-              <input className="input" type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} required maxLength={200} autoComplete="email" />
-            </Field>
-            <Field label={preset.passwordLabel} hint={keepsPassword ? "Leave blank to keep the saved one." : preset.kind === "smtp" && preset.id !== "other" && preset.id !== "microsoft" ? "Not your regular password." : undefined}>
-              <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required={!keepsPassword} maxLength={500} autoComplete="new-password" spellCheck={false} />
-            </Field>
-          </div>
+          {resend ? (
+            <div className="form-grid">
+              <Field label="API key" error={keyProblem} hint={keepsPassword ? "Leave blank to keep the saved one." : "From step 3. It starts with re_."}>
+                <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required={!keepsPassword} maxLength={500} autoComplete="off" spellCheck={false} placeholder="re_…" />
+              </Field>
+              <Field label="Send from" error={fromProblem} hint="Any address on the domain you added in Resend.">
+                <input className="input" type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} required maxLength={200} autoComplete="email" placeholder="office@yourcompany.com" />
+              </Field>
+            </div>
+          ) : (
+            <div className="form-grid">
+              <Field label="Email address" hint="The mailbox you're connecting. Emails come from this address.">
+                <input className="input" type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} required maxLength={200} autoComplete="email" />
+              </Field>
+              <Field label={preset.passwordLabel} hint={keepsPassword ? "Leave blank to keep the saved one." : preset.id !== "other" && preset.id !== "microsoft" ? "Not your regular password." : undefined}>
+                <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required={!keepsPassword} maxLength={500} autoComplete="new-password" spellCheck={false} />
+              </Field>
+            </div>
+          )}
           <Field label="Sender name" hint="What clients see as who it's from.">
             <input className="input" value={fromName} onChange={(e) => setFromName(e.target.value)} maxLength={120} />
           </Field>

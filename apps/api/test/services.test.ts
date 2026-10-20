@@ -149,7 +149,7 @@ describe("sender names", () => {
     const settings = { preset: "resend", kind: "resend" as const, from_email: "office@acme.example" };
     expect(await sendWithMailbox(settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" })).toEqual({
       sent: false,
-      reason: "Couldn't reach the email provider. Try again.",
+      reason: "Couldn't reach Resend. Try again.",
     });
   });
 });
@@ -335,7 +335,7 @@ describe("sign-in links", () => {
     expect(emails).toEqual([{ from: company, link: true }]);
     // Supabase's mailer would refuse right after the link, so it isn't asked.
     expect(calls.some((c) => c.url.pathname === "/auth/v1/recover")).toBe(false);
-    expect(calls.find((c) => c.method === "PATCH" && c.path === "integrations")?.body).toEqual({ status: "error", last_error: "The email provider refused it (403: API key is invalid)." });
+    expect(calls.find((c) => c.method === "PATCH" && c.path === "integrations")?.body).toEqual({ status: "error", last_error: expect.stringContaining("Resend didn't accept this API key") });
   });
 });
 

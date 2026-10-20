@@ -158,7 +158,7 @@ lists them all).
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books. Create a server-based client at api-console.zoho.com. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar: show a company's Google calendars on the schedule and put visits on a Google calendar Crewtavo makes. In Google Cloud, turn on the Google Calendar API, set up the OAuth consent screen with the scopes `calendar.calendarlist.readonly`, `calendar.events.readonly` and `calendar.app.created`, and create a Web application client whose redirect URI is the one shown on the Google Calendar app page (`https://your-domain/api/apps/google_calendar/callback`). Then, under **Audience**, publish the app (or choose **Internal** on Google Workspace): while it's in **Testing**, Google ends sign-ins after 7 days and Google Calendar disconnects. Optional: without these, Google Calendar works by secret address both ways (the Apps page walks people through it), and calendar files can be uploaded under **Settings → Calendars**. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Not needed for most businesses: connect Stripe on the **Apps** page instead (see [Connecting Stripe](#connecting-stripe)). These share one Stripe account with every company on the server that hasn't connected its own (so **Bring in your Stripe history** works with it only on a one-company server). Point a webhook at `/api/webhooks/stripe` with API version `2024-06-20` and the events in `STRIPE_EVENTS` (`apps/api/src/integrations/stripe.ts`): `invoice.*` (finalized, paid, payment_failed, voided, marked_uncollectible), `payment_intent.processing`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`, `payout.*` (created, updated, paid, failed, canceled) and `checkout.session.*` (completed, async_payment_succeeded, async_payment_failed). |
-| `RESEND_API_KEY`, `EMAIL_FROM` | Email through [Resend](https://resend.com). **Needed on Railway's trial and Hobby plans**, which block outgoing mail servers (SMTP). On Railway Pro or when self-hosting, the business can instead connect its own mailbox under **Settings → Email**, and these only give it a default sender until then. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Optional default sender through [Resend](https://resend.com), used until the business connects its own email under **Settings → Email**. That screen recommends Resend (the business's own free account, which works on every Railway plan); a mailbox over SMTP only works on Railway Pro or when self-hosting, since Railway's trial and Hobby plans block outgoing mail servers. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages. For two-way texting, set the number's **Messaging > A message comes in** webhook to `https://your-domain/api/webhooks/twilio` (HTTP POST). Replies appear in Messages and notify the office. `APP_URL` must match that address exactly, because Twilio signs the full URL. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SCHEDULER` | Set to `off` on extra replicas of `crewtavo`, so background tasks run in one place. |
@@ -235,12 +235,12 @@ the Sentry project's security settings so the server never infers them.
 
 ## After the first sign-in
 
-- **Settings → Email** (self-hosted, or Railway Pro; Railway's trial and Hobby plans block SMTP, so
-  use `RESEND_API_KEY` there): connect the business mailbox (Gmail, Google Workspace, Zoho, Microsoft 365, Yahoo,
-  iCloud or any SMTP server) with an app password; the screen links to where each provider makes one.
-  Crewtavo signs in and sends you a test before saving. Quotes, invoices, reminders, team invites,
-  password resets and team notifications then go out from that address. No DNS changes, no extra
-  account, nothing to pay for. (Until it's connected, invites show a link to copy and text instead.)
+- **Settings → Email**: connect Resend (recommended, and the only option on Railway's trial and Hobby plans,
+  which block SMTP): the screen walks through making a free Resend account, adding the domain and creating a
+  Sending access API key, with a button to each page. Or, self-hosted or on Railway Pro, connect the business
+  mailbox (Gmail, Google Workspace, Zoho, Microsoft 365, Yahoo, iCloud or any SMTP server) with an app password.
+  Crewtavo sends you a test before saving. Quotes, invoices, reminders, team invites, password resets and team
+  notifications then go out from that address. (Until it's connected, invites show a link to copy and text instead.)
 - **Settings → People and Roles**: invite the team. Starter roles: General manager, Office manager
   (invoices and payroll), Operations manager, Foreman (runs their own crew, no prices) and Employee.
 - **Settings → Profile → Notifications** (each person): turn on notifications for their phone and
