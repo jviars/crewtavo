@@ -1,5 +1,5 @@
 import type { TablesUpdate } from "@crewtavo/core/database";
-import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { paymentProblem, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -336,8 +336,9 @@ function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: str
   const save = useMutation({
     meta: { inline: true, success: (_: unknown) => (value >= invoice.balance - 0.005 ? "Payment recorded. The invoice is paid." : "Payment recorded") },
     mutationFn: async () => {
-      if (!(value > 0)) throw new Error("Enter an amount greater than zero.");
-      if (tooMuch) throw new Error(`That's more than the ${formatMoneyCents(invoice.balance)} balance.`);
+      // The same check AI assistants' record_payment makes (packages/core/src/money.ts).
+      const problem = paymentProblem(value, invoice.balance);
+      if (problem) throw new Error(problem);
       if (invoice.draft) unwrap(await supabase().from("invoices").update({ status: "sent" }).eq("id", invoice.id));
       unwrap(
         await supabase().from("payments").insert({

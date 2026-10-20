@@ -4,7 +4,7 @@
  * that changes something names its area; the person chooses which areas the assistant may change,
  * and deleting needs full access (packages/core/src/assistants.ts).
  */
-import type { AssistantArea } from "@crewtavo/core";
+import { assistantRefusal, mayChange, type AssistantAccess, type AssistantArea, type Permission, type Role } from "@crewtavo/core";
 import { z } from "zod";
 import type { Env } from "../env";
 import { ASSISTANT_READ_ONLY } from "../lib/assistants";
@@ -16,10 +16,40 @@ export interface ToolContext {
   userId: string;
   companyId: string;
   timezone: string;
+  /** The person's level and the areas their role gives them, as requireCompany works them out. */
+  role: Role;
+  permissions: Permission[];
+  /** What the person let this assistant change; null for an ordinary sign-in. */
+  access: AssistantAccess | null;
   /** Where this Crewtavo is, for links people share (booking forms). */
   origin: string;
   assistants: { enabled: boolean; read_only: boolean };
 }
+
+/**
+ * For a tool whose work the database doesn't hold to the person's role (figures it adds up, or
+ * work done with the server's own key): the same check the API's requireCompany makes.
+ */
+export function requireRole(ctx: ToolContext, roles?: readonly Role[], permission?: Permission) {
+  if ((roles && ctx.role !== "owner" && !roles.includes(ctx.role)) || (permission && !ctx.permissions.includes(permission))) {
+    throw new Error("Your role in Crewtavo doesn't allow that. An owner or admin can change your role.");
+  }
+}
+
+/** For a tool that also changes another area (a job's visits are the schedule's): the same check as its own. */
+export function requireArea(ctx: ToolContext, area: AssistantArea, deleting = false) {
+  if (ctx.access && !mayChange(ctx.access, area, deleting)) throw new Error(assistantRefusal(area, deleting, ctx.access));
+}
+
+/** Whether the assistant may change that area too (for doing the part it may, and saying what it skipped). */
+export const areaAllows = (ctx: ToolContext, area: AssistantArea) => !ctx.access || mayChange(ctx.access, area);
+
+/** The person's level and areas, for the shared services (services/schedule.ts and others). */
+export const scopeOf = (ctx: ToolContext) => ({ db: ctx.db, companyId: ctx.companyId, role: ctx.role, permissions: ctx.permissions });
+
+/** Whether the person's role would allow it (for leaving out what they can't see). */
+export const roleAllows = (ctx: ToolContext, roles?: readonly Role[], permission?: Permission) =>
+  !((roles && ctx.role !== "owner" && !roles.includes(ctx.role)) || (permission && !ctx.permissions.includes(permission)));
 
 export interface Tool<S extends z.ZodType> {
   description: string;

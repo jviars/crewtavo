@@ -17,6 +17,7 @@ import { formatDate, formatMoney, formatMoneyCompact, formatNumber, todayIn } fr
 import { can, hasRole, useSession } from "@/lib/session";
 import { CATEGORY_LABELS } from "../field/fieldData";
 import { BarChart, HBars, ReportCard, ReportTable, Stat } from "./Charts";
+import { agingBuckets, jobProfit } from "@crewtavo/core/reports";
 import { bucketize, bucketsFor, hoursBetween, PRESETS, resolveRange, shortDate, type PresetKey, type Range } from "./range";
 
 const TABS = [
@@ -207,17 +208,8 @@ function Overview({ range }: { range: Range }) {
 function Aging({ open }: { open: Array<{ balance_due: number | string; due_on: string | null }> }) {
   const { company } = useSession();
   const today = todayIn(company.timezone);
-  const late = (due: string | null) => (due ? Math.floor((Date.parse(today) - Date.parse(due)) / 86_400_000) : 0);
-  const buckets = [
-    { key: "current", label: "Not yet due", test: (n: number) => n <= 0, color: "var(--green)" },
-    { key: "30", label: "1–30 days late", test: (n: number) => n >= 1 && n <= 30, color: "#d9a43b" },
-    { key: "60", label: "31–60 days late", test: (n: number) => n >= 31 && n <= 60, color: "#d97a3b" },
-    { key: "90", label: "61–90 days late", test: (n: number) => n >= 61 && n <= 90, color: "#c8553d" },
-    { key: "90+", label: "Over 90 days late", test: (n: number) => n > 90, color: "var(--danger)" },
-  ].map((b) => {
-    const rows = open.filter((i) => b.test(late(i.due_on)));
-    return { key: b.key, label: b.label, color: b.color, value: sum(rows, (i) => Number(i.balance_due)), hint: `${rows.length}` };
-  });
+  const colors: Record<string, string> = { current: "var(--green)", "30": "#d9a43b", "60": "#d97a3b", "90": "#c8553d", "90+": "var(--danger)" };
+  const buckets = agingBuckets(open, today).map((b) => ({ key: b.key, label: b.label, color: colors[b.key], value: b.amount, hint: `${b.count}` }));
   const total = sum(buckets, (b) => b.value);
   return (
     <ReportCard title="Unpaid invoices by age" subtitle={`${formatMoney(total)} outstanding today`} action={<Link to="/invoices?status=overdue" className="btn btn-ghost btn-sm">Overdue invoices<Icon name="arrowRight" size={14} /></Link>}>
@@ -463,14 +455,8 @@ function Work({ range }: { range: Range }) {
           ])
         : [[], [], {} as Rates];
       const target = Number(((unwrap(settings).settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
-      const costed = jobs.map((j) => {
-        const labor = sum(time.filter((t) => t.job_id === j.id), (t) => hoursBetween(t.started_at, t.ended_at) * Number(rates[t.id] ?? 0));
-        const spent = sum(expenses.filter((e) => e.job_id === j.id), (e) => Number(e.amount));
-        const materials = sum(j.lines, (l) => Number(l.quantity) * Number(l.unit_cost ?? 0));
-        const revenue = Number(j.financials?.contract_total ?? 0);
-        const cost = labor + spent + materials;
-        return { id: j.id, number: j.number, title: j.title, client: j.client?.display_name ?? "", revenue, cost, profit: revenue - cost, margin: revenue > 0 ? ((revenue - cost) / revenue) * 100 : null };
-      });
+      // Costed as AI assistants' job_profit costs it (packages/core/src/reports.ts).
+      const costed = jobProfit(jobs, time, expenses, (t) => Number(rates[t.id] ?? 0), target).jobs.map((j) => ({ ...j, margin: j.margin_percent }));
       return { visits, requests, jobs: costed, lines, target };
     },
   });
@@ -804,4 +790,3 @@ function Clients({ range }: { range: Range }) {
     </TabBody>
   );
 }
-
