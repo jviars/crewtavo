@@ -71,6 +71,12 @@ function InvoicePageScreen() {
     mutationFn: async (patch: TablesUpdate<"invoices">) => unwrap(await supabase().from("invoices").update(patch).eq("id", id)),
     onSuccess: refresh,
   });
+  // Written off: what's left isn't counted as owed any more (or is again, undone).
+  const writeOff = useMutation({
+    meta: { success: (_: unknown, on: boolean) => (on ? "Invoice written off" : "It's owed again") },
+    mutationFn: async (on: boolean) => unwrap(await supabase().from("invoices").update({ status: on ? "written_off" : "sent" }).eq("id", id)),
+    onSuccess: refresh,
+  });
   const remove = useMutation({
     meta: { success: "Draft invoice deleted" },
     mutationFn: async () => unwrap(await supabase().from("invoices").delete().eq("id", id)),
@@ -94,9 +100,10 @@ function InvoicePageScreen() {
 
   const draft = inv.status === "draft";
   const isVoid = inv.status === "void";
+  const writtenOff = inv.status === "written_off";
   const balance = Number(inv.balance_due);
   const paid = Number(inv.amount_paid);
-  const daysLate = inv.due_on && balance > 0 && !draft && !isVoid ? Math.floor((Date.parse(today) - Date.parse(inv.due_on)) / 86_400_000) : 0;
+  const daysLate = inv.due_on && balance > 0 && !draft && !isVoid && !writtenOff ? Math.floor((Date.parse(today) - Date.parse(inv.due_on)) / 86_400_000) : 0;
   const lastPayment = inv.payments.at(-1);
   // The Stripe invoice that matters now: the live one, else the latest.
   const stripe = inv.stripe.find((s) => s.status === "open" || s.status === "processing") ?? inv.stripe.find((s) => s.stripe_id);
@@ -115,7 +122,7 @@ function InvoicePageScreen() {
         title={`Invoice #${inv.number}`}
         actions={
           <>
-            {!isVoid && <Button icon="send" variant={draft ? "primary" : "secondary"} disabled={!inv.lines.length} title={!inv.lines.length ? "Add a line item first" : undefined} onClick={() => setDialog("send")}>{draft ? "Send invoice" : "Resend"}</Button>}
+            {!isVoid && !writtenOff && <Button icon="send" variant={draft ? "primary" : "secondary"} disabled={!inv.lines.length} title={!inv.lines.length ? "Add a line item first" : undefined} onClick={() => setDialog("send")}>{draft ? "Send invoice" : "Resend"}</Button>}
             {!draft && !isVoid && balance > 0 && <Button variant="primary" icon="dollar" disabled={paysInStripe} title={paysInStripe ? "Made in Stripe: record its payments there" : (bankNote ?? undefined)} onClick={() => setDialog("payment")}>Record payment</Button>}
             <Menu
               items={[
@@ -124,7 +131,23 @@ function InvoicePageScreen() {
                 { separator: true },
                 { label: "Mark as sent", icon: "check", hidden: !draft || !inv.lines.length, onSelect: () => update.mutate({ status: "sent" }) },
                 { label: "Record payment", icon: "dollar", hidden: !draft || !inv.lines.length, onSelect: () => setDialog("payment") },
-                { label: "Move back to draft", icon: "undo", hidden: draft || isVoid || inv.payments.length > 0 || fromStripe, onSelect: () => update.mutate({ status: "draft", sent_at: null }) },
+                { label: "Move back to draft", icon: "undo", hidden: draft || isVoid || writtenOff || inv.payments.length > 0 || fromStripe, onSelect: () => update.mutate({ status: "draft", sent_at: null }) },
+                {
+                  label: "Write off",
+                  icon: "archive",
+                  hidden: draft || isVoid || writtenOff || inv.status === "paid" || balance <= 0,
+                  // A bank payment on its way may still pay it.
+                  disabled: Boolean(bank),
+                  onSelect: async () => {
+                    const ok = await confirm({
+                      title: `Write off invoice #${inv.number}?`,
+                      body: `${formatMoneyCents(balance)} stops counting as owed: it comes off your unpaid invoices and receivables, and no more reminders go out. The invoice still counts toward what you've invoiced. If ${inv.client?.display_name ?? "the client"} pays later, record the payment here. You can undo this.`,
+                      confirmLabel: "Write off",
+                    });
+                    if (ok) writeOff.mutate(true);
+                  },
+                },
+                { label: "Undo write-off", icon: "undo", hidden: !writtenOff, onSelect: () => writeOff.mutate(false) },
                 {
                   label: "Void invoice",
                   icon: "x",
@@ -159,6 +182,15 @@ function InvoicePageScreen() {
       </div>
 
       {isVoid && <div className="callout"><Icon name="x" size={18} /><div className="grow">This invoice is void and isn't owed.</div></div>}
+      {writtenOff && (
+        <div className="callout">
+          <Icon name="archive" size={18} />
+          <div className="grow">
+            Written off{inv.written_off_at ? ` on ${formatDate(inv.written_off_at)}` : ""}: {formatMoneyCents(balance)} isn't counted as owed. If the client pays after all, record it and the invoice is marked paid.
+          </div>
+          <Button size="sm" icon="undo" disabled={writeOff.isPending} onClick={() => writeOff.mutate(false)}>Undo write-off</Button>
+        </div>
+      )}
       {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
       {bankNote && <div className="callout callout-info"><Icon name="clock" size={18} /><div className="grow">{bankNote}</div></div>}
       {/* Up front, rather than refused once someone has filled in a payment. */}
@@ -237,7 +269,7 @@ function InvoicePageScreen() {
             <div className="line grand"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
             {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}
             {paid !== 0 && <div className="line"><span>Paid</span><span>−{formatMoneyCents(paid)}</span></div>}
-            <div className="line grand" style={{ fontSize: 20, color: balance > 0 && daysLate > 0 ? "var(--danger)" : undefined }}><span>Balance due</span><span>{formatMoneyCents(balance)}</span></div>
+            <div className="line grand" style={{ fontSize: 20, color: balance > 0 && daysLate > 0 ? "var(--danger)" : writtenOff ? "var(--text-2)" : undefined }}><span>{writtenOff ? "Written off" : "Balance due"}</span><span>{formatMoneyCents(balance)}</span></div>
           </div>
           <div className="card card-pad stack-sm">
             <strong>Dates</strong>

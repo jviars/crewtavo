@@ -111,14 +111,29 @@ select public.stripe_import_invoice(:'co', jsonb_build_object(
   'customer', jsonb_build_object('id', 'cus_oak'),
   'lines', jsonb_build_array(jsonb_build_object('name', 'Leaf removal', 'quantity', 2, 'unit_price', 40))
 ), false) as bad \gset
-select tstripe.check((select status from public.invoices where id = :'bad') = 'void', 'an invoice written off in Stripe isn''t counted as owed');
+select tstripe.check((select status from public.invoices where id = :'bad') = 'written_off', 'an invoice written off in Stripe is written off here, so it isn''t counted as owed');
 select public.stripe_import_invoice(:'co', jsonb_build_object(
   'stripe_id', 'in_bad_1', 'status', 'paid', 'amount_due', 80,
   'payment', jsonb_build_object('amount', 80, 'method', 'other', 'processor_ref', 'in_bad_1:paid', 'out_of_band', true)
 ), false);
-select tstripe.check((select status from public.invoices where id = :'bad') = 'void', 'paid after all, a void invoice stays void');
+select tstripe.check((select status from public.invoices where id = :'bad') = 'paid', 'paid after all, it''s paid');
 select tstripe.check((select coalesce(processor, 'none') || '/' || coalesce(invoice_id::text, 'no invoice') || '/' || notes from public.payments where processor_ref = 'in_bad_1:paid')
-  = format('none/no invoice/Marked paid in Stripe. For invoice #%s, which is void', (select number from public.invoices where id = :'bad')),
+  = format('none/%s/Marked paid in Stripe', :'bad'),
+  'with the money on the invoice, editable since it came outside Stripe');
+
+-- Voided in Stripe, then paid after all (a bank payment already on its way).
+select public.stripe_import_invoice(:'co', jsonb_build_object(
+  'stripe_id', 'in_bad_2', 'status', 'void', 'amount_due', 30,
+  'customer', jsonb_build_object('id', 'cus_oak'),
+  'lines', jsonb_build_array(jsonb_build_object('name', 'Leaf removal', 'quantity', 1, 'unit_price', 30))
+), false) as voided \gset
+select public.stripe_import_invoice(:'co', jsonb_build_object(
+  'stripe_id', 'in_bad_2', 'status', 'paid', 'amount_due', 30,
+  'payment', jsonb_build_object('amount', 30, 'method', 'other', 'processor_ref', 'in_bad_2:paid', 'out_of_band', true)
+), false);
+select tstripe.check((select status from public.invoices where id = :'voided') = 'void', 'paid after all, a void invoice stays void');
+select tstripe.check((select coalesce(processor, 'none') || '/' || coalesce(invoice_id::text, 'no invoice') || '/' || notes from public.payments where processor_ref = 'in_bad_2:paid')
+  = format('none/no invoice/Marked paid in Stripe. For invoice #%s, which is void', (select number from public.invoices where id = :'voided')),
   'so the money is the client''s, noted with the invoice, and stays editable since it came outside Stripe');
 
 select tstripe.expect_error(format('select public.stripe_import_invoice(%L, %L::jsonb)', :'co', '{"stripe_id": "in_x", "status": "draft"}'), 'drafts in Stripe aren''t imported');
@@ -148,7 +163,7 @@ update public.payments set payout_id = :'po' where processor_ref = 'pi_oak_1';
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "b3000000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
-select tstripe.check((select count(*) from public.stripe_invoices where company_id = :'co') = 5, 'the office sees Stripe invoices');
+select tstripe.check((select count(*) from public.stripe_invoices where company_id = :'co') = 6, 'the office sees Stripe invoices');
 select tstripe.check((select count(*) from public.payouts where company_id = :'co') = 1, 'and deposits');
 with changed as (update public.payouts set amount = 1 returning 1) select tstripe.check((select count(*) from changed) = 0, 'but can''t change deposits');
 with changed as (update public.stripe_invoices set status = 'paid' returning 1) select tstripe.check((select count(*) from changed) = 0, 'or Stripe invoices');

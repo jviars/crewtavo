@@ -125,6 +125,7 @@ function fakeDb(tables: Record<string, Row[]>) {
       is: (k: string, v: unknown) => (filters.push((r) => (r[k] ?? null) === v), q),
       not: (k: string, _op: string, v: unknown) => (filters.push((r) => (r[k] ?? null) !== v), q),
       in: (k: string, vs: unknown[]) => (filters.push((r) => vs.includes(r[k])), q),
+      gt: (k: string, v: any) => (filters.push((r) => r[k] > v), q),
       gte: (k: string, v: any) => (filters.push((r) => r[k] >= v), q),
       like: (k: string, p: string) => (filters.push((r) => new RegExp(`^${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*")}$`).test(String(r[k] ?? ""))), q),
       match: (m: Row) => {
@@ -286,6 +287,13 @@ async function fakeStripe(input: string | URL, init: RequestInit = {}): Promise<
     if (!invoice) return noInvoice(m[1]!);
     if (invoice.status !== "open") return json({ error: { message: `You can only void open invoices. This one is ${invoice.status}.` } }, 400);
     invoice.status = "void";
+    return json(invoice);
+  }
+  if ((m = path.match(/^\/v1\/invoices\/([^/]+)\/mark_uncollectible$/))) {
+    const invoice = s.invoices.get(m[1]!);
+    if (!invoice) return noInvoice(m[1]!);
+    if (invoice.status !== "open") return json({ error: { message: `You can only mark open invoices uncollectible. This one is ${invoice.status}.` } }, 400);
+    Object.assign(invoice, { status: "uncollectible", status_transitions: { ...invoice.status_transitions, marked_uncollectible_at: 1_760_000_900 } });
     return json(invoice);
   }
   if ((m = path.match(/^\/v1\/invoices\/([^/]+)$/))) {
@@ -919,5 +927,44 @@ describe("keeping Stripe in step", () => {
     await event("invoice.payment_failed", { id: made!.stripe_id });
     expect(stripeInvoice(made!.stripe_id)!.status).toBe("void");
     expect(rowsFor(INV)[0]).toMatchObject({ status: "void" });
+  });
+
+  it("writes an invoice made in Stripe off there when it's written off here, and voids Crewtavo's own payment page", async () => {
+    const key = stripeKey("sk_live_A", "acct_A");
+    await connect(key);
+    await syncStripeInvoice(env, db.db, CO, INV);
+    const [ours] = rowsFor(INV);
+    // INV2 was made in Stripe.
+    side(key).invoices.set("in_made", { id: "in_made", status: "open", livemode: true, metadata: {}, status_transitions: { finalized_at: 1_760_000_000, paid_at: null } });
+    db.tables.stripe_invoices!.push({
+      id: crypto.randomUUID(), company_id: CO, invoice_id: INV2, stripe_id: "in_made", origin: "stripe", status: "open", amount_due: 160, tip_amount: 0,
+      hosted_url: null, created_at: new Date().toISOString(), livemode: true, stripe_account: null, detached_at: null,
+    });
+    for (const id of [INV, INV2]) db.tables.invoices!.find((i) => i.id === id)!.status = "written_off";
+
+    // Stripe keeps the books for one made there, so it's written off there too.
+    expect(await syncStripeInvoice(env, db.db, CO, INV2)).toBe("written off");
+    expect(stripeInvoice("in_made")!.status).toBe("uncollectible");
+    expect(rowsFor(INV2)[0]).toMatchObject({ status: "uncollectible" });
+    expect(await syncStripeInvoice(env, db.db, CO, INV2)).toBe("nothing to do");
+    // Crewtavo's own Stripe invoice is only the client's payment page: it goes, as when nothing is owed.
+    expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("voided");
+    expect(stripeInvoice(ours!.stripe_id)!.status).toBe("void");
+  });
+
+  it("writes the invoice off here when it's written off in the Stripe dashboard, once", async () => {
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    await syncStripeInvoice(env, db.db, CO, INV);
+    const [made] = rowsFor(INV);
+    // Marked uncollectible in Stripe on Oct 3, 10am in Chicago.
+    Object.assign(stripeInvoice(made!.stripe_id)!, { status: "uncollectible", status_transitions: { finalized_at: 1_760_000_100, paid_at: null, marked_uncollectible_at: 1_791_039_600 } });
+    await event("invoice.marked_uncollectible", { id: made!.stripe_id });
+    const invoice = db.tables.invoices!.find((i) => i.id === INV)!;
+    expect(invoice).toMatchObject({ status: "written_off", written_off_at: "2026-10-03T15:00:00.000Z" });
+    expect(rowsFor(INV)[0]).toMatchObject({ status: "uncollectible" });
+    // The office undoes it here; Stripe sending the event again doesn't write it off again.
+    invoice.status = "sent";
+    await event("invoice.marked_uncollectible", { id: made!.stripe_id });
+    expect(invoice.status).toBe("sent");
   });
 });

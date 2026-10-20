@@ -500,9 +500,34 @@ async function voidStripeInvoice(ctx: Ctx, row: Linked): Promise<boolean> {
 }
 
 /**
+ * Write off an open Stripe invoice made in Stripe (its books are Stripe's), as it was here. False
+ * when it turns out to be paid (and that's recorded instead).
+ */
+async function writeOffStripeInvoice(ctx: Ctx, row: Linked): Promise<boolean> {
+  if (!row.stripe_id) return false;
+  try {
+    await stripeApi(ctx.key, "POST", `/v1/invoices/${row.stripe_id}/mark_uncollectible`);
+  } catch (error) {
+    if (missing(error)) {
+      await detach(ctx.admin, [row.id]);
+      return true;
+    }
+    const current = await fetchInvoice(ctx.key, row.stripe_id).catch(() => null);
+    if (current?.status === "paid") {
+      await applyInvoice(ctx, current);
+      return false;
+    }
+    if (current?.status !== "uncollectible" && current?.status !== "void") throw error;
+  }
+  fail((await ctx.admin.from("stripe_invoices").update({ status: "uncollectible" }).eq("id", row.id)).error);
+  return true;
+}
+
+/**
  * Bring an invoice's Stripe invoice in step with it (the outbox's stripe.invoice job). Ours are
  * replaced when the balance changes and voided once nothing is owed; ones made in Stripe are
- * voided there once they're paid or voided here.
+ * voided there once they're paid or voided here, and written off there when they're written off
+ * here.
  */
 export async function syncStripeInvoice(env: Env, admin: Db, companyId: string, invoiceId: string): Promise<string> {
   const ctx = await context(env, admin, companyId);
@@ -523,6 +548,7 @@ export async function syncStripeInvoice(env: Env, admin: Db, companyId: string, 
     return "busy";
   }
   if (live && !stale) return "in step";
+  if (live && imported && invoice.status === "written_off") return (await writeOffStripeInvoice(ctx, live)) ? "written off" : "paid in Stripe";
   if (live && !(await voidStripeInvoice(ctx, live))) return "paid in Stripe";
   // Ones made in Stripe stay Stripe's. Ours go to Stripe when sent, for companies with their own key.
   if (imported || !owed || !ctx.own) return live ? "voided" : "nothing to do";
@@ -638,6 +664,21 @@ async function settleOwnInvoice(ctx: Ctx, invoice: StripeInvoice) {
   }
 
   if (invoice.status === "paid") await recordPayment(ctx, invoice);
+  // Written off in the Stripe dashboard: written off here too, once, so a write-off undone here
+  // stays undone when Stripe repeats the event.
+  if (invoice.status === "uncollectible" && row && row.status !== "uncollectible") {
+    fail(
+      (
+        await ctx.admin
+          .from("invoices")
+          .update({ status: "written_off", written_off_at: isoAt(invoice.status_transitions.marked_uncollectible_at) })
+          .eq("company_id", ctx.companyId)
+          .eq("id", meta.crewtavo_invoice_id!)
+          .in("status", OWED)
+          .gt("balance_due", 0)
+      ).error,
+    );
+  }
   const status = invoice.status === "paid" || invoice.status === "void" || invoice.status === "uncollectible" ? invoice.status : null;
   if (row && status && row.status !== status) await ctx.admin.from("stripe_invoices").update({ status }).eq("id", row.id);
 }
@@ -758,6 +799,7 @@ async function importInvoice(ctx: Ctx, invoice: StripeInvoice, quiet: boolean) {
       issued_on: stripeDay(sent, ctx.timezone),
       due_on: invoice.due_date ? stripeDay(invoice.due_date, ctx.timezone) : null,
       sent_at: isoAt(sent),
+      written_off_at: invoice.status_transitions.marked_uncollectible_at ? isoAt(invoice.status_transitions.marked_uncollectible_at) : null,
       subject: invoice.description?.split("\n")[0]?.trim().slice(0, 200) || `Stripe invoice ${invoice.number ?? ""}`.trim(),
       customer: { id: invoice.customer, name: invoice.customer_name, email: invoice.customer_email, phone: invoice.customer_phone, address: invoice.customer_address },
       lines: importedLines(invoice, lines),

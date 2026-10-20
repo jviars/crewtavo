@@ -14,9 +14,10 @@ const salesScope = (ctx: ToolContext) => ({ db: ctx.db, env: ctx.env, companyId:
 
 export const invoiceTools = {
   list_invoices: tool({
-    description: "Invoices, newest first, with client, total, balance due and due date. Filter by status (draft, sent, partially_paid, paid, overdue, void, or unpaid: sent, partly paid and overdue) and client.",
+    description:
+      "Invoices, newest first, with client, total, balance due and due date. Filter by status (draft, sent, partially_paid, paid, overdue, void, written_off, or unpaid: sent, partly paid and overdue) and client. Written off: the business took the loss on what's left, so it isn't counted as owed.",
     input: z.object({
-      status: z.enum(["all", "unpaid", "draft", "sent", "partially_paid", "paid", "overdue", "void"]).default("all"),
+      status: z.enum(["all", "unpaid", "draft", "sent", "partially_paid", "paid", "overdue", "void", "written_off"]).default("all"),
       client_id: z.uuid().optional(),
       limit: z.number().int().min(1).max(200).default(50),
       offset: z.number().int().min(0).default(0),
@@ -40,7 +41,7 @@ export const invoiceTools = {
       one(
         ctx.db
           .from("invoices")
-          .select("id, number, kind, status, subtotal, discount_amount, tax_amount, total, amount_paid, balance_due, issued_on, due_on, job:jobs(id, number, title), client:clients(id, display_name, email), lines:invoice_line_items(name, description, quantity, unit, unit_price, taxable), payments(id, amount, tip_amount, method, received_at, notes, processor)")
+          .select("id, number, kind, status, subtotal, discount_amount, tax_amount, total, amount_paid, balance_due, issued_on, due_on, written_off_at, job:jobs(id, number, title), client:clients(id, display_name, email), lines:invoice_line_items(name, description, quantity, unit, unit_price, taxable), payments(id, amount, tip_amount, method, received_at, notes, processor)")
           .eq("id", a.invoice_id)
           .eq("company_id", ctx.companyId)
           .maybeSingle(),
@@ -127,6 +128,26 @@ export const invoiceTools = {
     run: async (ctx, a) => {
       await changed(ctx.db.from("invoices").update({ status: "void" }).eq("id", a.invoice_id).eq("company_id", ctx.companyId).select("id"), "That invoice");
       return { voided: true };
+    },
+  }),
+  write_off_invoice: tool({
+    description:
+      "Write off what's still owed on a sent invoice the client is never going to pay (partly paid ones too): it stops counting as owed (receivables, past due, reminders) but still counts as invoiced, and keeps its visits. A payment that comes in later is still recorded on it. undo_write_off makes it owed again.",
+    input: z.object({ invoice_id: z.uuid(), ...companyArg }),
+    area: "invoices",
+    destructive: true,
+    run: async (ctx, a) => {
+      await changed(ctx.db.from("invoices").update({ status: "written_off" }).eq("id", a.invoice_id).eq("company_id", ctx.companyId).select("id"), "That invoice");
+      return one(ctx.db.from("invoices").select("id, number, status, balance_due, written_off_at").eq("id", a.invoice_id).maybeSingle(), "That invoice");
+    },
+  }),
+  undo_write_off: tool({
+    description: "Make a written-off invoice owed again: it's back with the unpaid invoices, past due if its due date has passed.",
+    input: z.object({ invoice_id: z.uuid(), ...companyArg }),
+    area: "invoices",
+    run: async (ctx, a) => {
+      await changed(ctx.db.from("invoices").update({ status: "sent" }).eq("id", a.invoice_id).eq("company_id", ctx.companyId).eq("status", "written_off").select("id"), "That written-off invoice");
+      return one(ctx.db.from("invoices").select("id, number, status, balance_due").eq("id", a.invoice_id).maybeSingle(), "That invoice");
     },
   }),
 };
