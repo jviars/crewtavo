@@ -43,7 +43,7 @@ export const guideTools = {
   }),
   save_guide: tool({
     description:
-      "Write a new guide (no guide_id) or replace one (with guide_id and the updated_at get_guide gave, so a newer save by someone else isn't lost). The body is Markdown: headings, lists, bold, italics, links, quotes and code; a YouTube or Vimeo link alone on its own line shows as the video. New guides are drafts unless status is published.",
+      "Write a new guide (no guide_id) or replace one (with guide_id and the updated_at get_guide gave, so a newer save by someone else isn't lost). The body is Markdown: headings, numbered steps, lists, checklists (- [ ] Step), bold, italics, links, quotes, callouts (a quote whose first line is [!TIP], [!IMPORTANT] or [!WARNING]) and code; a YouTube or Vimeo link alone on its own line shows as the video. New guides are drafts unless status is published.",
     input: z.object({
       guide_id: z.uuid().optional(),
       updated_at: z.string().optional().describe("From get_guide; needed with guide_id."),

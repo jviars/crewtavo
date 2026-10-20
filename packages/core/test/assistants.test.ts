@@ -140,6 +140,15 @@ describe("guides from Markdown", () => {
     expect(text).toBe("Fueling\nUse non-ethanol gas, see the log.\nMower\nTrimmer\nShut off\nFill\nNever fuel a hot engine.\nfuel = 2 gal");
   });
 
+  it("makes checklists and callouts like the editor's", () => {
+    const { html, text } = markdownToGuide("- [ ] Cones out\n- [x] Blower fueled\n\n> [!WARNING]\n> Sealer is slippery when wet.\n\n> [!TIP] Start at the far end.");
+    expect(html).toBe(
+      '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><div><p>Cones out</p></div></li><li data-type="taskItem" data-checked="true"><div><p>Blower fueled</p></div></li></ul>' +
+        '<div data-callout="warning"><p>Sealer is slippery when wet.</p></div><div data-callout="tip"><p>Start at the far end.</p></div>',
+    );
+    expect(text).toBe("Cones out\nBlower fueled\nSealer is slippery when wet.\nStart at the far end.");
+  });
+
   it("lets no markup through", () => {
     const { html } = markdownToGuide('<script>alert(1)</script> <img src=x onerror=alert(1)> [click](javascript:alert(1)) `<b>` *a* _b_');
     expect(html).toBe("<p>&lt;script&gt;alert(1)&lt;/script&gt; &lt;img src=x onerror=alert(1)&gt; click) <code>&lt;b&gt;</code> <em>a</em> <em>b</em></p>");

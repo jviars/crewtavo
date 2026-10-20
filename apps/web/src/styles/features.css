@@ -289,23 +289,55 @@ a.field-card:active { transform: scale(0.99); }
 .rte-toolbar { position: sticky; top: var(--topbar-height); z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 6px; border-bottom: 1px solid var(--divider); background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(8px); border-radius: 12px 12px 0 0; }
 .rte-btn { display: inline-grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-weight: 800; font-size: 13px; transition: background var(--dur-fast), color var(--dur-fast); }
 .rte-btn:hover { background: var(--fill-2); color: var(--ink); }
-.rte-btn[aria-pressed="true"] { background: var(--green-tint); color: var(--green-dark); }
+.rte-btn[aria-pressed="true"], .rte-btn.is-on { background: var(--green-tint); color: var(--green-dark); }
+.rte-btn:disabled { opacity: 0.4; pointer-events: none; }
 .rte-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--divider); }
 .rte-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--divider); background: var(--fill); color: var(--text-3); animation: pop-in 150ms var(--ease-out); }
 .rte-link .input { flex: 1; min-width: 0; height: 34px; }
 .rte-link .error-text { flex-basis: 100%; padding-left: 23px; }
-.rte-body-wrap { position: relative; }
 .rte-body { padding: 16px 20px 24px; outline: none; font-size: 15px; }
-.rte-placeholder { position: absolute; top: 16px; left: 20px; color: var(--text-4); pointer-events: none; font-size: 15px; }
+/* Tiptap: the hint in an empty guide, players and pictures picked with a click, tables. */
+.rte-body .is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; color: var(--text-4); pointer-events: none; }
+.rte-body iframe { pointer-events: none; }
+.rte-body .ProseMirror-selectednode { outline: 3px solid var(--green); outline-offset: 2px; border-radius: 10px; }
+.rte-body .tableWrapper { overflow-x: auto; margin: 0 0 1em; }
+.rte-body .tableWrapper table { margin: 0; }
+.rte-body .selectedCell { background: var(--green-tint); }
 .prose > :first-child { margin-top: 0; }
 .prose h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.015em; margin: 1.3em 0 0.4em; }
 .prose h3 { font-size: 17px; font-weight: 800; margin: 1.2em 0 0.3em; }
+.prose h4 { font-size: 15px; font-weight: 800; margin: 1.1em 0 0.3em; }
 .prose p { margin: 0 0 0.8em; }
 .prose ul, .prose ol { margin: 0 0 0.9em; padding-left: 1.4em; }
 .prose li { margin: 0.2em 0; }
 .prose li::marker { color: var(--text-3); }
+.prose li > p { margin: 0; }
+.prose li > p + * { margin-top: 0.4em; }
+/* Numbered lists are steps: a number in a circle and room between them. A list inside a step stays plain. */
+.prose ol:not(li ol) { list-style: none; padding-left: 0; counter-reset: step; }
+.prose ol:not(li ol) > li { position: relative; counter-increment: step; min-height: 26px; padding-left: 38px; margin: 0 0 0.7em; }
+.prose ol:not(li ol) > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--green-tint); color: var(--green-dark); font-size: 13px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+/* Checklists. The editor has real checkboxes; a guide being read has none in its HTML, so the box is drawn. */
+.prose ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.prose ul[data-type="taskList"] > li { display: flex; gap: 10px; align-items: flex-start; }
+.prose ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
+.prose ul[data-type="taskList"] > li > div > p { margin: 0; }
+.prose ul[data-type="taskList"] > li > label { flex: none; display: grid; place-items: center; height: 1lh; }
+.prose ul[data-type="taskList"] > li > label input { width: 18px; height: 18px; margin: 0; accent-color: var(--green-solid); }
+.prose ul[data-type="taskList"] > li:not(:has(> label))::before { content: ""; flex: none; box-sizing: border-box; width: 18px; height: 18px; margin-top: calc((1lh - 18px) / 2); border: 2px solid var(--border-strong); border-radius: 5px; }
+.prose ul[data-type="taskList"] > li[data-checked="true"]:not(:has(> label))::before { border-color: var(--green-solid); background: var(--green-solid) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / 12px no-repeat; }
 .prose blockquote { margin: 0 0 1em; padding: 10px 14px; border-left: 3px solid var(--green); background: var(--green-tint); border-radius: 0 8px 8px 0; color: var(--ink); }
-.prose blockquote p:last-child { margin-bottom: 0; }
+/* Callouts: Tip, Important and Warning, labelled in the box itself. */
+.prose [data-callout] { margin: 0 0 1em; padding: 10px 14px 12px; border-left: 3px solid var(--info); border-radius: 0 8px 8px 0; background: var(--info-tint); color: var(--ink); }
+.prose [data-callout]::before { content: "Tip"; display: block; margin-bottom: 2px; color: var(--info); font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.prose [data-callout="important"] { border-color: var(--req); background: var(--warning-tint); }
+.prose [data-callout="important"]::before { content: "Important"; color: var(--warning); }
+.prose [data-callout="warning"] { border-color: var(--danger); background: var(--danger-tint); }
+.prose [data-callout="warning"]::before { content: "Warning"; color: var(--danger); }
+.prose :is(blockquote, [data-callout]) > :last-child { margin-bottom: 0; }
+.prose table { margin: 0 0 1em; }
+.prose th { background: var(--fill); font-weight: 700; text-align: left; }
+.prose :is(td, th) > p { margin: 0; }
 .prose a { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
 .prose hr { border: 0; border-top: 1px solid var(--divider); margin: 1.4em 0; }
 .prose code { padding: 1px 5px; border-radius: 5px; background: var(--fill-2); font-size: 0.92em; }
@@ -321,8 +353,43 @@ a.field-card:active { transform: scale(0.99); }
 .kb-answer { border-color: var(--green-tint-2); background: linear-gradient(180deg, var(--green-tint) 0%, var(--surface) 60%); animation: slide-up var(--dur-slow) var(--ease-out); }
 .kb-answer-icon { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--green-solid); color: #fff; }
 .kb-doc { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; flex: none; background: var(--fill-2); color: var(--text-2); }
-.sop-body { font-size: 15px; }
-@media print { .sop-body { box-shadow: none; border: 0; padding: 0 !important; } }
+
+/* ---------- Reading a guide ---------- */
+/* A column short enough to read comfortably, with "On this page" beside it, or folded above it when there's no room. */
+.sop-reader { container-type: inline-size; }
+.sop-layout { display: grid; grid-template-columns: minmax(0, 46rem) minmax(15rem, 18rem); gap: 32px; }
+.sop-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; align-self: start; }
+.sop-aside { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.sop-body { padding: 28px 32px 32px; font-size: 16px; line-height: 1.65; }
+.sop-body h2 { font-size: 23px; }
+.sop-body :is(h2, h3, h4) { scroll-margin-top: calc(var(--topbar-height) + 16px); }
+.heading-anchor { margin-left: 8px; color: var(--text-4) !important; font-weight: 700; text-decoration: none !important; opacity: 0; transition: opacity var(--dur-fast), color var(--dur-fast); }
+.sop-body :is(h2, h3):hover .heading-anchor, .heading-anchor:focus-visible { opacity: 1; }
+.heading-anchor:hover { color: var(--green-dark) !important; }
+@media (hover: none) { .heading-anchor { opacity: 0.5; } }
+.sop-toc { position: sticky; top: calc(var(--topbar-height) + 16px); display: grid; gap: 10px; }
+.toc-list { list-style: none; margin: 0; padding: 0; display: grid; border-left: 2px solid var(--divider); }
+.toc-list a { display: block; margin-left: -2px; padding: 5px 10px 5px 14px; border-left: 2px solid transparent; color: var(--text-2); font-size: 13.5px; line-height: 1.35; text-decoration: none; transition: color var(--dur-fast), border-color var(--dur-fast); }
+.toc-list [data-level="3"] a { padding-left: 26px; font-size: 13px; }
+.toc-list a:hover { color: var(--ink); }
+.toc-list a[aria-current] { border-left-color: var(--green); color: var(--green-dark); font-weight: 700; }
+.sop-toc-inline { display: none; }
+.sop-toc-inline > summary { padding: 12px 16px; font-weight: 700; cursor: pointer; }
+.sop-toc-inline[open] > summary { border-bottom: 1px solid var(--divider); }
+.sop-toc-inline .toc-list { border-left: 0; padding: 6px 4px 8px; }
+.sop-toc-inline .toc-list a { margin: 0; border-left: 0; padding: 8px 12px; font-size: 14px; }
+.sop-toc-inline .toc-list [data-level="3"] a { padding-left: 26px; }
+@container (max-width: 1007px) {
+  .sop-layout { grid-template-columns: minmax(0, 46rem); }
+  .sop-aside .sop-toc, .sop-aside:not(:has(> .card)) { display: none; }
+  .sop-toc-inline { display: block; }
+}
+@media (max-width: 600px) { .sop-body { padding: 20px 18px 24px; } }
+@media print {
+  .sop-layout { display: block; }
+  .sop-body { box-shadow: none; border: 0; padding: 0 !important; }
+  .heading-anchor { display: none; }
+}
 
 /* ---------- Apps ---------- */
 /* App icons: real logos sit on a white tile in both themes, like a phone's home screen. */
