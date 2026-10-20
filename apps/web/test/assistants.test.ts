@@ -11,6 +11,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import chatgptLogo from "../src/assets/apps/chatgpt.svg";
+import claudeLogo from "../src/assets/apps/claude.svg";
+import codexLogo from "../src/assets/apps/codex.svg";
 import { disconnect, loadConnections, setAccess } from "../src/features/apps/assistantConnections";
 import { AssistantSettings } from "../src/features/settings/AssistantSettings";
 import { ProfileSettings } from "../src/features/settings/ProfileSettings";
@@ -114,6 +117,18 @@ describe("connected assistants", () => {
     const failing = fakeSupabase(grants, [{ client_id: "claude", level: "full", areas: [] }], { revokeFails: true });
     await expect(disconnect(failing.db, "claude")).rejects.toThrow("It couldn't be disconnected. It can only read now; try again in a moment.");
     expect((await loadConnections(failing.db)).find((c) => c.clientId === "claude")?.access.level).toBe("read");
+  });
+
+  it("show the real logo for Codex, Claude and ChatGPT, and otherwise the one the assistant sent", async () => {
+    const withLogo = { ...grant("other", "Other Assistant", "2026-10-01T09:00:00Z"), client: { id: "other", name: "Other Assistant", uri: "", logo_uri: "https://other.test/logo.png" } };
+    const { db } = fakeSupabase([grant("codex", "Codex", "2026-10-15T09:00:00Z"), grant("claude-code", "Claude Code", "2026-10-14T09:00:00Z"), ...grants, withLogo], []);
+    const logos = Object.fromEntries((await loadConnections(db)).map((c) => [c.clientId, c.logo]));
+    expect(logos.codex).toBe(codexLogo);
+    expect(logos.claude).toBe(claudeLogo);
+    expect(logos["claude-code"]).toBe(claudeLogo);
+    expect(logos.chatgpt).toBe(chatgptLogo);
+    expect(logos.other).toBe("https://other.test/logo.png");
+    expect(logos.cursor).toBeNull();
   });
 
   it("say plainly when they can't be loaded", async () => {
