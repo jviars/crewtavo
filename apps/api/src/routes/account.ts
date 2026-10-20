@@ -1,8 +1,8 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
-import { ADMINS, getPreset, isRole, isTimeZoneName, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
+import { ADMINS, getPreset, isTimeZoneName, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import type { AppEnv, Env } from "../env";
+import type { AppEnv } from "../env";
 import { platformOf } from "../lib/address";
 import { emailAuthLink, requireCompany, requireUser } from "../lib/auth";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
@@ -10,10 +10,15 @@ import { renderEmail } from "../lib/email";
 import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
+import { timeRates } from "../services/payRates";
+import { invitePerson, inviteStatus, sendInvite, welcomeLink, type TeamScope } from "../services/team";
 import { clientIp } from "../lib/visitor";
 import { setRailwaySetup } from "../services/railway";
 
 export const account = new Hono<AppEnv>();
+
+/** The person's client and company, for the team service (services/team.ts). */
+const teamScope = (c: Context<AppEnv>): TeamScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, userId: c.var.userId, role: c.var.role, baseUrl: appUrl(c) });
 
 /** Everything the SPA needs at startup, so it has no build-time environment variables. */
 account.get("/config", (c) =>
@@ -229,9 +234,10 @@ account.get("/team", requireUser, requireCompany(), async (c) => {
 });
 
 /**
- * The pay rate approved time was costed at, by time entry, for job costs and reports: the time on
- * some jobs, or the time started between two moments. Like members' rates, the column isn't
- * readable by members directly; the office reads it here, with the job costs area.
+ * The pay rate each time entry is costed at, for job costs and reports: approved time at the rate
+ * it was approved at, the rest at the person's current rate. For the time on some jobs, or the time
+ * started between two moments. Like members' rates, the column isn't readable by members directly;
+ * the office reads it here, with the job costs area.
  */
 account.post("/time/rates", requireUser, requireCompany(OFFICE, "job_costs"), async (c) => {
   const body = await readJson(
@@ -243,69 +249,9 @@ account.post("/time/rates", requireUser, requireCompany(OFFICE, "job_costs"), as
     }),
   );
   if (!body.job_ids && !(body.from && body.to)) throw new HttpError(400, "Choose the jobs or the dates.");
-  const admin = adminClient(c.env);
-  const rates: Record<string, number> = {};
-  // A page at a time (PostgREST returns 1,000 rows at most), up to the 25,000 entries reports read.
-  for (let page = 0; page < 25; page++) {
-    let query = admin.from("time_entries").select("id, labor_rate").eq("company_id", c.var.companyId).not("labor_rate", "is", null);
-    if (body.job_ids) query = query.in("job_id", body.job_ids);
-    if (body.from && body.to) query = query.gte("started_at", body.from).lt("started_at", body.to);
-    const rows = must(await query.order("id").range(page * 1000, page * 1000 + 999));
-    for (const r of rows) rates[r.id] = Number(r.labor_rate);
-    if (rows.length < 1000) break;
-  }
-  return c.json(rates);
+  // Approved time at the rate it was approved at, the rest at the person's current rate (services/payRates.ts).
+  return c.json(await timeRates(adminClient(c.env), c.var.companyId, body));
 });
-
-/**
- * Where an invite stands for someone on the team: "pending" until they first sign in, so a new link
- * to set up their account can go out; "joined" after (someone locked out gets Reset password). And
- * "elsewhere" when another business has them too: the link sets their password, and it would come
- * back to this admin.
- */
-async function inviteStatus(env: Env, companyId: string, userId: string): Promise<{ status: "pending"; email: string } | { status: "joined" | "elsewhere" }> {
-  const admin = adminClient(env);
-  const [{ data: account, error }, { data: elsewhere }] = await Promise.all([
-    admin.auth.admin.getUserById(userId),
-    admin.from("memberships").select("company_id").eq("user_id", userId).eq("active", true).neq("company_id", companyId).limit(1),
-  ]);
-  if (error || !account.user?.email) {
-    console.error("Couldn't look up an account", error);
-    throw new HttpError(500, "Couldn't look up their account. Try again in a moment.");
-  }
-  if (account.user.last_sign_in_at) return { status: "joined" };
-  return elsewhere?.length ? { status: "elsewhere" } : { status: "pending", email: account.user.email };
-}
-
-/** A fresh one-time link to set up the account of someone who was invited but never signed in. */
-async function welcomeLink(env: Env, base: string, email: string): Promise<string> {
-  const { data, error } = await adminClient(env).auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: `${base}/` } });
-  if (error || !data.properties?.hashed_token) {
-    console.error("Couldn't create an invite link", error);
-    throw new HttpError(500, "Couldn't make the invite link. Try again in a moment.");
-  }
-  return emailAuthLink(base, data.properties.hashed_token, "recovery", true);
-}
-
-/**
- * The invitation: a link to set up their account or, without one, a note that they now have access.
- * It goes out from the company's own mailbox (Settings → Email), not Supabase's mailer, which on
- * hosted projects only reaches the project's own team.
- */
-async function sendInvite(c: Context<AppEnv>, to: { email: string; name?: string | null }, link: string | null) {
-  const company = must(await c.var.db.from("companies").select("name, email").eq("id", c.var.companyId).maybeSingle());
-  const inviter = (await c.var.db.from("profiles").select("full_name").eq("user_id", c.var.userId).maybeSingle()).data?.full_name || "Your team";
-  const first = to.name?.trim().split(/\s+/)[0];
-  const greeting = first ? `Hi ${first},\n\n` : "";
-  const text = link
-    ? `${greeting}${inviter} invited you to ${company.name} on Crewtavo, where you'll see your schedule, visits and time.\n\nSet up your account here (the link works once; if it has expired, ask for a new invite):\n\n${link}\n\nOn your phone, open it in your browser and use "Add to Home Screen" to keep Crewtavo one tap away.`
-    : `${greeting}${inviter} gave you access to ${company.name} on Crewtavo. Sign in with your email and password as usual:\n\n${appUrl(c)}/`;
-  return sendEmail(
-    c.env,
-    { to: to.email, subject: link ? `Join ${company.name} on Crewtavo` : `You now have access to ${company.name}`, ...renderEmail({ companyName: company.name, text }), replyTo: company.email ?? undefined, fromName: company.name },
-    c.var.companyId,
-  );
-}
 
 account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async (c) => {
   const body = await readJson(
@@ -317,38 +263,8 @@ account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async 
       role_id: uuid.nullable().optional(),
     }),
   );
-  if (!isRole(body.role)) throw new HttpError(400, "Pick a role.");
-  if (body.role_id) must(await c.var.db.from("company_roles").select("id").eq("id", body.role_id).eq("company_id", c.var.companyId).maybeSingle(), "That role no longer exists.");
-  const admin = adminClient(c.env);
-  const email = body.email.toLowerCase();
-  const base = appUrl(c);
-
-  // Existing account? Add them. Otherwise create the account and a one-time link to set a password.
-  // By the email they sign in with: profile emails are only a copy, and `ilike` would treat "_" as a wildcard.
-  const { data: existing } = await admin.rpc("user_id_for_email", { p_email: email });
-  let userId = existing ?? undefined;
-  let link: string | null = null;
-  if (!userId) {
-    const { data, error } = await admin.auth.admin.generateLink({ type: "invite", email, options: { data: { full_name: body.full_name ?? "" }, redirectTo: `${base}/` } });
-    if (error || !data.user) {
-      console.error("Invite failed", error);
-      throw new HttpError(400, /already|registered/i.test(error?.message ?? "") ? "That email already has an account. Try again in a moment." : "Couldn't create the invite. Check the email address and try again.");
-    }
-    userId = data.user.id;
-    link = emailAuthLink(base, data.properties.hashed_token, "invite");
-  } else if ((await inviteStatus(c.env, c.var.companyId, userId)).status === "pending") {
-    // Invited before but never signed in (the first link expired, or never arrived): a fresh set-up
-    // link instead of "sign in as usual", since they don't have a password yet.
-    link = await welcomeLink(c.env, base, email);
-  }
-
-  // Inserted as the inviting admin, so RLS checks they may grant this role.
-  const { error } = await c.var.db.from("memberships").upsert({ company_id: c.var.companyId, user_id: userId, role: body.role, role_id: body.role_id ?? null, active: true });
-  if (error) throw dbError(error);
-
-  const sent = await sendInvite(c, { email, name: body.full_name }, link);
   // The link comes back either way, so the admin can text it too (or instead, when email isn't connected).
-  return c.json({ user_id: userId, invited: !existing, emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link }, 201);
+  return c.json(await invitePerson(teamScope(c), body), 201);
 });
 
 /** Who on the team hasn't set up their account yet, and when their latest link went out. */
@@ -392,7 +308,7 @@ account.post("/team/:userId/invite-link", requireUser, requireCompany(ADMINS, "t
 
   const link = await welcomeLink(c.env, appUrl(c), invite.email);
   const profile = (await c.var.db.from("profiles").select("full_name").eq("user_id", targetId).maybeSingle()).data;
-  const sent = await sendInvite(c, { email: invite.email, name: profile?.full_name }, link);
+  const sent = await sendInvite(teamScope(c), { email: invite.email, name: profile?.full_name }, link);
   return c.json({ emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link });
 });
 

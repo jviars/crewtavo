@@ -1,11 +1,10 @@
 /** Clients, requests, notes, the schedule, guides and equipment: looking things up, logging requests and notes. */
-import { localDate } from "@crewtavo/core";
 import { z } from "zod";
 import { companyArg, friendly, rows, tool } from "./tool";
 
 export const recordTools = {
   search_clients: tool({
-    description: "Find clients by name, company, email or phone.",
+    description: "Find clients by name, company, email or phone (query 1–100 characters; limit 1–25, default 10). For a whole list, use list_clients.",
     input: z.object({ query: z.string().min(1).max(100), limit: z.number().int().min(1).max(25).default(10), ...companyArg }),
     run: (ctx, a) => {
       const term = a.query.replace(/[%,()*]/g, " ").trim();
@@ -20,18 +19,20 @@ export const recordTools = {
     },
   }),
   get_client: tool({
-    description: "A client's details, properties, and recent requests, quotes and jobs.",
+    description: "A client's details, contacts, properties (with access codes if your role sees them), and recent requests, quotes and jobs.",
     input: z.object({ client_id: z.uuid(), ...companyArg }),
     run: async (ctx, a) => {
-      const [client, properties, requests, quotes, jobs] = await Promise.all([
-        rows(ctx.db.from("clients").select("id, display_name, company_name, email, phone, status, tags, notes, lead_source").eq("id", a.client_id).eq("company_id", ctx.companyId)),
-        rows(ctx.db.from("properties").select("id, label, line1, city, postal_code").eq("client_id", a.client_id)),
+      const [client, contacts, properties, requests, quotes, jobs] = await Promise.all([
+        rows(ctx.db.from("clients").select("id, display_name, company_name, email, phone, status, tags, notes, lead_source, billing_address, marketing_opt_out, custom_fields").eq("id", a.client_id).eq("company_id", ctx.companyId)),
+        rows(ctx.db.from("client_contacts").select("id, name, email, phone, role, is_primary, notify_email, notify_sms").eq("client_id", a.client_id)),
+        rows(ctx.db.from("properties").select("id, label, line1, line2, city, region, postal_code, lat, lng, lot_size_sqft, notes, tags, access:property_access(gate_code, lockbox_code, alarm_code, instructions)").eq("client_id", a.client_id)),
         rows(ctx.db.from("requests").select("id, number, title, status, created_at").eq("client_id", a.client_id).order("created_at", { ascending: false }).limit(5)),
         rows(ctx.db.from("quotes").select("id, number, title, status, total, sent_at").eq("client_id", a.client_id).order("created_at", { ascending: false }).limit(5)),
         rows(ctx.db.from("jobs").select("id, number, title, status, kind").eq("client_id", a.client_id).order("created_at", { ascending: false }).limit(5)),
       ]);
       if (!client.length) throw new Error("Client not found");
-      return { client: client[0], properties, requests, quotes, jobs };
+      const { custom_fields, ...details } = client[0];
+      return { client: { ...details, source_id: ((custom_fields ?? {}) as { source_id?: string }).source_id ?? null }, contacts, properties, requests, quotes, jobs };
     },
   }),
   list_requests: tool({
@@ -60,20 +61,6 @@ export const recordTools = {
       if (error) throw new Error(friendly(error.message));
       return data;
     },
-  }),
-  get_schedule: tool({
-    description: "Visits on a date (default today, in the company's time zone), with client, address, crew and status.",
-    input: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), ...companyArg }),
-    run: (ctx, a) =>
-      rows(
-        ctx.db
-          .from("visits")
-          .select("id, title, kind, status, starts_at, ends_at, hold_reason, crew:crews(name), job:jobs(number, client:clients(display_name)), property:properties(line1, city)")
-          .eq("company_id", ctx.companyId)
-          .eq("scheduled_on", a.date ?? localDate(new Date(), ctx.timezone))
-          .order("starts_at", { nullsFirst: false })
-          .order("route_order", { nullsFirst: false }),
-      ),
   }),
   add_note: tool({
     description: "Add an internal note to a client's record.",

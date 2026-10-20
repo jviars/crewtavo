@@ -33,7 +33,8 @@ describe("client import", () => {
   it("groups a properties export by client and skips repeats and nameless rows", () => {
     const clients = read(["Client Name,Client Email,Street 1,City", "Meadowbrook HOA,board@hoa.test,75 Meadowbrook Ln,Rocky Mount", "Meadowbrook HOA,board@hoa.test,75 Meadowbrook Lane,Rocky Mount", "Meadowbrook HOA,board@hoa.test,80 Pool Rd,Rocky Mount", ",x@y.test,1 Nowhere,Rocky Mount"].join("\n"));
     expect(clients).toHaveLength(1);
-    expect(clients[0]!.properties.map((p) => p.line1)).toEqual(["75 Meadowbrook Ln", "75 Meadowbrook Lane", "80 Pool Rd"]);
+    // "Lane" and "Ln" are the same street.
+    expect(clients[0]!.properties.map((p) => p.line1)).toEqual(["75 Meadowbrook Ln", "80 Pool Rd"]);
   });
 
   it("keeps a stray quote inside a field instead of swallowing the rows after it", () => {

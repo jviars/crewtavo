@@ -1150,6 +1150,46 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"pay_periods": {
+                  Row: {
+                    "company_id": string,"created_at": string,"created_by": string | null,"ends_on": string,"id": string,"notes": string | null,"paid_at": string | null,"paid_by": string | null,"starts_on": string,"status": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"created_by"?: string | null,"ends_on": string,"id"?: string,"notes"?: string | null,"paid_at"?: string | null,"paid_by"?: string | null,"starts_on": string,"status"?: string,"updated_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"created_by"?: string | null,"ends_on"?: string,"id"?: string,"notes"?: string | null,"paid_at"?: string | null,"paid_by"?: string | null,"starts_on"?: string,"status"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "pay_periods_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"pay_period_lines": {
+                  Row: {
+                    "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"reference": string | null,"updated_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount"?: number,"break_hours"?: number,"company_id": string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id": string,"reference"?: string | null,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "amount"?: number,"break_hours"?: number,"company_id"?: string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id"?: string,"reference"?: string | null,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "pay_period_lines_company_id_period_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "pay_periods"
+      referencedColumns: ["company_id"]
+    }
+                  ]
                 },"payments": {
                   Row: {
                     "amount": number,"client_id": string,"company_id": string,"created_at": string,"fee_amount": number,"id": string,"invoice_id": string | null,"method": string,"notes": string | null,"payout_id": string | null,"processor": string | null,"processor_ref": string | null,"received_at": string,"recorded_by": string | null,"tip_amount": number

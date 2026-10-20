@@ -7,7 +7,9 @@ import type { Env } from "../src/env";
 const state = vi.hoisted(() => ({
   member: { role: "owner", role_id: null as string | null },
   permissions: [] as string[],
-  entries: [] as Array<{ id: string; labor_rate: number }>,
+  entries: [] as Array<{ id: string; user_id?: string; labor_rate: number | null }>,
+  /** Each person's current pay rate (memberships.labor_rate), read with the service role. */
+  current: [] as Array<{ user_id: string; labor_rate: number | null }>,
   queries: [] as Array<{ client: "user" | "admin"; table: string; calls: unknown[][] }>,
 }));
 vi.mock("../src/lib/supabase", () => {
@@ -18,7 +20,7 @@ vi.mock("../src/lib/supabase", () => {
       const calls: unknown[][] = [];
       state.queries.push({ client: kind, table, calls });
       const result = () => {
-        if (table === "memberships") return { data: state.member, error: null };
+        if (table === "memberships") return kind === "admin" ? { data: state.current, error: null } : { data: state.member, error: null };
         if (table === "company_roles") return { data: { permissions: state.permissions }, error: null };
         const [, from, to] = (calls.find((c) => c[0] === "range") ?? ["range", 0, 999]) as [string, number, number];
         return { data: kind === "admin" && table === "time_entries" ? state.entries.slice(from, to + 1) : [], error: null };
@@ -53,6 +55,7 @@ afterEach(() => {
   state.member = { role: "owner", role_id: null };
   state.permissions = [];
   state.entries = [];
+  state.current = [];
   state.queries = [];
 });
 
@@ -67,6 +70,17 @@ describe("pay rates on time entries", () => {
     expect(query!.client).toBe("admin");
     expect(query!.calls).toContainEqual(["eq", "company_id", COMPANY]);
     expect(query!.calls).toContainEqual(["in", "job_id", [JOB]]);
+  });
+
+  it("costs time that isn't approved yet at the person's current rate", async () => {
+    state.current = [{ user_id: "user-2", labor_rate: 25 }, { user_id: "user-3", labor_rate: null }];
+    state.entries = [
+      { id: "te-1", user_id: "user-2", labor_rate: 22 },
+      { id: "te-2", user_id: "user-2", labor_rate: null },
+      { id: "te-3", user_id: "user-3", labor_rate: null },
+    ];
+    expect(await (await rates({ job_ids: [JOB] })).json()).toEqual({ "te-1": 22, "te-2": 25 });
+    expect(state.queries.find((q) => q.table === "memberships" && q.client === "admin")!.calls).toContainEqual(["eq", "company_id", COMPANY]);
   });
 
   it("reads the time started in a range, a page at a time", async () => {

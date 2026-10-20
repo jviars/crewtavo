@@ -8,13 +8,13 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { supabase, unwrap } from "@/lib/api";
+import { api, supabase, unwrap } from "@/lib/api";
 import { parseCsv } from "@/lib/csv";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { guessMapping, sameStreet, TARGETS, toClients, type Mapping } from "./importClients";
+import { planImport, type ExistingClient } from "@crewtavo/core/clientImport";
+import { guessMapping, TARGETS, toClients, type Mapping } from "./importClients";
 
-const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
   const { company } = useSession();
@@ -46,67 +46,68 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
   const run = useMutation({
     meta: { inline: true },
     mutationFn: async () => {
-      // Who's already here: match by email, or by name for clients without one.
-      const existing: Array<{ id: string; email: string | null; display_name: string }> = [];
+      // Who's already here, and how they're matched: packages/core/src/clientImport.ts.
+      const existing: ExistingClient[] = [];
       for (let from = 0; ; from += 1000) {
-        const page = unwrap(await supabase().from("clients").select("id, email, display_name").eq("company_id", company.id).range(from, from + 999));
-        existing.push(...page);
+        const page = unwrap(await supabase().from("clients").select("id, email, display_name, status, custom_fields").eq("company_id", company.id).range(from, from + 999));
+        existing.push(...page.map((c) => ({ id: c.id, display_name: c.display_name, email: c.email, status: c.status, source_id: ((c.custom_fields ?? {}) as { source_id?: string }).source_id ?? null })));
         if (page.length < 1000) break;
       }
-      const byEmail = new Map(existing.filter((c) => c.email).map((c) => [c.email!.toLowerCase(), c.id]));
-      const byName = new Map(existing.map((c) => [norm(c.display_name), c.id]));
-
-      const fresh: Array<(typeof clients)[number] & { id: string }> = [];
-      const known: Array<(typeof clients)[number] & { id: string }> = [];
-      for (const c of clients) {
-        const id = (c.email && byEmail.get(c.email)) || (!c.email ? byName.get(norm(c.display_name)) : undefined);
-        if (id) known.push({ ...c, id });
-        else fresh.push({ ...c, id: crypto.randomUUID() });
+      // The streets the clients it finds already have, so the same address isn't added twice.
+      const found = [...new Set(planImport(clients, existing, new Map()).decisions.flatMap((d) => (d.client_id ? [d.client_id] : [])))];
+      const streets = new Map<string, string[]>();
+      for (let i = 0; i < found.length; i += 200) {
+        for (const p of unwrap(await supabase().from("properties").select("client_id, line1").in("client_id", found.slice(i, i + 200)))) streets.set(p.client_id, [...(streets.get(p.client_id) ?? []), p.line1]);
       }
-      // Properties the known clients already have, so the same address isn't added twice.
-      const have = new Map<string, string[]>();
-      for (let i = 0; i < known.length; i += 200) {
-        const ids = known.slice(i, i + 200).map((k) => k.id);
-        for (const p of unwrap(await supabase().from("properties").select("client_id, line1").in("client_id", ids))) have.set(p.client_id, [...(have.get(p.client_id) ?? []), p.line1]);
-      }
+      const plan = planImport(clients, existing, streets);
+      const byKey = new Map(clients.map((c) => [c.key, c]));
+      const fresh = plan.decisions.filter((d) => d.action === "create").map((d) => ({ ...d, id: crypto.randomUUID(), client: byKey.get(d.key)! }));
 
       let done = 0;
-      const total = fresh.length + known.length || 1;
+      const total = plan.decisions.length || 1;
       for (let i = 0; i < fresh.length; i += 200) {
         const chunk = fresh.slice(i, i + 200);
         unwrap(
           await supabase().from("clients").insert(
-            chunk.map((c) => ({
-              id: c.id, company_id: company.id, display_name: c.display_name, company_name: c.company_name, email: c.email, phone: c.phone,
-              lead_source: c.lead_source, tags: c.tags, notes: c.notes, billing_address: (c.billing ?? {}) as never, status: "active" as const,
+            chunk.map(({ id, status, client: c }) => ({
+              id, company_id: company.id, display_name: c.display_name, company_name: c.company_name, email: c.email, phone: c.phone,
+              lead_source: c.lead_source, tags: c.tags, notes: c.notes, billing_address: (c.billing ?? {}) as never, status: status ?? "active",
+              custom_fields: (c.source_id ? { source_id: c.source_id } : {}) as never,
             })),
           ),
         );
         done += chunk.length;
-        setProgress(Math.round((done / total) * 100));
+        setProgress(Math.round((done / total) * 90));
       }
-      let added = 0;
-      const properties = [...fresh, ...known].flatMap((c) =>
-        c.properties.filter((p) => !(have.get(c.id) ?? []).some((line) => sameStreet(line, p.line1))).map((p) => ({ ...p, client_id: c.id, company_id: company.id })),
+      // Clients already here whose status the file changes (Inactive → archived, and back).
+      for (const status of ["lead", "active", "archived"] as const) {
+        const ids = plan.decisions.filter((d) => d.status_change?.to === status).map((d) => d.client_id!);
+        for (let i = 0; i < ids.length; i += 200) unwrap(await supabase().from("clients").update({ status }).in("id", ids.slice(i, i + 200)));
+      }
+      const ids = new Map(fresh.map((f) => [f.key, f.id]));
+      const properties = plan.decisions.flatMap((d) =>
+        d.add_properties.map((p) => ({ label: p.label, line1: p.line1, line2: p.line2, city: p.city, region: p.region, postal_code: p.postal_code, notes: p.notes ?? null, client_id: d.client_id ?? ids.get(d.key)!, company_id: company.id })),
       );
+      const added: string[] = [];
       for (let i = 0; i < properties.length; i += 200) {
-        unwrap(await supabase().from("properties").insert(properties.slice(i, i + 200)));
-        added += Math.min(200, properties.length - i);
+        added.push(...unwrap(await supabase().from("properties").insert(properties.slice(i, i + 200)).select("id")).map((p) => p.id));
       }
+      // On the map in the background, so routes and weather know where they are.
+      if (added.length) await api.post("/properties/geocode", { ids: added }).catch(() => undefined);
       setProgress(100);
-      return { created: fresh.length, matched: known.length, properties: added };
+      return { created: plan.totals.create, matched: plan.totals.match, properties: added.length, statuses: plan.totals.status_changes };
     },
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ["clients", company.id] });
       queryClient.invalidateQueries({ queryKey: ["client-tags", company.id] });
       toast.success(`Imported ${r.created} new ${r.created === 1 ? "client" : "clients"} and ${r.properties} ${r.properties === 1 ? "property" : "properties"}`, {
-        description: r.matched ? `${r.matched} ${r.matched === 1 ? "was" : "were"} already in Crewtavo; new properties were added to them.` : undefined,
+        description: r.matched ? `${r.matched} ${r.matched === 1 ? "was" : "were"} already in Crewtavo; new properties were added to them${r.statuses ? `, and ${r.statuses} got the file's status` : ""}.` : undefined,
       });
       onClose();
     },
   });
 
-  const shown = showAll ? TARGETS : TARGETS.filter((t) => mapping[t.key] !== undefined || ["display_name", "email", "phone", "line1"].includes(t.key));
+  const shown = showAll ? TARGETS : TARGETS.filter((t) => mapping[t.key] !== undefined || ["display_name", "status", "email", "phone", "line1"].includes(t.key));
 
   return (
     <Dialog open onClose={onClose} title="Import clients and properties" size="lg">
@@ -167,7 +168,7 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
               </table>
             </div>
             <p className="muted small" style={{ margin: 0 }}>
-              {clients.length} {clients.length === 1 ? "client" : "clients"} with {propertyCount} {propertyCount === 1 ? "property" : "properties"}. Rows without a name are skipped; clients already in Crewtavo get any new properties instead of a duplicate.
+              {clients.length} {clients.length === 1 ? "client" : "clients"} with {propertyCount} {propertyCount === 1 ? "property" : "properties"}. Rows without a name are skipped; clients already in Crewtavo get any new properties, and the file's status, instead of a duplicate. A status column says who's active: Inactive or Former clients come in archived.
             </p>
             {run.isPending && <div className="progress"><span style={{ width: `${progress}%` }} /></div>}
           </>

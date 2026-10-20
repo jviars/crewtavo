@@ -82,7 +82,7 @@ update public.assistant_connections set level = 'read' where client_id = :'readi
 select t1040.check((select count(*) = 3 and bool_and(user_id = :'owner') from public.assistant_connections), 'a person''s connections are their own');
 select t1040.expect_error(format('insert into public.assistant_connections (user_id, client_id, level) values (%L, %L, %L)', :'office', :'earlier', 'full'),
   'nobody gives someone else''s assistant access');
-select t1040.expect_error(format('insert into public.assistant_connections (client_id, level, areas) values (%L, %L, %L)', :'earlier', 'areas', '{team}'),
+select t1040.expect_error(format('insert into public.assistant_connections (client_id, level, areas) values (%L, %L, %L)', :'earlier', 'areas', '{everything}'),
   'areas are only the ones there are');
 select t1040.expect_error(format('insert into public.assistant_connections (client_id, level) values (%L, %L)', :'earlier', 'admin'),
   'and so are levels');
@@ -136,7 +136,7 @@ set local role authenticated;
 select t1040.check(e = 'PT403: This assistant can''t change the price list. To let it, choose what it can change in Crewtavo, under Settings → AI assistants.',
   'a read-only assistant can''t add to the price list, and is told where to allow it: ' || e) from (select t1040.hook(:'owner', :'reading', 'POST', '/services') as e) x;
 select t1040.check(t1040.hook(:'owner', :'reading', 'PATCH', '/requests') like 'PT403: This assistant can''t change requests and notes.%', 'or change a request');
-select t1040.check(t1040.hook(:'owner', :'reading', 'DELETE', '/services') like 'PT403: This assistant can''t delete things.%', 'or delete anything');
+select t1040.check(t1040.hook(:'owner', :'reading', 'DELETE', '/services') like 'PT403: This assistant can''t change the price list.%', 'or delete anything');
 select t1040.check(t1040.hook(:'owner', :'earlier', 'POST', '/services') like 'PT403:%', 'nor can one connected before any of this');
 rollback;
 
@@ -163,10 +163,87 @@ rollback;
 -- Outside every area, whatever it's been given.
 begin;
 set local role authenticated;
-select t1040.check(t1040.hook(:'owner', :'full', 'POST', '/clients') = 'PT403: An AI assistant can''t change this. Do it in Crewtavo itself.', 'not even full access adds a client directly');
-select t1040.check(t1040.hook(:'owner', :'full', 'PATCH', '/memberships') like 'PT403:%', 'or changes people');
-select t1040.check(t1040.hook(:'owner', :'full', 'POST', '/company_roles') like 'PT403:%', 'or roles');
+select t1040.check(t1040.hook(:'owner', :'full', 'POST', '/notifications') = 'PT403: An AI assistant can''t change this. Do it in Crewtavo itself.', 'not even full access writes outside every area');
+select t1040.check(t1040.hook(:'owner', :'full', 'PATCH', '/integrations') like 'PT403:%', 'like connected apps and keys');
 select t1040.check(t1040.hook(:'owner', :'full', 'PATCH', '/assistant_connections') like 'PT403:%', 'or anyone''s assistant access');
+rollback;
+
+-- The rest of Crewtavo, and full access without money.
+\set nomoney 'c1040000-0000-0000-0000-00000000000e'
+\set quoting 'c1040000-0000-0000-0000-00000000000f'
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', null);
+insert into public.assistant_connections (client_id, level, areas) values (:'nomoney', 'full_no_money', '{}'), (:'quoting', 'areas', '{quotes,clients}');
+commit;
+
+begin;
+set local role authenticated;
+select t1040.check(t1040.hook(:'owner', :'full', 'POST', '/clients') = 'none', 'full access adds clients');
+select t1040.check(t1040.hook(:'owner', :'full', 'PATCH', '/memberships') = 'none', 'and changes people');
+select t1040.check(t1040.hook(:'owner', :'full', 'DELETE', '/payments') = 'none', 'and gets as far as a payment (the payments guard stops it)');
+select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/clients') = 'none', 'full access without money adds clients');
+select t1040.check(t1040.hook(:'owner', :'nomoney', 'DELETE', '/jobs') = 'none', 'deletes a job');
+select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/company_roles') = 'none', 'and saves roles');
+select t1040.check(e = 'PT403: This assistant can''t change money: quotes, invoices, payments or pay. To let it, give it Full access in Crewtavo, under Settings → AI assistants.',
+  'but doesn''t touch invoices: ' || e) from (select t1040.hook(:'owner', :'nomoney', 'POST', '/invoices') as e) x;
+select t1040.check(t1040.hook(:'owner', :'nomoney', 'PATCH', '/quotes') like 'PT403: This assistant can''t change money%', 'quotes');
+select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/pay_periods') like 'PT403: This assistant can''t change money%', 'or pay');
+select t1040.check(t1040.hook(:'owner', :'quoting', 'POST', '/quote_line_items') = 'none', 'an assistant given quotes changes them');
+select t1040.check(t1040.hook(:'owner', :'quoting', 'PATCH', '/visits') like 'PT403: This assistant can''t change the schedule.%', 'and nothing it wasn''t given');
+rollback;
+
+-- Two functions write for their area; the rest still can't. (The hook runs directly here: a read-only
+-- setting made inside error_of's block wouldn't outlast it.)
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'quoting', 'POST', '/rpc/convert_quote_to_job');
+select hooks.before_request();
+select t1040.check(current_setting('transaction_read_only') = 'off', 'turning a quote into a job can write with quotes');
+rollback;
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'quoting', 'POST', '/rpc/create_invoice_for_job');
+select hooks.before_request();
+select t1040.check(current_setting('transaction_read_only') = 'on', 'invoicing a job needs invoices, so it can''t write');
+rollback;
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'nomoney', 'POST', '/rpc/convert_quote_to_job');
+select hooks.before_request();
+select t1040.check(current_setting('transaction_read_only') = 'on', 'and full access without money can''t turn a quote into a job');
+rollback;
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'full', 'POST', '/rpc/create_invoice_for_job');
+select hooks.before_request();
+select t1040.check(current_setting('transaction_read_only') = 'off', 'full access invoices a job');
+rollback;
+
+-- Payments: recorded, never refunded or deleted by an assistant.
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'full', 'POST', '/payments');
+select t1040.check(e like '42501: An AI assistant can''t record a refund.%', 'an assistant can''t record a refund: ' || e)
+from (select t1040.error_of(format('insert into public.payments (company_id, client_id, amount, method) values (%L, (select id from public.clients where company_id = %L limit 1), -5, %L)', :'co', :'co', 'cash')) as e) x;
+rollback;
+
+-- Pay rates need pay; team changes reach the owners.
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'nomoney', 'PATCH', '/memberships');
+select t1040.check(t1040.error_of(format('update public.memberships set labor_rate = 31 where company_id = %L and user_id = %L', :'co', :'office')) like '42501: This assistant can''t change pay rates.%',
+  'full access without money can''t change a pay rate');
+select t1040.check(t1040.error_of(format('update public.memberships set role = %L where company_id = %L and user_id = %L', 'estimator', :'co', :'office')) = 'none', 'but changes a role');
+reset role;
+select t1040.check((select count(*) = 1 from public.notifications where company_id = :'co' and user_id = :'owner' and kind = 'security' and title = 'An AI assistant changed your team' and body like '%changed % role to Estimator'),
+  'and the owner hears about it');
+select t1040.check((select count(*) = 1 from public.activity where company_id = :'co' and verb = 'assistant.team'), 'and it''s on record');
+rollback;
+begin;
+set local role authenticated;
+select t1040.as_request(:'owner', :'full', 'PATCH', '/memberships');
+select t1040.check(t1040.error_of(format('update public.memberships set labor_rate = 31 where company_id = %L and user_id = %L', :'co', :'office')) = 'none', 'full access changes a pay rate');
 rollback;
 
 -- Functions it calls answer, but can't write, whatever it's been given.
