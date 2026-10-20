@@ -182,6 +182,8 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
   .mobile-nav a:active svg, .mobile-nav button:active svg { transform: scale(0.88); }
   .mobile-nav svg { transition: transform var(--dur-fast); }
   .mobile-nav [aria-current="page"] { color: var(--green); }
+  /* Out of the way while the keyboard is up (AppShell's useTyping). */
+  .mobile-nav[data-typing] { display: none; }
 }
 
 .sheet-backdrop { position: fixed; inset: 0; background: var(--overlay); z-index: 30; animation: fade-in var(--dur) ease-out; }
