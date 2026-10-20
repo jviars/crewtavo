@@ -5,6 +5,7 @@
  *   link      - calendars added by their ICS link (calendar_sources; see integrations/calendars.ts)
  *   connector - the app connects to us (Claude and ChatGPT via MCP at /mcp)
  *   builtin   - part of Crewtavo, turned on or off for the company (team chat: companies.settings.team_chat)
+ *   site      - the company's website editor, by its address (Sveltia CMS: companies.settings.website, integrations/website.ts)
  */
 import type { Env } from "../env";
 
@@ -12,16 +13,16 @@ import type { Env } from "../env";
 export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic" | "railway";
 /** Apps whose calendars are added by link. They're also the calendar_sources.app values (with google_calendar). */
 export type LinkApp = "zoho_calendar" | "outlook_calendar" | "apple_calendar" | "ics_calendar";
-export type AppId = Provider | LinkApp | "chatgpt" | "team_chat";
+export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "sveltia";
 export type CalendarApp = LinkApp | "google_calendar";
 export const CALENDAR_APPS: readonly CalendarApp[] = ["google_calendar", "zoho_calendar", "outlook_calendar", "apple_calendar", "ics_calendar"];
 
 export interface CatalogEntry {
   id: AppId;
   name: string;
-  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging";
+  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging" | "Website";
   description: string;
-  auth: "oauth" | "api_key" | "link" | "connector" | "builtin";
+  auth: "oauth" | "api_key" | "link" | "connector" | "builtin" | "site";
   docs: string;
   /** False when this deployment lacks the OAuth app or platform key the provider needs. */
   available: (env: Env) => boolean;
@@ -143,6 +144,15 @@ export const CATALOG: CatalogEntry[] = [
     auth: "api_key",
     docs: "https://www.twilio.com/docs/messaging",
     available: (env) => Boolean(env.TWILIO_ACCOUNT_SID),
+  },
+  {
+    id: "sveltia",
+    name: "Sveltia CMS",
+    category: "Website",
+    description: "Edit your website's pages and posts from Crewtavo, in the Sveltia CMS editor your site already has.",
+    auth: "site",
+    docs: "https://crewtavo.com/docs/connections/sveltia-cms/",
+    available: () => true,
   },
 ];
 

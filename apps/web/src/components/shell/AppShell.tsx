@@ -248,8 +248,9 @@ function Screen() {
   const location = useLocation();
   const transitioning = useViewTransitionState(location.pathname);
   const [crossFaded] = useState(transitioning);
-  // Team chat fills the screen edge to edge, like a messaging app; its settings are a normal page.
-  const flush = /^\/chat(\/|$)/.test(location.pathname) && !location.pathname.startsWith("/chat/settings");
+  // Team chat fills the screen edge to edge, like a messaging app (its settings are a normal page),
+  // and so does the website's editor.
+  const flush = (/^\/chat(\/|$)/.test(location.pathname) && !location.pathname.startsWith("/chat/settings")) || /^\/website\/?$/.test(location.pathname);
   return (
     <main className={flush ? "content content-flush" : "content"} data-crossfade={crossFaded || undefined}>
       <Outlet />

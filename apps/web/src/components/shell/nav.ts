@@ -11,7 +11,7 @@ export interface NavItem {
   only?: string[]; // only these access levels, owners included (e.g. "My day" for crews)
   also?: string[]; // other screens that count as this section (highlighted in the sidebar)
   keywords?: string; // other words people search for it by
-  feature?: "team_chat"; // only while the business has this app on (Apps)
+  feature?: "team_chat" | "website"; // only while the business has this app on (Apps)
 }
 
 /**
@@ -34,12 +34,13 @@ export const NAV_GROUPS: NavItem[][] = [
   ],
   [
     { to: "/marketing", label: "Marketing", icon: "marketing", roles: ["admin", "office"], perm: "marketing", keywords: "campaigns email blasts reviews referrals" },
+    { to: "/website", label: "Website", icon: "globe", roles: ["admin", "office"], perm: "marketing", feature: "website", keywords: "site web page blog posts edit content cms sveltia decap" },
     { to: "/finance", label: "Finance", icon: "finance", roles: ["admin", "office"], perm: ["reports", "invoices"], keywords: "reports revenue profit payments money collected net volume fees deposits owed goal" },
     { to: "/metrics", label: "Metrics", icon: "metrics", roles: ["admin", "office"], perm: "reports", keywords: "reports analytics numbers sales conversion lead sources visits hours team clients" },
     { to: "/timesheets", label: "Timesheets", icon: "clock", keywords: "time clock hours payroll" },
     { to: "/equipment", label: "Equipment", icon: "truck", keywords: "trucks mowers trailers tools fleet maintenance" },
     { to: "/kb", label: "Knowledge base", icon: "book", keywords: "sop procedures training how to guides" },
-    { to: "/apps", label: "Apps", icon: "apps", roles: ["admin"], perm: "apps", keywords: "integrations connect app store team chat quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant" },
+    { to: "/apps", label: "Apps", icon: "apps", roles: ["admin"], perm: "apps", keywords: "integrations connect app store team chat quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
   ],
 ];
 
@@ -88,7 +89,7 @@ export function navVisible(session: { role: string; permissions: readonly string
   return [item.perm ?? []].flat().every((p) => session.permissions.includes(p));
 }
 
-/** A built-in app the business turned on in Apps (companies.settings.team_chat.enabled). */
+/** An app the business turned on in Apps: companies.settings.team_chat.enabled, or .website.enabled once its editor is added. */
 export function featureOn(settings: Record<string, unknown> | null | undefined, feature: NonNullable<NavItem["feature"]>): boolean {
   return (settings?.[feature] as { enabled?: boolean } | undefined)?.enabled === true;
 }

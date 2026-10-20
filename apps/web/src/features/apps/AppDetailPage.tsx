@@ -31,6 +31,7 @@ import { useIsInstalled } from "./installed";
 import { SCREENSHOTS } from "./screenshots";
 import { StripePanel } from "./StripePanel";
 import { TeamChatPanel, useTeamChatSwitch } from "./TeamChatPanel";
+import { WebsitePanel } from "./WebsitePanel";
 
 const GOOGLE_SETTINGS = "https://calendar.google.com/calendar/r/settings";
 const GOOGLE_SIGNIN_GUIDE = "https://crewtavo.com/docs/connections/google-calendar/#instant-updates-with-google-sign-in";
@@ -115,8 +116,9 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   const setup = phase === "waiting";
   const refresh = () => {
     for (const key of ["apps", "calendars", "google-calendars"]) queryClient.invalidateQueries({ queryKey: [key] });
-    // The company's own Anthropic key turns on Ask and the other AI buttons (lib/session.tsx).
-    if (app.id === "anthropic") session.refresh();
+    // The company's own Anthropic key turns on Ask and the other AI buttons (lib/session.tsx), and
+    // the website's editor puts Website in the menu (the company's settings).
+    if (app.id === "anthropic" || app.auth === "site") session.refresh();
   };
   const connect = useMutation({
     mutationFn: () => api.post<{ authorization_url: string }>(`/apps/${app.id}/connect`),
@@ -133,6 +135,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       for (const c of assistants) await disconnectAssistant(supabase(), c.clientId);
       // Google's own calendars go with its sign-in; the ones added by address are removed here.
       if (hasAccount(app)) await api.post(`/apps/${app.id}/disconnect`);
+      if (app.auth === "site") await api.delete(`/apps/${app.id}/site`);
       await Promise.all(sources.filter((s) => s.kind !== "google").map((s) => api.delete(`/calendars/${s.id}`)));
     },
     onSuccess: () => setPhase(null),
@@ -142,7 +145,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       queryClient.invalidateQueries({ queryKey: ["schedule"] });
     },
   });
-  const canUninstall = installed && (app.auth === "builtin" || hasAccount(app) || assistants.length > 0 || sources.length > 0);
+  const canUninstall = installed && (app.auth === "builtin" || app.auth === "site" || hasAccount(app) || assistants.length > 0 || sources.length > 0);
 
   const askUninstall = async () => {
     if (app.auth === "builtin") return chatSwitch.turnOff();
@@ -290,6 +293,8 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
             <>{googleSignIn}{googleByAddress}</>
           ) : app.auth === "link" ? (
             <LinkCalendarsPanel app={app.id} appName={app.name} steps={info.steps} />
+          ) : app.auth === "site" ? (
+            <WebsitePanel app={app} onSaved={refresh} />
           ) : app.auth === "connector" || app.id === "anthropic" ? (
             <>
               <ConnectorCard app={app} mcpUrl={mcpUrl} setup />
@@ -314,6 +319,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           {app.id === "stripe" && app.stripe && <StripePanel app={app} onChanged={refresh} />}
           {app.auth === "api_key" && <KeyCard app={app} onSaved={refresh} />}
           {app.id === "team_chat" && <TeamChatPanel />}
+          {app.auth === "site" && <WebsitePanel app={app} onSaved={refresh} />}
         </>
       )}
 
@@ -396,6 +402,7 @@ function uninstallBody(app: AppRow, counts: { assistants: number; calendars: num
     return `${parts.join(" ")} ${again}`;
   }
   if (app.id === "twilio") return `Texts stop going out from your number. Nothing already sent is deleted. ${again}`;
+  if (app.auth === "site") return `Website comes out of the menu. Your website, its editor and everything on it stay as they are. ${again}`;
   return `Crewtavo stops using it right away. Nothing already here is deleted. ${again}`;
 }
 

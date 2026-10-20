@@ -8,6 +8,7 @@ import googleCalendarLogo from "@/assets/apps/google-calendar.svg";
 import outlookLogo from "@/assets/apps/outlook.svg";
 import quickbooksLogo from "@/assets/apps/quickbooks.svg";
 import stripeLogo from "@/assets/apps/stripe.svg";
+import sveltiaLogo from "@/assets/apps/sveltia.svg";
 import twilioLogo from "@/assets/apps/twilio.svg";
 import zohoLogo from "@/assets/apps/zoho.svg";
 import type { AppRow } from "./catalog";
@@ -23,9 +24,12 @@ const LOGOS: Record<string, string> = {
   twilio: twilioLogo,
   anthropic: claudeLogo,
   chatgpt: chatgptLogo,
+  sveltia: sveltiaLogo,
 };
 /** Wordmark-shaped logos get more width. */
 const WIDE = new Set(["zoho_calendar", "zoho_books"]);
+/** Logos that are already a whole app icon fill the tile. */
+const FULL = new Set(["sveltia"]);
 
 export type IconSize = "sm" | "md" | "lg";
 
@@ -49,7 +53,7 @@ export function AppIcon({ id, name, size = "md" }: { id: string; name: string; s
   }
   const src = LOGOS[id];
   return (
-    <span className="app-icon" data-size={size} data-wide={WIDE.has(id) || undefined} aria-hidden="true">
+    <span className="app-icon" data-size={size} data-wide={WIDE.has(id) || undefined} data-full={FULL.has(id) || undefined} aria-hidden="true">
       {src ? <img src={src} alt="" /> : <span className="app-icon-letter">{name.slice(0, 1)}</span>}
     </span>
   );

@@ -1,5 +1,6 @@
 /** Apps page: catalog with status, OAuth connect/callback/disconnect, API keys, and AI helpers. */
 import { ADMINS } from "@crewtavo/core";
+import { websiteOf } from "@crewtavo/core/website";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
@@ -15,6 +16,7 @@ import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from 
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, zohoAccountsServer, type Provider } from "../integrations/registry";
 import { beginStripeImport, canImportStripe, connectStripe, disconnectStripe, IMPORT_STALE_MS, importFromStripe, SHARED_STRIPE_IMPORT, stripeAccess, type ImportState } from "../integrations/stripe";
 import { appKeysOf, exchangeCode, loadSecret, oauthClient, revoke, saveSecret, SignInRefused } from "../integrations/tokens";
+import { checkSite, saveWebsite, WebsiteError } from "../integrations/website";
 
 export const apps = new Hono<AppEnv>();
 
@@ -35,6 +37,8 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const integrations = must(rows);
   // Built-in apps are on or off in the company's settings (team chat: routes/chat.ts).
   const builtinOn: Record<string, boolean> = { team_chat: (company.data?.settings as { team_chat?: { enabled?: boolean } } | null)?.team_chat?.enabled === true };
+  // The website's editor, by its address (integrations/website.ts).
+  const website = websiteOf(company.data?.settings as Record<string, unknown> | null);
   const byProvider = new Map(integrations.map(({ settings, ...r }) => [r.provider, r]));
   const calendarRows = must(calendars);
   const ownKey = Boolean(stripeKey.count);
@@ -63,8 +67,9 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
         ...entry,
         available: available(c.env) || Boolean(ownKeys),
         redirect_uri: OAUTH[entry.id as Provider] ? callbackUrl(appUrl(c), entry.id) : null,
-        ...(row ?? { status: (entry.auth === "link" && own.length) || builtinOn[entry.id] ? "connected" : "disconnected" }),
+        ...(row ?? { status: (entry.auth === "link" && own.length) || builtinOn[entry.id] || (entry.auth === "site" && website) ? "connected" : "disconnected" }),
         ...linked,
+        ...(entry.auth === "site" ? { website } : {}),
         ...(entry.id === "stripe" && stripe ? { stripe } : {}),
         ...(takesKeys ? { takes_app_keys: true, app_keys: ownKeys } : {}),
       };
@@ -276,6 +281,29 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   if (error) throw dbError(error);
   await saveSecret(c.env, admin, c.var.companyId, provider, { api_key: body.api_key });
   return c.json({ provider, status: "connected" });
+});
+
+/**
+ * Sveltia CMS: check the website's editor at the address typed, then keep it, which puts Website in
+ * the menu. A page that opens but doesn't say Sveltia or Decap answers 422, and can be kept `anyway`
+ * (an editor bundled into the site's own scripts).
+ */
+apps.put("/apps/sveltia/site", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const body = await readJson(c, z.object({ address: z.string().trim().min(3, "Type your website's address.").max(500), anyway: z.boolean().default(false) }));
+  try {
+    const site = await checkSite(body.address, appUrl(c), { anyway: body.anyway });
+    await saveWebsite(adminClient(c.env), c.var.companyId, site);
+    return c.json({ website: site });
+  } catch (error) {
+    if (error instanceof WebsiteError) throw new HttpError(error.code === "no_editor" ? 422 : 400, error.message);
+    throw error;
+  }
+});
+
+/** Uninstall: Website leaves the menu. The website and its editor aren't touched. */
+apps.delete("/apps/sveltia/site", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  await saveWebsite(adminClient(c.env), c.var.companyId, null);
+  return c.json({ website: null });
 });
 
 // ---------------------------------------------------------------------------------------------

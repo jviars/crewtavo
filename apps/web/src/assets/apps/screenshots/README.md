@@ -4,3 +4,7 @@ light and a dark copy, shown with the app's theme.
 The team chat ones are the real chat screen (features/chat/ChatPage.tsx) with made-up people and
 messages for a lawn care business, rendered at 1440×900 and saved as WebP. To retake them after the
 chat screen changes, render it with sample data and screenshot it with Playwright in both themes.
+
+The Sveltia CMS ones are the real Sveltia CMS (0.248.1) with its test backend, seeded with a made-up
+lawn care business's website (Green Valley Lawn Care: blog posts, services, pages, hours), rendered
+at 1440×900 in light and dark with Playwright and saved as WebP by Chromium.

@@ -32,7 +32,8 @@
     "./clientImport": "./src/clientImport.ts",
     "./reports": "./src/reports.ts",
     "./pay": "./src/pay.ts",
-    "./video": "./src/video.ts"
+    "./video": "./src/video.ts",
+    "./website": "./src/website.ts"
   },
   "scripts": {
     "test": "vitest run",

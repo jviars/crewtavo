@@ -3,6 +3,7 @@
  * offer it, comes from the API (apps/api/src/integrations/registry.ts); the words and pictures
  * people read live here.
  */
+import type { WebsiteSite } from "@crewtavo/core/website";
 import { useQuery } from "@tanstack/react-query";
 import type { IconName } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
@@ -11,10 +12,10 @@ import { can, hasRole, useSession } from "@/lib/session";
 export interface AppRow {
   id: string;
   name: string;
-  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging";
+  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging" | "Website";
   description: string;
-  /** builtin: part of Crewtavo, turned on or off here (team chat). */
-  auth: "oauth" | "api_key" | "link" | "connector" | "builtin";
+  /** builtin: part of Crewtavo, turned on or off here (team chat). site: the website's editor, by its address (Sveltia CMS). */
+  auth: "oauth" | "api_key" | "link" | "connector" | "builtin" | "site";
   docs: string;
   available: boolean;
   redirect_uri: string | null;
@@ -31,6 +32,8 @@ export interface AppRow {
   takes_app_keys?: boolean;
   /** That app's keys, once saved (never the secret). */
   app_keys?: { client_id: string; sandbox: boolean; accounts_server: string | null } | null;
+  /** Sveltia CMS: the website's editor, once its address is added. */
+  website?: WebsiteSite | null;
 }
 
 export interface StripeImport {
@@ -71,6 +74,7 @@ export const CATEGORY_LABELS: Record<AppRow["category"], string> = {
   Accounting: "Accounting",
   Payments: "Payments",
   Messaging: "Messaging",
+  Website: "Your website",
 };
 
 /** An app's category on its own page: the built-in ones are simply Crewtavo's. */
@@ -84,6 +88,7 @@ export const MORE_LABELS: Record<AppRow["category"], string> = {
   Accounting: "More accounting apps",
   Payments: "More payment apps",
   Messaging: "More messaging apps",
+  Website: "More website apps",
 };
 
 /** "Add a Zoho calendar", "Add an Outlook calendar"... */
@@ -313,6 +318,25 @@ export const APP_INFO: Record<string, AppInfo> = {
     connectsWith: "API key",
     website: "https://www.twilio.com/",
     open: "/messages",
+  },
+  sveltia: {
+    developer: "Sveltia",
+    tagline: "Edit your website without leaving Crewtavo",
+    about:
+      "Sveltia CMS is the editor many fast, modern websites come with: pages, blog posts, services and photos, with a preview as you type. Add your website's address once and Website appears in the menu with your editor right there, next to your clients and schedule. Sign in the way you do on your site, with GitHub or a token, and changes save to your website exactly as they do when you open it on its own. Decap CMS (once called Netlify CMS) works too.",
+    highlights: [
+      { icon: "globe", title: "Your site, in Crewtavo", text: "Website in the menu opens your site's editor, for owners, admins and anyone with Marketing." },
+      { icon: "edit", title: "Pages, posts and photos", text: "Write a post, change a price or swap a photo, and see it as visitors will before it goes live." },
+      { icon: "lock", title: "Your own sign-in", text: "Sign in with GitHub, as you do on your site. Crewtavo never sees it." },
+    ],
+    access: [
+      "Show your website's editor (its /admin page) inside Crewtavo",
+      "Read that page and its settings, to check the editor is there and where it saves",
+      "Nothing else: it can't see your sign-in or change your website. Sveltia saves your edits, as it does on your site",
+    ],
+    connectsWith: "Your website's address",
+    website: "https://sveltiacms.app/",
+    open: "/website",
   },
 };
 
