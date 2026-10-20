@@ -1,6 +1,7 @@
 import type { Section } from "@crewtavo/core/geo";
 import { describe, expect, it } from "vitest";
-import { centers, gridPolygons, outlines, ringArea, simplifyRing } from "../src/features/measure/detect";
+import { centers, gridPolygons, outlines, pieceAt, ringArea, simplifyRing } from "../src/features/measure/detect";
+import { maskGrids, pickMask, pixelValues, SAM_GRID, SAM_SIZE } from "../src/features/measure/samLocal";
 import { feetPerPixel, scaleLength } from "../src/features/measure/takeoffSheet";
 import { currentStep, formulaValue, serviceKind, stageLabel, takeoffVariables, usesDepth, type TakeoffRow } from "../src/features/paving/data";
 
@@ -53,6 +54,58 @@ describe("Find paving's outlines", () => {
 
   it("puts a count at the middle of each stall it found", () => {
     expect(centers([grid(10, [0, 0, 2, 4]), grid(10, [6, 6, 10, 10]), grid(10)], 100, 10)).toEqual([[10, 20], [80, 80]]);
+  });
+});
+
+describe("tap to outline (the free model)", () => {
+  it("keeps only the piece under the tap", () => {
+    const g = grid(20, [2, 2, 8, 8], [12, 2, 18, 8]);
+    const piece = pieceAt(g, 4.5, 4.5, { cells: 20 });
+    expect(piece.reduce((n, v) => n + v, 0)).toBe(36);
+    expect(piece[3 * 20 + 14]).toBe(0); // the other lot stays out
+  });
+
+  it("takes the nearest piece for a tap just off it, and nothing for one far off", () => {
+    const g = grid(20, [12, 2, 18, 8]);
+    expect(pieceAt(g, 10, 4, { cells: 20 }).reduce((n, v) => n + v, 0)).toBe(36);
+    expect(pieceAt(g, 2, 16, { cells: 20 }).reduce((n, v) => n + v, 0)).toBe(0);
+  });
+
+  it("turns the model's masks into grids, leaving the padding under the picture off", () => {
+    const side = 256;
+    const logits = new Float32Array(3 * side * side).fill(-5);
+    const on = (m: number, x0: number, y0: number, x1: number, y1: number) => {
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) logits[m * side * side + y * side + x] = 3;
+    };
+    on(0, 10, 10, 20, 20);
+    on(1, 0, 100, 50, 200); // half of it below a 1024 × 512 picture
+    const { grids, scores } = maskGrids(logits, [1, 1, 3, side, side], [0.9, 0.8, 0.1], SAM_SIZE, 512);
+    expect(grids).toHaveLength(3);
+    expect(scores).toEqual([0.9, 0.8, 0.1]);
+    expect(grids[0].reduce((n, v) => n + v, 0)).toBe(100);
+    expect(grids[1].reduce((n, v) => n + v, 0)).toBe(50 * 28); // rows 100 to 127 only
+    expect(grids[2].every((v) => v === 0)).toBe(true);
+    expect(grids[0].length).toBe(SAM_GRID * SAM_GRID);
+  });
+
+  it("starts on the whole lot, not the speck SAM scores highest", () => {
+    // Answers from a tap on the Radford lot: the lot, then two specks around the tap.
+    expect(pickMask([{ cells: 19526, score: 0.72 }, { cells: 21, score: 0.87 }, { cells: 18, score: 0.9 }])).toBe(0);
+    expect(pickMask([{ cells: 2356, score: 0.44 }, { cells: 13251, score: 0.84 }, { cells: 900, score: 0.95 }])).toBe(1);
+    // Not fairly sure of any: the surest.
+    expect(pickMask([{ cells: 500, score: 0.3 }, { cells: 40, score: 0.45 }])).toBe(1);
+    expect(pickMask([])).toBe(-1);
+  });
+
+  it("normalizes the picture the way SAM was trained, top-left in the padded square", () => {
+    const rgba = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255]); // white, black
+    const out = pixelValues(rgba, 2, 1);
+    const plane = SAM_SIZE * SAM_SIZE;
+    expect(out.length).toBe(3 * plane);
+    expect(out[0]).toBeCloseTo((1 - 0.485) / 0.229, 4); // white's red
+    expect(out[plane + 1]).toBeCloseTo(-0.456 / 0.224, 4); // black's green
+    expect(out[2]).toBe(0); // padding
+    expect(out[SAM_SIZE]).toBe(0);
   });
 });
 

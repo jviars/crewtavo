@@ -1,8 +1,10 @@
 /**
- * Find paving: outlines the asphalt and concrete on the aerial in view, and counts its stalls, with
- * Meta's SAM 3 on the business's own fal.ai account (Apps → fal.ai; routes/paving.ts on the server).
- * What it finds lands on the map as ordinary shapes with their takeoff item, to check and fix
- * before pricing. Without fal.ai installed, the button says how to get it.
+ * Find paving, two ways. **Tap to outline** is free: a small Segment Anything runs in the browser
+ * and outlines the surface under each tap (TapOutline.tsx). **Find everything in view** outlines all
+ * the asphalt and concrete on the aerial and counts its stalls, with Meta's SAM 3 on the business's
+ * own fal.ai account (Apps → fal.ai; routes/paving.ts on the server). What either finds lands on the
+ * map as ordinary shapes with their takeoff item, to check and fix before pricing. Without fal.ai
+ * installed, the second says how to get it.
  */
 import { lineLengthM, polygonAreaM2, SQFT_PER_SQM } from "@crewtavo/core/geo";
 import { useMutation } from "@tanstack/react-query";
@@ -10,14 +12,16 @@ import { useState, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { FormError } from "@/components/ui/Field";
+import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { anyOf, centers, GRID, maskGrid, outlines } from "./detect";
 import type { ImageryId } from "./imagery";
 import type { MeasureMapHandle } from "./MeasureMap";
+import { TAP_ITEMS } from "./TapOutline";
 
+type Method = "tap" | "fal";
 type Target = "asphalt" | "concrete" | "stalls";
 interface Result { target: Target; masks: string[]; scores: number[] }
 
@@ -34,6 +38,23 @@ const MIN_AREA_SQFT = { asphalt: 250, concrete: 60 } as const;
 const MIN_HOLE_SQFT = 250;
 /** Masks SAM 3 isn't at least this sure of are left out. */
 const MIN_SCORE = 0.3;
+const METHOD_KEY = "crewtavo.findPavingMethod";
+
+function savedMethod(): Method | null {
+  try {
+    const m = localStorage.getItem(METHOD_KEY);
+    return m === "tap" || m === "fal" ? m : null;
+  } catch {
+    return null;
+  }
+}
+function saveMethod(method: Method) {
+  try {
+    localStorage.setItem(METHOD_KEY, method);
+  } catch {
+    /* nothing to remember it in */
+  }
+}
 
 export function FindPaving({
   map,
@@ -43,7 +64,9 @@ export function FindPaving({
   imagery,
   pictureImagery,
   zoom,
+  activeItem,
   onFound,
+  onTap,
 }: {
   map: RefObject<MeasureMapHandle | null>;
   ready: boolean;
@@ -54,9 +77,15 @@ export function FindPaving({
   /** The free imagery to look at when the map shows Google's, which can't be sent on. */
   pictureImagery: () => Promise<ImageryId>;
   zoom: number;
+  /** The takeoff item picked in the list, which tapping starts on when it's an area. */
+  activeItem: string | null;
   onFound: (ids: string[], item: string) => void;
+  /** Starts tap to outline, as this item. */
+  onTap: (item: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [method, setMethod] = useState<Method>(() => savedMethod() ?? (connected ? "fal" : "tap"));
+  const [tapItem, setTapItem] = useState("asphalt");
   const [targets, setTargets] = useState<Target[]>(["asphalt", "concrete"]);
   const notAerial = imagery === "street" || imagery === "terrain";
   const tooFar = zoom < 16;
@@ -68,7 +97,7 @@ export function FindPaving({
       if (!handle) throw new Error("The map isn't ready yet.");
       const view = await handle.viewImage(SIZE, imagery === "google" ? { imagery: await pictureImagery() } : {});
       if (!view) throw new Error("Couldn't take a picture of the map. Try again.");
-      const image = await blobToDataUri(view.image);
+      const image = view.canvas.toDataURL("image/jpeg", 0.9);
       const { results } = await api.post<{ results: Result[] }>("/paving/detect", { image, targets });
       // How many feet a picture pixel is, for leaving out specks and car-sized holes.
       const ftPerPx = (lineLengthM([view.at(0, SIZE / 2), view.at(SIZE, SIZE / 2)]) * 3.280_84) / SIZE;
@@ -112,73 +141,111 @@ export function FindPaving({
   });
 
   const toggle = (id: Target, on: boolean) => setTargets((t) => (on ? [...t.filter((x) => x !== id), id] : t.filter((x) => x !== id)));
+  const show = () => {
+    setTapItem(activeItem && TAP_ITEMS.some((i) => i.id === activeItem) ? activeItem : "asphalt");
+    setOpen(true);
+  };
+  const choose = (next: Method) => {
+    setMethod(next);
+    saveMethod(next);
+  };
+  const blocked = notAerial ? "Switch to aerial imagery first: Find paving needs a photo of the lot." : tooFar ? "Zoom in closer to the lot first." : null;
+  const methods: Array<{ id: Method; title: string; badge: string; body: string }> = [
+    { id: "tap", title: "Tap to outline", badge: "Free", body: "Tap a lot, drive or sidewalk and it's outlined, one tap at a time. It runs in this browser, so nothing is sent anywhere." },
+    { id: "fal", title: "Find everything in view", badge: "fal.ai", body: `Outlines all the asphalt and concrete in view at once and counts stalls, for about half a cent a thing found on your fal.ai account.${connected ? "" : " Needs fal.ai installed."}` },
+  ];
 
   return (
     <>
-      <Button size="sm" variant={connected ? "primary" : undefined} icon="sparkle" disabled={!ready} onClick={() => setOpen(true)}>
+      <Button size="sm" variant="primary" icon="sparkle" disabled={!ready} onClick={show}>
         Find paving
       </Button>
-      <span className="muted small">{connected ? "Outlines what's on the aerial for you." : "Outlines the lot for you, with fal.ai."}</span>
+      <span className="muted small">Tap the pavement and it's outlined for you.</span>
       {open && (
-        <Dialog open onClose={() => !run.isPending && setOpen(false)} title="Find paving" description="Outlines what's on the aerial in view, then you check it." size="md">
-          {connected ? (
-            <form className="dialog-body stack" onSubmit={(e) => { e.preventDefault(); run.mutate(); }}>
-              <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-                <legend className="small strong" style={{ marginBottom: 6 }}>What to find</legend>
-                {TARGETS.map((t) => (
-                  <label key={t.id} className="check-row">
-                    <input type="checkbox" checked={targets.includes(t.id)} onChange={(e) => toggle(t.id, e.target.checked)} disabled={run.isPending} />
-                    <span className="grow" style={{ display: "grid", gap: 1 }}>
-                      <strong>{t.label}</strong>
-                      <span className="muted small">{t.detail}</span>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              <div className="callout" role="note">
-                <Icon name="info" size={16} />
-                <span className="small" style={{ fontWeight: 400 }}>
-                  It looks at the map as it is now, so zoom until the lot fills it. Each thing you find costs about half a cent on your fal.ai account.
-                  {imagery === "google" ? " Google's imagery can't be sent on, so it looks at the free imagery here instead." : ""}
-                </span>
-              </div>
-              {notAerial && <div className="field-error" role="alert">Switch to aerial imagery first: Find paving needs a photo of the lot.</div>}
-              {!notAerial && tooFar && <div className="field-error" role="alert">Zoom in closer to the lot first.</div>}
-              {run.isPending && <span className="muted small row" style={{ gap: 8 }} role="status"><span className="spinner" style={{ width: 14, height: 14 }} /> Looking at the aerial. This takes about 10 to 30 seconds.</span>}
-              <FormError error={run.error} />
-              <div className="form-actions">
-                <Button onClick={() => setOpen(false)} disabled={run.isPending}>Cancel</Button>
-                <Button type="submit" variant="primary" icon="sparkle" loading={run.isPending} disabled={!targets.length || notAerial || tooFar}>Find</Button>
-              </div>
-            </form>
-          ) : (
-            <div className="dialog-body stack">
-              <p style={{ margin: 0 }}>
-                Find paving outlines the asphalt and concrete on the aerial, cuts out islands and buildings, and counts stalls, so you check a takeoff instead of drawing it.
-                It uses Meta's Segment Anything model through <strong>fal.ai</strong>, on your own fal.ai account: about half a cent for each thing it finds.
-              </p>
+        <Dialog open onClose={() => !run.isPending && setOpen(false)} title="Find paving" description="Outlines the pavement on the aerial for you, then you check it." size="md">
+          <form
+            className="dialog-body stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (blocked) return;
+              if (method === "tap") {
+                setOpen(false);
+                onTap(tapItem);
+              } else if (connected) run.mutate();
+            }}
+          >
+            <div className="stack-sm" role="radiogroup" aria-label="How to find it">
+              {methods.map((m) => (
+                <label key={m.id} className="card card-pad" style={{ display: "flex", gap: 10, cursor: "pointer", padding: 14, borderColor: method === m.id ? "var(--green)" : undefined, boxShadow: method === m.id ? "var(--ring)" : undefined }}>
+                  <input type="radio" name="method" checked={method === m.id} onChange={() => choose(m.id)} disabled={run.isPending} style={{ marginTop: 3 }} />
+                  <span>
+                    <strong>{m.title}</strong> <span className={m.id === "tap" ? "chip chip-green" : "chip"}>{m.badge}</span>
+                    <span className="muted small" style={{ display: "block" }}>{m.body}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {method === "tap" ? (
+              <>
+                <Field label="Outline as">
+                  <select className="select" value={tapItem} onChange={(e) => setTapItem(e.target.value)}>
+                    {TAP_ITEMS.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  </select>
+                </Field>
+                <div className="callout" role="note">
+                  <Icon name="info" size={16} />
+                  <span className="small" style={{ fontWeight: 400 }}>
+                    Tap the middle of each surface. If an outline takes too much or too little, <strong>Smaller</strong> and <strong>Bigger</strong> change it. The first time, the model (about 14 MB) downloads, then it stays in this browser.
+                    {imagery === "google" ? " Google's imagery can't be used for this, so it looks at the free imagery here instead." : ""}
+                  </span>
+                </div>
+              </>
+            ) : connected ? (
+              <>
+                <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
+                  <legend className="small strong" style={{ marginBottom: 6 }}>What to find</legend>
+                  {TARGETS.map((t) => (
+                    <label key={t.id} className="check-row">
+                      <input type="checkbox" checked={targets.includes(t.id)} onChange={(e) => toggle(t.id, e.target.checked)} disabled={run.isPending} />
+                      <span className="grow" style={{ display: "grid", gap: 1 }}>
+                        <strong>{t.label}</strong>
+                        <span className="muted small">{t.detail}</span>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+                <div className="callout" role="note">
+                  <Icon name="info" size={16} />
+                  <span className="small" style={{ fontWeight: 400 }}>
+                    It looks at the map as it is now, so zoom until the lot fills it. Each thing you find costs about half a cent on your fal.ai account.
+                    {imagery === "google" ? " Google's imagery can't be sent on, so it looks at the free imagery here instead." : ""}
+                  </span>
+                </div>
+              </>
+            ) : (
               <p className="muted small" style={{ margin: 0 }}>
+                It uses Meta's Segment Anything model through <strong>fal.ai</strong>, on your own fal.ai account.{" "}
                 {isAdmin ? "Installing fal.ai takes about two minutes: make an account, add a few dollars of credit and paste your key." : "Ask an owner or admin to install fal.ai on the Apps page. It takes about two minutes."}
               </p>
-              <div className="form-actions">
-                <Button onClick={() => setOpen(false)}>Not now</Button>
-                {isAdmin && <Link className="btn btn-primary" to="/apps/fal">Set up fal.ai</Link>}
-              </div>
+            )}
+            {blocked && <div className="field-error" role="alert">{blocked}</div>}
+            {run.isPending && <span className="muted small row" style={{ gap: 8 }} role="status"><span className="spinner" style={{ width: 14, height: 14 }} /> Looking at the aerial. This takes about 10 to 30 seconds.</span>}
+            <FormError error={run.error} />
+            <div className="form-actions">
+              <Button onClick={() => setOpen(false)} disabled={run.isPending}>Cancel</Button>
+              {method === "tap" ? (
+                <Button type="submit" variant="primary" icon="sparkle" disabled={Boolean(blocked)}>Start tapping</Button>
+              ) : connected ? (
+                <Button type="submit" variant="primary" icon="sparkle" loading={run.isPending} disabled={!targets.length || Boolean(blocked)}>Find</Button>
+              ) : (
+                isAdmin && <Link className="btn btn-primary" to="/apps/fal">Set up fal.ai</Link>
+              )}
             </div>
-          )}
+          </form>
         </Dialog>
       )}
     </>
   );
-}
-
-function blobToDataUri(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Couldn't read the map picture."));
-    reader.readAsDataURL(blob);
-  });
 }
 
 /** Points closer than `feet` to one already kept are the same stall found twice. */
