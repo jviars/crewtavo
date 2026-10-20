@@ -16,8 +16,9 @@ import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
 import { deliverNotifications } from "./services/delivery";
 import { dailyOutlook } from "./services/external";
+import { autoRoutes } from "./services/routes";
 
-export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "plans"] as const;
+export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "plans", "routes"] as const;
 export type TaskName = (typeof TASKS)[number];
 
 /** Cron expressions -> tasks, run by server.ts's scheduler. */
@@ -28,6 +29,7 @@ export const CRON_TASKS: Record<string, TaskName[]> = {
   "*/15 * * * *": ["calendars"],
   "0 * * * *": ["followups"],
   "0 */6 * * *": ["weather"],
+  "30 * * * *": ["routes"],
   "15 6 * * *": ["recurrence"],
   "40 5 * * *": ["railway"],
   "20 4 * * *": ["plans"],
@@ -57,6 +59,8 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return keepRailwayAlive(env, adminClient(env));
     case "plans":
       return tidyPlanFiles(adminClient(env));
+    case "routes":
+      return autoRoutes(env);
   }
 }
 
@@ -116,12 +120,13 @@ type RecurringJobRow = {
   active_months: number[] | null;
   visit_start_time: string | null;
   visit_duration_min: number;
+  visit_time_fixed?: boolean;
   default_crew_id: string | null;
   company: unknown;
 };
 
 const RECURRING_FIELDS =
-  "id, company_id, title, property_id, starts_on, ends_on, recurrence_rule, active_months, visit_start_time, visit_duration_min, default_crew_id, company:companies(timezone)";
+  "id, company_id, title, property_id, starts_on, ends_on, recurrence_rule, active_months, visit_start_time, visit_duration_min, visit_time_fixed, default_crew_id, company:companies(timezone)";
 
 /**
  * Bring one recurring job's visits in line with its schedule for the next 60 days: add missing
@@ -166,6 +171,7 @@ export async function materializeJob(admin: Db, job: RecurringJobRow, prune = fa
       scheduled_on: date,
       starts_at: start?.toISOString() ?? null,
       ends_at: start ? new Date(start.getTime() + job.visit_duration_min * 60_000).toISOString() : null,
+      time_fixed: Boolean(start && job.visit_time_fixed),
       crew_id: job.default_crew_id,
     };
   });

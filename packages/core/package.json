@@ -15,6 +15,7 @@
     "./database": "./src/database.types.ts",
     "./time": "./src/time.ts",
     "./recurrence": "./src/recurrence.ts",
+    "./routing": "./src/routing.ts",
     "./ical": "./src/ical.ts",
     "./automations": "./src/automations.ts",
     "./equipment": "./src/equipment.ts",

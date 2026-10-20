@@ -24,11 +24,11 @@ export interface DragState<V> {
   duration: number;
 }
 
-const SNAP = 15;
 const TOUCH_DELAY = 320;
-const snap = (m: number) => Math.round(m / SNAP) * SNAP;
 
-function readTarget(x: number, y: number, offsetMin: number, duration: number, mode: "move" | "resize", startMin: number | null): { target: DropTarget; duration: number } | null {
+/** `step`: minutes a dropped visit snaps to (Settings → Schedule: 5 by default, like Google Calendar's app). */
+function readTarget(x: number, y: number, offsetMin: number, duration: number, mode: "move" | "resize", startMin: number | null, step: number): { target: DropTarget; duration: number } | null {
+  const snap = (m: number) => Math.round(m / step) * step;
   const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop]");
   if (!el) return null;
   const { drop, date = "", crew } = el.dataset;
@@ -41,7 +41,7 @@ function readTarget(x: number, y: number, offsetMin: number, duration: number, m
   const ppm = Number(el.dataset.ppm ?? 1);
   const at = top + (y - rect.top) / ppm;
   if (mode === "resize" && startMin !== null) {
-    const length = Math.max(SNAP, snap(at) - startMin);
+    const length = Math.max(step, snap(at) - startMin);
     return { target: { type: "slot", date, crew, minutes: startMin }, duration: Math.min(length, 24 * 60 - startMin) };
   }
   const minutes = Math.max(0, Math.min(24 * 60 - Math.min(duration, 24 * 60), snap(at - offsetMin)));
@@ -50,10 +50,13 @@ function readTarget(x: number, y: number, offsetMin: number, duration: number, m
 
 export function useVisitDrag<V extends { id: string }>({
   enabled,
+  step = 5,
   timing,
   onDrop,
 }: {
   enabled: boolean;
+  /** Minutes a drop snaps to. */
+  step?: number;
   /** The visit's start (minutes after midnight, local) and length, or null start for anytime. */
   timing: (visit: V) => { start: number | null; duration: number };
   onDrop: (visit: V, target: DropTarget, duration: number) => void;
@@ -61,8 +64,8 @@ export function useVisitDrag<V extends { id: string }>({
   const [drag, setDrag] = useState<DragState<V> | null>(null);
   const justDragged = useRef(false);
   const cleanup = useRef<(() => void) | null>(null);
-  const latest = useRef({ timing, onDrop });
-  latest.current = { timing, onDrop };
+  const latest = useRef({ timing, onDrop, step });
+  latest.current = { timing, onDrop, step };
 
   useEffect(() => () => cleanup.current?.(), []);
 
@@ -95,7 +98,7 @@ export function useVisitDrag<V extends { id: string }>({
         setDrag({ visit, mode, target: null, duration: initial });
       };
       const update = (x: number, y: number) => {
-        const next = readTarget(x, y, offsetMin, initial, mode, startMin);
+        const next = readTarget(x, y, offsetMin, initial, mode, startMin, latest.current.step);
         if (JSON.stringify(next) === JSON.stringify(current)) return;
         current = next;
         setDrag({ visit, mode, target: next?.target ?? null, duration: next?.duration ?? initial });

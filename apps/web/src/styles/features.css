@@ -502,6 +502,34 @@ body.is-dragging-visit, body.is-dragging-visit * { cursor: grabbing !important; 
 .unscheduled-panel[data-over] { background: var(--green-tint); box-shadow: inset 0 0 0 2px var(--green); }
 .unscheduled-panel .tg-chip { white-space: normal; padding: 8px 10px; font-weight: 500; }
 @media (max-width: 1180px) { .unscheduled-panel { position: static; max-height: none; } }
+
+/* ---- Addresses, visit details and routes --------------------------------------------------- */
+.address-link { all: unset; display: inline; color: inherit; font: inherit; text-align: left; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--text-4); text-underline-offset: 3px; cursor: pointer; overflow-wrap: anywhere; }
+.address-link:hover { color: var(--green-dark); text-decoration-color: currentColor; }
+.address-link:focus-visible { border-radius: 4px; box-shadow: var(--ring); }
+.maps-choices { display: grid; gap: 8px; }
+.maps-choices .btn { justify-content: flex-start; gap: 10px; padding: 0 16px; }
+.visit-facts { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px 10px; align-items: start; margin: 0; }
+.visit-facts > svg { margin-top: 2px; color: var(--text-3); }
+.visit-facts > div { min-width: 0; overflow-wrap: anywhere; }
+.visit-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.route-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.route-stop { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--divider); }
+.route-stop:first-child { border-top: 0; }
+.route-stop[data-started] { opacity: 0.6; }
+.route-num { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--green-tint); color: var(--green-dark); font-size: 12px; font-weight: 800; }
+.route-stop[data-fixed] .route-num { background: var(--info-tint); color: var(--info); }
+.route-stop[data-late] .route-num { background: var(--danger-tint); color: var(--danger); }
+.route-drive { grid-column: 2 / -1; font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 4px; margin: -4px 0 0; }
+.route-moves { display: flex; gap: 2px; }
+.route-sketch { width: 100%; height: 170px; border-radius: 12px; background: var(--fill); border: 1px solid var(--divider); }
+.route-sketch path { fill: none; stroke: var(--green); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-sketch path[data-back] { stroke-dasharray: 4 4; opacity: 0.6; }
+.route-sketch circle { fill: var(--surface); stroke: var(--green-dark); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.route-sketch rect { fill: var(--ink); }
+.route-sketch text { font-size: 10px; font-weight: 800; fill: var(--green-dark); text-anchor: middle; dominant-baseline: central; }
+.route-summary { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
+.route-summary strong { font-weight: 800; }
 .month-cell[data-over] { background: var(--green-tint); box-shadow: inset 0 0 0 2px var(--green); }
 .month-chip { touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 

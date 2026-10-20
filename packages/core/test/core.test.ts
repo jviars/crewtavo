@@ -30,11 +30,13 @@ import {
   orderStops,
   parseRule,
   pitchFactor,
+  planRoute,
   pitchFromDegrees,
   polygonAreaM2,
   ringAreaM2,
   roofingSquares,
   routeLengthM,
+  scheduleSettings,
   sqmToSqft,
   summarizeFeatureCollection,
   validateFormula,
@@ -333,6 +335,69 @@ describe("routing", () => {
     const ordered = orderStops(start, stops);
     expect(ordered.map((s) => s.id)).toEqual(["near", "mid", "far"]);
     expect(routeLengthM(start, ordered)).toBeLessThanOrEqual(routeLengthM(start, stops));
+  });
+
+  // A shop and lawns due north of it, about 0.69 miles (straight) apart per 0.01 degree.
+  const shop = { lat: 37.13, lng: -80.57 };
+  const lawn = (id: string, lat: number, minutes = 30, fixed: number | null = null) => ({ id, at: { lat, lng: -80.57 }, minutes, fixed });
+  const base = { from: shop, returnTo: shop, dayStart: 8 * 60, speedMph: 30, step: 5 };
+
+  it("gives each stop a time after the drive, rounded to the time step", () => {
+    const plan = planRoute({ ...base, stops: [lawn("far", 37.2), lawn("near", 37.14), lawn("mid", 37.17)] });
+    expect(plan.stops.map((s) => s.id)).toEqual(["near", "mid", "far"]);
+    // 0.69 mi straight x 1.3 at 30 mph is about 1.8 minutes: 8:00 becomes 8:05.
+    expect(plan.stops[0]).toMatchObject({ start: 8 * 60 + 5, end: 8 * 60 + 35, fixed: false, late: false });
+    for (const [a, b] of [[0, 1], [1, 2]]) expect(plan.stops[b]!.start).toBeGreaterThanOrEqual(plan.stops[a]!.end);
+    for (const s of plan.stops) expect(s.start % 5).toBe(0);
+    // Out and back: twice the farthest lawn's distance, with roads.
+    expect(plan.miles).toBeCloseTo(2 * 0.07 * 69.05 * 1.3, 0);
+    expect(plan.finish).toBeGreaterThan(plan.stops[2]!.end);
+  });
+
+  it("keeps fixed times and routes the rest around them", () => {
+    const plan = planRoute({ ...base, stops: [lawn("a", 37.14, 60), lawn("b", 37.15, 60), lawn("gate", 37.2, 30, 9 * 60), lawn("c", 37.16, 60)] });
+    const gate = plan.stops.find((s) => s.id === "gate")!;
+    expect(gate).toMatchObject({ start: 9 * 60, end: 9 * 60 + 30, fixed: true, late: false });
+    // Nothing overlaps.
+    const sorted = [...plan.stops].sort((x, y) => x.start - y.start);
+    for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.start).toBeGreaterThanOrEqual(sorted[i - 1]!.end);
+  });
+
+  it("fills the time before a fixed stop instead of waiting", () => {
+    // The long lawn doesn't fit before 9:00; the short one does, so the crew mows it first.
+    const plan = planRoute({ ...base, returnTo: null, stops: [lawn("long", 37.14, 120), lawn("short", 37.15, 30), lawn("gate", 37.16, 30, 9 * 60)] });
+    expect(plan.stops.map((s) => s.id)).toEqual(["short", "gate", "long"]);
+    expect(plan.stops.every((s) => !s.late)).toBe(true);
+  });
+
+  it("flags a fixed stop the crew can't reach in time", () => {
+    const plan = planRoute({ ...base, dayStart: 9 * 60, stops: [lawn("early", 37.3, 30, 9 * 60)] });
+    expect(plan.stops[0]).toMatchObject({ start: 9 * 60, late: true });
+  });
+
+  it("keeps an order set by hand, and fits new stops in where they add the least driving", () => {
+    const stops = [lawn("far", 37.2), lawn("near", 37.14), lawn("mid", 37.17)];
+    expect(planRoute({ ...base, stops, order: ["far", "near", "mid"] }).stops.map((s) => s.id)).toEqual(["far", "near", "mid"]);
+    const plan = planRoute({ ...base, stops: [...stops, lawn("new", 37.15)], order: ["near", "mid", "far"] });
+    expect(plan.stops.map((s) => s.id)).toEqual(["near", "new", "mid", "far"]);
+  });
+
+  it("puts stops with no map location last, without driving", () => {
+    const plan = planRoute({ ...base, stops: [{ id: "lost", at: null, minutes: 45 }, lawn("a", 37.14)] });
+    expect(plan.stops.map((s) => [s.id, s.located, s.driveMin])).toEqual([["a", true, 2], ["lost", false, 0]]);
+  });
+
+  it("reads the schedule settings with defaults", () => {
+    expect(scheduleSettings({})).toEqual({ timeStep: 5, autoRoutes: false, returnToShop: true, speedMph: 30, routeTimes: true, setupMin: 0 });
+    expect(scheduleSettings({ schedule: { time_step: 1, auto_routes: true, return_to_shop: false, speed_mph: 200, route_times: false, setup_min: 4.6 } })).toEqual({
+      timeStep: 1,
+      autoRoutes: true,
+      returnToShop: false,
+      speedMph: 80,
+      routeTimes: false,
+      setupMin: 5,
+    });
+    expect(scheduleSettings({ schedule: { time_step: 7 } }).timeStep).toBe(5);
   });
 });
 

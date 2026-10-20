@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
+import { MapsLink } from "@/components/ui/MapsLink";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
@@ -175,7 +176,7 @@ export function JobPage() {
         <EntityStatus kind="job" status={j.status} />
         {j.kind === "recurring" && <span className="chip chip-blue"><Icon name="refresh" size={12} />{j.recurrence_rule ? describeRule(j.recurrence_rule) : "Recurring"}</span>}
         {j.client && <Link to={`/clients/${j.client.id}`} className="strong">{j.client.display_name}</Link>}
-        {j.property && <span className="muted">{addressLine(j.property)}</span>}
+        {j.property && <MapsLink className="address-link muted" place={j.property}>{addressLine(j.property)}</MapsLink>}
       </div>
 
       {j.status === "requires_invoicing" && seesInvoices && (
@@ -317,7 +318,7 @@ export function JobPage() {
               <strong>Client</strong>
               <Link to={`/clients/${j.client.id}`} className="strong">{j.client.display_name}</Link>
               {j.client.phone && <a href={`tel:${j.client.phone}`} className="small">{j.client.phone}</a>}
-              {j.property && <a className="btn btn-sm" style={{ justifySelf: "start" }} target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(j.property.lat != null ? `${j.property.lat},${j.property.lng}` : addressLine(j.property).replace(/ · /g, ", "))}`}><Icon name="navigation" size={14} />Directions</a>}
+              {j.property && <span style={{ justifySelf: "start" }}><MapsLink className="btn btn-sm" place={j.property}><Icon name="navigation" size={14} />Directions</MapsLink></span>}
             </div>
           )}
         </aside>

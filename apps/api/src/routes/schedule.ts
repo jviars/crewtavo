@@ -1,5 +1,5 @@
 /** Dashboard and scheduling: the calendar feed, moving visits, rain-day shifts, routing, find-a-time. */
-import { addDays, DISPATCH, localDate, localTime, orderStops, routeLengthM, zonedTimeToUtc } from "@crewtavo/core";
+import { addDays, DISPATCH, localDate, localTime, scheduleSettings, zonedTimeToUtc } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -8,6 +8,7 @@ import { dbError, HttpError, isoDate, must, param, readJson, uuid } from "../lib
 import { allow } from "../lib/limit";
 import { adminClient } from "../lib/supabase";
 import { geocodeAddress, suggestPlaces } from "../services/external";
+import { clockLabel, dayRoute, fitIntoRoute, loadDay, locateMissing, markDay, MAX_ROUTE_STOPS, planDay, saveDay } from "../services/routes";
 import { materializeJob, recurringJob } from "../tasks";
 
 export const schedule = new Hono<AppEnv>();
@@ -18,7 +19,7 @@ async function companyZone(c: { var: AppEnv["Variables"] }): Promise<{ tz: strin
 }
 
 const VISIT_FIELDS =
-  "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, hold_reason, crew_id, notes, series_id, series_day, series_total, job:jobs(id, number, title, client:clients(id, display_name)), property:properties(id, line1, city, lat, lng), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment_id)";
+  "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, hold_reason, crew_id, notes, series_id, series_day, series_total, job:jobs(id, number, title, client:clients(id, display_name)), property:properties(id, line1, city, lat, lng), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment_id)";
 
 const isWeekend = (date: string) => [0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay());
 
@@ -59,6 +60,8 @@ schedule.post("/visits", requireUser, requireCompany(DISPATCH), async (c) => {
       scheduled_on: isoDate.nullable().optional(),
       starts_at: z.iso.datetime({ offset: true }).nullable().optional(),
       ends_at: z.iso.datetime({ offset: true }).nullable().optional(),
+      /** Keep this start time when the route is organized. */
+      time_fixed: z.boolean().default(false),
       days: z.number().int().min(1).max(30).default(1),
       skip_weekends: z.boolean().default(true),
       assignee_ids: z.array(uuid).max(20).default([]),
@@ -66,7 +69,8 @@ schedule.post("/visits", requireUser, requireCompany(DISPATCH), async (c) => {
     }),
   );
   if (body.starts_at && body.ends_at && Date.parse(body.ends_at) <= Date.parse(body.starts_at)) throw new HttpError(400, "The visit has to end after it starts.");
-  const { tz } = await companyZone(c);
+  const company = await companyZone(c);
+  const { tz } = company;
   const first = body.starts_at ? localDate(new Date(body.starts_at), tz) : body.scheduled_on ?? null;
   const days = first && body.status !== "unscheduled" ? body.days : 1;
   const dates: Array<string | null> = [];
@@ -96,6 +100,7 @@ schedule.post("/visits", requireUser, requireCompany(DISPATCH), async (c) => {
       scheduled_on: body.status === "unscheduled" ? null : date,
       starts_at: start?.toISOString() ?? null,
       ends_at: start && length ? new Date(start.getTime() + length).toISOString() : null,
+      time_fixed: Boolean(start) && body.time_fixed,
       series_id: seriesId,
       series_day: seriesId ? i + 1 : null,
       series_total: seriesId ? dates.length : null,
@@ -107,6 +112,11 @@ schedule.post("/visits", requireUser, requireCompany(DISPATCH), async (c) => {
   for (const v of created.data) {
     if (body.assignee_ids.length) await syncLinks(c, "visit_assignees", "user_id", v.id, body.assignee_ids, notYours);
     if (body.equipment_ids.length) await syncLinks(c, "visit_equipment", "equipment_id", v.id, body.equipment_ids, notYours);
+  }
+  // An anytime visit on an organized day goes into the route (with automatic routes on).
+  if (body.status === "scheduled" && !startTime) {
+    const ids = created.data.map((v) => v.id);
+    for (const date of dates) if (date) await fitQuietly(c, ids, body.crew_id ?? null, date, company);
   }
   return c.json({ ids: created.data.map((v) => v.id), series_id: seriesId }, 201);
 });
@@ -278,6 +288,8 @@ schedule.patch("/visits/:id", requireUser, requireCompany(), async (c) => {
       crew_id: uuid.nullable().optional(),
       status: z.enum(["unscheduled", "scheduled", "en_route", "in_progress", "completed", "cancelled"]).optional(),
       notes: z.string().max(5000).nullable().optional(),
+      /** Keep this start time when the route is organized. */
+      time_fixed: z.boolean().optional(),
       assignee_ids: z.array(uuid).max(20).optional(),
       equipment_ids: z.array(uuid).max(30).optional(),
       /** For multi-day work: when this day moves, move the days after it by as much. */
@@ -296,22 +308,38 @@ schedule.patch("/visits/:id", requireUser, requireCompany(), async (c) => {
       return c.json({ ...must(await c.var.db.from("visits").select(VISIT_FIELDS).eq("id", id).maybeSingle()), skipped: true });
     }
   }
-  const reschedules = assignee_ids !== undefined || equipment_ids !== undefined || ["starts_at", "ends_at", "scheduled_on", "crew_id"].some((k) => k in fields);
+  const reschedules = assignee_ids !== undefined || equipment_ids !== undefined || ["starts_at", "ends_at", "scheduled_on", "crew_id", "time_fixed"].some((k) => k in fields);
   // Which visits and people: the database decides (every crew with the "schedule" area, a crew
   // lead's own crew without it). See private.schedules_crew().
   if (reschedules && !DISPATCH.includes(c.var.role)) throw new HttpError(403, "Your role can't reschedule or reassign visits.");
   if (fields.starts_at && fields.ends_at && Date.parse(fields.ends_at) <= Date.parse(fields.starts_at)) throw new HttpError(400, "The visit has to end after it starts.");
-  const before = shift_series
-    ? must(await c.var.db.from("visits").select("scheduled_on, series_id, series_day").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Visit not found.")
-    : null;
+  const moves = ["starts_at", "scheduled_on", "crew_id"].some((k) => k in fields);
+  const before =
+    shift_series || moves
+      ? must(await c.var.db.from("visits").select("scheduled_on, starts_at, crew_id, series_id, series_day").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), "Visit not found.")
+      : null;
+  // A visit that moves leaves its place in the route; an anytime visit has no time to keep.
+  const moved =
+    before &&
+    (("scheduled_on" in fields && fields.scheduled_on !== before.scheduled_on) ||
+      ("crew_id" in fields && (fields.crew_id ?? null) !== before.crew_id) ||
+      ("starts_at" in fields && (fields.starts_at ? !before.starts_at || Date.parse(fields.starts_at) !== Date.parse(before.starts_at) : before.starts_at !== null)));
+  const routeFields = { ...(moved && { route_order: null }), ...("starts_at" in fields && !fields.starts_at && { time_fixed: false }) };
   if (Object.keys(fields).length) {
-    const { data, error } = await c.var.db.from("visits").update(fields).eq("id", id).eq("company_id", c.var.companyId).select("id, scheduled_on");
+    const { data, error } = await c.var.db
+      .from("visits")
+      .update({ ...fields, ...routeFields })
+      .eq("id", id)
+      .eq("company_id", c.var.companyId)
+      .select("id, scheduled_on, starts_at, crew_id, status");
     if (error) throw dbError(error);
     if (!data.length) throw new HttpError(404, "Visit not found.");
+    const now = data[0]!;
+    if (moved && now.status === "scheduled" && now.scheduled_on && !now.starts_at) await fitQuietly(c, [id], now.crew_id, now.scheduled_on);
     // Later days of the same multi-day job follow on the work days after it, keeping their own times
     // (and skipping weekends if the job didn't use them).
-    const moved = before?.series_id && before.scheduled_on && data[0]!.scheduled_on && before.scheduled_on !== data[0]!.scheduled_on;
-    if (moved && before?.series_id) {
+    const seriesMoved = shift_series && before?.series_id && before.scheduled_on && data[0]!.scheduled_on && before.scheduled_on !== data[0]!.scheduled_on;
+    if (seriesMoved && before?.series_id) {
       const { tz } = await companyZone(c);
       const all = must(await c.var.db.from("visits").select("id, series_day, scheduled_on, starts_at, ends_at, status").eq("series_id", before.series_id).order("series_day"));
       const skipWeekends = !all.some((v) => v.id !== id && v.scheduled_on && isWeekend(v.scheduled_on));
@@ -368,58 +396,126 @@ schedule.post("/schedule/shift", requireUser, requireCompany(DISPATCH), async (c
   return c.json({ moved: updates.length });
 });
 
-/** Ordering takes about a quarter second at 100 stops and grows fast (2.6 s at 200), blocking the server. */
-export const MAX_ROUTE_STOPS = 100;
+// ---- Routes -------------------------------------------------------------------------------------
 
-/** Order a day's anytime visits for one crew (or the visits with no crew) to shorten the drive. */
-schedule.post("/schedule/optimize", requireUser, requireCompany(DISPATCH), async (c) => {
+/** With automatic routes on, an anytime visit added to an organized day goes into its route. */
+async function fitQuietly(c: { var: AppEnv["Variables"] }, visitIds: string[], crewId: string | null, date: string, company?: { tz: string; settings: Record<string, any> }) {
+  try {
+    const clock = company ?? (await companyZone(c));
+    if (!scheduleSettings(clock.settings).autoRoutes) return;
+    await fitIntoRoute(c.var.db, c.var.companyId, crewId, date, clock, c.var.userId, { only: visitIds });
+  } catch (error) {
+    // The visit is saved either way; the hourly routes task tries again.
+    console.error("Couldn't fit a visit into its route", error instanceof Error ? error.message : error);
+  }
+}
+
+/** A crew lead without "Schedule the whole team" plans only their own crew's route. */
+async function mayRoute(c: { var: AppEnv["Variables"] }, crewId: string | null) {
+  if (c.var.permissions.includes("schedule")) return;
+  const mine = crewId ? must(await c.var.db.rpc("my_crew_ids", { p_company: c.var.companyId })) : [];
+  if (!crewId || !(mine as string[]).includes(crewId)) throw new HttpError(403, "You can plan your own crew's route. Pick your crew.");
+}
+
+// No crew_id (or null) means the visits with no crew, never every crew's at once.
+const routeDay = { date: isoDate, crew_id: uuid.nullish(), order: z.array(uuid).max(MAX_ROUTE_STOPS).optional() };
+const miles = (m: number) => Math.round(m * 10) / 10;
+
+/**
+ * A crew's day as Organize route would leave it: the shortest order (or `order`, someone's own),
+ * each stop's time and the driving between stops, without saving anything.
+ */
+schedule.post("/schedule/route/preview", requireUser, requireCompany(DISPATCH), async (c) => {
+  const body = await readJson(c, z.object(routeDay));
+  const crewId = body.crew_id ?? null;
+  await mayRoute(c, crewId);
+  const company = await companyZone(c);
+  const visits = await loadDay(c.var.db, c.var.companyId, crewId, body.date);
+  await locateMissing(c.var.db, c.env, visits);
+  const day = planDay(visits, company, body.date, { order: body.order });
+  const route = await dayRoute(c.var.db, c.var.companyId, crewId, body.date);
+  const stop = (v: (typeof visits)[number]) => ({
+    id: v.id,
+    title: v.title,
+    status: v.status,
+    client: v.job?.client?.display_name ?? null,
+    address: v.property ? [v.property.line1, v.property.city].filter(Boolean).join(", ") : null,
+    lat: v.property?.lat ?? null,
+    lng: v.property?.lng ?? null,
+    was_order: v.route_order,
+    was_starts_at: v.starts_at,
+    was_ends_at: v.ends_at,
+  });
+  return c.json({
+    date: body.date,
+    times: day.times,
+    shop: day.shop,
+    return_to_shop: day.returnToShop,
+    by_hand: route?.by_hand ?? false,
+    organized_at: route?.organized_at ?? null,
+    miles_before: miles(day.milesBefore),
+    miles_after: miles(day.milesAfter),
+    finish: day.stops.length ? clockLabel(day.finish) : null,
+    late_finish: day.stops.length > 0 && day.finish > day.workEnd,
+    changes: day.changes.length,
+    warnings: day.warnings,
+    started: day.started.map((v) => ({ ...stop(v), order: v.route_order, starts_at: v.starts_at, ends_at: v.ends_at })),
+    stops: day.stops.map((p) => ({
+      ...stop(p.visit),
+      order: p.order,
+      starts_at: p.starts_at,
+      ends_at: p.ends_at,
+      minutes: p.planned.end - p.planned.start,
+      drive_min: p.planned.driveMin,
+      drive_miles: miles(p.planned.driveMiles),
+      fixed: p.planned.fixed,
+      late: p.planned.late,
+      located: p.planned.located,
+    })),
+  });
+});
+
+/** Save a crew's route: the order (`by_hand` when someone arranged it) and each stop's time. */
+schedule.post("/schedule/route", requireUser, requireCompany(DISPATCH), async (c) => {
+  const body = await readJson(c, z.object({ ...routeDay, by_hand: z.boolean().default(false) }));
+  const crewId = body.crew_id ?? null;
+  await mayRoute(c, crewId);
+  const company = await companyZone(c);
+  const visits = await loadDay(c.var.db, c.var.companyId, crewId, body.date);
+  const day = planDay(visits, company, body.date, { order: body.order });
+  const previous = await saveDay(c.var.db, c.var.companyId, crewId, day, { byHand: body.by_hand, userId: c.var.userId });
+  return c.json({ saved: previous.length, previous, miles_before: miles(day.milesBefore), miles_after: miles(day.milesAfter) });
+});
+
+/** Undo Organize route: the visits' order and times as they were. The day is then left as it is. */
+schedule.post("/schedule/route/undo", requireUser, requireCompany(DISPATCH), async (c) => {
   const body = await readJson(
     c,
-    // No crew_id (or null) means the visits with no crew, never every crew's at once.
-    z.object({ date: isoDate, crew_id: uuid.nullish(), start: z.object({ lat: z.number(), lng: z.number() }).optional() }),
+    z.object({
+      date: isoDate,
+      crew_id: uuid.nullish(),
+      visits: z
+        .array(z.object({ id: uuid, route_order: z.number().int().min(1).max(10_000).nullable(), starts_at: z.iso.datetime({ offset: true }).nullable(), ends_at: z.iso.datetime({ offset: true }).nullable() }))
+        .max(MAX_ROUTE_STOPS),
+    }),
   );
-  if (!c.var.permissions.includes("schedule")) {
-    const mine = body.crew_id ? must(await c.var.db.rpc("my_crew_ids", { p_company: c.var.companyId })) : [];
-    if (!body.crew_id || !(mine as string[]).includes(body.crew_id)) throw new HttpError(403, "You can plan your own crew's route. Pick your crew.");
-  }
-  let query = c.var.db
-    .from("visits")
-    .select("id, property:properties(lat, lng)")
-    .eq("company_id", c.var.companyId)
-    .eq("scheduled_on", body.date)
-    .is("starts_at", null)
-    .not("status", "in", "(completed,cancelled)");
-  query = body.crew_id ? query.eq("crew_id", body.crew_id) : query.is("crew_id", null);
-  const rows = must(await query) as Array<{ id: string; property: { lat: number | null; lng: number | null } | null }>;
-  const stops = rows
-    .filter((r) => r.property?.lat != null && r.property?.lng != null)
-    .map((r) => ({ id: r.id, lat: r.property!.lat!, lng: r.property!.lng! }));
-  if (!stops.length) return c.json({ order: [], miles_before: 0, miles_after: 0, skipped: rows.length });
-  if (stops.length > MAX_ROUTE_STOPS) {
-    throw new HttpError(400, `That's ${stops.length} stops. Route ordering handles up to ${MAX_ROUTE_STOPS} at a time, so split them across crews or days first.`);
-  }
-
-  const { settings } = await companyZone(c);
-  const start = body.start ?? settings.depot ?? stops[0];
-  const ordered = orderStops(start, stops);
-  for (const [index, stop] of ordered.entries()) {
-    const { error } = await c.var.db.from("visits").update({ route_order: index + 1 }).eq("id", stop.id);
+  const crewId = body.crew_id ?? null;
+  await mayRoute(c, crewId);
+  for (const { id, ...fields } of body.visits) {
+    let query = c.var.db.from("visits").update(fields).eq("id", id).eq("company_id", c.var.companyId).eq("status", "scheduled");
+    query = crewId ? query.eq("crew_id", crewId) : query.is("crew_id", null);
+    const { error } = await query;
     if (error) throw dbError(error);
   }
-  const miles = (m: number) => Math.round((m / 1609.344) * 10) / 10;
-  return c.json({
-    order: ordered.map((s) => s.id),
-    miles_before: miles(routeLengthM(start, stops)),
-    miles_after: miles(routeLengthM(start, ordered)),
-    skipped: rows.length - stops.length, // visits whose property has no map location
-  });
+  await markDay(c.var.db, c.var.companyId, crewId, body.date, { byHand: true, userId: c.var.userId });
+  return c.json({ restored: body.visits.length });
 });
 
 /** Suggest open slots in working hours (company settings.working_hours, default 7:00-18:00). */
 schedule.post("/schedule/find-time", requireUser, requireCompany(), async (c) => {
   const body = await readJson(
     c,
-    z.object({ date_from: isoDate, days: z.number().int().min(1).max(14).default(7), duration_min: z.number().int().min(15).max(720), crew_id: uuid.optional() }),
+    z.object({ date_from: isoDate, days: z.number().int().min(1).max(14).default(7), duration_min: z.number().int().min(1).max(720), crew_id: uuid.optional() }),
   );
   const { tz, settings } = await companyZone(c);
   const hours = { start: settings.working_hours?.start ?? "07:00", end: settings.working_hours?.end ?? "18:00" };
@@ -444,8 +540,9 @@ schedule.post("/schedule/find-time", requireUser, requireCompany(), async (c) =>
 
   const slots: Array<{ starts_at: string; ends_at: string }> = [];
   const need = body.duration_min * 60_000;
-  const quarter = 15 * 60_000;
-  const now = Math.ceil(Date.now() / quarter) * quarter;
+  // Slots start on the company's time step (every 5 minutes, unless Settings → Schedule says otherwise).
+  const step = Math.max(5, scheduleSettings(settings).timeStep) * 60_000;
+  const now = Math.ceil(Date.now() / step) * step;
   for (let day = body.date_from; day <= dateTo && slots.length < 10; day = addDays(day, 1)) {
     const dayStart = Math.max(zonedTimeToUtc(day, hours.start, tz).getTime(), now);
     const dayEnd = zonedTimeToUtc(day, hours.end, tz).getTime();

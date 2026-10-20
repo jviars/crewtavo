@@ -110,6 +110,7 @@ export interface JobRecord {
   ends_on: string | null;
   visit_start_time: string | null;
   visit_duration_min: number;
+  visit_time_fixed?: boolean;
   default_crew_id: string | null;
   billing_mode: string;
   po_number: string | null;
@@ -127,6 +128,7 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
     kind: job.kind,
     visit_start_time: job.visit_start_time ? job.visit_start_time.slice(0, 5) : "",
     visit_duration_min: job.visit_duration_min ?? 60,
+    visit_time_fixed: job.visit_time_fixed ? "1" : "",
     default_crew_id: job.default_crew_id ?? "",
     billing_mode: job.billing_mode,
     po_number: job.po_number ?? "",
@@ -162,7 +164,9 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
             starts_on: recurring ? recurrence.starts_on : null,
             ends_on: recurring ? recurrence.ends_on : null,
             visit_start_time: f.visit_start_time || null,
-            visit_duration_min: Math.max(15, Number(f.visit_duration_min) || 60),
+            // Any whole number of minutes, like Google Calendar: a 20-minute mow stays 20 minutes.
+            visit_duration_min: Math.min(24 * 60, Math.max(1, Math.round(Number(f.visit_duration_min)) || 60)),
+            visit_time_fixed: Boolean(f.visit_start_time) && f.visit_time_fixed === "1",
             default_crew_id: f.default_crew_id || null,
             billing_mode: f.billing_mode as "on_completion",
             po_number: f.po_number.trim() || null,
@@ -194,8 +198,14 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
             <RecurrenceEditor value={recurrence} onChange={setRecurrence} />
             <div className="form-grid">
               <Field label="Visit time" hint="Leave empty for anytime."><input className="input" type="time" value={f.visit_start_time} onChange={set("visit_start_time")} /></Field>
-              <Field label="Minutes per visit"><input className="input" type="number" min={15} step={15} value={f.visit_duration_min} onChange={set("visit_duration_min")} /></Field>
+              <Field label="Minutes per visit"><input className="input" type="number" inputMode="numeric" min={1} max={1440} step={1} value={f.visit_duration_min} onChange={set("visit_duration_min")} /></Field>
             </div>
+            {f.visit_start_time && (
+              <label className="switch-row" style={{ fontWeight: 500 }}>
+                <input type="checkbox" className="switch" checked={f.visit_time_fixed === "1"} onChange={(e) => setF({ ...f, visit_time_fixed: e.target.checked ? "1" : "" })} />
+                Keep this time when routes are organized
+              </label>
+            )}
           </>
         )}
         <div className="form-grid">

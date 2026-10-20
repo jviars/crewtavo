@@ -6,7 +6,7 @@
 import type { IconName } from "@/components/ui/Icon";
 import { can, hasRole, type Session } from "@/lib/session";
 
-export type SettingsTab = "profile" | "company" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "license";
+export type SettingsTab = "profile" | "company" | "schedule" | "address" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "license";
 export type SettingsItem = { label: string; icon: IconName; keywords: string } & ({ tab: SettingsTab } | { to: string });
 
 export function settingsGroups(session: Session): Array<{ title: string; items: SettingsItem[] }> {
@@ -24,6 +24,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
       title: "Business",
       items: [
         isAdmin && { tab: "company", label: "Company", icon: "home", keywords: "business name address phone email website brand color sales tax time zone workday hours quotes valid invoice due" },
+        isAdmin && { tab: "schedule", label: "Schedule and routes", icon: "navigation", keywords: "routes route optimize organize order stops lawn mowing drive time driving speed shop automatic time steps 5 minutes 15 minutes precision calendar snap" },
         isAdmin && session.config.singleCompany && { tab: "address", label: "Web address", icon: "globe", keywords: "domain url custom domain cloudflare railway link" },
         canSell && { tab: "prices", label: "Price list", icon: "list", keywords: "services products prices rates costs catalog formulas materials import" },
         isAdmin && { tab: "maps", label: "Maps", icon: "map", keywords: "imagery satellite aerial google esri measure key" },

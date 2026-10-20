@@ -7,6 +7,7 @@ import type { CSSProperties } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { MapsLink } from "@/components/ui/MapsLink";
 import { formatTime } from "@/lib/format";
 import type { VisitInput } from "./VisitDialog";
 
@@ -75,7 +76,7 @@ export function CalendarEventDialog({ event, tz, onClose, onAddVisit }: { event:
         {event.location && (
           <div className="row" style={{ gap: 10, alignItems: "flex-start" }}>
             <Icon name="pin" size={16} />
-            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`} target="_blank" rel="noreferrer" style={{ whiteSpace: "pre-line" }}>{event.location}</a>
+            <MapsLink className="address-link" place={{ text: event.location }}><span style={{ whiteSpace: "pre-line", textAlign: "left" }}>{event.location}</span></MapsLink>
           </div>
         )}
         {event.description && <p style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{event.description}</p>}

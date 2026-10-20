@@ -1,5 +1,6 @@
 /**
- * Scheduling: book a visit for a job, then move it by dragging it on the Schedule's day grid.
+ * Scheduling: book a visit of any length for a job, then move it by dragging it on the Schedule's
+ * day grid.
  */
 import { dateIn, expect, expectAccessible, makeJob, must, test, zonedIso } from "./support/fixtures";
 
@@ -21,8 +22,10 @@ test("schedule a visit, then drag it to a new time on the Schedule", async ({ as
   await expect(dialog.getByLabel("Title")).toHaveValue(job.title);
   await dialog.getByLabel("Date", { exact: true }).fill(day);
   await dialog.getByLabel("Anytime that day").uncheck();
-  await dialog.getByLabel("Start time").fill("09:00");
-  await dialog.getByLabel("Length").selectOption({ label: "1 hour" });
+  await dialog.getByLabel("Starts").fill("09:00");
+  // Any length, like Google Calendar: 50 minutes.
+  await dialog.getByLabel("Ends").fill("09:50");
+  await expect(dialog.getByText("50 min")).toBeVisible();
   await expect(dialog.getByLabel("Crew", { exact: true })).toHaveValue(job.crewId);
   await expectAccessible(page, "the visit dialog");
   await dialog.getByRole("button", { name: "Schedule", exact: true }).click();
@@ -30,7 +33,7 @@ test("schedule a visit, then drag it to a new time on the Schedule", async ({ as
 
   const booked = await visitTimes();
   expect(booked.start).toBe(at("09:00"));
-  expect(booked.end).toBe(at("10:00"));
+  expect(booked.end).toBe(at("09:50"));
   expect(booked.crew_id).toBe(job.crewId);
 
   // On the Schedule's day view, drag it two hours later.
@@ -58,5 +61,6 @@ test("schedule a visit, then drag it to a new time on the Schedule", async ({ as
   await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
   await expect.poll(async () => (await visitTimes()).start).toBe(at("11:00"));
   await expect(card).toContainText("11:00 AM");
-  expect((await visitTimes()).end).toBe(at("12:00"));
+  // Moving keeps the length.
+  expect((await visitTimes()).end).toBe(at("11:50"));
 });

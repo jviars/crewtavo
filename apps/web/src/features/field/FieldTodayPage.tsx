@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { MapsLink } from "@/components/ui/MapsLink";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -16,7 +17,6 @@ import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
 import { pendingVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
-import { directionsUrl } from "./fieldData";
 import { InstallAppCard } from "./InstallAppCard";
 import { OfflineNote } from "./OfflineNote";
 import { FIELD_SCOPE } from "@/lib/offline";
@@ -97,8 +97,17 @@ export function FieldTodayPage() {
   const changeStatus = (visit: Visit, status: string) =>
     setStatus.mutate({ companyId: session.company.id, userId: session.userId, visitId: visit.id, jobId: visit.job?.id ?? null, status, at: new Date().toISOString() });
 
+  // The route the office or crew lead set (Organize route), else timed visits by time, then the rest.
   const order = (a: Visit, b: Visit) =>
-    a.starts_at && b.starts_at ? a.starts_at.localeCompare(b.starts_at) : a.starts_at ? -1 : b.starts_at ? 1 : (a.route_order ?? 99) - (b.route_order ?? 99);
+    a.route_order != null && b.route_order != null
+      ? a.route_order - b.route_order
+      : a.starts_at && b.starts_at
+        ? a.starts_at.localeCompare(b.starts_at)
+        : a.starts_at
+          ? -1
+          : b.starts_at
+            ? 1
+            : (a.route_order ?? 999) - (b.route_order ?? 999);
   const visits = [...(data.data?.today ?? [])].sort(order);
   const open = visits.filter((v) => v.status !== "completed");
   const done = visits.filter((v) => v.status === "completed");
@@ -135,7 +144,8 @@ export function FieldTodayPage() {
           return (
             <article key={v.id} className="field-card" style={v.status === "in_progress" ? { borderColor: "var(--green)", boxShadow: "var(--ring)" } : undefined}>
               <div className="row">
-                <span className="chip">{v.starts_at ? time(v.starts_at) : `Stop ${v.route_order ?? i + 1}`}</span>
+                {v.route_order != null && <span className="chip chip-green">Stop {v.route_order}</span>}
+                <span className="chip">{v.starts_at ? time(v.starts_at) : v.route_order != null ? "Anytime" : `Stop ${i + 1}`}</span>
                 <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
                 {v.kind !== "job" && <span className="chip">{statusLabel(v.kind)}</span>}
                 {v.series_total && v.series_total > 1 && <span className="chip chip-blue">Day {v.series_day} of {v.series_total}</span>}
@@ -146,7 +156,7 @@ export function FieldTodayPage() {
               </Link>
               {v.hold_reason && <div className="small" style={{ color: "var(--warning)", fontWeight: 700 }}><Icon name="cloud" size={14} /> Weather: {v.hold_reason}</div>}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
-                {v.property && <a className="btn big-action" href={directionsUrl(v.property)} target="_blank" rel="noreferrer"><Icon name="navigation" size={18} />Directions</a>}
+                {v.property && <MapsLink className="btn big-action" place={v.property}><Icon name="navigation" size={18} />Directions</MapsLink>}
                 {next && (
                   <Button variant={next.primary ? "primary" : "secondary"} icon={next.icon} className="big-action" loading={busy} onClick={() => changeStatus(v, next.status)}>{next.label}</Button>
                 )}

@@ -80,9 +80,4 @@ export function formatDuration(ms: number) {
   return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
 }
 
-export function directionsUrl(p: { line1?: string | null; city?: string | null; lat?: number | null; lng?: number | null }) {
-  const destination = p.lat != null && p.lng != null ? `${p.lat},${p.lng}` : [p.line1, p.city].filter(Boolean).join(", ");
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
-}
-
 export const CATEGORY_LABELS: Record<TimerCategory, string> = { visit: "On a visit", assessment: "Assessment", drive: "Driving", shop: "Shop time", break: "On break", other: "Other work" };
