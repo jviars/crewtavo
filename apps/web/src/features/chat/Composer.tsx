@@ -19,6 +19,7 @@ export interface MentionOption extends Mentionable {
   kind: "user" | "role" | "everyone";
   color?: string | null;
   avatar?: string | null;
+  photo?: string | null;
   hint?: string;
 }
 
@@ -245,7 +246,7 @@ export function Composer({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => choose(o)}
               >
-                {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} size={28} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={18} />}
+                {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={28} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={18} />}
                 <span style={{ fontWeight: 700, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? "@everyone" : o.label}</span>
                 {o.hint && <small>{o.hint}</small>}
               </button>

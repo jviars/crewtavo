@@ -19,7 +19,7 @@ import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { initials } from "@/components/shell/AppShell";
+import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -61,7 +61,7 @@ interface ScheduleData {
 }
 type View = "day" | "week" | "month";
 /** Someone on the team, from GET /api/team (former members too, so old visits keep their names). */
-interface Person { user_id: string; active: boolean; profile: { full_name: string | null; email: string | null; color: string | null } | null }
+interface Person { user_id: string; active: boolean; profile: { full_name: string | null; email: string | null; color: string | null; avatar_url?: string | null } | null }
 type Patch = Partial<Pick<Visit, "scheduled_on" | "starts_at" | "ends_at" | "crew_id" | "status">>;
 
 /** Monday of the week containing `date`. */
@@ -346,7 +346,7 @@ export function SchedulePage() {
 
   const namesOn = (v: Visit) => v.assignees.map((a) => nameOf(a.user_id)).join(", ");
   const firstNames = (v: Visit) => v.assignees.map((a) => nameOf(a.user_id).split(/\s+/)[0]).join(", ");
-  /** The initials of the people on a visit, in their colors; yours ringed. */
+  /** The faces of the people on a visit (photos, or initials in their colors); yours ringed. */
   const faces = (v: Visit) => {
     if (!v.assignees.length) return null;
     const names = namesOn(v);
@@ -354,7 +354,7 @@ export function SchedulePage() {
       <span className="tg-people" title={names}>
         {v.assignees.slice(0, 3).map(({ user_id: id }) => {
           const p = personById.get(id);
-          return <i key={id} data-me={id === session.userId || undefined} style={{ "--p": p?.profile?.color ?? undefined } as CSSProperties} aria-hidden="true">{initials(p?.profile?.full_name || p?.profile?.email)}</i>;
+          return <i key={id} data-me={id === session.userId || undefined} style={{ "--p": p?.profile?.color ?? undefined } as CSSProperties} aria-hidden="true"><Face name={p?.profile?.full_name || p?.profile?.email} photo={p?.profile?.avatar_url} /></i>;
         })}
         {v.assignees.length > 3 && <i data-more aria-hidden="true">+{v.assignees.length - 3}</i>}
         <span className="sr-only">With {names.replace(/^You\b/, "you")}</span>

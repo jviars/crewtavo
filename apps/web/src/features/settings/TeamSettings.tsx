@@ -1,4 +1,4 @@
-import { canMakeResetLink, LEVEL_SUMMARY, type Role } from "@crewtavo/core/roles";
+import { ADMINS, canMakeResetLink, LEVEL_SUMMARY, type Role } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -11,14 +11,15 @@ import { MoneyInput } from "@/components/ui/MoneyInput";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { initials } from "@/components/shell/AppShell";
+import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { can, useSession } from "@/lib/session";
+import { PhotoButtons } from "./ProfilePhoto";
 import { choiceFor, patchFor, roleChoices, roleName, useCompanyRoles } from "./roles";
 
-export interface Member { user_id: string; role: Role; role_id: string | null; active: boolean; labor_rate: number | null; profile: { full_name: string; email: string | null; color: string | null } | null }
+export interface Member { user_id: string; role: Role; role_id: string | null; active: boolean; labor_rate: number | null; profile: { full_name: string; email: string | null; color: string | null; avatar_url: string | null } | null }
 /** Someone invited who hasn't set up their account yet, and when their latest link went out. */
 interface PendingInvite { user_id: string; sent_at: string }
 /** What an invite (new or resent) did: emailed or not, and the link to copy either way. */
@@ -30,6 +31,7 @@ export function TeamSettings() {
   const [inviting, setInviting] = useState(false);
   const [resetting, setResetting] = useState<Member | null>(null);
   const [resending, setResending] = useState<Member | null>(null);
+  const [photoFor, setPhotoFor] = useState<string | null>(null);
   const team = useQuery({ queryKey: ["team", session.company.id], queryFn: () => api.get<Member[]>("/team") });
   const invites = useQuery({ queryKey: ["team-invites", session.company.id], queryFn: () => api.get<PendingInvite[]>("/team/invites") });
   const pending = new Map((invites.data ?? []).map((i) => [i.user_id, i.sent_at]));
@@ -46,6 +48,9 @@ export function TeamSettings() {
   });
   const isOwner = session.role === "owner";
   const members = [...(team.data ?? [])].sort((a, b) => Number(b.active) - Number(a.active) || (a.profile?.full_name ?? "").localeCompare(b.profile?.full_name ?? ""));
+  // Your own photo, and for those who manage the team, anyone's (an owner's only by an owner).
+  const canSetPhoto = (m: Member) => m.user_id === session.userId || (ADMINS.includes(session.role) && can(session, "team") && (isOwner || m.role !== "owner"));
+  const photoMember = members.find((m) => m.user_id === photoFor);
 
   return (
     <div className="stack">
@@ -69,7 +74,14 @@ export function TeamSettings() {
                   <tr key={m.user_id} style={m.active ? undefined : { opacity: 0.6 }}>
                     <td>
                       <div className="row">
-                        <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }}>{initials(name)}</span>
+                        {canSetPhoto(m) ? (
+                          <button type="button" className="avatar avatar-edit" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }} onClick={() => setPhotoFor(m.user_id)} aria-label={me ? "Your photo" : `${name}'s photo`} title={m.profile?.avatar_url ? "Change photo" : "Add a photo"}>
+                            <Face name={name} photo={m.profile?.avatar_url} />
+                            <span className="avatar-edit-badge" aria-hidden="true"><Icon name="camera" size={9} strokeWidth={2.5} /></span>
+                          </button>
+                        ) : (
+                          <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
+                        )}
                         <span>
                           <strong>{name}</strong>{me && <span className="chip" style={{ marginLeft: 6 }}>You</span>}<div className="muted small">{m.profile?.email}</div>
                           {sentAt && (
@@ -118,7 +130,32 @@ export function TeamSettings() {
       {inviting && <InviteDialog onClose={() => setInviting(false)} />}
       {resetting && <ResetPasswordDialog member={resetting} onClose={() => setResetting(null)} />}
       {resending && <ResendInviteDialog member={resending} onClose={() => setResending(null)} />}
+      {photoMember && <PhotoDialog member={photoMember} onClose={() => setPhotoFor(null)} />}
     </div>
+  );
+}
+
+/** Someone's photo, from their avatar in the list: shown wherever the team sees them. */
+function PhotoDialog({ member, onClose }: { member: Member; onClose: () => void }) {
+  const session = useSession();
+  const me = member.user_id === session.userId;
+  const name = member.profile?.full_name || member.profile?.email || "Team member";
+  const first = name.split(/\s+/)[0];
+  return (
+    <Dialog open onClose={onClose} title={me ? "Your photo" : `${first}'s photo`} size="sm">
+      <div className="dialog-body">
+        <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
+          <span className="avatar" style={{ width: 96, height: 96, fontSize: 34, background: member.profile?.color || "var(--text-3)" }}><Face name={name} photo={member.profile?.avatar_url} /></span>
+          <PhotoButtons userId={member.user_id} photo={member.profile?.avatar_url} />
+          <p className="muted small" style={{ margin: 0 }}>
+            {me
+              ? "It shows wherever your team sees you: the schedule, timesheets and team chat."
+              : `It shows wherever your team sees ${first}: the schedule, timesheets and team chat. ${first} can also change it in Settings → Profile.`}
+          </p>
+        </div>
+        <div className="form-actions"><Button variant="primary" onClick={onClose}>Done</Button></div>
+      </div>
+    </Dialog>
   );
 }
 

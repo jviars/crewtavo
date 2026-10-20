@@ -27,7 +27,6 @@ vi.mock("../src/lib/session", () => ({
 }));
 // The rest of the profile page, which needs a browser or other data.
 vi.mock("../src/lib/theme", () => ({ useTheme: () => "system", setTheme: () => undefined }));
-vi.mock("../src/components/shell/AppShell", () => ({ initials: (name: string) => name.slice(0, 2).toUpperCase() }));
 vi.mock("../src/features/settings/CalendarFeedCard", () => ({ CalendarFeedCard: () => null }));
 vi.mock("../src/features/settings/NotificationSettings", () => ({ NotificationSettings: () => null }));
 

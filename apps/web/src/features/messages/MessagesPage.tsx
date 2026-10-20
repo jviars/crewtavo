@@ -9,7 +9,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { initials } from "@/components/shell/AppShell";
+import { initials } from "@/components/ui/Avatar";
 import { ApiError, api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";

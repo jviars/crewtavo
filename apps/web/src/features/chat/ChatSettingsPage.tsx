@@ -55,7 +55,7 @@ interface SettingsRole {
   custom: boolean;
   base_role: string;
   description: string | null;
-  people: Array<{ id: string; name: string; color: string | null }>;
+  people: Array<{ id: string; name: string; color: string | null; photo: string | null }>;
 }
 interface SettingsData {
   channels: SettingsChannel[];
@@ -190,7 +190,7 @@ function RolesTab({ data }: { data: SettingsData }) {
           </div>
           <span className="row" style={{ gap: 0 }}>
             {role.people.slice(0, 5).map((p, i) => (
-              <span key={p.id} style={{ marginLeft: i ? -8 : 0, borderRadius: "50%", boxShadow: "0 0 0 2px var(--page)" }}><Avatar name={p.name} color={p.color} size={30} /></span>
+              <span key={p.id} style={{ marginLeft: i ? -8 : 0, borderRadius: "50%", boxShadow: "0 0 0 2px var(--page)" }}><Avatar name={p.name} color={p.color} photo={p.photo} size={30} /></span>
             ))}
             <span className="muted small" style={{ marginLeft: 10 }}>{role.people.length ? `${role.people.length} ${role.people.length === 1 ? "person" : "people"}` : "Nobody has this role yet"}</span>
           </span>

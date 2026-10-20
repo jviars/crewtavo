@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { initials } from "@/components/shell/AppShell";
+import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
@@ -41,7 +41,7 @@ interface Entry {
   visit: { title: string } | null;
   job: { title: string } | null;
 }
-interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null } | null }
+interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null }
 
 export function TimesheetsPage() {
   const session = useSession();
@@ -108,6 +108,7 @@ export function TimesheetsPage() {
 
   const name = (id: string) => data.data?.team.find((m) => m.user_id === id)?.profile?.full_name ?? "Team member";
   const color = (id: string) => data.data?.team.find((m) => m.user_id === id)?.profile?.color ?? "var(--text-3)";
+  const photo = (id: string) => data.data?.team.find((m) => m.user_id === id)?.profile?.avatar_url;
   const rows = data.data?.rows ?? [];
   const people = [...new Set(rows.map((r) => r.user_id))].sort((a, b) => name(a).localeCompare(name(b)));
   const dayOf = (iso: string) => localDate(new Date(iso), tz);
@@ -180,7 +181,7 @@ export function TimesheetsPage() {
         return (
           <section key={userId} className="card">
             <div className="card-head" style={{ flexWrap: "wrap" }}>
-              <span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: color(userId) }}>{initials(name(userId))}</span>
+              <span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: color(userId) }}><Face name={name(userId)} photo={photo(userId)} /></span>
               <strong>{name(userId)}</strong>
               <span className="tabular"><strong>{total.toFixed(2)}</strong> h{isOffice && rate ? <span className="muted"> · {formatMoney(total * Number(rate))}</span> : null}</span>
               {total > 40 && <span className="chip chip-amber">{(total - 40).toFixed(1)} h over 40</span>}

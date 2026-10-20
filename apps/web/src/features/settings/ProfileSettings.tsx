@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
-import { initials } from "@/components/shell/AppShell";
+import { Face } from "@/components/ui/Avatar";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { MapsAppSetting } from "@/components/ui/MapsLink";
 import { api, supabase } from "@/lib/api";
@@ -11,6 +11,7 @@ import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
 import { toast } from "@/lib/toast";
 import { CalendarFeedCard } from "./CalendarFeedCard";
 import { NotificationSettings } from "./NotificationSettings";
+import { PhotoButtons } from "./ProfilePhoto";
 import { SpareKeysCard } from "./SpareKeysCard";
 
 const COLORS = ["#0f2a35", "#3b7d23", "#3474d4", "#c9852a", "#d2445c", "#8b5cf6", "#0e7490", "#57534e"];
@@ -49,10 +50,13 @@ export function ProfileSettings() {
     <div className="two-col">
       <form className="wide card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="row" style={{ gap: 14 }}>
-          <span className="avatar" style={{ width: 56, height: 56, fontSize: 20, background: color }}>{initials(name || session.profile.email)}</span>
-          <div>
-            <strong style={{ fontSize: 16 }}>{name || "Your name"}</strong>
-            <div className="muted small">{session.profile.email}</div>
+          <span className="avatar" style={{ width: 72, height: 72, fontSize: 26, background: color }}><Face name={name || session.profile.email} photo={session.profile.avatar_url} /></span>
+          <div className="stack-sm" style={{ gap: 8 }}>
+            <div>
+              <strong style={{ fontSize: 16 }}>{name || "Your name"}</strong>
+              <div className="muted small">{session.profile.email}</div>
+            </div>
+            <PhotoButtons userId={session.userId} photo={session.profile.avatar_url} />
           </div>
         </div>
         <div className="form-grid">

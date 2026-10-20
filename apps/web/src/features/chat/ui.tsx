@@ -2,7 +2,7 @@
 import type { CSSProperties } from "react";
 import type { ChatColor } from "@crewtavo/core/chat";
 import { Icon } from "@/components/ui/Icon";
-import { initials } from "@/components/shell/AppShell";
+import { Face } from "@/components/ui/Avatar";
 import type { ChatChannel } from "./data";
 import s from "./chat.module.css";
 
@@ -11,10 +11,10 @@ export const roleColor = (color: ChatColor | string | null | undefined) => `var(
 export const roleTint = (color: ChatColor | string | null | undefined) => `var(--chat-${color || "default"}-tint)`;
 export const badgeStyle = (color: ChatColor | string | null | undefined): CSSProperties => ({ background: roleTint(color), color: roleColor(color) });
 
-export function Avatar({ name, color, size = 40, className }: { name: string; color?: string | null; size?: number; className?: string }) {
+export function Avatar({ name, color, photo, size = 40, className }: { name: string; color?: string | null; photo?: string | null; size?: number; className?: string }) {
   return (
     <span className={className ?? s.memberAvatar} style={{ width: size, height: size, fontSize: Math.round(size * 0.35), background: color || "var(--avatar)" }} aria-hidden="true">
-      {initials(name)}
+      <Face name={name} photo={photo} />
     </span>
   );
 }

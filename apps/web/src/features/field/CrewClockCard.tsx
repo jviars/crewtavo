@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { initials } from "@/components/shell/AppShell";
+import { initials } from "@/components/ui/Avatar";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useMyCrews } from "../schedule/myCrews";

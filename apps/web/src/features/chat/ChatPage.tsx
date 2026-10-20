@@ -268,7 +268,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
   const options: MentionOption[] = useMemo(() => {
     const people = (members.data ?? [])
       .filter((m) => m.id !== me)
-      .map((m) => ({ kind: "user" as const, label: m.name, token: userToken(m.id), avatar: m.avatar_color, hint: m.role_label }));
+      .map((m) => ({ kind: "user" as const, label: m.name, token: userToken(m.id), avatar: m.avatar_color, photo: m.avatar_url, hint: m.role_label }));
     const roles = state.roles
       .filter((r) => r.key !== "owner" && (r.mentionable || trusted))
       .map((r) => ({ kind: "role" as const, label: r.label, token: roleToken(r.key), color: r.color, hint: "Role" }));
@@ -395,7 +395,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
       <PersonDialog
         person={person}
         onClose={() => setPersonId(null)}
-        onMention={channel.can_post ? (p) => { setMentionInsert({ option: { kind: "user", label: p.name, token: userToken(p.id), avatar: p.avatar_color }, nonce: Date.now() }); setFocusKey(`mention:${Date.now()}`); } : null}
+        onMention={channel.can_post ? (p) => { setMentionInsert({ option: { kind: "user", label: p.name, token: userToken(p.id), avatar: p.avatar_color, photo: p.avatar_url }, nonce: Date.now() }); setFocusKey(`mention:${Date.now()}`); } : null}
       />
       <PinsDialog open={pinsOpen} channel={channel} ctx={ctx} onClose={() => setPinsOpen(false)} />
       <TopicDialog open={topicOpen} channel={channel} onClose={() => setTopicOpen(false)} />
