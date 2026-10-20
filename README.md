@@ -175,9 +175,10 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
       what's open, won and lost.</p>
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/reports.png" alt="Reports: cash collected, revenue goal and unpaid invoices by age">
-      <p><strong>Reports.</strong> Sales, work, money, team and clients, a yearly revenue goal, and
-      unpaid invoices by age. Everything exports to CSV.</p>
+      <img src="docs/images/finance.png" alt="Finance: money collected against the previous period, the revenue goal, and payments, net volume and unpaid invoices">
+      <p><strong>Finance.</strong> Collected, net and invoiced against the previous period, every
+      payment, unpaid invoices by age, top clients and a yearly revenue goal, plus sales, work, team
+      and client reports. Everything exports to CSV.</p>
     </td>
   </tr>
   <tr>

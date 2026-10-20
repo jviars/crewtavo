@@ -1,6 +1,6 @@
 /**
- * The business's figures, worked out the same way on the Reports page (apps/web/src/features/
- * reports) and for AI assistants (the report tools): date ranges in the company's time zone, and
+ * The business's figures, worked out the same way on the Finance page (apps/web/src/features/
+ * finance) and for AI assistants (the report tools): date ranges in the company's time zone, and
  * pure sums over the rows each report reads. Money is in dollars, rounded to the cent where it's
  * shown; hours are decimal hours.
  */

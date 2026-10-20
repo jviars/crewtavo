@@ -142,7 +142,7 @@ a.field-card:active { transform: scale(0.99); }
 .check-row input[type="checkbox"] { width: 22px; height: 22px; margin: 0; flex: none; }
 
 /* ---------- Report bar lists (charts themselves are in components.css) ---------- */
-.hbar { height: 10px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
+.hbar { height: 8px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
 .hbar > span { display: block; height: 100%; border-radius: inherit; background: var(--c, var(--green)); transform-origin: left; animation: grow-right 0.6s var(--ease-out) both; }
 @keyframes grow-right { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
@@ -188,6 +188,100 @@ a.field-card:active { transform: scale(0.99); }
 .goal-track { position: relative; height: 12px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
 .goal-track > .fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--green); transform-origin: left; animation: grow-right 0.8s var(--ease-out) both; }
 .goal-track > .pace { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); border-radius: 2px; }
+
+/* ---------- Finance and Metrics (features/finance) ---------- */
+.range-pill-label { color: var(--text-3); font-weight: 600; padding-right: 8px; border-right: 1px solid var(--border); }
+.range-pill select { color: var(--green-dark); padding-left: 2px; }
+
+/* A row of figures in one card, hairlines between them (shadows, so a wrapped row draws its own top line). */
+.kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); overflow: hidden; }
+.kpi { min-width: 0; padding: 16px 20px; box-shadow: -1px 0 0 var(--divider), 0 -1px 0 var(--divider); }
+.kpi-label { font-size: 13px; font-weight: 600; color: var(--text-3); }
+.kpi-value { margin-top: 4px; font-size: 22px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2; }
+.kpi-hint { margin-top: 4px; font-size: 12px; color: var(--text-3); }
+
+.report-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 18px 20px; }
+.report-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.report-card-title { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; }
+.info-tip { display: inline-grid; place-items: center; color: var(--text-4); cursor: help; border-radius: 4px; }
+.info-tip:hover, .info-tip:focus-visible { color: var(--text-2); outline: none; }
+.info-tip:focus-visible { box-shadow: var(--ring); }
+.report-card-value { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: -6px; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.report-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 2px; font-size: 13px; color: var(--text-3); }
+.report-card-foot a, .report-card-foot button { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.report-card-foot a:hover, .report-card-foot button:hover { color: var(--green-dark); }
+
+.change { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 6px; background: var(--fill-2); color: var(--text-2); font-size: 12px; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.change[data-tone="up"] { background: var(--green-tint); color: var(--green-dark); }
+.change[data-tone="down"] { background: var(--danger-tint); color: var(--danger); }
+
+.trend { display: grid; gap: 6px; min-width: 0; }
+.trend .chart-empty { inset: 0 48px 0 0; }
+.trend-dates { display: flex; justify-content: space-between; gap: 12px; padding-right: 48px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* A total split in parts: one bar (2px gaps between parts), then a row per part. */
+.breakdown { display: grid; gap: 12px; }
+.breakdown-bar { display: flex; gap: 2px; height: 12px; border-radius: 4px; overflow: hidden; transform-origin: left; animation: grow-right 0.6s var(--ease-out) both; }
+.breakdown-bar > span { min-width: 3px; }
+.breakdown-list { margin: 0; padding: 0; list-style: none; }
+.breakdown-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--row-divider); font-size: 13px; }
+.breakdown-list li:first-child { border-top: 0; }
+.breakdown-list i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.breakdown-list .ellipsis { flex: 1; font-weight: 600; }
+.breakdown-list .muted { font-size: 12px; white-space: nowrap; }
+.breakdown-list strong { min-width: 64px; text-align: right; }
+
+/* Overview: the chosen figure against the period before, what's owed and deposited, and the goal beside it. */
+.fin-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 32px; align-items: start; }
+@media (max-width: 1100px) { .fin-hero { grid-template-columns: minmax(0, 1fr); } }
+.fin-hero-main { display: grid; gap: 16px; min-width: 0; }
+.fin-figures { display: flex; flex-wrap: wrap; gap: 12px 56px; }
+.fin-figure { display: grid; gap: 4px; min-width: 0; }
+.metric-pick { position: relative; display: inline-flex; align-items: center; gap: 6px; justify-self: start; height: 22px; border-radius: 6px; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer; }
+.metric-pick select { appearance: none; margin-right: -22px; padding: 0 22px 0 0; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; outline: none; }
+.metric-pick svg { pointer-events: none; color: var(--text-3); }
+.metric-pick:focus-within { box-shadow: var(--ring); }
+.fin-figure-label { display: inline-flex; align-items: center; gap: 6px; height: 22px; font-size: 14px; font-weight: 600; color: var(--text-3); }
+.key { flex: none; width: 14px; height: 0; border-top: 2px solid var(--green); border-radius: 2px; }
+.key.dashed { border-top: 2px dashed var(--text-4); }
+.fin-hero-value { font-size: clamp(30px, 3.6vw, 40px); font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; }
+.fin-hero-value.is-muted { color: var(--text-3); }
+.fin-hero-hint { display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: 13px; color: var(--text-3); }
+.fin-balances { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 16px 32px; padding-top: 16px; border-top: 1px solid var(--divider); }
+.fin-balance { display: grid; gap: 2px; min-width: 0; }
+.fin-balance-label { font-size: 14px; font-weight: 600; color: var(--text-2); }
+.fin-balance a { font-size: 13px; font-weight: 600; color: var(--green-dark); }
+.fin-balance a:hover { color: var(--ink); }
+.fin-balance-value { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; }
+
+.fin-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--divider); }
+.fin-section-head h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.section-link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: inherit; font-size: 14px; font-weight: 600; color: var(--green-dark); cursor: pointer; }
+.section-link:hover { color: var(--ink); }
+
+/* Cards on a tinted panel: three across, two on tablets, one on phones (without the panel). */
+.fin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 12px; border-radius: 16px; background: var(--ground); }
+@media (max-width: 1200px) { .fin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .fin-grid { grid-template-columns: minmax(0, 1fr); padding: 0; background: none; } }
+
+.fin-list { margin: 0; padding: 0; list-style: none; }
+.fin-list li { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--row-divider); }
+.fin-list li:first-child { padding-top: 0; border-top: 0; }
+.fin-list-main { display: grid; flex: 1; gap: 1px; min-width: 0; color: inherit; }
+.fin-list-main:hover { color: inherit; }
+.fin-list-main:hover strong { color: var(--green-dark); }
+.fin-clear { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--text-3); }
+.fin-clear svg { color: var(--green); }
+
+.pay-method { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); white-space: nowrap; }
+.pay-method svg { color: var(--text-3); }
+@media (max-width: 900px) {
+  /* Stacked on phones: amount and status, what it was for, then who and when. */
+  .pay-table tr { grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; }
+  .pay-table td:nth-child(2), .pay-table td:nth-child(6) { justify-self: end; }
+  .pay-table td:nth-child(3) { display: none; }
+  .pay-table td:nth-child(4) { grid-column: 1 / -1; }
+}
 
 /* ---------- Rich text editor ---------- */
 .rte { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
