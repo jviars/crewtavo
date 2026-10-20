@@ -2167,7 +2167,7 @@ isOneToOne: false
 { Args: { "p_id": number,"p_token": string }; Returns: boolean
                            },
 "search_sops":
-{ Args: { "p_company": string,"p_limit"?: number,"p_query": string }; Returns: {
+{ Args: { "p_any"?: boolean,"p_company": string,"p_limit"?: number,"p_query": string }; Returns: {
               "acknowledged": boolean,"body_text": string,"category": string,"id": string,"rank": number,"required": boolean,"revision": number,"snippet": string,"title": string
             }[]
                            },

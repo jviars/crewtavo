@@ -11,7 +11,7 @@ import { clientLink } from "../lib/links";
 import { emailReady, sendEmail } from "../lib/notify";
 import { adminClient } from "../lib/supabase";
 import { renderTemplate } from "@crewtavo/core";
-import { complete } from "../services/ai";
+import { companyAnthropicKey, complete } from "../services/ai";
 import { companyAddress } from "../services/automations";
 import { sendReviewRequest } from "../services/reviews";
 
@@ -109,6 +109,7 @@ marketing.post("/campaigns/draft", requireUser, requireCompany(OFFICE, "marketin
   const body = await readJson(c, z.object({ goal: z.string().trim().min(5).max(600), tone: z.enum(["friendly", "professional", "urgent"]).default("friendly") }));
   const company = must(await c.var.db.from("companies").select("name, trade_preset").eq("id", c.var.companyId).maybeSingle());
   const text = await complete(c.env, {
+    apiKey: await companyAnthropicKey(c.env, adminClient(c.env), c.var.companyId),
     system:
       "You write short marketing emails for local service businesses (lawn care, paving, roofing and similar). " +
       "Write plainly, like the owner would, with no hype, no emoji and no placeholders other than {{client.first_name}} and {{company.name}}. " +

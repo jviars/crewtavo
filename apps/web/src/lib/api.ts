@@ -22,7 +22,16 @@ export interface AppConfig {
   turnstileSiteKey: string | null;
   /** Error reporting (Sentry or GlitchTip), when the deployment sets CREWTAVO_SENTRY_DSN. */
   sentry: MonitoringConfig | null;
-  features: { ai: boolean; payments: boolean; email: boolean; sms: boolean; roofInsights: boolean };
+  features: { ai: boolean; payments: boolean; email: boolean; sms: boolean; roofInsights: boolean; devMail?: boolean };
+}
+
+/**
+ * What's on for one business: the instance's own keys (config), or what the business set up itself.
+ * Its own mailbox (Settings → Email) turns email on, and its own Anthropic key (Apps → Claude) AI.
+ */
+export function companyFeatures(features: AppConfig["features"], company: { email_connected?: boolean; ai_connected?: boolean }): AppConfig["features"] {
+  const ownMailbox = Boolean(company.email_connected);
+  return { ...features, email: features.email || ownMailbox, devMail: !ownMailbox && Boolean(features.devMail), ai: features.ai || Boolean(company.ai_connected) };
 }
 
 // Kept across hot reloads in development so modules that re-import this one keep a live client.

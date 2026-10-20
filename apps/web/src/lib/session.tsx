@@ -18,7 +18,7 @@ import { FirstRun, SetupGate } from "@/features/setup/SetupPage";
 import { registerFieldActions } from "@/features/field/fieldActions";
 import { TermsPage } from "@/features/legal/License";
 import { RailwaySetupPage } from "@/features/setup/RailwaySetupPage";
-import { api, ApiError, loadConfig, setActiveCompany, supabase, type AppConfig } from "./api";
+import { api, ApiError, companyFeatures, loadConfig, setActiveCompany, supabase, type AppConfig } from "./api";
 import { forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache } from "./offline";
 import { setSessionExpiredHandler } from "./queryClient";
 import { toast } from "./toast";
@@ -35,11 +35,11 @@ export interface Company {
 
 interface Me {
   profile: { user_id: string; email: string | null; full_name: string; phone: string | null; color?: string | null };
-  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; email_connected?: boolean; terms_accepted?: boolean }>;
+  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; email_connected?: boolean; ai_connected?: boolean; terms_accepted?: boolean }>;
 }
 
 export interface Session {
-  config: AppConfig & { features: AppConfig["features"] & { devMail?: boolean } };
+  config: AppConfig;
   userId: string;
   profile: Me["profile"];
   companies: Me["memberships"];
@@ -266,10 +266,8 @@ export function SessionProvider({ children, requireCompany = true }: { children:
 
   const value = useMemo<Session | null>(() => {
     if (!config.data || !auth || !me.data || !membership || cacheFor !== auth.user.id) return null;
-    // The company's own mailbox (Settings → Email) counts as email being on.
-    const ownMailbox = Boolean(membership.email_connected);
     return {
-      config: { ...config.data, features: { ...config.data.features, email: config.data.features.email || ownMailbox, devMail: !ownMailbox && Boolean((config.data.features as { devMail?: boolean }).devMail) } },
+      config: { ...config.data, features: companyFeatures(config.data.features, membership) },
       userId: auth.user.id,
       profile: me.data.profile,
       companies: me.data.memberships,

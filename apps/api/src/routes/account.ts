@@ -71,16 +71,18 @@ account.get("/me", requireUser, async (c) => {
   const roleIds = rows.map((m) => m.role_id).filter((id): id is string => Boolean(id));
   const roles = roleIds.length ? must(await db.from("company_roles").select("id, name, permissions").in("id", roleIds)) : [];
   const byId = new Map(roles.map((r) => [r.id, r]));
-  // Which companies send email from their own mailbox (Settings → Email); integrations is admin-only.
+  // Which companies send email from their own mailbox (Settings → Email) and which added their own
+  // Anthropic key (Apps → Claude), so email and AI are on for them; integrations is admin-only.
   const companyIds = rows.map((m) => (m.company as { id: string } | null)?.id).filter((id): id is string => Boolean(id));
   // ...and which have agreed to the current license (only owners and admins can read agreements).
-  const [mailboxes, agreements] = companyIds.length
+  const [connected, agreements] = companyIds.length
     ? await Promise.all([
-        adminClient(c.env).from("integrations").select("company_id").eq("provider", "email").neq("status", "disconnected").in("company_id", companyIds),
+        adminClient(c.env).from("integrations").select("company_id, provider").in("provider", ["email", "anthropic"]).neq("status", "disconnected").in("company_id", companyIds),
         adminClient(c.env).from("terms_acceptances").select("company_id").eq("version", TERMS_VERSION).in("company_id", companyIds),
-      ]).then(([mail, terms]) => [must(mail), must(terms)])
+      ]).then(([apps, terms]) => [must(apps), must(terms)] as const)
     : [[], []];
-  const withMailbox = new Set(mailboxes.map((r) => r.company_id));
+  const withMailbox = new Set(connected.filter((r) => r.provider === "email").map((r) => r.company_id));
+  const withClaudeKey = new Set(connected.filter((r) => r.provider === "anthropic").map((r) => r.company_id));
   const agreed = new Set(agreements.map((r) => r.company_id));
   return c.json({
     profile: must(profile, "Profile not found."),
@@ -92,6 +94,7 @@ account.get("/me", requireUser, async (c) => {
         role_name: custom?.name ?? ROLE_LABELS[m.role as Role],
         permissions: memberPermissions(m.role as Role, custom ? custom.permissions : null),
         email_connected: withMailbox.has((m.company as { id: string } | null)?.id ?? ""),
+        ai_connected: withClaudeKey.has((m.company as { id: string } | null)?.id ?? ""),
         terms_accepted: agreed.has((m.company as { id: string } | null)?.id ?? ""),
       };
     }),
