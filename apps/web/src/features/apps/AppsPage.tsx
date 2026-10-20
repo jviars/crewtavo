@@ -8,9 +8,11 @@ import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState, NoAccess } from "@/components/ui/States";
 import { AppTile } from "./AppIcon";
 import { CATEGORY_LABELS, useApps, type AppRow } from "./catalog";
+import { useIsInstalled } from "./installed";
 
 export function AppsPage() {
   const apps = useApps();
+  const { isInstalled } = useIsInstalled();
   const [params] = useSearchParams();
 
   // Sign-in links from before app pages existed came back to /apps?app=...
@@ -50,7 +52,7 @@ export function AppsPage() {
         <section key={category} aria-labelledby={`apps-${category}`} className="stack-sm" style={{ gap: 12 }}>
           <h2 id={`apps-${category}`} className="section-title">{CATEGORY_LABELS[category] ?? category}</h2>
           <div className="app-grid">
-            {rows.map((app) => <AppTile key={app.id} app={app} />)}
+            {rows.map((app) => <AppTile key={app.id} app={app} installed={isInstalled(app)} />)}
           </div>
         </section>
       ))}

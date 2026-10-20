@@ -386,13 +386,13 @@ export function UploadCalendarForm() {
   );
 }
 
-/** A calendar app's calendars and the form to add one. */
+/** A calendar app's calendars and the form to add one. Installing it is adding the first. */
 export function LinkCalendarsPanel({ app, appName, steps }: { app: string; appName: string; steps?: string[] }) {
   const calendars = useCalendars();
   const mine = (calendars.data?.calendars ?? []).filter((s) => s.app === app && s.kind !== "google");
   return (
     <>
-      <section className="card" aria-labelledby={`${app}-calendars`}>
+      {(calendars.isPending || calendars.error || mine.length > 0) && <section className="card" aria-labelledby={`${app}-calendars`}>
         <div className="card-pad stack-sm" style={{ gap: 4 }}>
           <h2 id={`${app}-calendars`} className="section-title" style={{ fontSize: 17 }}>Calendars on your schedule</h2>
           <span className="muted small">Read again every 15 minutes. Changes made here only affect Crewtavo.</span>
@@ -401,12 +401,10 @@ export function LinkCalendarsPanel({ app, appName, steps }: { app: string; appNa
           <div className="card-row"><Skeleton height={36} radius={8} style={{ flex: 1 }} /></div>
         ) : calendars.error ? (
           <ErrorState error={calendars.error} onRetry={() => calendars.refetch()} compact />
-        ) : mine.length ? (
-          mine.map((s) => <div key={s.id} className="card-row"><CalendarRow source={s} /></div>)
         ) : (
-          <div className="card-row muted small">None yet. Add one below.</div>
+          mine.map((s) => <div key={s.id} className="card-row"><CalendarRow source={s} /></div>)
         )}
-      </section>
+      </section>}
       <section className="card card-pad stack" aria-labelledby={`${app}-add`}>
         <h2 id={`${app}-add`} className="section-title" style={{ fontSize: 17 }}>Add {CALENDAR_NOUNS[app] ?? "a calendar"}</h2>
         <AddCalendarForm app={app} appName={appName} steps={steps} />

@@ -359,6 +359,25 @@ a.field-card:active { transform: scale(0.99); }
 .app-hero-tagline { margin: 0; color: var(--text-2); font-size: 15px; }
 .app-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
 .app-get { border-radius: 999px; min-width: 112px; justify-content: center; font-weight: 700; }
+/* Install's progress ring (InstallRing.tsx): as tall as the button it replaces, in the middle of where it was. */
+.install-ring-slot { display: inline-grid; place-items: center; min-width: 112px; }
+.install-ring { position: relative; display: inline-grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--green); }
+.install-ring svg { transform: rotate(-90deg); }
+.install-ring-track { fill: none; stroke: var(--border); stroke-width: 3; }
+.install-ring-arc { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.2s linear; }
+.install-ring[data-phase="done"] .install-ring-arc { transition-duration: 0.3s; transition-timing-function: var(--ease-out); }
+.install-ring[data-phase="waiting"] svg { animation: install-spin 0.9s linear infinite; }
+.install-ring-stop { position: absolute; width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+button.install-ring { cursor: pointer; }
+button.install-ring:hover { background: var(--fill); }
+button.install-ring:focus-visible { outline: none; box-shadow: var(--ring); }
+@keyframes install-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+@media (prefers-reduced-motion: reduce) { .install-ring[data-phase="waiting"] svg { animation-duration: 3s; } }
+/* Screenshots, side by side like an app store's, scrolling sideways when there are more. */
+.app-shots { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(min(460px, 86%), 1fr); gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; scrollbar-width: thin; }
+.app-shots figure { margin: 0; scroll-snap-align: start; }
+.app-shots img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-radius: 12px; border: 1px solid var(--border); background: var(--fill); }
+html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 @media (max-width: 600px) {
   .app-hero { gap: 16px; align-items: flex-start; }
   .app-hero .app-icon[data-size="lg"] { --size: 84px; }
@@ -366,10 +385,10 @@ a.field-card:active { transform: scale(0.99); }
 }
 /* The strip of facts under the name, divided like an app store listing's. */
 .app-facts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(120px, 1fr); margin: 0; padding: 12px 0; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); overflow-x: auto; scrollbar-width: none; }
-.app-facts > div { display: grid; gap: 2px; justify-items: center; text-align: center; padding: 0 12px; border-left: 1px solid var(--divider); }
+.app-facts > div { display: grid; gap: 2px; justify-items: center; text-align: center; min-width: 0; padding: 0 12px; border-left: 1px solid var(--divider); }
 .app-facts > div:first-child { border-left: 0; }
 .app-facts dt { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
-.app-facts dd { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+.app-facts dd { margin: 0; max-width: 100%; font-size: 14px; font-weight: 700; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 600px) { .app-facts { grid-auto-columns: minmax(112px, 42%); } }
 
 .app-highlights { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; }

@@ -55,18 +55,16 @@ export function AppIcon({ id, name, size = "md" }: { id: string; name: string; s
   );
 }
 
-/** Connected, or needs attention: a small badge on the icon's corner. */
-export function appBadge(app: AppRow): { tone: "good" | "danger"; label: string } | null {
+/** Installed, or needs attention: a small badge on the icon's corner. */
+export function appBadge(app: AppRow, installed: boolean): { tone: "good" | "danger"; label: string } | null {
   if (app.status === "error" || app.calendar_errors) return { tone: "danger", label: "Needs attention" };
-  // Google Calendar can have calendars by secret address without being signed in.
-  if (app.auth === "builtin") return app.status === "connected" ? { tone: "good", label: "On" } : null;
-  if (app.status === "connected" || app.calendars) return { tone: "good", label: app.calendars ? `${app.calendars} ${app.calendars === 1 ? "calendar" : "calendars"}` : "Connected" };
-  return null;
+  if (!installed) return null;
+  return { tone: "good", label: app.calendars ? `${app.calendars} ${app.calendars === 1 ? "calendar" : "calendars"}` : "Installed" };
 }
 
 /** An app on the grid: its icon with its name beneath. */
-export function AppTile({ app }: { app: AppRow }) {
-  const badge = appBadge(app);
+export function AppTile({ app, installed }: { app: AppRow; installed: boolean }) {
+  const badge = appBadge(app, installed);
   return (
     <Link to={`/apps/${app.id}`} className="app-tile" aria-label={`${app.name}${badge ? `, ${badge.label}` : ""}`}>
       <span className="app-tile-icon">

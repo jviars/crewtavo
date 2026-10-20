@@ -83,7 +83,7 @@ export function ChatSettingsPage() {
     return (
       <>
         <BackLink to="/chat">Team chat</BackLink>
-        <div className="card"><EmptyState icon="chat" title="Team chat is off" action={<Link className="btn btn-primary" to="/apps/team_chat">Turn it on in Apps</Link>}>Turn it on to set up its channels and roles.</EmptyState></div>
+        <div className="card"><EmptyState icon="chat" title="Team chat is off" action={<Link className="btn btn-primary" to="/apps/team_chat">Install it from Apps</Link>}>Install it to set up its channels and roles.</EmptyState></div>
       </>
     );
   }
