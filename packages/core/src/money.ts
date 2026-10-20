@@ -148,3 +148,13 @@ export function quoteTotals(lines: TotalsLine[], opts: { taxRate: Amount; discou
   const total = max(sub - discount, 0n) + tax;
   return { subtotal: toDollars(sub), discount: toDollars(discount), tax: toDollars(tax), total: toDollars(total) };
 }
+
+/**
+ * Why a payment can't be recorded against an invoice's balance, or null: it has to be more than
+ * zero and not more than what's owed (a refund is a payment of its own, recorded in Crewtavo).
+ */
+export function paymentProblem(amount: number, balance: number): string | null {
+  if (!(amount > 0)) return "Enter an amount greater than zero.";
+  if (amount > balance + 0.005) return `That's more than the ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(balance)} balance.`;
+  return null;
+}

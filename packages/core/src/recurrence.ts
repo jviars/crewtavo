@@ -125,3 +125,37 @@ export function describeRule(rule: string): string {
     return rule;
   }
 }
+
+/** The repeats the job screen offers: weekly on some days, or monthly on a day of the month. */
+export interface SimpleRepeat {
+  freq: "WEEKLY" | "MONTHLY";
+  interval: number;
+  /** MO, TU, WE, TH, FR, SA, SU (weekly). */
+  days: string[];
+  /** 1-28 (monthly). */
+  monthDay: number;
+}
+
+const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+
+/** A rule the job screen's editor can show (anything else reads as weekly on Monday there). */
+export function parseSimpleRule(rule: string): SimpleRepeat {
+  const parts = Object.fromEntries(rule.split(";").map((p) => p.split("=")));
+  return {
+    freq: parts.FREQ === "MONTHLY" ? "MONTHLY" : "WEEKLY",
+    interval: Math.max(1, Number(parts.INTERVAL ?? 1) || 1),
+    days: parts.BYDAY ? String(parts.BYDAY).split(",").filter((d) => WEEKDAYS.includes(d)) : ["MO"],
+    monthDay: Math.min(28, Math.max(1, Number(parts.BYMONTHDAY ?? 1) || 1)),
+  };
+}
+
+/** "Every 2 weeks on Tuesday" as a rule; weekly with no days means Monday. */
+export function buildSimpleRule(p: SimpleRepeat): string {
+  if (p.freq === "MONTHLY") return `FREQ=MONTHLY;INTERVAL=${p.interval};BYMONTHDAY=${p.monthDay}`;
+  return `FREQ=WEEKLY;INTERVAL=${p.interval};BYDAY=${(p.days.length ? p.days : ["MO"]).join(",")}`;
+}
+
+/** The weekday of a date (YYYY-MM-DD) as a rule's day: "TU". */
+export function ruleDay(date: string): string {
+  return WEEKDAYS[(utcMidnight(date).getUTCDay() + 6) % 7];
+}

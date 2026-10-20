@@ -21,7 +21,9 @@ import { ClockCard } from "../field/ClockCard";
 import { CATEGORY_LABELS, type TimerCategory } from "../field/fieldData";
 import { useMyCrews } from "../schedule/myCrews";
 import { useDispatchOptions } from "../schedule/VisitDialog";
+import { timeEntryProblem } from "@crewtavo/core/pay";
 import { entrySpan } from "./entrySpan";
+import { PayPeriods } from "./PayPeriods";
 
 const hours = (start: string, end: string | null) => ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 3_600_000;
 const mondayOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
@@ -51,6 +53,9 @@ export function TimesheetsPage() {
   const canApprove = isOffice || (isLead && can(session, "timesheets"));
   const approvable = (userId: string) => canApprove && !(isLead && userId === session.userId);
   const [week, setWeek] = useState(mondayOf(todayIn(tz)));
+  // Pay (each person's pay for a period, and marking it paid) is for the office with job costs.
+  const seesPay = hasRole(session, "admin", "office") && can(session, "job_costs");
+  const [view, setView] = useState<"hours" | "pay">("hours");
   const [editing, setEditing] = useState<Entry | "new" | null>(null);
   const days = Array.from({ length: 7 }, (_, i) => addDaysIso(week, i));
 
@@ -123,6 +128,22 @@ export function TimesheetsPage() {
       ),
     );
 
+  const tabs = seesPay && (
+    <div className="underline-tabs" role="tablist" aria-label="Timesheets">
+      <button type="button" role="tab" aria-selected={view === "hours"} onClick={() => setView("hours")}>Hours</button>
+      <button type="button" role="tab" aria-selected={view === "pay"} onClick={() => setView("pay")}>Pay</button>
+    </div>
+  );
+  if (view === "pay") {
+    return (
+      <>
+        <PageHeader title="Timesheets" />
+        {tabs}
+        <PayPeriods />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -135,6 +156,7 @@ export function TimesheetsPage() {
           </>
         }
       />
+      {tabs}
       {isThisWeek && <ClockCard />}
 
       <div className="toolbar">
@@ -230,8 +252,9 @@ function TimeEntryDialog({ entry, team, defaultDate, onClose, onSaved }: { entry
     mutationFn: async () => {
       if (!span) throw new Error("Enter the date and the start and end times.");
       const { startAt, endAt } = span;
-      if (!(length > 0) || length > 16) throw new Error("A single entry has to be between a minute and 16 hours.");
-      if (future) throw new Error("You can't add time in the future.");
+      // The same checks AI assistants' time tools make (packages/core/src/pay.ts).
+      const problem = timeEntryProblem({ startAt, endAt });
+      if (problem) throw new Error(problem);
       // A fixed entry is no longer a guess.
       const row = { started_at: startAt.toISOString(), ended_at: endAt.toISOString(), category, notes: notes.trim() || null, ...(entry ? { auto_stopped_at: null } : {}) };
       if (entry) unwrap(await supabase().from("time_entries").update(row).eq("id", entry.id));

@@ -3,7 +3,7 @@
  * it can change or give it full access; and owner and admin controls for the company: on or off,
  * read-only, and what they did.
  */
-import { ASSISTANT_AREAS, ASSISTANT_TOOL_LABELS, areasForRole, describeAssistantAccess, type AssistantAccess as Access, type AssistantArea } from "@crewtavo/core/assistants";
+import { ASSISTANT_AREA_GROUPS, ASSISTANT_AREAS, ASSISTANT_TOOL_LABELS, areasForRole, describeAssistantAccess, type AssistantAccess as Access, type AssistantArea } from "@crewtavo/core/assistants";
 import { PERMISSIONS } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -151,16 +151,32 @@ export function ConnectedAssistants({ card = false }: { card?: boolean }) {
 const LEVELS: Array<{ level: Access["level"]; label: string; hint: string }> = [
   { level: "read", label: "Read only", hint: "Looks things up. Can't add or change anything." },
   { level: "areas", label: "Choose what it can change", hint: "Adds and changes things in the areas you tick, but doesn't delete." },
-  { level: "full", label: "Full access", hint: "Everything you can change, including deleting." },
+  { level: "full", label: "Full access", hint: "Everything you can change, including deleting, people and money." },
+  { level: "full_no_money", label: "Full access, no money", hint: "Everything you can change, including deleting, except quotes, invoices, payments and pay." },
 ];
+
+/** What each full level lets it do, for the warning before giving it. */
+const FULL_WARNING: Record<"full" | "full_no_money", (name: string) => { title: string; body: string; confirmLabel: string }> = {
+  full: (name) => ({
+    title: `Give ${name} full access?`,
+    body: `${name} will be able to add, change and delete anything you can in Crewtavo: clients, jobs and the schedule, quotes, invoices and payments, people and roles, time and pay, and the business's setup. It still can't change anyone's sign-in or password, connected apps and keys, or its own access, and it can't refund or delete payments. Everything it does shows in Recent assistant activity, and you can switch it back to Read only any time.`,
+    confirmLabel: "Give full access",
+  }),
+  full_no_money: (name) => ({
+    title: `Give ${name} full access, without money?`,
+    body: `${name} will be able to add, change and delete anything you can in Crewtavo except money: clients, jobs and the schedule, people and roles, time, and the business's setup. It can't change quotes, invoices, payments or pay, anyone's sign-in or password, connected apps and keys, or its own access. Everything it does shows in Recent assistant activity, and you can switch it back to Read only any time.`,
+    confirmLabel: "Give full access",
+  }),
+};
 
 function savedMessage(name: string, access: Access) {
   if (access.level === "full") return `${name} has full access now`;
+  if (access.level === "full_no_money") return `${name} has full access, without money, now`;
   if (access.level === "areas") return `${name} can change ${access.areas.map((a) => ASSISTANT_AREAS.find((x) => x.key === a)?.label.toLowerCase() ?? a).join(", ")} now`;
   return `${name} can only read now`;
 }
 
-/** Read only, chosen areas, or full access, which asks first. Areas the person's role can't change aren't offered. */
+/** Read only, chosen areas, or full access with or without money, which asks first. Areas the person's role can't change aren't offered. */
 function AccessDialog({ connection, onClose }: { connection: AssistantConnection; onClose: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -172,14 +188,8 @@ function AccessDialog({ connection, onClose }: { connection: AssistantConnection
     meta: { inline: true, success: (saved: Access | null) => (saved ? savedMessage(connection.name, saved) : null) },
     mutationFn: async (): Promise<Access | null> => {
       const access: Access = level === "areas" && !areas.length ? { level: "read", areas: [] } : { level, areas: level === "areas" ? areas : [] };
-      if (access.level === "full" && connection.access.level !== "full") {
-        const yes = await confirm({
-          title: `Give ${connection.name} full access?`,
-          body: `${connection.name} will be able to add, change and delete anything you can in Crewtavo's setup and records: company details, price list, crews, checklists, booking forms, guides, automations, requests and notes. It still can't change your sign-in, people and roles, connected apps and keys, or its own access. Everything it does shows in Recent assistant activity, and you can switch it back to Read only any time.`,
-          confirmLabel: "Give full access",
-          danger: true,
-        });
-        if (!yes) return null;
+      if ((access.level === "full" || access.level === "full_no_money") && connection.access.level !== access.level) {
+        if (!(await confirm({ ...FULL_WARNING[access.level](connection.name), danger: true }))) return null;
       }
       await setAccess(supabase(), session.userId, connection.clientId, access);
       return access;
@@ -209,18 +219,23 @@ function AccessDialog({ connection, onClose }: { connection: AssistantConnection
         {level === "areas" && (
           <fieldset className="stack-sm" style={{ border: 0, padding: "0 0 0 12px", margin: 0 }}>
             <legend className="small strong" style={{ marginBottom: 6 }}>It can change</legend>
-            {ASSISTANT_AREAS.map((a) => {
-              const allowed = offered.includes(a.key);
-              return (
-                <label key={a.key} className="checkbox" style={{ opacity: allowed ? 1 : 0.55 }}>
-                  <input type="checkbox" checked={allowed && areas.includes(a.key)} disabled={!allowed} onChange={(e) => toggle(a.key, e.target.checked)} />
-                  <span>
-                    {a.label}
-                    {!allowed && <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Your role can't change this</span>}
-                  </span>
-                </label>
-              );
-            })}
+            {ASSISTANT_AREA_GROUPS.map((group) => (
+              <div key={group} className="stack-sm" style={{ gap: 6 }}>
+                <span className="muted small strong">{group}</span>
+                {ASSISTANT_AREAS.filter((a) => a.group === group).map((a) => {
+                  const allowed = offered.includes(a.key);
+                  return (
+                    <label key={a.key} className="checkbox" style={{ opacity: allowed ? 1 : 0.55 }}>
+                      <input type="checkbox" checked={allowed && areas.includes(a.key)} disabled={!allowed} onChange={(e) => toggle(a.key, e.target.checked)} />
+                      <span>
+                        {a.label}
+                        {!allowed && <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Your role can't change this</span>}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ))}
             {!areas.length && <span className="muted small">Tick at least one, or it stays read only.</span>}
           </fieldset>
         )}
