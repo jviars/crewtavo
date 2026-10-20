@@ -25,6 +25,11 @@ export interface CatalogEntry {
   docs: string;
   /** False when this deployment lacks the OAuth app or platform key the provider needs. */
   available: (env: Env) => boolean;
+  /**
+   * A company can sign in with its own app at the provider instead: it pastes that app's keys on the
+   * app's page (kept with its tokens, see oauthClient in tokens.ts), so nobody has to set up the server.
+   */
+  appKeys?: true;
 }
 
 export const CATALOG: CatalogEntry[] = [
@@ -106,8 +111,9 @@ export const CATALOG: CatalogEntry[] = [
     category: "Accounting",
     description: "Send clients, invoices and payments to QuickBooks when it's your book of record.",
     auth: "oauth",
-    docs: "https://developer.intuit.com/app/developer/qbo/docs/get-started",
+    docs: "https://crewtavo.com/docs/connections/quickbooks/",
     available: (env) => Boolean(env.QUICKBOOKS_CLIENT_ID && env.QUICKBOOKS_CLIENT_SECRET),
+    appKeys: true,
   },
   {
     id: "zoho_books",
@@ -115,8 +121,9 @@ export const CATALOG: CatalogEntry[] = [
     category: "Accounting",
     description: "Send clients, invoices and payments to Zoho Books in your data center.",
     auth: "oauth",
-    docs: "https://www.zoho.com/books/api/v3/introduction/",
+    docs: "https://crewtavo.com/docs/connections/zoho-books/",
     available: (env) => Boolean(env.ZOHO_CLIENT_ID && env.ZOHO_CLIENT_SECRET),
+    appKeys: true,
   },
   {
     id: "stripe",
@@ -151,7 +158,7 @@ export interface CallbackContext {
 }
 
 export interface OAuthConfig {
-  authorizeUrl: (env: Env) => string;
+  authorizeUrl: (env: Env, saved?: Record<string, string>) => string;
   tokenUrl: (env: Env, ctx?: CallbackContext, saved?: Record<string, string>) => string;
   revokeUrl?: (env: Env, saved?: Record<string, string>) => string;
   scope: string;
@@ -220,7 +227,8 @@ export const OAUTH: Partial<Record<Provider, OAuthConfig>> = {
     clientAuth: "basic",
   },
   zoho_books: {
-    authorizeUrl: (env) => `${zohoAccounts(env)}/oauth/v2/auth`,
+    // A company's own Zoho app lives in its own data center, so sign-in starts there.
+    authorizeUrl: (env, saved) => `${zohoAccounts(env, saved)}/oauth/v2/auth`,
     // Zoho's callback says which data center the account is in; tokens must come from there.
     tokenUrl: (env, ctx, saved) => `${ctx?.query["accounts-server"] ? zohoAccountsServer(ctx.query["accounts-server"]) : zohoAccounts(env, saved)}/oauth/v2/token`,
     revokeUrl: (env, saved) => `${zohoAccounts(env, saved)}/oauth/v2/token/revoke`,

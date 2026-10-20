@@ -289,8 +289,8 @@ Everything an instance needs is generated. These optional settings turn on extra
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | A Stripe account shared by every company on the server. Usually not needed: each business connects its own Stripe on the Apps page. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Text messages, and two-way texting. |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email through Resend. Needed on Railway's trial and Hobby plans, which block SMTP; elsewhere, a default sender until the business connects its own mailbox. |
-| `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | QuickBooks Online sync. |
-| `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Zoho Books sync. |
+| `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET` | An Intuit app for QuickBooks Online sync. Usually not needed: each business pastes its own Intuit app's keys on the Apps page. |
+| `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | A Zoho app for Zoho Books sync. Usually not needed: each business pastes its own Zoho app's keys on the Apps page. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar sign-in: its calendars on the schedule, and visits on a Google calendar within minutes. Publish the OAuth app (Testing ends sign-ins after 7 days). Calendars added by ICS link (Zoho, Outlook, iCloud, Google's secret address) or uploaded as a file need nothing. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SENTRY_DSN` | Error reports to Sentry or a self-hosted GlitchTip, with personal data removed. |

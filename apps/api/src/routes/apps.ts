@@ -12,9 +12,9 @@ import { adminClient } from "../lib/supabase";
 import { companyAnthropicKey, complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
-import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
+import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, zohoAccountsServer, type Provider } from "../integrations/registry";
 import { beginStripeImport, canImportStripe, connectStripe, disconnectStripe, IMPORT_STALE_MS, importFromStripe, SHARED_STRIPE_IMPORT, stripeAccess, type ImportState } from "../integrations/stripe";
-import { exchangeCode, loadSecret, revoke, saveSecret } from "../integrations/tokens";
+import { appKeysOf, exchangeCode, loadSecret, oauthClient, revoke, saveSecret, SignInRefused } from "../integrations/tokens";
 
 export const apps = new Hono<AppEnv>();
 
@@ -28,6 +28,10 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
     adminClient(c.env).from("integration_secrets").select("provider", { count: "exact", head: true }).match({ company_id: c.var.companyId, provider: "stripe" }),
     c.var.db.from("companies").select("settings").eq("id", c.var.companyId).maybeSingle(),
   ]);
+  // Apps the company can sign in to with its own app at the provider: which keys it saved, if any.
+  const keyed = CATALOG.filter((entry) => entry.appKeys).map((entry) => entry.id as Provider);
+  const saved = await Promise.all(keyed.map((provider) => loadSecret(c.env, adminClient(c.env), c.var.companyId, provider).catch(() => null)));
+  const appKeys = new Map(keyed.map((provider, i) => [provider as string, appKeysOf(saved[i]?.extra)]));
   const integrations = must(rows);
   // Built-in apps are on or off in the company's settings (team chat: routes/chat.ts).
   const builtinOn: Record<string, boolean> = { team_chat: (company.data?.settings as { team_chat?: { enabled?: boolean } } | null)?.team_chat?.enabled === true };
@@ -48,17 +52,21 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
     : null;
   return c.json({
     mcp_url: `${appUrl(c)}/mcp`,
-    apps: CATALOG.map(({ available, ...entry }) => {
+    apps: CATALOG.map(({ available, appKeys: takesKeys, ...entry }) => {
       const own = calendarRows.filter((s) => s.app === entry.id);
       const linked = isCalendarApp(entry.id) ? { calendars: own.length, calendar_errors: own.filter((s) => s.last_error).length } : {};
       const row = byProvider.get(entry.id);
+      // The Client ID shows up in sign-in links anyway; the secret never leaves the server.
+      const keys = appKeys.get(entry.id);
+      const ownKeys = keys?.client_id ? { client_id: keys.client_id, sandbox: keys.environment === "sandbox", accounts_server: keys.accounts_server ?? null } : null;
       return {
         ...entry,
-        available: available(c.env),
+        available: available(c.env) || Boolean(ownKeys),
         redirect_uri: OAUTH[entry.id as Provider] ? callbackUrl(appUrl(c), entry.id) : null,
         ...(row ?? { status: (entry.auth === "link" && own.length) || builtinOn[entry.id] ? "connected" : "disconnected" }),
         ...linked,
         ...(entry.id === "stripe" && stripe ? { stripe } : {}),
+        ...(takesKeys ? { takes_app_keys: true, app_keys: ownKeys } : {}),
       };
     }),
   });
@@ -88,7 +96,10 @@ apps.post("/apps/:provider/connect", requireUser, requireCompany(ADMINS, "apps")
   const provider = c.req.param("provider") as Provider;
   const entry = catalogEntry(provider);
   const config = OAUTH[provider];
-  if (!entry || !config || entry.auth !== "oauth" || !entry.available(c.env)) throw new HttpError(400, "That app isn't available yet.");
+  // The company's own app at the provider when it saved one, otherwise the server's.
+  const keys = entry?.appKeys ? appKeysOf((await loadSecret(c.env, adminClient(c.env), c.var.companyId, provider).catch(() => null))?.extra) : {};
+  const client = config ? oauthClient(c.env, provider, keys) : null;
+  if (!entry || !config || entry.auth !== "oauth" || !client) throw new HttpError(400, "That app isn't available yet.");
 
   const nonce = randomId();
   const state = await signToken(c.env, {
@@ -101,14 +112,14 @@ apps.post("/apps/:provider/connect", requireUser, requireCompany(ADMINS, "apps")
   setCookie(c, STATE_COOKIE, nonce, { httpOnly: true, secure: true, sameSite: "Lax", path: "/api/apps", maxAge: 600 });
 
   const params = new URLSearchParams({
-    client_id: config.clientId(c.env)!,
+    client_id: client.id,
     response_type: "code",
     scope: config.scope,
     redirect_uri: callbackUrl(appUrl(c), provider),
     state,
     ...config.extraParams,
   });
-  return c.json({ authorization_url: `${config.authorizeUrl(c.env)}?${params}` });
+  return c.json({ authorization_url: `${config.authorizeUrl(c.env, keys)}?${params}` });
 });
 
 /** Step 2: the provider redirects the browser here. No bearer token; identity comes from the signed state. */
@@ -126,8 +137,11 @@ apps.get("/apps/:provider/callback", async (c) => {
   if (query.error || !query.code) return done("error", query.error_description ?? query.error ?? "Sign-in was cancelled.");
 
   const admin = adminClient(c.env);
+  const entry = catalogEntry(provider);
   try {
-    const secret = await exchangeCode(c.env, provider, query.code, callbackUrl(appUrl(c), provider), { query });
+    // Signing in with the company's own app: its keys get the tokens, and stay with them.
+    const saved = entry?.appKeys ? await loadSecret(c.env, admin, state.company, provider).catch(() => null) : null;
+    const secret = await exchangeCode(c.env, provider, query.code, callbackUrl(appUrl(c), provider), { query }, saved?.extra);
     const account = provider === "google_calendar"
       ? await describeGoogleAccount(secret.access_token!)
       : await describeAccount(c.env, provider, secret.access_token!, query, secret.extra);
@@ -151,8 +165,13 @@ apps.get("/apps/:provider/callback", async (c) => {
     return done("connected");
   } catch (error) {
     console.error("OAuth callback failed", provider, error);
-    // Refusing a server that isn't the provider's says so; other failures stay general.
-    return done("error", error instanceof UntrustedServerError ? error.message : "Couldn't finish connecting. Check the app's settings and try again.");
+    // Refusing a server that isn't the provider's says so, and so do keys the provider turned down
+    // (a secret pasted wrong, most likely). Other failures stay general.
+    if (error instanceof UntrustedServerError) return done("error", error.message);
+    if (error instanceof SignInRefused && /invalid_client|unauthorized_client/.test(error.message)) {
+      return done("error", `${entry?.name ?? "The app"} didn't accept the Client ID and secret. Check them on this page, then connect again.`);
+    }
+    return done("error", "Couldn't finish connecting. Check the app's settings and try again.");
   }
 });
 
@@ -172,11 +191,64 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
   // Stripe's open invoices are voided with the old key, which can finish after the response.
   if (secret && provider === "stripe") runInBackground(c, (await disconnectStripe(c.env, admin, c.var.companyId, secret)).settled);
   else if (secret) await revoke(c.env, provider, secret);
-  await admin.from("integration_secrets").delete().match({ company_id: c.var.companyId, provider });
+  // The company's own app keys stay, so connecting again is one click.
+  const keys = catalogEntry(provider)?.appKeys ? appKeysOf(secret?.extra) : {};
+  if (keys.client_id) await saveSecret(c.env, admin, c.var.companyId, provider, { extra: keys });
+  else await admin.from("integration_secrets").delete().match({ company_id: c.var.companyId, provider });
   const { error } = await admin
     .from("integrations")
     .update({ status: "disconnected", account_label: null, last_error: null, ...(provider === "google_calendar" ? { settings: {} } : {}) })
     .match({ company_id: c.var.companyId, provider });
+  if (error) throw dbError(error);
+  return c.json({ provider, status: "disconnected" });
+});
+
+const appKey = z.string().trim().min(8, "That looks too short. Copy the whole thing.").max(300).regex(/^\S+$/, "Paste it without spaces.");
+
+/**
+ * The company's own app at Intuit or Zoho (its Client ID and secret), so QuickBooks and Zoho Books
+ * work without anyone setting up the server. Tokens belong to the app that issued them, so new keys
+ * sign out of the old app first; connecting again signs in with the new one.
+ */
+apps.put("/apps/:provider/app-keys", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const provider = c.req.param("provider") as Provider;
+  if (!catalogEntry(provider)?.appKeys) throw new HttpError(400, "That app doesn't take its own keys.");
+  const body = await readJson(c, z.object({ client_id: appKey, client_secret: appKey, sandbox: z.boolean().default(false), accounts_server: z.string().max(100).optional() }));
+  // Zoho: the data center the app was made in, where sign-in starts. Only Zoho's own servers.
+  let accountsServer: string | undefined;
+  if (provider === "zoho_books") {
+    try {
+      accountsServer = zohoAccountsServer(body.accounts_server ?? "https://accounts.zoho.com");
+    } catch {
+      throw new HttpError(400, "Pick where your Zoho account is.");
+    }
+  }
+  const admin = adminClient(c.env);
+  const previous = await loadSecret(c.env, admin, c.var.companyId, provider).catch(() => null);
+  if (previous) await revoke(c.env, provider, previous);
+  // The integrations row must exist before its secret (foreign key).
+  const { error } = await admin.from("integrations").upsert({ company_id: c.var.companyId, provider, status: "disconnected", account_label: null, last_error: null });
+  if (error) throw dbError(error);
+  await saveSecret(c.env, admin, c.var.companyId, provider, {
+    extra: {
+      client_id: body.client_id,
+      client_secret: body.client_secret,
+      ...(provider === "quickbooks" && body.sandbox ? { environment: "sandbox" } : {}),
+      ...(accountsServer ? { accounts_server: accountsServer } : {}),
+    },
+  });
+  return c.json({ provider, status: "disconnected" });
+});
+
+/** Forget the company's own app keys, signing out of that app first. The server's app is used again, if it has one. */
+apps.delete("/apps/:provider/app-keys", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const provider = c.req.param("provider") as Provider;
+  if (!catalogEntry(provider)?.appKeys) throw new HttpError(400, "That app doesn't take its own keys.");
+  const admin = adminClient(c.env);
+  const secret = await loadSecret(c.env, admin, c.var.companyId, provider).catch(() => null);
+  if (secret) await revoke(c.env, provider, secret);
+  await admin.from("integration_secrets").delete().match({ company_id: c.var.companyId, provider });
+  const { error } = await admin.from("integrations").update({ status: "disconnected", account_label: null, last_error: null }).match({ company_id: c.var.companyId, provider });
   if (error) throw dbError(error);
   return c.json({ provider, status: "disconnected" });
 });

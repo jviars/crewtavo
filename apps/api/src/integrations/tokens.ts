@@ -14,8 +14,32 @@ export interface StoredSecret {
   refresh_token?: string;
   expires_at?: number; // ms since epoch
   api_key?: string;
-  /** Provider details needed later, e.g. Zoho's accounts server and API domain. */
+  /**
+   * Provider details needed later, e.g. Zoho's accounts server and API domain. A company that signs
+   * in with its own app at the provider keeps that app's keys here too (see oauthClient).
+   */
   extra?: Record<string, string>;
+}
+
+/** What a company's own app at the provider leaves in `extra`, and keeps when it disconnects. */
+const APP_KEY_FIELDS = ["client_id", "client_secret", "environment", "accounts_server"] as const;
+
+/** A company's own app keys from a stored secret, without its tokens. Empty when it has none. */
+export function appKeysOf(extra: Record<string, string> | undefined): Record<string, string> {
+  if (!extra?.client_id || !extra.client_secret) return {};
+  return Object.fromEntries(APP_KEY_FIELDS.filter((key) => extra[key]).map((key) => [key, extra[key]!]));
+}
+
+/**
+ * The app a company signs in with: its own (keys pasted on the app's page) when it saved one,
+ * otherwise this server's (QUICKBOOKS_CLIENT_ID and the like). Null when there's neither.
+ */
+export function oauthClient(env: Env, provider: Provider, extra?: Record<string, string>): { id: string; secret: string } | null {
+  if (extra?.client_id && extra.client_secret) return { id: extra.client_id, secret: extra.client_secret };
+  const config = OAUTH[provider];
+  const id = config?.clientId(env);
+  const secret = config?.clientSecret(env);
+  return id && secret ? { id, secret } : null;
 }
 
 /** The provider said no for good (sign-in revoked or expired, or this server's app keys are wrong). */
@@ -37,16 +61,15 @@ interface TokenResponse {
 async function tokenRequest(env: Env, provider: Provider, form: Record<string, string>, ctx?: CallbackContext, saved?: Record<string, string>) {
   const config = OAUTH[provider];
   if (!config) throw new IntegrationError(`${provider} doesn't use OAuth`);
-  const clientId = config.clientId(env);
-  const clientSecret = config.clientSecret(env);
-  if (!clientId || !clientSecret) throw new IntegrationError(`${provider} isn't configured on this server`);
+  const client = oauthClient(env, provider, saved);
+  if (!client) throw new IntegrationError(`${provider} isn't set up: add your app's keys on the Apps page`);
 
   const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" };
   const body = new URLSearchParams(form);
-  if (config.clientAuth === "basic") headers.Authorization = `Basic ${btoa(`${clientId}:${clientSecret}`)}`;
+  if (config.clientAuth === "basic") headers.Authorization = `Basic ${btoa(`${client.id}:${client.secret}`)}`;
   else {
-    body.set("client_id", clientId);
-    body.set("client_secret", clientSecret);
+    body.set("client_id", client.id);
+    body.set("client_secret", client.secret);
   }
   const response = await fetch(config.tokenUrl(env, ctx, saved), { method: "POST", headers, body, signal: providerTimeout() });
   const json = (await response.json().catch(() => ({}))) as TokenResponse;
@@ -57,9 +80,11 @@ async function tokenRequest(env: Env, provider: Provider, form: Record<string, s
   return json;
 }
 
-export async function exchangeCode(env: Env, provider: Provider, code: string, redirectUri: string, ctx: CallbackContext): Promise<StoredSecret> {
-  const json = await tokenRequest(env, provider, { grant_type: "authorization_code", code, redirect_uri: redirectUri }, ctx);
-  const extra: Record<string, string> = {};
+/** `saved` is what was stored before signing in: the company's own app keys, if it has them, stay. */
+export async function exchangeCode(env: Env, provider: Provider, code: string, redirectUri: string, ctx: CallbackContext, saved?: Record<string, string>): Promise<StoredSecret> {
+  const keys = appKeysOf(saved);
+  const json = await tokenRequest(env, provider, { grant_type: "authorization_code", code, redirect_uri: redirectUri }, ctx, keys);
+  const extra: Record<string, string> = { ...keys };
   if (provider === "zoho_books") {
     // Both come from outside (the callback URL and the token response): only Zoho's servers are kept.
     if (ctx.query["accounts-server"]) extra.accounts_server = zohoAccountsServer(ctx.query["accounts-server"]);
@@ -133,10 +158,12 @@ export async function revoke(env: Env, provider: Provider, secret: StoredSecret)
   try {
     const url = config.revokeUrl(env, secret.extra);
     if (provider === "quickbooks") {
+      const client = oauthClient(env, provider, secret.extra);
+      if (!client) return;
       await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Basic ${btoa(`${config.clientId(env)}:${config.clientSecret(env)}`)}`,
+          Authorization: `Basic ${btoa(`${client.id}:${client.secret}`)}`,
           "Content-Type": "application/json",
           Accept: "application/json",
         },
