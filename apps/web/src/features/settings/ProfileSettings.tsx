@@ -9,6 +9,7 @@ import { api, supabase } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
 import { toast } from "@/lib/toast";
+import { MeasureMapSetting } from "../measure/ImageryPicker";
 import { CalendarFeedCard } from "./CalendarFeedCard";
 import { NotificationSettings } from "./NotificationSettings";
 import { PhotoButtons } from "./ProfilePhoto";
@@ -78,6 +79,7 @@ export function ProfileSettings() {
       <NotificationSettings phone={session.profile.phone} />
       <Appearance />
       <MapsAppSetting />
+      <MeasureMapSetting />
       <CalendarFeedCard />
       <SpareKeysCard />
       <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>

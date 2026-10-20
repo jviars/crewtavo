@@ -92,3 +92,8 @@ export interface MapKeys {
   esri_key?: string | null;
   google_key?: string | null;
 }
+
+/** companies.settings.maps: the keys, and what Measure opens on for the team ("auto" or a source). */
+export interface MapSettings extends MapKeys {
+  default_imagery?: string | null;
+}

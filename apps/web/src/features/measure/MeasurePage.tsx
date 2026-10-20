@@ -1,9 +1,10 @@
 /**
  * Measure on aerial imagery: draw areas, lines and counts and see their sizes as you go (the server
  * recomputes them on save), keep a picture of the drawing, and put it on a quote or invoice for the
- * client. The map opens on the Crewtavo map (Auto): the state's own imagery where it has some, else
- * US aerial (NAIP), else USGS, else (outside the US) Esri with a key from Settings > Maps, or the
- * street map. Anyone can pick a source themselves instead, from the Imagery button.
+ * client. The map opens on Auto: the state's own imagery where it has some, else US aerial (NAIP),
+ * else USGS, else (outside the US) Esri with a key from Settings > Maps, or the street map. Anyone
+ * can pick a source themselves instead, from the Imagery button, and make it what Measure opens on
+ * (an admin can set that for the whole team in Settings > Maps).
  */
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { roofingSquares, summarizeFeatureCollection, type Feature } from "@crewtavo/core/geo";
@@ -24,7 +25,7 @@ import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { AddressSearch, type ClientSuggestion, type PlaceSuggestion } from "./AddressSearch";
 import { ShareDrawing, type DrawingRow } from "./drawings";
-import { AUTO_NAME, ELEVATION_CREDIT, imageryCredit, imageryInfo, mapKeys, OVERLAYS, probeImagery, resolveAuto, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
+import { AUTO_NAME, choiceName, ELEVATION_CREDIT, imageryCredit, imageryInfo, imageryUsable, isImageryId, mapKeys, openingImagery, OVERLAYS, probeImagery, resolveAuto, setMyDefault, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
 import { ImageryPicker } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
@@ -56,8 +57,6 @@ const safeSquares = (areaSqft: number, pitch: string, wastePct: number) => {
     return null; // pitch still being typed
   }
 };
-const isImagery = (value: unknown): value is ImageryId =>
-  typeof value === "string" && (["naip", "usgs-naip", "usgs", "terrain", "esri", "google", "street"].includes(value) || (value.startsWith("state:") && Boolean(stateImagery(value.slice(6)))));
 // Slope and contours stay on (or off) between visits, per browser.
 const OVERLAYS_KEY = "crewtavo.measureOverlays";
 function savedOverlays(): OverlayId[] {
@@ -98,6 +97,10 @@ export function MeasurePage() {
   const [params] = useSearchParams();
   const linkIds = { property: params.get("property"), quote: params.get("quote"), request: params.get("request"), invoice: params.get("invoice"), measurement: params.get("measurement") };
   const keys = useMemo(() => mapKeys(company.settings ?? {}, session.config.mapsBrowserKey), [company.settings, session.config.mapsBrowserKey]);
+  // What Measure opens on: this person's default, the team's, or Auto.
+  const [defaultRevision, setDefaultRevision] = useState(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const opening = useMemo(() => openingImagery(company.settings ?? {}, keys), [company.settings, keys, defaultRevision]);
   const touch = useMemo(touchScreen, []);
 
   const mapRef = useRef<MeasureMapHandle>(null);
@@ -188,21 +191,24 @@ export function MeasurePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
-  // First imagery: the Crewtavo map (Auto), unless the drawing being reopened was made on a source
-  // someone picked. Auto starts on a guess so the map can load, and settles once it has looked.
+  // First imagery: the source a reopened drawing was made on, if someone picked it; else this
+  // person's default, the team's, or Auto. Auto starts on a guess so the map can load, and settles
+  // once it has looked.
   useEffect(() => {
     if (!start || choice) return;
     const view = (ctx?.measurement?.view ?? null) as SavedView | null;
-    const usable = (id: ImageryId) => (id === "esri" ? Boolean(keys.esri_key) : id === "google" ? Boolean(keys.google_key) : true);
-    const savedOn = isImagery(view?.imagery) && usable(view.imagery) ? view.imagery : null;
+    const savedOn = isImageryId(view?.imagery) && imageryUsable(view.imagery, keys) ? view.imagery : null;
     if (view?.mode === "manual" && savedOn) {
       setChoice(savedOn);
       setImagery(savedOn);
+    } else if (opening !== "auto") {
+      setChoice(opening);
+      setImagery(opening);
     } else {
       setChoice("auto");
       setImagery(savedOn ?? (start.zoom < 11 ? "usgs" : "naip"));
     }
-  }, [start, choice, ctx, keys]);
+  }, [start, choice, ctx, keys, opening]);
 
   useEffect(() => {
     // A new drawing is named after the property until someone names it.
@@ -341,6 +347,11 @@ export function MeasurePage() {
     if (next === "auto") setResolveTick((n) => n + 1);
     else setImagery(next);
   };
+  const makeDefault = (next: ImageryChoice) => {
+    setMyDefault(next);
+    setDefaultRevision((n) => n + 1);
+    toast.success(`Measure opens on ${choiceName(next)} from now on`);
+  };
   const toggleOverlay = (id: OverlayId, on: boolean) => {
     const next = on ? [...overlays.filter((o) => o !== id), id] : overlays.filter((o) => o !== id);
     setOverlays(next);
@@ -377,7 +388,7 @@ export function MeasurePage() {
     mapRef.current?.jumpTo(to.lng, to.lat, to.zoom);
     if (to.country && to.country !== "US") {
       // Auto finds the best there is by itself; a US-only source someone picked gets explained.
-      if (choice !== "auto" && (imagery === "naip" || imagery?.startsWith("state:") || imagery?.startsWith("usgs"))) setAbroad({ place: to.place });
+      if (choice !== "auto" && (imagery === "naip" || imagery === "terrain" || imagery?.startsWith("state:") || imagery?.startsWith("usgs"))) setAbroad({ place: to.place });
     } else if (autoImagery.current && choice !== "auto") {
       chooseImagery("auto");
       toast.success(`Back on ${AUTO_NAME}`);
@@ -643,7 +654,7 @@ export function MeasurePage() {
                 onEdit={() => find.isError && find.reset()}
               />
               {imagery && (
-                <ImageryPicker choice={choice ?? "auto"} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} overlays={overlays} onPick={(next) => chooseImagery(next)} onStreetNames={setStreetNames} onOverlay={toggleOverlay} />
+                <ImageryPicker choice={choice ?? "auto"} opening={opening} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} overlays={overlays} onPick={(next) => chooseImagery(next)} onMakeDefault={makeDefault} onStreetNames={setStreetNames} onOverlay={toggleOverlay} />
               )}
             </div>
           )}
