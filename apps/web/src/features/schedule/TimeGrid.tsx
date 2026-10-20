@@ -50,7 +50,22 @@ export interface GridColumn {
 }
 
 export const PPM = 0.8; // pixels per minute: 48 px an hour
+/** On phones the hours are twice as tall, so a short visit still has room for its time and name. */
+const PHONE_PPM = 1.6;
+const PHONE = "(max-width: 700px)";
 const MIN_HEIGHT = 22;
+
+/** Pixels per minute for this screen, following it when the phone turns or the window resizes. */
+export function useGridScale() {
+  const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
+  useEffect(() => {
+    const query = window.matchMedia(PHONE);
+    const changed = () => setPhone(query.matches);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  }, []);
+  return phone ? PHONE_PPM : PPM;
+}
 
 export const minutesOf = (iso: string, tz: string) => {
   const [h, m] = localTime(new Date(iso), tz).split(":").map(Number);
@@ -132,6 +147,7 @@ export function TimeGrid<V extends GridVisit>({
   startMin,
   endMin,
   minColumn = 120,
+  ppm = PPM,
   canDispatch,
   canMove,
   drag,
@@ -153,6 +169,8 @@ export function TimeGrid<V extends GridVisit>({
   startMin: number;
   endMin: number;
   minColumn?: number;
+  /** Pixels per minute (useGridScale). */
+  ppm?: number;
   canDispatch: boolean;
   /** Per visit, when only some can be changed (a crew lead's own crew). Defaults to all. */
   canMove?: (visit: V) => boolean;
@@ -166,9 +184,9 @@ export function TimeGrid<V extends GridVisit>({
   stale?: boolean;
 }) {
   const now = useNowMinutes(tz);
-  const height = (endMin - startMin) * PPM;
+  const height = (endMin - startMin) * ppm;
   const hours = Array.from({ length: Math.ceil((endMin - startMin) / 60) }, (_, i) => startMin + i * 60);
-  const style = { "--cols": columns.length, "--min-col": `${minColumn}px` } as CSSProperties;
+  const style = { "--cols": columns.length, "--min-col": `${minColumn}px`, "--hour": `${60 * ppm}px` } as CSSProperties;
   const draggable = (v: V) => canDispatch && (canMove?.(v) ?? true) && !["completed", "cancelled"].includes(v.status);
   const targets = (col: GridColumn, t: DragState<V>["target"]) =>
     t && "date" in t && t.date === col.date && (col.crew === undefined || !("crew" in t) || t.crew === col.crew);
@@ -176,7 +194,7 @@ export function TimeGrid<V extends GridVisit>({
   const createAt = (col: GridColumn) => (e: MouseEvent<HTMLDivElement>) => {
     if (!canDispatch || wasDragging() || e.target !== e.currentTarget) return;
     const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
-    onCreate(col, Math.max(0, Math.min(24 * 60 - 30, Math.floor((startMin + y / PPM) / 30) * 30)));
+    onCreate(col, Math.max(0, Math.min(24 * 60 - 30, Math.floor((startMin + y / ppm) / 30) * 30)));
   };
 
   return (
@@ -228,7 +246,7 @@ export function TimeGrid<V extends GridVisit>({
 
         <div className="tg-row tg-body" role="row">
           <div className="tg-gutter tg-hours" style={{ height }} aria-hidden="true">
-            {hours.map((m) => <span key={m} style={{ top: (m - startMin) * PPM }}>{clock(m)}</span>)}
+            {hours.map((m) => <span key={m} style={{ top: (m - startMin) * ppm }}>{clock(m)}</span>)}
           </div>
           {columns.map((col) => {
             const timedExternal = (externalFor?.(col) ?? []).filter((e) => e.starts_at).map(asItem);
@@ -243,7 +261,7 @@ export function TimeGrid<V extends GridVisit>({
                 data-date={col.date}
                 data-crew={col.crew}
                 data-start-min={startMin}
-                data-ppm={PPM}
+                data-ppm={ppm}
                 data-today={col.today || undefined}
                 data-past={col.past || undefined}
                 data-can-create={canDispatch || undefined}
@@ -251,9 +269,9 @@ export function TimeGrid<V extends GridVisit>({
                 onClick={createAt(col)}
               >
                 {placed.map(({ v: item, start, end, lane, lanes, conflict }) => {
-                  const h = Math.max(MIN_HEIGHT, (end - start) * PPM - 2);
+                  const h = Math.max(MIN_HEIGHT, (end - start) * ppm - 2);
                   const size = h < 34 ? "tiny" : h < 60 ? "short" : "full";
-                  const box = { top: (start - startMin) * PPM + 1, height: h, left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)` };
+                  const box = { top: (start - startMin) * ppm + 1, height: h, left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)` };
                   if (isExternal(item)) {
                     const e = item.ext;
                     return (
@@ -285,11 +303,11 @@ export function TimeGrid<V extends GridVisit>({
                   );
                 })}
                 {ghost && drag && (
-                  <div className="tg-ghost" style={{ top: (ghost.minutes - startMin) * PPM + 1, height: Math.max(MIN_HEIGHT, drag.duration * PPM - 2) }}>
+                  <div className="tg-ghost" style={{ top: (ghost.minutes - startMin) * ppm + 1, height: Math.max(MIN_HEIGHT, drag.duration * ppm - 2) }}>
                     {clock(ghost.minutes)} – {clock(ghost.minutes + drag.duration)}
                   </div>
                 )}
-                {col.today && now >= startMin && now <= endMin && <div className="tg-now" style={{ top: (now - startMin) * PPM }} aria-hidden="true" />}
+                {col.today && now >= startMin && now <= endMin && <div className="tg-now" style={{ top: (now - startMin) * ppm }} aria-hidden="true" />}
               </div>
             );
           })}

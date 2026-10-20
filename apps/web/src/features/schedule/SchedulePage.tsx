@@ -5,6 +5,7 @@
  * Click a visit to see it all (Edit changes it). Drops snap to the time step in Settings → Schedule.
  * Also: rain-day shifts, a visit for many jobs at once, and Organize route for each crew's day.
  * Events from other calendars (added on the Apps page) show alongside, and can be hidden.
+ * Each visit shows the initials of the people on it, and the board can show one person's visits.
  */
 import { scheduleSettings } from "@crewtavo/core/routing";
 import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
@@ -18,13 +19,14 @@ import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
+import { initials } from "@/components/shell/AppShell";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
 import { RouteDialog } from "./RouteDialog";
-import { clock, lengthOf, minutesOf, TimeGrid, type GridColumn, type GridExternal } from "./TimeGrid";
+import { clock, lengthOf, minutesOf, TimeGrid, useGridScale, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
 import { VisitDetails } from "./VisitDetails";
 import { VisitDialog, type VisitInput } from "./VisitDialog";
@@ -58,6 +60,8 @@ interface ScheduleData {
   events?: CalendarEvent[];
 }
 type View = "day" | "week" | "month";
+/** Someone on the team, from GET /api/team (former members too, so old visits keep their names). */
+interface Person { user_id: string; active: boolean; profile: { full_name: string | null; email: string | null; color: string | null } | null }
 type Patch = Partial<Pick<Visit, "scheduled_on" | "starts_at" | "ends_at" | "crew_id" | "status">>;
 
 /** Monday of the week containing `date`. */
@@ -102,6 +106,8 @@ export function SchedulePage() {
   });
   const [anchor, setAnchor] = useState(params.get("date") ?? today);
   const [crewId, setCrewId] = useState("");
+  // Whose visits: "" everyone, a person's id, or "none" for visits nobody is on yet.
+  const [person, setPersonState] = useState(() => readPref("crewtavo.schedule.person") ?? "");
   const [editing, setEditing] = useState<VisitInput | null>(null);
   const [dialog, setDialog] = useState<null | "shift" | "bulk">(null);
   const [panel, setPanelState] = useState<boolean | null>(() => (readPref("crewtavo.schedule.panel") === "closed" ? false : null));
@@ -135,6 +141,11 @@ export function SchedulePage() {
     setShowCalendarsState(on);
     writePref("crewtavo.schedule.calendars", on ? "shown" : "hidden");
   };
+  const setPerson = (id: string) => {
+    setPersonState(id);
+    writePref("crewtavo.schedule.person", id);
+  };
+  const ppm = useGridScale();
 
   const range = useMemo(() => {
     if (view === "day") return { from: anchor, to: anchor };
@@ -158,13 +169,29 @@ export function SchedulePage() {
     queryFn: () => api.get<ScheduleData>(`/schedule?from=${range.from}&to=${range.to}${crewId ? `&crew_id=${crewId}` : ""}`),
   });
 
+  // Names and colors for the initials on each visit. Field crew see only their own visits, so they
+  // have nobody else's to pick.
+  const team = useQuery({ queryKey: ["team", session.company.id], staleTime: 5 * 60_000, queryFn: () => api.get<Person[]>("/team") });
+  const personById = new Map((team.data ?? []).map((p) => [p.user_id, p]));
+  const nameOf = (id: string) => {
+    const p = personById.get(id);
+    return id === session.userId ? "You" : p?.profile?.full_name || p?.profile?.email || "Someone";
+  };
+  const pickable = (team.data ?? [])
+    .filter((p) => p.active && p.user_id !== session.userId)
+    .sort((a, b) => nameOf(a.user_id).localeCompare(nameOf(b.user_id)));
+  const canPickPerson = session.role !== "field_crew" && pickable.length > 0;
+  // A remembered person who has since left the team shows everyone again.
+  const shownPerson = !canPickPerson || (team.data && person && person !== "none" && person !== session.userId && !pickable.some((p) => p.user_id === person)) ? "" : person;
+  const forPerson = (v: Visit) => !shownPerson || (shownPerson === "none" ? v.assignees.length === 0 : v.assignees.some((a) => a.user_id === shownPerson));
+
   // Card times in the company's zone, like the grid and the visit dialog.
   const timeOf = (iso: string) => formatTime(iso, tz);
   const crews = schedule.data?.crews ?? [];
   const crewOf = (id: string | null) => crews.find((c) => c.id === id);
   const withColor = (v: Visit): Visit => ({ ...v, crewColor: crewOf(v.crew_id)?.color ?? undefined });
-  const scheduled = (schedule.data?.visits ?? []).map(withColor);
-  const unscheduled = (schedule.data?.unscheduled ?? []).map(withColor);
+  const scheduled = (schedule.data?.visits ?? []).map(withColor).filter(forPerson);
+  const unscheduled = (schedule.data?.unscheduled ?? []).map(withColor).filter(forPerson);
   // A route's stop numbers set the order; otherwise timed visits by time, then anytime ones.
   const byDay = (date: string) =>
     scheduled
@@ -317,17 +344,38 @@ export function SchedulePage() {
     return { startMin: Math.max(0, Math.floor(lo / 60) * 60), endMin: Math.min(24 * 60, Math.ceil(hi / 60) * 60) };
   }, [schedule.data, tz, workStart, workEnd, showCalendars]);
 
+  const namesOn = (v: Visit) => v.assignees.map((a) => nameOf(a.user_id)).join(", ");
+  const firstNames = (v: Visit) => v.assignees.map((a) => nameOf(a.user_id).split(/\s+/)[0]).join(", ");
+  /** The initials of the people on a visit, in their colors; yours ringed. */
+  const faces = (v: Visit) => {
+    if (!v.assignees.length) return null;
+    const names = namesOn(v);
+    return (
+      <span className="tg-people" title={names}>
+        {v.assignees.slice(0, 3).map(({ user_id: id }) => {
+          const p = personById.get(id);
+          return <i key={id} data-me={id === session.userId || undefined} style={{ "--p": p?.profile?.color ?? undefined } as CSSProperties} aria-hidden="true">{initials(p?.profile?.full_name || p?.profile?.email)}</i>;
+        })}
+        {v.assignees.length > 3 && <i data-more aria-hidden="true">+{v.assignees.length - 3}</i>}
+        <span className="sr-only">With {names.replace(/^You\b/, "you")}</span>
+      </span>
+    );
+  };
+
   const content = (v: Visit, size: "tiny" | "short" | "full") => {
     const who = v.job?.client?.display_name ?? v.property?.line1;
     const done = v.status === "completed" ? "✓ " : "";
     const day = v.series_total && v.series_total > 1 ? ` · day ${v.series_day}/${v.series_total}` : "";
     const stop = v.route_order && v.status === "scheduled" ? `${v.route_order}. ` : "";
-    if (size === "tiny") return <span className="tg-n" style={{ WebkitLineClamp: 1 }}>{stop}{done}{v.title}{day}</span>;
+    if (size === "tiny") return <span className="tg-line"><span className="tg-n" style={{ WebkitLineClamp: 1 }}>{stop}{done}{v.title}{day}</span>{faces(v)}</span>;
+    // A short visit keeps the people beside its time; a longer one has room to name them.
+    const time = v.starts_at && <span className="tg-t">{stop}{timeOf(v.starts_at)}{v.ends_at ? ` – ${timeOf(v.ends_at)}` : ""}</span>;
     return (
       <>
-        {v.starts_at && <span className="tg-t">{stop}{timeOf(v.starts_at)}{v.ends_at ? ` – ${timeOf(v.ends_at)}` : ""}</span>}
+        {size === "short" ? <span className="tg-line">{time}{faces(v)}</span> : time}
         <span className="tg-n">{done}{v.title}{day}</span>
         {size === "full" && who && <span className="tg-m">{who}</span>}
+        {size === "full" && v.assignees.length > 0 && <span className="tg-line tg-who">{faces(v)}<span className="tg-m" aria-hidden="true">{firstNames(v)}</span></span>}
         {size === "full" && v.hold_reason && <span className="tg-w" title={v.hold_reason}>⚠ {v.hold_reason.split(";")[0]}</span>}
       </>
     );
@@ -394,6 +442,7 @@ export function SchedulePage() {
     onOpen: show,
     onCreate: newAt,
     content,
+    ppm,
     visitsFor: laneVisits,
     externalFor,
     onOpenExternal: openExternal,
@@ -435,6 +484,14 @@ export function SchedulePage() {
           <Button size="sm" icon="calendar" title={showCalendars ? "Hide events from other calendars" : "Show events from other calendars"} onClick={() => setShowCalendars(!showCalendars)}>
             {showCalendars ? "Hide calendars" : "Show calendars"}
           </Button>
+        )}
+        {canPickPerson && (
+          <select className="select" style={{ width: "auto" }} value={shownPerson} onChange={(e) => setPerson(e.target.value)} aria-label="Whose visits to show">
+            <option value="">Everyone</option>
+            <option value={session.userId}>Just mine</option>
+            {pickable.map((p) => <option key={p.user_id} value={p.user_id}>{nameOf(p.user_id)}</option>)}
+            {canDispatch && <option value="none">Nobody assigned yet</option>}
+          </select>
         )}
         {crews.length > 1 && (
           <select className="select" style={{ width: "auto" }} value={crewId} onChange={(e) => setCrewId(e.target.value)} aria-label="Filter by crew">
@@ -491,7 +548,7 @@ export function SchedulePage() {
                           className="month-chip"
                           data-status={v.status}
                           style={{ ["--crew" as string]: v.crewColor }}
-                          title={v.title}
+                          title={v.assignees.length ? `${v.title} · ${namesOn(v)}` : v.title}
                           onPointerDown={canDispatch && canMove(v) && !["completed", "cancelled"].includes(v.status) ? startDrag(v, "move") : undefined}
                           onClick={() => !wasDragging() && show(v)}
                         >
@@ -536,7 +593,7 @@ export function SchedulePage() {
                       onPointerDown={canDispatch && canMove(v) ? startDrag(v, "move") : undefined}
                       onClick={() => !wasDragging() && show(v)}
                     >
-                      <strong style={{ display: "block" }}>{v.title}</strong>
+                      <span className="tg-line"><strong className="grow">{v.title}</strong>{faces(v)}</span>
                       {(v.job?.client || v.property) && <span className="muted small">{v.job?.client?.display_name ?? v.property?.line1}</span>}
                     </button>
                   ))}
