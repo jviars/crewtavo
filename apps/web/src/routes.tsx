@@ -143,4 +143,5 @@ export const routes: RouteObject[] = [
   { path: "book/:company/:form", errorElement: <RouteError fullPage />, ...page(() => import("@/features/booking/BookingFormPage"), "BookingFormPage") },
   { path: "u/:token", errorElement: <RouteError fullPage />, ...page(() => import("@/features/public/UnsubscribePage"), "UnsubscribePage") },
   { path: "refer/:token", errorElement: <RouteError fullPage />, ...page(() => import("@/features/public/ReferralPage"), "ReferralPage") },
+  { path: "license", errorElement: <RouteError fullPage />, ...page(() => import("@/features/public/LicensePage"), "LicensePage") },
 ];

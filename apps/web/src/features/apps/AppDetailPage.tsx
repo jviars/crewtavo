@@ -21,6 +21,7 @@ import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { CalendarFeedCard } from "../settings/CalendarFeedCard";
 import { AppIcon, AppTile } from "./AppIcon";
+import { AppKeysCard } from "./AppKeysCard";
 import { AssistantAccess, ConnectedAssistants, useAssistantConnections } from "./AssistantAccess";
 import { assistantAppFor, CONNECTOR_STEPS, disconnect as disconnectAssistant } from "./assistantConnections";
 import { CalendarRow, GoogleCalendarPanel, LinkCalendarsPanel, AddCalendarForm, useCalendars, type CalendarSource } from "./CalendarPanels";
@@ -46,12 +47,18 @@ const STRIPE_NEW_KEY = `https://dashboard.stripe.com/apikeys/create?name=Crewtav
 /** Google Calendar on a server without Google sign-in: it works by secret address, like the link apps. */
 const byLinkOnly = (app: AppRow) => app.id === "google_calendar" && !app.available;
 
+/**
+ * QuickBooks and Zoho Books sign in with the business's own app at Intuit or Zoho. Install shows its
+ * keys first when the server has no app of its own, or when the business saved some (to change them).
+ */
+const keysFirst = (app: AppRow) => Boolean(app.takes_app_keys && (!app.available || app.app_keys));
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function statusOf(app: AppRow, installed: boolean): { label: string; tone: Tone } {
   if (app.status === "error" || app.calendar_errors) return { label: "Needs attention", tone: "danger" };
   if (installed) return app.calendars ? { label: plural(app.calendars, "calendar"), tone: "good" } : { label: "Installed", tone: "good" };
-  if (!app.available && !byLinkOnly(app)) return { label: "Not available yet", tone: "muted" };
+  if (!app.available && !byLinkOnly(app) && !app.takes_app_keys) return { label: "Not available yet", tone: "muted" };
   return { label: "Not installed", tone: "muted" };
 }
 
@@ -151,7 +158,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       return chatSwitch.toggle.mutate(true, failed);
     }
     // Signing in is the setup; Google also offers adding a calendar by its address instead.
-    if (app.auth === "oauth" && app.available && app.id !== "google_calendar") {
+    if (app.auth === "oauth" && app.available && app.id !== "google_calendar" && !keysFirst(app)) {
       setPhase("working");
       return connect.mutate(undefined, failed);
     }
@@ -180,7 +187,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
 
   const status = statusOf(app, installed);
   const callback = params.get("status") ? { ok: params.get("status") === "connected", message: params.get("message") } : null;
-  const unavailable = !app.available && !byLinkOnly(app);
+  const unavailable = !app.available && !byLinkOnly(app) && !app.takes_app_keys;
   const needsReconnect = app.auth === "oauth" && app.status === "error" && app.available;
   const open = openTarget(app, info);
 
@@ -277,6 +284,8 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
         <div id="app-install" className="stack" style={{ scrollMarginTop: 16 }}>
           {byLinkOnly(app) ? (
             <GoogleBySecretAddress app={app} sources={googleSources} />
+          ) : keysFirst(app) ? (
+            <AppKeysCard app={app} onChanged={refresh} onConnect={() => connect.mutate()} connecting={connect.isPending} />
           ) : app.id === "google_calendar" ? (
             <>{googleSignIn}{googleByAddress}</>
           ) : app.auth === "link" ? (
@@ -297,6 +306,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
         <>
           {byLinkOnly(app) && <GoogleBySecretAddress app={app} sources={googleSources} />}
           {app.auth === "oauth" && app.available && (app.status === "disconnected" ? app.id === "google_calendar" && googleSignIn : <AccountCard app={app} />)}
+          {app.app_keys && <AppKeysCard app={app} onChanged={refresh} onConnect={() => connect.mutate()} connecting={connect.isPending} />}
           {app.id === "google_calendar" && app.status === "connected" && <GoogleCalendarPanel />}
           {app.id === "google_calendar" && app.available && googleByAddress}
           {app.auth === "link" && <LinkCalendarsPanel app={app.id} appName={app.name} steps={info.steps} />}
@@ -375,7 +385,10 @@ function uninstallBody(app: AppRow, counts: { assistants: number; calendars: num
   }
   if (app.auth === "link") return `${counts.calendars === 1 ? "Its calendar comes" : `Its ${counts.calendars} calendars come`} off the schedule. The calendars themselves aren't changed. ${again}`;
   if (app.id === "stripe") return `Crewtavo's webhook comes out of your Stripe account, and new invoices and payments stop showing up here. Nothing already recorded is deleted. ${again}`;
-  if (app.category === "Accounting") return `Syncing stops right away. Nothing already synced is deleted. ${again}`;
+  if (app.category === "Accounting") {
+    const keys = app.app_keys ? ` Your ${app.id === "quickbooks" ? "Intuit" : "Zoho"} app's keys stay, so installing it again is one sign-in.` : "";
+    return `Syncing stops right away. Nothing already synced is deleted.${keys} ${again}`;
+  }
   if (app.category === "AI") {
     const parts = [];
     if (counts.assistants) parts.push(`${app.name} stops working with your Crewtavo account. Anyone else on your team who connected it keeps theirs.`);

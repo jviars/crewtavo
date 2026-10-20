@@ -27,6 +27,10 @@ export interface AppRow {
   calendar_errors?: number;
   /** Stripe only, once it's set up: the company's own key or the server's, and the last import. */
   stripe?: { own: boolean; webhook: boolean; livemode: boolean; import: StripeImport | null };
+  /** QuickBooks and Zoho Books: the company can sign in with its own app there (AppKeysCard). */
+  takes_app_keys?: boolean;
+  /** That app's keys, once saved (never the secret). */
+  app_keys?: { client_id: string; sandbox: boolean; accounts_server: string | null } | null;
 }
 
 export interface StripeImport {

@@ -88,11 +88,20 @@ async function linkedElsewhere(ctx: Ctx, entity: Entity, externalId: string, loc
 // alone isn't enough, since the books can have an invoice of their own with it. QuickBooks' request
 // ids aren't used: a repeated one gets the first answer, which may be a refusal fixed since.
 
+/**
+ * Which QuickBooks the keys work with. A company's own Intuit keys say so themselves (development
+ * keys only reach sandbox companies); the server's follow the settings, then QUICKBOOKS_ENVIRONMENT.
+ */
+export function qboEnvironment(env: Env, settings: Record<string, unknown>, extra?: Record<string, string>): keyof typeof QBO_BASE {
+  if (extra?.client_id) return extra.environment === "sandbox" ? "sandbox" : "production";
+  return settings.environment === "sandbox" ? "sandbox" : (env.QUICKBOOKS_ENVIRONMENT ?? "production");
+}
+
 async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknown) {
   const realm = ctx.integration.external_account_id;
   if (!realm) throw new IntegrationError("QuickBooks company (realm) ID is missing; reconnect QuickBooks.");
-  const env = ctx.integration.settings.environment === "sandbox" ? "sandbox" : (ctx.env.QUICKBOOKS_ENVIRONMENT ?? "production");
-  const { token } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "quickbooks");
+  const { token, secret } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "quickbooks");
+  const env = qboEnvironment(ctx.env, ctx.integration.settings, secret.extra);
   const url = `${QBO_BASE[env]}/v3/company/${realm}/${path}${path.includes("?") ? "&" : "?"}minorversion=${QBO_MINOR_VERSION}`;
   const response = await fetch(url, {
     method,
@@ -336,7 +345,7 @@ export async function describeAccount(env: Env, provider: Provider, token: strin
   if (provider === "quickbooks") {
     const realm = query.realmId;
     if (!realm) throw new IntegrationError("QuickBooks didn't return a company ID.");
-    const base = QBO_BASE[env.QUICKBOOKS_ENVIRONMENT ?? "production"];
+    const base = QBO_BASE[qboEnvironment(env, {}, extra)];
     const response = await fetch(`${base}/v3/company/${realm}/companyinfo/${realm}?minorversion=${QBO_MINOR_VERSION}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
       signal: providerTimeout(),

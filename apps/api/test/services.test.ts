@@ -218,12 +218,14 @@ describe("Zoho data centers", () => {
     expect(res.status).toBe(302);
     return new URL(res.headers.get("Location")!).searchParams;
   }
+  // Calls that leave the server: not the database (where the company's own Zoho app keys are read from).
+  const outside = (calls: Call[]) => calls.filter((c) => c.url.origin !== new URL(env.SUPABASE_URL).origin);
 
   it("never sends the client secret to an accounts server that isn't Zoho's", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const calls = serve(() => ({}));
     const result = await callback({ "accounts-server": "https://attacker.example" });
-    expect(calls).toEqual([]);
+    expect(outside(calls)).toEqual([]);
     expect(result.get("status")).toBe("error");
     expect(result.get("message")).toContain("isn't Zoho's");
   });
@@ -232,8 +234,8 @@ describe("Zoho data centers", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const calls = serve((call) => (call.url.pathname === "/oauth/v2/token" ? { access_token: "token-1", refresh_token: "refresh-1", api_domain: "http://169.254.169.254" } : []));
     const result = await callback({ "accounts-server": "https://accounts.zoho.eu" });
-    expect(calls.map((c) => c.url.origin)).toEqual(["https://accounts.zoho.eu"]);
-    expect(calls[0]!.signal).toBeInstanceOf(AbortSignal);
+    expect(outside(calls).map((c) => c.url.origin)).toEqual(["https://accounts.zoho.eu"]);
+    expect(outside(calls)[0]!.signal).toBeInstanceOf(AbortSignal);
     expect(result.get("status")).toBe("error");
     expect(result.get("message")).toContain("isn't one of Zoho's");
   });

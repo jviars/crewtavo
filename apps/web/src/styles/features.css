@@ -419,6 +419,11 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .color-swatch:focus-visible { outline: none; box-shadow: var(--ring); }
 
 .code-pill { display: flex; align-items: center; min-height: 38px; padding: 8px 12px; border-radius: 8px; background: var(--fill); border: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere; }
+/* A value to copy into another app's form, next to the name that form gives it (AppKeysCard). */
+.app-copy { display: grid; grid-template-columns: minmax(130px, 200px) minmax(0, 1fr) auto; align-items: center; gap: 8px; color: var(--ink); }
+.app-copy > span { font-size: 13px; color: var(--text-3); }
+.app-copy .code-pill { min-height: 34px; padding: 6px 10px; }
+@media (max-width: 600px) { .app-copy { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; } .app-copy > span { grid-column: 1 / -1; } }
 
 /* ---------- Measure ---------- */
 .measure-card { overflow: hidden; }
