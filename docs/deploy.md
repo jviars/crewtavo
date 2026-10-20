@@ -37,12 +37,32 @@ memory across the five services (Postgres 136 MB, Storage 124 MB, crewtavo 47 MB
 auth 12 MB), roughly $3.60 a month at Railway's $10 per GB-month. Railway's free trial (30 days, $5
 of credit) is enough to try Crewtavo; to keep running, an instance needs Railway's Hobby plan ($5 a
 month, including $5 of usage). Use grows with data and traffic; check
-[Railway's pricing](https://railway.com/pricing).
+[Railway's pricing](https://railway.com/pricing), or **Settings → Hosting** in the instance.
 
-**Your own domain:** right after setting up the business, the owner sees **Your web address**: four
-steps on a timeline, ticked off as they're done, with what to do now opened under the current one.
-1. **Log in with Railway.** They're still signed in after deploying, so they pick this project and
-   press Allow.
+**Connect Railway (required):** right after setting up the business, the owner is asked to **Log in
+with Railway**. They're still signed in after deploying, so they pick the workspace and this project
+and press Allow. Crewtavo asks for `project:member` (changes in this project only) and
+`workspace:admin` (only admins can read billing). Until it's connected, or after a sign-in from
+before Crewtavo asked for billing, the owner sees this step whenever they open Crewtavo; **Ask me
+tomorrow** lets them in for a day, for when Railway is down or someone else looks after it
+(`railwayNeeded` in `apps/api/src/services/railway.ts`). A pasted project token counts too, but it
+can't see billing.
+
+**Settings → Hosting** (`apps/api/src/services/hosting.ts`) shows what Railway charges: usage so far
+this billing period against what the plan includes, Railway's forecast, what each service used
+(priced at Railway's rates, so estimates), the last week's memory and CPU, and how full the volumes
+are. Plans, credit and the card open Railway's own pages, since Railway's API can't change a plan
+or take a payment; the usage limit Crewtavo changes itself. A task twice a day (`hosting`) sends the
+owner and admins each new warning once, by the bell, email and push (the `hosting` notification
+topic): the trial ending in 7, 3 or 1 days or its credit nearly gone, a card Railway couldn't
+charge, prepaid credit running out, usage on track to reach the limit or to go over what the plan
+includes, a volume over 85% full, or a Railway sign-in that stopped working. These usage and
+billing queries are the ones Railway's dashboard uses but aren't in Railway's API docs, so each is
+optional: what Railway doesn't share is left out.
+
+**Your own domain:** after connecting Railway, the owner sees **Your web address**: four steps on a
+timeline, ticked off as they're done, with what to do now opened under the current one.
+1. **Log in with Railway.** Already done by the step above.
 2. **Choose your domain.** "Do you already have a domain?"
    - **Yes, use mine:** the address box starts with `crm.` and they type their domain after it.
    - **No, get me one:** opens Railway's Buy a Domain on the crewtavo service. Railway attaches it and
@@ -51,7 +71,7 @@ steps on a timeline, ticked off as they're done, with what to do now opened unde
    steps** to whoever looks after the domain. A domain bought on Railway skips this.
 4. **Crewtavo switches over** by itself.
 
-It can be skipped. **Settings → Web address** shows the same steps any time, and businesses set up
+The web address can be skipped. **Settings → Web address** shows the same steps any time, and businesses set up
 before this see them only there. With Railway connected, Crewtavo adds the address to the crewtavo
 service and shows the two DNS records Railway wants, with steps for the domain's DNS provider. On Cloudflare it can add
 them itself, from a token used once and never stored. Then it checks the records live. Once Railway has verified the
@@ -65,7 +85,7 @@ assistant connectors keep working on both addresses.
 
 Crewtavo keeps its Railway access afterwards, encrypted, so later features don't ask again. A daily
 task refreshes it before Railway's sign-in runs out, and **Remove access** in Settings → Web address
-ends it. Each instance registers its own client with Railway, so there's no shared app to run. If
+or Hosting ends it. Each instance registers its own client with Railway, so there's no shared app to run. If
 Railway won't register it, the screen asks for a project token instead. By hand (under **Can't log
 in with Railway?** in step 1), the steps are:
 1. In the crewtavo service, **Settings → Networking → Custom Domain**.

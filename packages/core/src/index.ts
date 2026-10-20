@@ -8,6 +8,7 @@ export * from "./equipment";
 export * from "./forms";
 export * from "./formulas";
 export * from "./geo";
+export * from "./hosting";
 export * from "./dns";
 export * from "./ical";
 export * from "./imagery";

@@ -58,10 +58,13 @@ export function WebAddressSettings() {
   );
 }
 
+/** Where Railway's sign-in comes back to: the setup step, this screen, or Settings → Hosting. */
+export type RailwayReturn = "setup" | "settings" | "hosting";
+
 interface ScreenProps {
   overview: AddressOverview;
   /** Where Railway's sign-in comes back to. */
-  returnTo: "setup" | "settings";
+  returnTo: RailwayReturn;
   /** The owner asked to pick an address (again). */
   choosing: boolean;
   onChoosing: (choosing: boolean) => void;
@@ -110,9 +113,11 @@ export function useRailwayReturn() {
   const result = params.get("railway");
   useEffect(() => {
     if (!result) return;
-    if (result === "connected") toast.success("Connected to Railway", { description: "Crewtavo can now set things up there for you." });
+    if (result === "connected") toast.success("Connected to Railway", { description: "Crewtavo can now warn you before Railway stops it, and set things up there for you." });
     else toast.error(RETURNS[result] ?? RETURNS.error!);
     queryClient.invalidateQueries({ queryKey: WEB_ADDRESS_KEY });
+    // Settings → Hosting (HostingSettings.tsx) reads Railway through the same connection.
+    queryClient.invalidateQueries({ queryKey: ["hosting"] });
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -232,7 +237,7 @@ export function AddressSteps({ overview, returnTo, choosing, onChoosing, checkin
 }
 
 /** Step 1: Railway's sign-in, with a sketch of the screen it opens. */
-function LoginStep({ railway, returnTo, onByHand }: { railway: Railway; returnTo: "setup" | "settings"; onByHand: () => void }) {
+function LoginStep({ railway, returnTo, onByHand }: { railway: Railway; returnTo: RailwayReturn; onByHand: () => void }) {
   return (
     <div className="stack">
       {railway.error && <Problem title="Railway isn't connected">{railway.error}</Problem>}
@@ -249,7 +254,7 @@ function LoginStep({ railway, returnTo, onByHand }: { railway: Railway; returnTo
       )}
       <span className="row muted small" style={{ gap: 6, flexWrap: "nowrap", alignItems: "flex-start" }}>
         <span style={{ flex: "none", marginTop: 1 }}><Icon name="lock" size={14} /></span>
-        Crewtavo only gets this one project, and you can take the access back any time in Settings.
+        Crewtavo only makes changes in this project, and only reads your Railway billing. You can take the access back any time in Settings.
       </span>
       <details className={styles.details}>
         <summary>Can't log in with Railway?</summary>
@@ -263,13 +268,14 @@ function LoginStep({ railway, returnTo, onByHand }: { railway: Railway; returnTo
 }
 
 /** What Railway's sign-in asks, drawn small, so the real screen looks familiar. */
-function RailwaySketch({ projectName }: { projectName: string | null }) {
+export function RailwaySketch({ projectName }: { projectName: string | null }) {
   return (
     <div className={styles.sketch} aria-hidden="true">
       <div className={styles.sketchTop}><i /><i /><i /><span>On Railway</span></div>
       <div className={styles.sketchBody}>
-        <span className={styles.sketchRow}><b>1</b>Choose<span className={styles.sketchSelect}><span className={styles.barText}>{projectName ?? "your project"}</span><Icon name="chevronDown" size={13} /></span></span>
-        <span className={styles.sketchRow}><b>2</b>Press<span className={styles.sketchAllow}>Allow</span></span>
+        <span className={styles.sketchRow}><b>1</b>Choose<span className={styles.sketchSelect}><span className={styles.barText}>your workspace</span><Icon name="chevronDown" size={13} /></span></span>
+        <span className={styles.sketchRow}><b>2</b>Choose<span className={styles.sketchSelect}><span className={styles.barText}>{projectName ?? "your project"}</span><Icon name="chevronDown" size={13} /></span></span>
+        <span className={styles.sketchRow}><b>3</b>Press<span className={styles.sketchAllow}>Allow</span></span>
       </div>
     </div>
   );
@@ -411,7 +417,7 @@ function BrowserBar({ address, tone = "new" }: { address: string; tone?: "old" |
 }
 
 /** Log in with Railway: Railway's consent screen, then back to Settings or the setup step. */
-export function ConnectRailway({ returnTo, projectName, label = "Log in with Railway" }: { returnTo: "setup" | "settings"; projectName: string | null; label?: string }) {
+export function ConnectRailway({ returnTo, projectName, label = "Log in with Railway" }: { returnTo: RailwayReturn; projectName: string | null; label?: string }) {
   const queryClient = useQueryClient();
   const connect = useMutation({
     meta: { inline: true },
@@ -425,7 +431,7 @@ export function ConnectRailway({ returnTo, projectName, label = "Log in with Rai
       <div className="row wrap">
         <Button variant="primary" icon="arrowRight" loading={connect.isPending || connect.isSuccess} onClick={() => connect.mutate()}>{label}</Button>
       </div>
-      <span className="muted small">On Railway's screen, choose {projectName ? <strong>{projectName}</strong> : "this project"} and press Allow.</span>
+      <span className="muted small">On Railway's screen, choose your workspace and {projectName ? <strong>{projectName}</strong> : "this project"}, then press Allow.</span>
       <FormError error={connect.error} />
     </div>
   );
@@ -780,12 +786,13 @@ function RailwayStep({ overview, domain }: { overview: AddressOverview; domain: 
   );
 }
 
-export function RailwayTokenForm({ tokensUrl, onLogin }: { tokensUrl: string | null; onLogin?: () => void }) {
+/** `intro`: what a token does where the form is shown (the address switch, unless it says otherwise). */
+export function RailwayTokenForm({ tokensUrl, onLogin, intro }: { tokensUrl: string | null; onLogin?: () => void; intro?: ReactNode }) {
   const [token, setToken] = useState("");
   const save = useAddressAction((value: string) => api.post<AddressOverview>("/railway/token", { token: value }), { inline: true, success: "Connected to Railway" });
   return (
     <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (token.trim()) save.mutate(token.trim()); }}>
-      <span className="muted small">With a project token, Crewtavo adds the address in Railway for you, then switches over by itself once it works.</span>
+      <span className="muted small">{intro ?? "With a project token, Crewtavo adds the address in Railway for you, then switches over by itself once it works."}</span>
       <ol className={styles.steps}>
         <li>
           <div className="stack-sm">
@@ -1097,12 +1104,12 @@ function StopButton({ overview, domain }: { overview: AddressOverview; domain: s
 }
 
 /** Crewtavo holds Railway access: say so, and let the owner take it back. */
-function RailwayAccess({ overview }: { overview: AddressOverview }) {
+export function RailwayAccess({ overview }: { overview: AddressOverview }) {
   const forget = useAddressAction(() => api.delete<AddressOverview>("/railway"), { success: "Railway access removed" });
   if (!overview.railway?.connected) return null;
   const busy = overview.change?.status === "waiting" || overview.change?.status === "switching";
   const ask = async () => {
-    const body = busy ? "Crewtavo won't be able to finish this by itself; you'd do the last steps on Railway by hand." : "You can connect again next time you change the address.";
+    const body = `${busy ? "Crewtavo won't be able to finish the new address by itself; you'd do the last steps on Railway by hand. " : ""}Crewtavo also stops warning you before Railway's trial, credit or card runs out, and the owner is asked to connect again when they next open Crewtavo.`;
     if (await confirm({ title: "Remove Crewtavo's Railway access?", body, confirmLabel: "Remove access", danger: true })) forget.mutate();
   };
   return (
@@ -1135,8 +1142,8 @@ function Copyable({ value, what }: { value: string; what: string }) {
   );
 }
 
-const ExternalButton = ({ href, children }: { href: string; children: ReactNode }) => (
-  <a className="btn btn-sm" style={{ justifySelf: "start" }} href={href} target="_blank" rel="noreferrer">
+export const ExternalButton = ({ href, children, primary = false }: { href: string; children: ReactNode; primary?: boolean }) => (
+  <a className={`btn btn-sm${primary ? " btn-primary" : ""}`} style={{ justifySelf: "start" }} href={href} target="_blank" rel="noreferrer">
     <Icon name="external" size={14} />
     {children}
   </a>

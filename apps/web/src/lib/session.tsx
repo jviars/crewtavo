@@ -35,7 +35,7 @@ export interface Company {
 
 interface Me {
   profile: { user_id: string; email: string | null; full_name: string; phone: string | null; color?: string | null; avatar_url?: string | null };
-  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; email_connected?: boolean; ai_connected?: boolean; fal_connected?: boolean; terms_accepted?: boolean }>;
+  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; email_connected?: boolean; ai_connected?: boolean; fal_connected?: boolean; terms_accepted?: boolean; railway_needed?: boolean }>;
 }
 
 export interface Session {
@@ -317,9 +317,10 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   if (membership.terms_accepted === false && (membership.role === "owner" || membership.role === "admin")) {
     return <TermsPage companyName={membership.company.name} onAccepted={() => me.refetch()} onSignOut={signOut} />;
   }
-  // Just set up on Railway: offer to connect it and pick a web address (skippable).
-  if (requireCompany && membership.role === "owner" && config.data.platform === "railway" && membership.company.settings?.railway_setup === "pending") {
-    return <RailwaySetupPage companyName={membership.company.name} onDone={() => me.refetch()} onSignOut={signOut} />;
+  // On Railway the owner connects it first (required: the warnings before Railway stops Crewtavo
+  // need it), then, just after setting up, may pick a web address (skippable).
+  if (requireCompany && membership.role === "owner" && config.data.platform === "railway" && (membership.railway_needed || membership.company.settings?.railway_setup === "pending")) {
+    return <RailwaySetupPage companyName={membership.company.name} needed={Boolean(membership.railway_needed)} onDone={() => me.refetch()} onSignOut={signOut} />;
   }
   if (!value) return <ShellSkeleton />;
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

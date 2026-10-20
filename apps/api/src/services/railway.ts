@@ -1,8 +1,10 @@
 /**
- * Crewtavo's access to its own Railway project. The owner connects it once, usually in setup right
- * after deploying (Login with Railway: still signed in to Railway, they only pick the project and
- * press Allow), or pastes a project token. Crewtavo keeps it, encrypted, until the owner removes
- * it: Settings → Web address uses it now, and later features can too without asking again.
+ * Crewtavo's access to its own Railway project. The owner connects it in setup right after
+ * deploying (Login with Railway: still signed in to Railway, they pick the workspace and project
+ * and press Allow), or pastes a project token. It's required on Railway: until it's there, the
+ * owner is asked at sign-in (railwayNeeded), since the warnings before the trial, credit or card
+ * runs out need it (services/hosting.ts). Crewtavo keeps it, encrypted, until the owner removes it;
+ * Settings → Web address and Settings → Hosting use it.
  *
  * OAuth access tokens last an hour and refresh themselves when used; the refresh token lasts a
  * year from when it was issued and rotates on every refresh, so the daily "railway" task refreshes
@@ -13,7 +15,8 @@ import type { Env } from "../env";
 import { railwayLinks } from "../lib/address";
 import { asJson, HttpError } from "../lib/http";
 import type { Db } from "../lib/supabase";
-import { deleteClient, projectAccess, RailwayError, refreshAccess, registerClient, type RailwayAccess, type RailwayClient } from "../integrations/railway";
+import { deleteClient, projectAccess, railwayIds, RailwayError, refreshAccess, registerClient, SCOPE, type RailwayAccess, type RailwayClient } from "../integrations/railway";
+import { platformOf } from "../lib/address";
 import { loadSecret, saveSecret, type StoredSecret } from "../integrations/tokens";
 
 /** Refresh tokens that haven't rotated in this long get refreshed by the daily task. */
@@ -27,6 +30,7 @@ const clientOf = (secret: StoredSecret | null): RailwayClient | null =>
         client_id: secret.extra.client_id,
         client_secret: secret.extra.client_secret,
         redirect_uri: secret.extra.redirect_uri,
+        scope: secret.extra.scope,
         registration_access_token: secret.extra.registration_access_token,
         registration_client_uri: secret.extra.registration_client_uri,
       }
@@ -39,8 +43,10 @@ export async function railwayState(env: Env, admin: Db, companyId: string): Prom
     loadSecret(env, admin, companyId, "railway").catch(() => null),
   ]);
   const links = railwayLinks(env);
+  const connected = Boolean(row?.status === "connected" && (secret?.access_token || secret?.api_key));
   return {
-    connected: Boolean(row?.status === "connected" && (secret?.access_token || secret?.api_key)),
+    connected,
+    current: connected && askedEnough(row?.settings),
     oauth: Boolean(links) && (row?.settings as { oauth_refused?: boolean } | null)?.oauth_refused !== true,
     settingsUrl: links?.settingsUrl ?? null,
     variablesUrl: links?.variablesUrl ?? null,
@@ -48,6 +54,39 @@ export async function railwayState(env: Env, admin: Db, companyId: string): Prom
     projectName: env.RAILWAY_PROJECT_NAME ?? null,
     error: row && row.status !== "connected" ? row.last_error : null,
   };
+}
+
+/**
+ * A sign-in made before Crewtavo asked for billing access is asked again. A project token can't
+ * have it, so a token counts as enough; so does an owner whose Railway role is lower than admin,
+ * once they've been asked.
+ */
+function askedEnough(settings: unknown): boolean {
+  const s = (settings ?? {}) as { method?: string; scope?: string };
+  return s.method === "token" || s.scope === SCOPE;
+}
+
+/** How long "Ask me tomorrow" puts off connecting Railway, for an owner who can't right now. */
+export const LATER_MS = 24 * 60 * 60_000;
+
+/**
+ * Whether the owner still has to connect Railway (or log in again for billing access): on a
+ * one-business instance on Railway, until they have, or for a day after "Ask me tomorrow". GET /me
+ * says so, and the app asks at sign-in.
+ */
+export function railwayNeeded(env: Env, row: { status: string; settings: unknown } | null, companySettings: unknown, now = Date.now()): boolean {
+  if (env.CREWTAVO_SINGLE_COMPANY !== "1" || platformOf(env) !== "railway" || !railwayIds(env)) return false;
+  const later = Date.parse(String((companySettings as { railway_later?: string } | null)?.railway_later ?? ""));
+  if (later > now) return false;
+  return !(row?.status === "connected" && askedEnough(row.settings));
+}
+
+/** "Ask me tomorrow": the owner can't connect Railway right now (Railway is down, or someone else looks after it). */
+export async function connectRailwayLater(admin: Db, companyId: string): Promise<void> {
+  const { data } = await admin.from("companies").select("settings").eq("id", companyId).maybeSingle();
+  const settings = (data?.settings ?? {}) as Record<string, unknown>;
+  const { error } = await admin.from("companies").update({ settings: asJson({ ...settings, railway_later: new Date(Date.now() + LATER_MS).toISOString() }) }).eq("id", companyId);
+  if (error) throw new HttpError(500, "Couldn't save that. Try again.");
 }
 
 /** Keeps why a Railway sign-in failed, for the screen to show (never taken from the address bar). */
@@ -103,7 +142,7 @@ export async function railwayAccess(env: Env, admin: Db, companyId: string): Pro
 export async function railwayClient(env: Env, admin: Db, companyId: string, redirectUri: string, name: string): Promise<RailwayClient> {
   const secret = await loadSecret(env, admin, companyId, "railway").catch(() => null);
   const known = clientOf(secret);
-  if (known?.redirect_uri === redirectUri) return known;
+  if (known?.redirect_uri === redirectUri && known.scope === SCOPE) return known;
   let client: RailwayClient;
   try {
     client = await registerClient(redirectUri, name);
@@ -119,7 +158,7 @@ export async function railwayClient(env: Env, admin: Db, companyId: string, redi
   await admin.from("integrations").upsert({ company_id: companyId, provider: "railway", status: "disconnected", settings: asJson({}), last_error: null });
   const { client_id, client_secret, redirect_uri, registration_access_token, registration_client_uri } = client;
   await saveSecret(env, admin, companyId, "railway", {
-    extra: { method: "oauth", client_id, client_secret, redirect_uri, ...(registration_access_token ? { registration_access_token } : {}), ...(registration_client_uri ? { registration_client_uri } : {}) },
+    extra: { method: "oauth", client_id, client_secret, redirect_uri, scope: SCOPE, ...(registration_access_token ? { registration_access_token } : {}), ...(registration_client_uri ? { registration_client_uri } : {}) },
   });
   return client;
 }
@@ -139,7 +178,9 @@ export async function saveRailwayAccess(env: Env, admin: Db, companyId: string, 
           extra: { ...secret?.extra, method: "oauth", refreshed_at: String(Date.now()) },
         };
   const { error } = await admin.from("integrations").upsert({
-    company_id: companyId, provider: "railway", status: "connected", account_label: env.RAILWAY_PROJECT_NAME ?? "Railway", connected_by: userId, connected_at: new Date().toISOString(), last_error: null, settings: asJson({}),
+    company_id: companyId, provider: "railway", status: "connected", account_label: env.RAILWAY_PROJECT_NAME ?? "Railway", connected_by: userId, connected_at: new Date().toISOString(), last_error: null,
+    // What it was asked for, so a sign-in from before billing access is asked again (railwayNeeded).
+    settings: asJson(access.method === "token" ? { method: "token" } : { method: "oauth", scope: SCOPE }),
   });
   if (error) throw new HttpError(500, "Couldn't save the Railway sign-in. Try again.");
   // A project token replaces a Login with Railway client; let Railway forget that one.

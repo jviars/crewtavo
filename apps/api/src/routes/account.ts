@@ -14,7 +14,7 @@ import { timeRates } from "../services/payRates";
 import { removePhoto, setPhoto } from "../services/photos";
 import { invitePerson, inviteStatus, sendInvite, welcomeLink, type TeamScope } from "../services/team";
 import { clientIp } from "../lib/visitor";
-import { setRailwaySetup } from "../services/railway";
+import { railwayNeeded, setRailwaySetup } from "../services/railway";
 
 export const account = new Hono<AppEnv>();
 
@@ -76,12 +76,14 @@ account.get("/me", requireUser, async (c) => {
   // Anthropic or fal.ai key (Apps), so email and AI are on for them; integrations is admin-only.
   const companyIds = rows.map((m) => (m.company as { id: string } | null)?.id).filter((id): id is string => Boolean(id));
   // ...and which have agreed to the current license (only owners and admins can read agreements).
-  const [connected, agreements] = companyIds.length
+  // ...and, on Railway, whether the owner still has to connect it (services/railway.ts).
+  const [connected, agreements, railways] = companyIds.length
     ? await Promise.all([
         adminClient(c.env).from("integrations").select("company_id, provider").in("provider", ["email", "anthropic", "fal"]).neq("status", "disconnected").in("company_id", companyIds),
         adminClient(c.env).from("terms_acceptances").select("company_id").eq("version", TERMS_VERSION).in("company_id", companyIds),
-      ]).then(([apps, terms]) => [must(apps), must(terms)] as const)
-    : [[], []];
+        adminClient(c.env).from("integrations").select("company_id, status, settings").eq("provider", "railway").in("company_id", companyIds),
+      ]).then(([apps, terms, railway]) => [must(apps), must(terms), must(railway)] as const)
+    : [[], [], []];
   const withMailbox = new Set(connected.filter((r) => r.provider === "email").map((r) => r.company_id));
   const withClaudeKey = new Set(connected.filter((r) => r.provider === "anthropic").map((r) => r.company_id));
   const withFal = new Set(connected.filter((r) => r.provider === "fal").map((r) => r.company_id));
@@ -100,6 +102,10 @@ account.get("/me", requireUser, async (c) => {
         // Apps → fal.ai: Find paving on the measuring map.
         fal_connected: withFal.has((m.company as { id: string } | null)?.id ?? ""),
         terms_accepted: agreed.has((m.company as { id: string } | null)?.id ?? ""),
+        // Only the owner is asked to connect Railway at sign-in.
+        railway_needed:
+          m.role === "owner" &&
+          railwayNeeded(c.env, railways.find((r) => r.company_id === (m.company as { id: string } | null)?.id) ?? null, (m.company as { settings?: unknown } | null)?.settings ?? null),
       };
     }),
   });

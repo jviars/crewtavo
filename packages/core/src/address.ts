@@ -57,6 +57,8 @@ export interface AddressOverview {
   railway: {
     /** Crewtavo holds Railway access for this project right now. */
     connected: boolean;
+    /** Connected with everything Crewtavo asks for now: false for a sign-in from before it asked for billing access. */
+    current: boolean;
     /** Login with Railway can be offered (false once Railway refused to register this instance). */
     oauth: boolean;
     /** Railway pages for doing it by hand, when the project's IDs are known. */

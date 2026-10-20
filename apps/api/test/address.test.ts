@@ -128,7 +128,7 @@ describe("Railway", () => {
     const calls = serve(() => Response.json({ client_id: "cid", client_secret: "sec", registration_access_token: "rat", registration_client_uri: "https://backboard.railway.com/oauth/register/cid" }, { status: 201 }));
     const client = await registerClient("https://x.up.railway.app/api/railway/callback", "Crewtavo for Green Lawn");
     expect(client).toMatchObject({ client_id: "cid", client_secret: "sec", redirect_uri: "https://x.up.railway.app/api/railway/callback" });
-    expect(calls[0]!.body).toMatchObject({ redirect_uris: ["https://x.up.railway.app/api/railway/callback"], scope: "openid project:member offline_access" });
+    expect(calls[0]!.body).toMatchObject({ redirect_uris: ["https://x.up.railway.app/api/railway/callback"], scope: "openid project:member workspace:admin offline_access" });
 
     serve(() => Response.json({ error: "invalid_client_metadata", error_description: "registration closed" }, { status: 400 }));
     await expect(registerClient("https://x.up.railway.app/cb", "Crewtavo")).rejects.toThrow("Use a project token instead");

@@ -11,6 +11,7 @@ import { reportError } from "./lib/monitoring";
 import { adminClient, type Db } from "./lib/supabase";
 import { runAddressTask } from "./services/address";
 import { rollUpVisits } from "./services/analytics";
+import { checkHosting } from "./services/hosting";
 import { tidyPlanFiles } from "./services/planFiles";
 import { keepRailwayAlive } from "./services/railway";
 import { processAutomations } from "./services/automations";
@@ -19,7 +20,7 @@ import { deliverNotifications } from "./services/delivery";
 import { dailyOutlook } from "./services/external";
 import { autoRoutes } from "./services/routes";
 
-export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "plans", "routes", "website"] as const;
+export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "hosting", "plans", "routes", "website"] as const;
 export type TaskName = (typeof TASKS)[number];
 
 /** Cron expressions -> tasks, run by server.ts's scheduler. */
@@ -34,6 +35,7 @@ export const CRON_TASKS: Record<string, TaskName[]> = {
   "10 * * * *": ["website"],
   "15 6 * * *": ["recurrence"],
   "40 5 * * *": ["railway"],
+  "45 2,14 * * *": ["hosting"],
   "20 4 * * *": ["plans"],
 };
 
@@ -59,6 +61,8 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return runAddressTask(env, adminClient(env));
     case "railway":
       return keepRailwayAlive(env, adminClient(env));
+    case "hosting":
+      return checkHosting(env, adminClient(env));
     case "plans":
       return tidyPlanFiles(adminClient(env));
     case "routes":

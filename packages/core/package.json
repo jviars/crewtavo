@@ -28,6 +28,7 @@
     "./terms": "./src/terms.ts",
     "./address": "./src/address.ts",
     "./dns": "./src/dns.ts",
+    "./hosting": "./src/hosting.ts",
     "./assistants": "./src/assistants.ts",
     "./forms": "./src/forms.ts",
     "./markdown": "./src/markdown.ts",
