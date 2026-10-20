@@ -13,7 +13,7 @@ import { ErrorState, PageError } from "@/components/ui/States";
 import { initials } from "@/components/shell/AppShell";
 import { ApiError, api, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
-import { htmlToText, sanitizeHtml } from "@/lib/html";
+import { hasContent, htmlToText, sanitizeHtml } from "@/lib/html";
 import { useSession } from "@/lib/session";
 import { ROLE_LABELS, useIsEditor } from "./kbData";
 
@@ -110,7 +110,7 @@ export function SopPage() {
       </div>
       <div className="two-col">
         <article className="wide card card-pad prose sop-body" style={{ padding: "24px 28px" }}>
-          {html.replace(/<[^>]+>/g, "").trim() ? <div dangerouslySetInnerHTML={{ __html: html }} /> : <p className="muted">This guide is empty.{editor && <> <Link to={`/kb/${sop.id}/edit`}>Add content</Link></>}</p>}
+          {hasContent(html) ? <div dangerouslySetInnerHTML={{ __html: html }} /> : <p className="muted">This guide is empty.{editor && <> <Link to={`/kb/${sop.id}/edit`}>Add content</Link></>}</p>}
         </article>
         <aside className="narrow stack no-print" style={{ gap: 16 }}>
           {sop.tags.length > 0 && (

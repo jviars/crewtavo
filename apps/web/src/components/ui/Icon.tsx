@@ -6,7 +6,7 @@ import {
   List, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, MessagesSquare, Minus, Monitor, Moon, MousePointer2, Navigation,
   Pause, Pencil, Percent, Phone, Pin, PinOff, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Reply, Search, Send, SeparatorHorizontal,
   Settings, Share, SmilePlus, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Tag, ThumbsUp, Trash, TriangleAlert, Truck, Underline, Undo2, Upload,
-  User, Users, WifiOff, Wrench, X, Zap, type LucideIcon,
+  User, Users, Video, WifiOff, Wrench, X, Zap, type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
@@ -69,6 +69,7 @@ const ICONS = {
   eye: Eye,
   image: Image,
   camera: Camera,
+  video: Video,
   refresh: RefreshCw,
   archive: Archive,
   undo: Undo2,

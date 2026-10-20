@@ -1,9 +1,11 @@
 /**
  * Markdown to a guide's HTML and plain text, for guides an AI assistant writes (it writes Markdown
  * naturally). Only the small set the guide editor makes comes out: headings, paragraphs, lists,
- * quotes, dividers, code, bold, italics and links. Everything else is escaped, so no markup in the
- * text gets through as markup. Pages sanitise again when they show it (apps/web/src/lib/html.ts).
+ * quotes, dividers, code, bold, italics, links and YouTube or Vimeo videos (a link alone on its
+ * line). Everything else is escaped, so no markup in the text gets through as markup. Pages
+ * sanitise again when they show it (apps/web/src/lib/html.ts).
  */
+import { videoEmbed, videoIframe } from "./video";
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -41,6 +43,13 @@ export function markdownToGuide(markdown: string): { html: string; text: string 
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
+    // A YouTube or Vimeo link alone on its line is the video, as when it's pasted in the editor.
+    const video = paragraph.length === 1 && /^https?:\/\/\S+$/i.test(paragraph[0]) ? videoEmbed(paragraph[0]) : null;
+    if (video) {
+      html.push(`<p>${videoIframe(video)}</p>`);
+      paragraph = [];
+      return;
+    }
     const p = inline(paragraph.join(" "));
     html.push(`<p>${p.html}</p>`);
     text.push(p.text);

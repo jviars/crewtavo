@@ -30,7 +30,8 @@
     "./markdown": "./src/markdown.ts",
     "./clientImport": "./src/clientImport.ts",
     "./reports": "./src/reports.ts",
-    "./pay": "./src/pay.ts"
+    "./pay": "./src/pay.ts",
+    "./video": "./src/video.ts"
   },
   "scripts": {
     "test": "vitest run",
