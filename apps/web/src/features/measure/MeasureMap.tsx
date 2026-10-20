@@ -41,6 +41,15 @@ export interface Shape {
   value: number;
 }
 
+/** A picture of the imagery in view (MeasureMapHandle.viewImage). */
+export interface ViewImage {
+  canvas: HTMLCanvasElement;
+  /** Where a pixel of the picture is on the map. */
+  at: (x: number, y: number) => [number, number];
+  /** Where a spot on the map is in the picture. */
+  px: (at: LngLat) => [number, number];
+}
+
 export interface MeasureMapHandle {
   setTool(tool: Tool): void;
   /** Takes back the last point while drawing, or the last change. */
@@ -75,15 +84,19 @@ export interface MeasureMapHandle {
    */
   capture(options?: { imagery?: ImageryId; sheet?: SheetInfo }): Promise<Blob | null>;
   /**
-   * The imagery in view as a square picture with no drawing on it, for finding paving on it
-   * (detect.ts), and where each of its pixels is on the map. Null before the map is ready.
+   * The imagery in view as a picture with no drawing on it, for finding paving on it (detect.ts),
+   * and where each of its pixels is on the map. Square from the middle of the map, `size` px across,
+   * or with `whole` all of the view, `size` px along its longer side. Null before the map is ready.
    * With `imagery`, taken on that source instead (Google's terms don't allow sending it on).
    */
-  viewImage(size: number, options?: { imagery?: ImageryId }): Promise<{ image: Blob; at: (x: number, y: number) => [number, number] } | null>;
+  viewImage(size: number, options?: { imagery?: ImageryId; whole?: boolean }): Promise<ViewImage | null>;
   /** A plan sheet on the map, over the imagery and under the drawing; null takes it off. */
   setPlan(plan: { url: string; corners: Corners; opacity: number } | null): void;
-  /** While set, taps on the map go here instead of drawing (lining a plan up). */
-  pickSpots(onPick: ((at: LngLat) => void) | null): void;
+  /**
+   * While set, taps on the map go here instead of drawing (lining a plan up, tap to outline). Null
+   * with `owner` stops them only if they still go to `owner`.
+   */
+  pickSpots(onPick: ((at: LngLat) => void) | null, owner?: (at: LngLat) => void): void;
   /** Numbered pins for the spots picked so far. */
   setPins(pins: Array<{ at: LngLat; label: string; tone: "plan" | "map" }>): void;
   /** The view's middle and its west and east edges. */
@@ -781,7 +794,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       });
       map.jumpTo(before);
       if (swap) await applyImagery(live.current.imagery);
-      draw.setMode(mode === "static" ? toolRef.current : mode);
+      draw.setMode(pickRef.current ? "static" : mode === "static" ? toolRef.current : mode);
       return blob;
     },
     async viewImage(size, options = {}) {
@@ -806,33 +819,43 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         });
         const canvas = map.getCanvas();
         const side = Math.min(canvas.width, canvas.height);
-        const [sx, sy] = [(canvas.width - side) / 2, (canvas.height - side) / 2];
-        const square = document.createElement("canvas");
-        square.width = square.height = size;
-        square.getContext("2d")?.drawImage(canvas, sx, sy, side, side, 0, 0, size, size);
-        const image = await new Promise<Blob | null>((resolve) => square.toBlob(resolve, "image/jpeg", 0.9));
-        if (!image) return null;
-        // Where the square's corners are, so each pixel's place is known after the map moves on.
+        const [sx, sy, sw, sh] = options.whole ? [0, 0, canvas.width, canvas.height] : [(canvas.width - side) / 2, (canvas.height - side) / 2, side, side];
+        const scale = size / Math.max(sw, sh);
+        const picture = document.createElement("canvas");
+        picture.width = Math.round(sw * scale);
+        picture.height = Math.round(sh * scale);
+        const ctx = picture.getContext("2d");
+        if (!ctx) return null;
+        ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, picture.width, picture.height);
+        // Where the picture's corners are, so each pixel's place is known after the map moves on.
         const ratio = canvas.width / Math.max(1, canvas.clientWidth);
         const corner = (x: number, y: number) => {
           const p = map.unproject([x / ratio, y / ratio]);
           return toMercator([p.lng, p.lat]);
         };
         const [mx0, my0] = corner(sx, sy);
-        const [mx1, my1] = corner(sx + side, sy + side);
-        const at = (x: number, y: number): [number, number] => fromMercator([mx0 + ((mx1 - mx0) * x) / size, my0 + ((my1 - my0) * y) / size]);
-        return { image, at };
+        const [mx1, my1] = corner(sx + sw, sy + sh);
+        const [w, h] = [picture.width, picture.height];
+        const at = (x: number, y: number): [number, number] => fromMercator([mx0 + ((mx1 - mx0) * x) / w, my0 + ((my1 - my0) * y) / h]);
+        const px = (spot: LngLat): [number, number] => {
+          const [mx, my] = toMercator(spot);
+          return [((mx - mx0) / (mx1 - mx0)) * w, ((my - my0) / (my1 - my0)) * h];
+        };
+        return { canvas: picture, at, px };
       } finally {
         for (const id of hidden) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible");
         if (swap) await applyImagery(live.current.imagery);
-        draw.setMode(mode === "static" ? toolRef.current : mode);
+        // Still not drawing while taps are being picked (tap to outline takes pictures between taps).
+        draw.setMode(pickRef.current ? "static" : mode === "static" ? toolRef.current : mode);
       }
     },
     setPlan(plan) {
       planRef.current = plan;
       applyPlan();
     },
-    pickSpots(onPick) {
+    pickSpots(onPick, owner) {
+      // Lining up a plan can take the taps over from tap to outline: then stopping that leaves them.
+      if (!onPick && owner && pickRef.current !== owner) return;
       pickRef.current = onPick;
       const draw = drawRef.current;
       const map = mapRef.current;

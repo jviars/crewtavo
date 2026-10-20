@@ -40,6 +40,7 @@ import { FindPaving } from "./FindPaving";
 import { formatItemTotal, ItemSelect, PavingItemsCard } from "./PavingItems";
 import { MeasurePitch, PitchPicker, pitchLabel, riseOf, STEEP_FROM } from "./RoofPitch";
 import type { SheetInfo } from "./takeoffSheet";
+import { TapBanner, useTapOutline } from "./TapOutline";
 
 const TOOLS: Array<{ tool: Tool; label: string; icon: IconName; key: string; what: string }> = [
   { tool: "polygon", label: "Area", icon: "area", key: "A", what: "Lawns, roofs, lots, driveways" },
@@ -549,6 +550,7 @@ export function MeasurePage() {
 
   // ----- Tools ---------------------------------------------------------------------------------
   const pickTool = (next: Tool) => {
+    tap.stop();
     setTool(next);
     mapRef.current?.setTool(next);
     if (next !== "select") setSelected(null);
@@ -583,6 +585,7 @@ export function MeasurePage() {
     setItems(({ [id]: _, ...rest }) => (item ? { ...rest, [id]: item } : rest));
   /** Draw a paving item: its tool, and new shapes become it. Null goes back to plain shapes. */
   const pickItem = (item: PavingItem | null) => {
+    tap.stop();
     setActiveItem(item);
     if (!item) return;
     const next: Tool = item.geometry === "area" ? "polygon" : item.geometry === "line" ? "linestring" : "point";
@@ -660,6 +663,7 @@ export function MeasurePage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target) || mapState !== "ready") return;
+      if (tap.item && e.key === "Escape") return void tap.stop();
       if (aligning) {
         if (e.key === "Escape") plan.cancelLineUp();
         return;
@@ -721,6 +725,13 @@ export function MeasurePage() {
     const now = Date.now();
     return (await resolveAuto(center.lng, center.lat, 19, { ...keys, esri_key: null }, (source) => probe(source, center.lng, center.lat), (source) => (down.current.get(source) ?? 0) > now)).id;
   };
+  // Tap to outline (TapOutline.tsx): the free way to find paving. Lining up a plan takes the taps.
+  const tap = useTapOutline({ map: mapRef, imagery, pictureImagery: freePicture, onFound: addFound });
+  useEffect(() => {
+    if (aligning) tap.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aligning]);
+
   /** What the takeoff sheet under the saved picture says (takeoffSheet.ts). */
   const sheetInfo = (pictureOn: ImageryId): SheetInfo => {
     const place = ctx?.property ? addressLine(ctx.property) : picked?.label ?? null;
@@ -1012,14 +1023,14 @@ export function MeasurePage() {
                     {shapes.length > 0 && <button type="button" className="measure-round" onClick={() => mapRef.current?.fitShapes()} title={touch ? "Show all shapes" : "Show all shapes (F)"} aria-label="Show all shapes"><Icon name="eye" size={17} /></button>}
                     <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={17} /></button>
                   </div>
-                  {aligning ? <LineUpBanner plan={plan} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
+                  {aligning ? <LineUpBanner plan={plan} /> : tap.item ? <TapBanner tap={tap} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
                   {overlays.includes("slope") && (
                     <div className="measure-legend" aria-label="Slope colors">
                       <strong>Slope</strong>
                       {SLOPE_CLASSES.map((c) => <span key={c.label}><i style={{ background: c.color }} />{c.label}<span className="muted"> · {c.note}</span></span>)}
                     </div>
                   )}
-                  {!aligning && <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>}
+                  {!aligning && !tap.item && <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>}
                   {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
                   {center && center.zoom < 12 && !shapes.length && !banner && !aligning && (
                     <div className="measure-zoom-note">Search an address or zoom in to the property to start measuring.</div>
@@ -1051,13 +1062,18 @@ export function MeasurePage() {
               finder={
                 <FindPaving
                   map={mapRef}
-                  ready={mapState === "ready" && !aligning}
+                  ready={mapState === "ready" && !aligning && !tap.item}
                   connected={Boolean(session.config.features.findPaving)}
                   isAdmin={isAdmin}
                   imagery={imagery}
                   pictureImagery={freePicture}
                   zoom={center?.zoom ?? 0}
+                  activeItem={activeItem?.id ?? null}
                   onFound={addFound}
+                  onTap={(item) => {
+                    setSelected(null);
+                    tap.start(item);
+                  }}
                 />
               }
             />

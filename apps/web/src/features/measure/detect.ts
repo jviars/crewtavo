@@ -45,6 +45,45 @@ export function anyOf(grids: Uint8Array[], cells = GRID): Uint8Array {
 }
 
 /**
+ * Only the piece of a grid that's under a tap (cells joined side to side), so a tap outlines the lot
+ * it's on and not a patch of the same color across the road. A tap just off the mask takes the
+ * nearest piece within `reach` cells; with nothing that close, the grid comes back empty.
+ */
+export function pieceAt(grid: Uint8Array, x: number, y: number, { cells = GRID, reach = 4 } = {}): Uint8Array {
+  const out = new Uint8Array(cells * cells);
+  const [cx, cy] = [Math.floor(x), Math.floor(y)];
+  let start = -1;
+  for (let r = 0; r <= reach && start < 0; r++) {
+    let best = Infinity;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // the ring r cells out
+        const [px, py] = [cx + dx, cy + dy];
+        if (px < 0 || py < 0 || px >= cells || py >= cells || !grid[py * cells + px]) continue;
+        const d = dx * dx + dy * dy;
+        if (d < best) [best, start] = [d, py * cells + px];
+      }
+    }
+  }
+  if (start < 0) return out;
+  const stack = [start];
+  out[start] = 1;
+  while (stack.length) {
+    const i = stack.pop()!;
+    const [ix, iy] = [i % cells, Math.floor(i / cells)];
+    for (const [nx, ny] of [[ix - 1, iy], [ix + 1, iy], [ix, iy - 1], [ix, iy + 1]]) {
+      if (nx < 0 || ny < 0 || nx >= cells || ny >= cells) continue;
+      const n = ny * cells + nx;
+      if (grid[n] && !out[n]) {
+        out[n] = 1;
+        stack.push(n);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * The filled cells as polygons, in cell units: runs along each row, stacked into rectangles where
  * the next row's run is the same, then joined.
  */

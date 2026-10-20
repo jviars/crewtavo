@@ -264,15 +264,15 @@ export const APP_INFO: Record<string, AppInfo> = {
   },
   fal: {
     developer: "fal",
-    tagline: "Find paving on the aerial in one tap",
+    tagline: "Find all the paving in view at once",
     about:
-      "Find paving outlines the asphalt and concrete on the aerial, cuts the islands and buildings out of the lot, and counts the striped stalls, so a takeoff starts drawn and you check it instead of tracing it. It runs Meta's Segment Anything model (SAM 3) on fal.ai, with your own fal.ai account: about half a cent for each thing it looks for, billed by fal. Only the aerial picture of the lot you're measuring goes to fal.ai.",
+      "With fal.ai, Find paving outlines all the asphalt and concrete on the aerial at once, cuts the islands and buildings out of the lot, and counts the striped stalls, so a takeoff starts drawn and you check it instead of tracing it. It runs Meta's Segment Anything model (SAM 3) on fal.ai, with your own fal.ai account: about half a cent for each thing it looks for, billed by fal. Only the aerial picture of the lot you're measuring goes to fal.ai. Without it, Find paving's free Tap to outline still outlines one surface per tap, right in the browser.",
     highlights: [
       { icon: "sparkle", title: "Outlined for you", text: "Asphalt and concrete come back as shapes on the map, each marked as its takeoff item and ready to edit." },
       { icon: "scissors", title: "Islands cut out", text: "Planted islands and buildings in the lot come out of the asphalt, so sealcoat isn't priced on grass." },
       { icon: "pin", title: "Stalls counted", text: "Striped stalls are counted where the imagery is sharp enough to see the lines." },
     ],
-    access: ["Send fal.ai the aerial picture of the lot when someone taps Find paving", "Nothing else: no clients, prices or anything else from Crewtavo", "fal.ai bills your account directly, about half a cent per thing found"],
+    access: ["Send fal.ai the aerial picture of the lot when someone uses Find paving's Find everything in view", "Nothing else: no clients, prices or anything else from Crewtavo", "fal.ai bills your account directly, about half a cent per thing found"],
     connectsWith: "Key from fal.ai",
     website: "https://fal.ai/",
     open: "/measure",
