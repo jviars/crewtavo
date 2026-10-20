@@ -125,7 +125,7 @@ export async function processCampaigns(env: Env, options: { campaignId?: string;
           // One-click unsubscribe (RFC 8058): mail apps POST to the API endpoint directly.
           headers: { "List-Unsubscribe": `<${unsubscribe.replace("/u/", "/api/public/unsubscribe/")}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
         }, campaign.company_id);
-        if (!result.sent && /\(429/.test(result.reason ?? "")) {
+        if (!result.sent && result.status === 429) {
           await release(admin, token, rest(index)); // rate limited: the rest go next run
           break;
         }

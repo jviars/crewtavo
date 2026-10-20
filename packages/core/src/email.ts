@@ -1,23 +1,35 @@
 /**
- * Ways a company can send email from its own account: a mailbox it already pays for (Gmail, Google
- * Workspace, Zoho, Microsoft 365, Yahoo, iCloud) over SMTP with an app password, any other SMTP
- * server, or a Resend account. Shared by the Email settings screen and the API that sends.
+ * Ways a company can send email from its own account: a Resend account (recommended: it works on
+ * every Railway plan, where mail servers are blocked on trial and Hobby), a mailbox it already pays
+ * for (Gmail, Google Workspace, Zoho, Microsoft 365, Yahoo, iCloud) over SMTP with an app password,
+ * or any other SMTP server. Shared by the Email settings screen and the API that sends.
  */
 
 export type MailSecurity = "tls" | "starttls";
+
+/** A setup step with a heading, and a button to the page where it's done. */
+export interface MailStep {
+  title: string;
+  text: string;
+  url?: string;
+  urlLabel?: string;
+}
 
 export interface MailPreset {
   id: "gmail" | "google_workspace" | "zoho" | "microsoft" | "yahoo" | "icloud" | "other" | "resend";
   label: string;
   /** "smtp": host, port, sign-in and app password. "resend": an API key. */
   kind: "smtp" | "resend";
+  /** Shown first, on its own, with this one-line reason. */
+  recommended?: boolean;
+  summary?: string;
   host?: string;
   port?: number;
   security?: MailSecurity;
   /** What to call the password field: most providers want an app password, not the real one. */
   passwordLabel: string;
-  /** Short steps for getting an app password, shown next to the form. */
-  steps: string[];
+  /** Short steps for getting an app password (or API key), shown next to the form. */
+  steps: Array<string | MailStep>;
   /** Where the person creates the app password (or API key). */
   helpUrl?: string;
   helpLabel?: string;
@@ -28,6 +40,39 @@ export interface MailPreset {
 }
 
 export const MAIL_PRESETS: MailPreset[] = [
+  {
+    id: "resend",
+    label: "Resend",
+    kind: "resend",
+    recommended: true,
+    summary: "Made for sending business email, so it reaches inboxes. Free for up to 100 emails a day, and it works on every Railway plan.",
+    passwordLabel: "API key",
+    steps: [
+      {
+        title: "Create a free Resend account",
+        text: "Sign up with your email or Google account. The free plan sends up to 100 emails a day (3,000 a month).",
+        url: "https://resend.com/signup",
+        urlLabel: "Sign up for Resend",
+      },
+      {
+        title: "Add your domain",
+        text: "Open Domains, press Add Domain and type your website's address, like yourcompany.com. Resend lists a few DNS records: add them where you manage your domain (GoDaddy, Namecheap, Squarespace, Cloudflare…), then wait for Resend to show Verified. That's usually within 15 minutes.",
+        url: "https://resend.com/domains",
+        urlLabel: "Open Domains",
+      },
+      {
+        title: "Create an API key",
+        text: "Open API keys and press Create API Key. Name it Crewtavo, choose Sending access, and leave the domain on all domains so it isn't tied to just one. Copy the key right away: Resend only shows it once.",
+        url: "https://resend.com/api-keys",
+        urlLabel: "Open API keys",
+      },
+      {
+        title: "Paste it below",
+        text: "Send from can be any address on the domain you added, like office@yourcompany.com. It doesn't need its own inbox.",
+      },
+    ],
+    dailyLimit: "up to 100 emails a day (3,000 a month) on the free plan, more on paid plans",
+  },
   {
     id: "gmail",
     label: "Gmail",
@@ -132,20 +177,15 @@ export const MAIL_PRESETS: MailPreset[] = [
     passwordLabel: "Password",
     steps: ["Your email provider's help pages list its SMTP (outgoing mail) server, port and whether it uses SSL.", "Most providers want an app password rather than your normal one."],
   },
-  {
-    id: "resend",
-    label: "Resend",
-    kind: "resend",
-    passwordLabel: "API key",
-    steps: [
-      "Create a free Resend account and add your domain under Domains (it shows a few DNS records to add where your domain is hosted).",
-      "Once the domain shows Verified, create an API key with Sending access and paste it here.",
-    ],
-    helpUrl: "https://resend.com/domains",
-    helpLabel: "Open Resend",
-    dailyLimit: "100 a day free, more on paid plans",
-    note: "Best for large email campaigns. It needs DNS changes on your domain, so a mailbox above is quicker to set up.",
-  },
 ];
 
 export const mailPreset = (id: string | null | undefined) => MAIL_PRESETS.find((p) => p.id === id);
+
+/** Free personal mail services. Resend only sends from a domain you own, never from one of these. */
+const PERSONAL_MAIL = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+  "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "gmx.com", "mail.com", "zoho.com", "yandex.com",
+]);
+export const isPersonalMailDomain = (domain: string) => PERSONAL_MAIL.has(domain.trim().toLowerCase());
+/** The part after the @, lowercased ("" when there isn't one). */
+export const emailDomain = (email: string) => (email.includes("@") ? email.slice(email.lastIndexOf("@") + 1).trim().toLowerCase() : "");
