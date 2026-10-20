@@ -74,6 +74,15 @@ function savedOverlays(): OverlayId[] {
     return [];
   }
 }
+// House numbers stay on (or off) between visits too.
+const HOUSE_NUMBERS_KEY = "crewtavo.measureHouseNumbers";
+function savedHouseNumbers(): boolean {
+  try {
+    return localStorage.getItem(HOUSE_NUMBERS_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
 const touchScreen = () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
@@ -141,6 +150,15 @@ export function MeasurePage() {
   // Sources that stopped answering, and until when Auto leaves them alone.
   const down = useRef(new Map<ImageryId, number>());
   const [streetNames, setStreetNames] = useState(true);
+  const [houseNumbers, setHouseNumbers] = useState(savedHouseNumbers);
+  const showHouseNumbers = (on: boolean) => {
+    setHouseNumbers(on);
+    try {
+      localStorage.setItem(HOUSE_NUMBERS_KEY, on ? "on" : "off");
+    } catch {
+      /* remembered for this visit only */
+    }
+  };
   const [streetMap, setStreetMap] = useState(true);
   const [center, setCenter] = useState<{ lng: number; lat: number; zoom: number } | null>(null);
   const [banner, setBanner] = useState<Banner | null>(null);
@@ -827,7 +845,7 @@ export function MeasurePage() {
                 onEdit={() => find.isError && find.reset()}
               />
               {imagery && (
-                <ImageryPicker choice={choice ?? "auto"} opening={opening} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} overlays={overlays} onPick={(next) => chooseImagery(next)} onMakeDefault={makeDefault} onStreetNames={setStreetNames} onOverlay={toggleOverlay} />
+                <ImageryPicker choice={choice ?? "auto"} opening={opening} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} houseNumbers={houseNumbers} overlays={overlays} onPick={(next) => chooseImagery(next)} onMakeDefault={makeDefault} onStreetNames={setStreetNames} onHouseNumbers={showHouseNumbers} onOverlay={toggleOverlay} />
               )}
             </div>
           )}
@@ -849,6 +867,7 @@ export function MeasurePage() {
                   labels={mapNames}
                   values={mapValues}
                   showStreetNames={streetNames}
+                  showHouseNumbers={houseNumbers}
                   overlays={overlays}
                   onReady={onReady}
                   onFailed={(message) => { setMapError(message); setMapState("error"); }}
