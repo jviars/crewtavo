@@ -2,9 +2,11 @@
  * The schedule: a time grid for a day (one lane per crew) or a week, and a month view. Drag a visit
  * to move it (mouse or finger), drag its bottom edge to change its length, click an open spot to
  * book it, and drag visits in and out of the unscheduled list. Every change can be undone.
- * Also: rain-day shifts, a visit for many jobs at once, and route order for anytime stops.
+ * Click a visit to see it all (Edit changes it). Drops snap to the time step in Settings → Schedule.
+ * Also: rain-day shifts, a visit for many jobs at once, and Organize route for each crew's day.
  * Events from other calendars (added on the Apps page) show alongside, and can be hidden.
  */
+import { scheduleSettings } from "@crewtavo/core/routing";
 import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
@@ -21,8 +23,10 @@ import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
+import { RouteDialog } from "./RouteDialog";
 import { clock, lengthOf, minutesOf, TimeGrid, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
+import { VisitDetails } from "./VisitDetails";
 import { VisitDialog, type VisitInput } from "./VisitDialog";
 import { useSchedulingRights } from "./myCrews";
 
@@ -35,6 +39,7 @@ interface Visit {
   starts_at: string | null;
   ends_at: string | null;
   route_order: number | null;
+  time_fixed?: boolean;
   hold_reason: string | null;
   crew_id: string | null;
   notes: string | null;
@@ -102,12 +107,15 @@ export function SchedulePage() {
   const [panel, setPanelState] = useState<boolean | null>(() => (readPref("crewtavo.schedule.panel") === "closed" ? false : null));
   const [showCalendars, setShowCalendarsState] = useState(() => readPref("crewtavo.schedule.calendars") !== "hidden");
   const [viewing, setViewing] = useState<CalendarEvent | null>(null);
+  const [details, setDetails] = useState<Visit | null>(null);
+  const [routing, setRouting] = useState<{ crew: string; name: string } | null>(null);
   const rights = useSchedulingRights();
   const { canDispatch, wholeTeam } = rights;
   const canMove = (v: { crew_id: string | null }) => rights.canChange(v.crew_id);
   const hours = (session.company.settings?.working_hours ?? {}) as { start?: string; end?: string };
   const workStart = toMinutes(hours.start, 7 * 60);
   const workEnd = toMinutes(hours.end, 18 * 60);
+  const { timeStep } = scheduleSettings(session.company.settings);
 
   useEffect(() => {
     if (params.get("new") === "1") {
@@ -157,10 +165,23 @@ export function SchedulePage() {
   const withColor = (v: Visit): Visit => ({ ...v, crewColor: crewOf(v.crew_id)?.color ?? undefined });
   const scheduled = (schedule.data?.visits ?? []).map(withColor);
   const unscheduled = (schedule.data?.unscheduled ?? []).map(withColor);
+  // A route's stop numbers set the order; otherwise timed visits by time, then anytime ones.
   const byDay = (date: string) =>
     scheduled
       .filter((v) => v.scheduled_on === date)
-      .sort((a, b) => (a.starts_at && b.starts_at ? a.starts_at.localeCompare(b.starts_at) : a.starts_at ? -1 : b.starts_at ? 1 : (a.route_order ?? 99) - (b.route_order ?? 99)));
+      .sort((a, b) =>
+        a.route_order != null && b.route_order != null
+          ? a.route_order - b.route_order
+          : a.starts_at && b.starts_at
+            ? a.starts_at.localeCompare(b.starts_at)
+            : a.starts_at
+              ? -1
+              : b.starts_at
+                ? 1
+                : (a.route_order ?? 999) - (b.route_order ?? 999),
+      );
+  /** Opening a visit shows it; its Edit button opens the form. */
+  const show = (v: Visit) => setDetails(v);
   const open = (v: Visit) => setEditing({ ...v, job_id: v.job?.id ?? null, property_id: v.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id), context: v.job ? { label: `Job #${v.job.number}${v.job.client ? ` · ${v.job.client.display_name}` : ""}`, to: `/jobs/${v.job.id}` } : null });
 
   // ---- Other calendars ---------------------------------------------------------------------------
@@ -261,6 +282,7 @@ export function SchedulePage() {
 
   const { drag, start: startDrag, wasDragging } = useVisitDrag<Visit>({
     enabled: canDispatch,
+    step: timeStep,
     timing: (v) => ({ start: v.starts_at ? minutesOf(v.starts_at, tz) : null, duration: lengthOf(v) }),
     onDrop: drop,
   });
@@ -299,10 +321,11 @@ export function SchedulePage() {
     const who = v.job?.client?.display_name ?? v.property?.line1;
     const done = v.status === "completed" ? "✓ " : "";
     const day = v.series_total && v.series_total > 1 ? ` · day ${v.series_day}/${v.series_total}` : "";
-    if (size === "tiny") return <span className="tg-n" style={{ WebkitLineClamp: 1 }}>{v.route_order && !v.starts_at ? `${v.route_order}. ` : ""}{done}{v.title}{day}</span>;
+    const stop = v.route_order && v.status === "scheduled" ? `${v.route_order}. ` : "";
+    if (size === "tiny") return <span className="tg-n" style={{ WebkitLineClamp: 1 }}>{stop}{done}{v.title}{day}</span>;
     return (
       <>
-        {v.starts_at && <span className="tg-t">{timeOf(v.starts_at)}{v.ends_at ? ` – ${timeOf(v.ends_at)}` : ""}</span>}
+        {v.starts_at && <span className="tg-t">{stop}{timeOf(v.starts_at)}{v.ends_at ? ` – ${timeOf(v.ends_at)}` : ""}</span>}
         <span className="tg-n">{done}{v.title}{day}</span>
         {size === "full" && who && <span className="tg-m">{who}</span>}
         {size === "full" && v.hold_reason && <span className="tg-w" title={v.hold_reason}>⚠ {v.hold_reason.split(";")[0]}</span>}
@@ -331,14 +354,16 @@ export function SchedulePage() {
   ];
   const dayColumns: GridColumn[] = lanes.map((col) => {
     const lane = laneVisits(col);
-    const anytime = lane.filter((v) => !v.starts_at && !["completed", "cancelled"].includes(v.status));
+    const stops = lane.filter((v) => v.status === "scheduled");
     return {
       ...col,
       today: anchor === today,
       past: anchor < today,
       headerExtra: (
         <span className="row" style={{ gap: 4 }}>
-          {canDispatch && anytime.length > 1 && rights.canChange(col.crew || null) && <OptimizeButton date={anchor} crewId={col.crew ?? ""} />}
+          {canDispatch && stops.length > 0 && anchor >= today && rights.canChange(col.crew || null) && (
+            <Button size="sm" variant="ghost" icon="navigation" title="Organize this crew's route by distance" onClick={() => setRouting({ crew: col.crew ?? "", name: typeof col.label === "string" ? col.label : "Crew" })}>Route</Button>
+          )}
           <span className="muted small">{lane.length || ""}</span>
         </span>
       ),
@@ -366,7 +391,7 @@ export function SchedulePage() {
     drag,
     startDrag,
     wasDragging,
-    onOpen: open,
+    onOpen: show,
     onCreate: newAt,
     content,
     visitsFor: laneVisits,
@@ -468,7 +493,7 @@ export function SchedulePage() {
                           style={{ ["--crew" as string]: v.crewColor }}
                           title={v.title}
                           onPointerDown={canDispatch && canMove(v) && !["completed", "cancelled"].includes(v.status) ? startDrag(v, "move") : undefined}
-                          onClick={() => !wasDragging() && open(v)}
+                          onClick={() => !wasDragging() && show(v)}
                         >
                           {v.starts_at ? `${timeOf(v.starts_at)} ` : ""}{v.title}
                         </button>
@@ -509,7 +534,7 @@ export function SchedulePage() {
                       data-dragging={drag?.visit.id === v.id || undefined}
                       style={{ "--crew": v.crewColor } as CSSProperties}
                       onPointerDown={canDispatch && canMove(v) ? startDrag(v, "move") : undefined}
-                      onClick={() => !wasDragging() && open(v)}
+                      onClick={() => !wasDragging() && show(v)}
                     >
                       <strong style={{ display: "block" }}>{v.title}</strong>
                       {(v.job?.client || v.property) && <span className="muted small">{v.job?.client?.display_name ?? v.property?.line1}</span>}
@@ -522,7 +547,15 @@ export function SchedulePage() {
         </div>
       )}
 
+      {details && (
+        <VisitDetails
+          visitId={details.id}
+          onClose={() => setDetails(null)}
+          onEdit={canMove(details) ? () => { const v = details; setDetails(null); open(v); } : undefined}
+        />
+      )}
       {editing && <VisitDialog visit={editing} onClose={() => setEditing(null)} />}
+      {routing && <RouteDialog date={anchor} crewId={routing.crew} crewName={routing.name} onClose={() => setRouting(null)} />}
       {viewing && (
         <CalendarEventDialog
           event={viewing}
@@ -560,17 +593,6 @@ function ScheduleSkeleton({ view }: { view: View }) {
       </div>
     </Loading>
   );
-}
-
-function OptimizeButton({ date, crewId }: { date: string; crewId: string }) {
-  const queryClient = useQueryClient();
-  const optimize = useMutation({
-    meta: { success: (r: { miles_before: number; miles_after: number; skipped: number }) => `Route ordered: ${r.miles_before} → ${r.miles_after} miles${r.skipped ? ` (${r.skipped} without a map location)` : ""}` },
-    // The "No crew" lane sends null: only visits with no crew, not every crew's.
-    mutationFn: () => api.post<{ miles_before: number; miles_after: number; skipped: number }>("/schedule/optimize", { date, crew_id: crewId || null }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["schedule"] }),
-  });
-  return <Button size="sm" variant="ghost" icon="navigation" loading={optimize.isPending} onClick={() => optimize.mutate()}>Order anytime stops</Button>;
 }
 
 function ShiftDialog({ defaultDate, crews, allCrews, onClose }: { defaultDate: string; crews: Array<{ id: string; name: string }>; allCrews: boolean; onClose: () => void }) {

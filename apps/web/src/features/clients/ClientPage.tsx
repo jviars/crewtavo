@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
+import { MapsLink } from "@/components/ui/MapsLink";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
@@ -183,13 +184,12 @@ export function ClientPage() {
               <div className="grid-cards">
                 {c.properties.map((p) => {
                   const codes = accessFor(p.id);
-                  const maps = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.lat != null ? `${p.lat},${p.lng}` : addressLine(p).replace(/ · /g, ", "))}`;
                   return (
                     <div key={p.id} className="card card-pad stack-sm">
                       <div className="row-between" style={{ alignItems: "flex-start" }}>
                         <div style={{ minWidth: 0 }}>
                           <strong>{p.label || p.line1}</strong>
-                          <div className="muted text-sm">{addressLine(p)}</div>
+                          <MapsLink className="address-link muted text-sm" place={p}>{addressLine(p)}</MapsLink>
                         </div>
                         {canSell && (
                           <Menu
@@ -214,7 +214,7 @@ export function ClientPage() {
                       {codes?.instructions && <span className="muted small pre-wrap">{codes.instructions}</span>}
                       {p.notes && <span className="muted small pre-wrap">{p.notes}</span>}
                       <div className="row wrap" style={{ marginTop: 4 }}>
-                        <a className="btn btn-sm" href={maps} target="_blank" rel="noreferrer"><Icon name="navigation" size={14} />Directions</a>
+                        <MapsLink className="btn btn-sm" place={p}><Icon name="navigation" size={14} />Directions</MapsLink>
                         {p.lat == null && <span className="muted small" title="Routing and weather checks need a map location">Not on the map yet</span>}
                       </div>
                     </div>

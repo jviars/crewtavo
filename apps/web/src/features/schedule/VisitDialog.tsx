@@ -1,6 +1,7 @@
 /**
- * Create or edit a visit, assessment, task or event: date, time (or anytime), crew, people, status
- * and notes, with "Find a time" for open slots. Used by Schedule, Job, Request and Home.
+ * Create or edit a visit, assessment, task or event: date, start and end time (any minute, like
+ * Google Calendar) or anytime, crew, people, status and notes, with "Find a time" for open slots.
+ * Used by Schedule, Job, Request and Home.
  */
 import { isIsoDate, localDate, localTime, parseZonedTime } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,6 +35,8 @@ export interface VisitInput {
   assignee_ids?: string[];
   /** A new visit with no set time (from the schedule's "anytime" row). */
   anytime?: boolean;
+  /** Keep the start time when the route is organized. */
+  time_fixed?: boolean;
   /** Shown for context, e.g. "Job #12 · Jordan Rivera". */
   context?: { label: string; to: string } | null;
 }
@@ -47,8 +50,12 @@ const STATUSES: Array<[string, string]> = [
   ["unscheduled", "Unscheduled (no date yet)"],
 ];
 const KINDS: Array<[string, string]> = [["job", "Visit for a job"], ["assessment", "Assessment"], ["task", "Task"], ["event", "Event"]];
-const LENGTHS = [15, 30, 45, 60, 90, 120, 180, 240, 300, 360, 480, 600];
-const lengthLabel = (m: number) => (m < 60 ? `${m} min` : `${m / 60} ${m === 60 ? "hour" : "hours"}`);
+export const lengthLabel = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} ${m === 60 ? "hour" : "hours"}`);
+const toMin = (t: string) => {
+  const [h, m] = t.split(":").map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h! * 60 + m! : NaN;
+};
+const fromMin = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
 interface TeamMember {
   user_id: string;
@@ -92,7 +99,9 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const [date, setDate] = useState(startDate);
   const [anytime, setAnytime] = useState(visit.anytime ?? (!visit.starts_at && !isNew ? true : !visit.starts_at && Boolean(visit.job_id)));
   const [time, setTime] = useState(visit.starts_at ? localTime(new Date(visit.starts_at), tz) : "08:00");
+  // The length; the end time shown is the start plus this, so moving the start keeps the length.
   const [duration, setDuration] = useState(minutes);
+  const [timeFixed, setTimeFixed] = useState<boolean | null>(visit.time_fixed ?? (isNew ? false : null));
   const [crewId, setCrewId] = useState(visit.crew_id ?? "");
   const [status, setStatus] = useState(visit.status ?? "scheduled");
   const [notes, setNotes] = useState(visit.notes ?? "");
@@ -107,17 +116,20 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const extra = useQuery({
     queryKey: ["visit-extra", visit.id],
     enabled: !isNew,
-    queryFn: async () => unwrapOne(await supabase().from("visits").select("series_id, series_day, series_total, equipment:visit_equipment(equipment_id)").eq("id", visit.id!).maybeSingle(), "This visit"),
+    queryFn: async () => unwrapOne(await supabase().from("visits").select("series_id, series_day, series_total, time_fixed, equipment:visit_equipment(equipment_id)").eq("id", visit.id!).maybeSingle(), "This visit"),
   });
   useEffect(() => {
     if (extra.data && equipment === null) setEquipment(extra.data.equipment.map((e) => e.equipment_id));
-  }, [extra.data, equipment]);
+    if (extra.data && timeFixed === null) setTimeFixed(extra.data.time_fixed);
+  }, [extra.data, equipment, timeFixed]);
   const series = extra.data?.series_total && extra.data.series_total > 1 ? { day: extra.data.series_day!, total: extra.data.series_total } : null;
   const machines = useEquipmentChoices();
   const picked = equipment ?? [];
   // A cleared date input gives "": no start time (and nothing to save) until it's filled in again.
   const validDate = isIsoDate(date);
   const start = !anytime && status !== "unscheduled" ? parseZonedTime(date, time, tz) : null;
+  const endTime = Number.isFinite(toMin(time)) ? fromMin(Math.min(24 * 60 - 1, Math.max(0, toMin(time) + duration))) : "";
+  const badLength = !anytime && status !== "unscheduled" && (duration < 1 || toMin(time) + duration >= 24 * 60);
   const clashes = useQuery({
     queryKey: ["equipment-clash", picked.join(","), date, start?.toISOString(), duration, visit.id],
     enabled: picked.length > 0 && status !== "unscheduled" && validDate,
@@ -176,6 +188,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
       if (!unscheduled && !validDate) throw new Error("Pick a date for the visit.");
       const start = anytime || unscheduled ? null : parseZonedTime(date, time, tz);
       if (!anytime && !unscheduled && !start) throw new Error("Pick a start time, or choose anytime that day.");
+      if (!anytime && !unscheduled && badLength) throw new Error("The visit has to end after it starts, before midnight.");
       const fields = {
         title: title.trim(),
         scheduled_on: unscheduled ? null : date,
@@ -184,6 +197,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
         crew_id: crewId || null,
         status,
         notes: notes.trim() || null,
+        ...(timeFixed !== null && canDispatch && { time_fixed: Boolean(start) && timeFixed }),
       };
       if (!isNew) {
         const dateChanged = fields.scheduled_on !== startDate;
@@ -242,11 +256,19 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           <>
             <div className="form-grid">
               <Field label="Date" error={validDate ? null : "Pick a date"}><input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setSlots(null); }} required disabled={!canDispatch} /></Field>
-              <Field label="Start time"><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={anytime || !canDispatch} required={!anytime} /></Field>
-              <Field label="Length">
-                <select className="select" value={duration} onChange={(e) => { setDuration(Number(e.target.value)); setSlots(null); }} disabled={anytime || !canDispatch}>
-                  {[...new Set([...LENGTHS, duration])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{lengthLabel(m)}</option>)}
-                </select>
+              <Field label="Starts"><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={anytime || !canDispatch} required={!anytime} /></Field>
+              <Field label="Ends" hint={anytime ? undefined : badLength ? undefined : lengthLabel(duration)} error={badLength ? "End after it starts" : null}>
+                <input
+                  className="input"
+                  type="time"
+                  value={anytime ? "" : endTime}
+                  onChange={(e) => {
+                    const end = toMin(e.target.value);
+                    if (Number.isFinite(end) && Number.isFinite(toMin(time))) setDuration(end - toMin(time));
+                    setSlots(null);
+                  }}
+                  disabled={anytime || !canDispatch}
+                />
               </Field>
             </div>
             <div className="row-between wrap">
@@ -254,8 +276,17 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                 <input type="checkbox" className="switch" checked={anytime} onChange={(e) => setAnytime(e.target.checked)} disabled={!canDispatch} />
                 Anytime that day
               </label>
-              {canDispatch && !anytime && <Button size="sm" variant="ghost" icon="search" loading={findTime.isPending} onClick={() => findTime.mutate()}>Find a time</Button>}
+              {canDispatch && !anytime && <Button size="sm" variant="ghost" icon="search" loading={findTime.isPending} disabled={badLength} onClick={() => findTime.mutate()}>Find a time</Button>}
             </div>
+            {!anytime && canDispatch && (
+              <label className="switch-row" style={{ fontWeight: 500 }}>
+                <input type="checkbox" className="switch" checked={Boolean(timeFixed)} onChange={(e) => setTimeFixed(e.target.checked)} />
+                <span>
+                  Fixed time
+                  <span className="muted small" style={{ display: "block", fontWeight: 400 }}>The customer expects this time. Organizing the route keeps it.</span>
+                </span>
+              </label>
+            )}
             {slots && (
               <div className="stack-sm">
                 <span className="muted small">{slots.length ? `Open slots for ${lengthLabel(duration)}${crewId ? " for this crew" : ""}:` : "No open slots in the next 7 days during working hours."}</span>
@@ -395,7 +426,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           )}
           <span className="spacer" />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!title.trim() || (pickJob && kind === "job" && !job) || (!unscheduled && !validDate)}>{isNew ? (unscheduled ? "Add to unscheduled" : "Schedule") : "Save"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={!title.trim() || (pickJob && kind === "job" && !job) || (!unscheduled && !validDate) || badLength}>{isNew ? (unscheduled ? "Add to unscheduled" : "Schedule") : "Save"}</Button>
         </div>
       </form>
     </Dialog>

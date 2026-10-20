@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { MapsLink } from "@/components/ui/MapsLink";
 import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
@@ -20,7 +21,7 @@ import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
 import { FieldPlans } from "../plans/FieldPlans";
 import { pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
-import { directionsUrl, formatDuration } from "./fieldData";
+import { formatDuration } from "./fieldData";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { SignaturePad } from "./SignaturePad";
 
@@ -128,12 +129,12 @@ export function FieldVisitPage() {
         {v.status === "scheduled" && <Button variant="primary" icon="play" className="big-action" loading={setStatus.isPending} onClick={() => setStatus.mutate("in_progress")}>Start visit</Button>}
         {client?.phone && <a className="btn big-action" href={`tel:${client.phone}`}><Icon name="phone" size={18} />Call</a>}
         {client?.phone && <a className="btn big-action" href={`sms:${client.phone}`}><Icon name="messages" size={18} />Text</a>}
-        {v.property && <a className="btn big-action" href={directionsUrl(v.property)} target="_blank" rel="noreferrer"><Icon name="navigation" size={18} />Directions</a>}
+        {v.property && <MapsLink className="btn big-action" place={v.property}><Icon name="navigation" size={18} />Directions</MapsLink>}
       </div>
 
       <section className="card card-pad stack-sm">
         <strong style={{ fontSize: 16 }}>{client?.display_name ?? "Site"}</strong>
-        {v.property && <span>{addressLine(v.property)}</span>}
+        {v.property && <MapsLink className="address-link" place={v.property}>{addressLine(v.property)}</MapsLink>}
         {access.isPending && v.property ? <Skeleton width="40%" /> : (
           <>
             {codes?.gate_code && <span style={{ fontSize: 18 }}><Icon name="lock" size={16} /> Gate code <strong>{codes.gate_code}</strong></span>}

@@ -56,8 +56,9 @@ export const minutesOf = (iso: string, tz: string) => {
   const [h, m] = localTime(new Date(iso), tz).split(":").map(Number);
   return h * 60 + m;
 };
+/** A visit's length in minutes, any length (a 10-minute stop stays 10 minutes when it's moved). */
 export const lengthOf = (v: { starts_at: string | null; ends_at: string | null }) =>
-  v.starts_at && v.ends_at ? Math.max(15, Math.round((Date.parse(v.ends_at) - Date.parse(v.starts_at)) / 60000)) : 60;
+  v.starts_at && v.ends_at ? Math.max(1, Math.round((Date.parse(v.ends_at) - Date.parse(v.starts_at)) / 60000)) : 60;
 export const clock = (minutes: number) => {
   const h = Math.floor(minutes / 60) % 24;
   const m = minutes % 60;

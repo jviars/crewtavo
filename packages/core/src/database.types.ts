@@ -62,14 +62,14 @@ isOneToOne: false
                   ]
                 },"assistant_connections": {
                   Row: {
-                    "areas": string[],"client_id": string,"level": string,"updated_at": string,"user_id": string
+                    "areas": (string)[],"client_id": string,"level": string,"updated_at": string,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "areas"?: string[],"client_id": string,"level"?: string,"updated_at"?: string,"user_id"?: string
+                    "areas"?: (string)[],"client_id": string,"level"?: string,"updated_at"?: string,"user_id"?: string
                   }
                   Update: {
-                    "areas"?: string[],"client_id"?: string,"level"?: string,"updated_at"?: string,"user_id"?: string
+                    "areas"?: (string)[],"client_id"?: string,"level"?: string,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
                     
@@ -932,14 +932,14 @@ isOneToOne: false
                   ]
                 },"jobs": {
                   Row: {
-                    "active_months": (number)[] | null,"billing_mode": string,"client_id": string,"company_id": string,"created_at": string,"created_by": string | null,"default_crew_id": string | null,"ends_on": string | null,"id": string,"instructions": string | null,"kind": string,"number": number | null,"permit_number": string | null,"po_number": string | null,"property_id": string | null,"quote_id": string | null,"recurrence_rule": string | null,"retainage_pct": number,"starts_on": string | null,"status": string,"title": string,"updated_at": string,"visit_duration_min": number,"visit_start_time": string | null,"warranty_until": string | null,"weather_rules": NonNullable<Json>
+                    "active_months": (number)[] | null,"billing_mode": string,"client_id": string,"company_id": string,"created_at": string,"created_by": string | null,"default_crew_id": string | null,"ends_on": string | null,"id": string,"instructions": string | null,"kind": string,"number": number | null,"permit_number": string | null,"po_number": string | null,"property_id": string | null,"quote_id": string | null,"recurrence_rule": string | null,"retainage_pct": number,"starts_on": string | null,"status": string,"title": string,"updated_at": string,"visit_duration_min": number,"visit_start_time": string | null,"visit_time_fixed": boolean,"warranty_until": string | null,"weather_rules": NonNullable<Json>
                   }
                   ComputedFields: never
                   Insert: {
-                    "active_months"?: (number)[] | null,"billing_mode"?: string,"client_id": string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"default_crew_id"?: string | null,"ends_on"?: string | null,"id"?: string,"instructions"?: string | null,"kind"?: string,"number"?: number | null,"permit_number"?: string | null,"po_number"?: string | null,"property_id"?: string | null,"quote_id"?: string | null,"recurrence_rule"?: string | null,"retainage_pct"?: number,"starts_on"?: string | null,"status"?: string,"title": string,"updated_at"?: string,"visit_duration_min"?: number,"visit_start_time"?: string | null,"warranty_until"?: string | null,"weather_rules"?: NonNullable<Json>
+                    "active_months"?: (number)[] | null,"billing_mode"?: string,"client_id": string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"default_crew_id"?: string | null,"ends_on"?: string | null,"id"?: string,"instructions"?: string | null,"kind"?: string,"number"?: number | null,"permit_number"?: string | null,"po_number"?: string | null,"property_id"?: string | null,"quote_id"?: string | null,"recurrence_rule"?: string | null,"retainage_pct"?: number,"starts_on"?: string | null,"status"?: string,"title": string,"updated_at"?: string,"visit_duration_min"?: number,"visit_start_time"?: string | null,"visit_time_fixed"?: boolean,"warranty_until"?: string | null,"weather_rules"?: NonNullable<Json>
                   }
                   Update: {
-                    "active_months"?: (number)[] | null,"billing_mode"?: string,"client_id"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"default_crew_id"?: string | null,"ends_on"?: string | null,"id"?: string,"instructions"?: string | null,"kind"?: string,"number"?: number | null,"permit_number"?: string | null,"po_number"?: string | null,"property_id"?: string | null,"quote_id"?: string | null,"recurrence_rule"?: string | null,"retainage_pct"?: number,"starts_on"?: string | null,"status"?: string,"title"?: string,"updated_at"?: string,"visit_duration_min"?: number,"visit_start_time"?: string | null,"warranty_until"?: string | null,"weather_rules"?: NonNullable<Json>
+                    "active_months"?: (number)[] | null,"billing_mode"?: string,"client_id"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"default_crew_id"?: string | null,"ends_on"?: string | null,"id"?: string,"instructions"?: string | null,"kind"?: string,"number"?: number | null,"permit_number"?: string | null,"po_number"?: string | null,"property_id"?: string | null,"quote_id"?: string | null,"recurrence_rule"?: string | null,"retainage_pct"?: number,"starts_on"?: string | null,"status"?: string,"title"?: string,"updated_at"?: string,"visit_duration_min"?: number,"visit_start_time"?: string | null,"visit_time_fixed"?: boolean,"warranty_until"?: string | null,"weather_rules"?: NonNullable<Json>
                   }
                   Relationships: [
                     {
@@ -1550,6 +1550,32 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"routes": {
+                  Row: {
+                    "by_hand": boolean,"company_id": string,"crew_id": string | null,"id": string,"miles": number | null,"organized_at": string,"organized_by": string | null,"route_date": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "by_hand"?: boolean,"company_id": string,"crew_id"?: string | null,"id"?: string,"miles"?: number | null,"organized_at"?: string,"organized_by"?: string | null,"route_date": string
+                  }
+                  Update: {
+                    "by_hand"?: boolean,"company_id"?: string,"crew_id"?: string | null,"id"?: string,"miles"?: number | null,"organized_at"?: string,"organized_by"?: string | null,"route_date"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "routes_company_id_crew_id_fkey"
+      columns: ["company_id","crew_id"]
+isOneToOne: false
+      referencedRelation: "crews"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "routes_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"services": {
                   Row: {
                     "active": boolean,"category": string | null,"company_id": string,"created_at": string,"description": string | null,"formula": string | null,"formula_target": string,"id": string,"name": string,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number,"updated_at": string
@@ -1802,14 +1828,14 @@ isOneToOne: false
                   ]
                 },"visits": {
                   Row: {
-                    "company_id": string,"completed_at": string | null,"completed_by": string | null,"created_at": string,"crew_id": string | null,"ends_at": string | null,"hold_reason": string | null,"id": string,"invoice_id": string | null,"job_id": string | null,"kind": string,"notes": string | null,"property_id": string | null,"recurrence_key": string | null,"request_id": string | null,"route_order": number | null,"scheduled_on": string | null,"series_day": number | null,"series_id": string | null,"series_total": number | null,"starts_at": string | null,"status": string,"title": string,"updated_at": string
+                    "company_id": string,"completed_at": string | null,"completed_by": string | null,"created_at": string,"crew_id": string | null,"ends_at": string | null,"hold_reason": string | null,"id": string,"invoice_id": string | null,"job_id": string | null,"kind": string,"notes": string | null,"property_id": string | null,"recurrence_key": string | null,"request_id": string | null,"route_order": number | null,"scheduled_on": string | null,"series_day": number | null,"series_id": string | null,"series_total": number | null,"starts_at": string | null,"status": string,"time_fixed": boolean,"title": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"completed_at"?: string | null,"completed_by"?: string | null,"created_at"?: string,"crew_id"?: string | null,"ends_at"?: string | null,"hold_reason"?: string | null,"id"?: string,"invoice_id"?: string | null,"job_id"?: string | null,"kind"?: string,"notes"?: string | null,"property_id"?: string | null,"recurrence_key"?: string | null,"request_id"?: string | null,"route_order"?: number | null,"scheduled_on"?: string | null,"series_day"?: number | null,"series_id"?: string | null,"series_total"?: number | null,"starts_at"?: string | null,"status"?: string,"title": string,"updated_at"?: string
+                    "company_id": string,"completed_at"?: string | null,"completed_by"?: string | null,"created_at"?: string,"crew_id"?: string | null,"ends_at"?: string | null,"hold_reason"?: string | null,"id"?: string,"invoice_id"?: string | null,"job_id"?: string | null,"kind"?: string,"notes"?: string | null,"property_id"?: string | null,"recurrence_key"?: string | null,"request_id"?: string | null,"route_order"?: number | null,"scheduled_on"?: string | null,"series_day"?: number | null,"series_id"?: string | null,"series_total"?: number | null,"starts_at"?: string | null,"status"?: string,"time_fixed"?: boolean,"title": string,"updated_at"?: string
                   }
                   Update: {
-                    "company_id"?: string,"completed_at"?: string | null,"completed_by"?: string | null,"created_at"?: string,"crew_id"?: string | null,"ends_at"?: string | null,"hold_reason"?: string | null,"id"?: string,"invoice_id"?: string | null,"job_id"?: string | null,"kind"?: string,"notes"?: string | null,"property_id"?: string | null,"recurrence_key"?: string | null,"request_id"?: string | null,"route_order"?: number | null,"scheduled_on"?: string | null,"series_day"?: number | null,"series_id"?: string | null,"series_total"?: number | null,"starts_at"?: string | null,"status"?: string,"title"?: string,"updated_at"?: string
+                    "company_id"?: string,"completed_at"?: string | null,"completed_by"?: string | null,"created_at"?: string,"crew_id"?: string | null,"ends_at"?: string | null,"hold_reason"?: string | null,"id"?: string,"invoice_id"?: string | null,"job_id"?: string | null,"kind"?: string,"notes"?: string | null,"property_id"?: string | null,"recurrence_key"?: string | null,"request_id"?: string | null,"route_order"?: number | null,"scheduled_on"?: string | null,"series_day"?: number | null,"series_id"?: string | null,"series_total"?: number | null,"starts_at"?: string | null,"status"?: string,"time_fixed"?: boolean,"title"?: string,"updated_at"?: string
                   }
                   Relationships: [
                     {

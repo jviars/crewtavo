@@ -17,6 +17,7 @@ import { MapsSettings } from "./MapsSettings";
 import { PriceList } from "./PriceList";
 import { ProfileSettings } from "./ProfileSettings";
 import { RolesSettings } from "./RolesSettings";
+import { ScheduleSettings } from "./ScheduleSettings";
 import { settingsGroups, type SettingsTab } from "./sections";
 import { TeamSettings } from "./TeamSettings";
 import { WebAddressSettings } from "./WebAddressSettings";
@@ -59,6 +60,7 @@ export function SettingsPage() {
         <div className="settings-body">
           {tab === "profile" && <ProfileSettings />}
           {tab === "company" && <CompanySettings />}
+          {tab === "schedule" && <ScheduleSettings />}
           {tab === "address" && <WebAddressSettings />}
           {tab === "team" && <TeamSettings />}
           {tab === "roles" && <RolesSettings />}
