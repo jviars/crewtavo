@@ -20,6 +20,7 @@ import {
   stateImageryAt,
   stateTileUrl,
   type MapKeys,
+  type MapSettings,
   type StateImagery,
 } from "@crewtavo/core/imagery";
 import type { RasterSourceSpecification } from "maplibre-gl";
@@ -129,6 +130,56 @@ export async function resolveAuto(
 export function mapKeys(settings: Record<string, unknown>, deploymentGoogleKey: string | null): MapKeys {
   const maps = (settings.maps ?? {}) as MapKeys;
   return { esri_key: maps.esri_key?.trim() || null, google_key: maps.google_key?.trim() || deploymentGoogleKey || null };
+}
+
+export const isImageryId = (value: unknown): value is ImageryId =>
+  typeof value === "string" && (["naip", "usgs-naip", "usgs", "terrain", "esri", "google", "street"].includes(value) || (value.startsWith("state:") && Boolean(stateImagery(value.slice(6)))));
+
+/** Esri and Google need their key; everything else is free. */
+export const imageryUsable = (id: ImageryId, keys: MapKeys) => (id === "esri" ? Boolean(keys.esri_key) : id === "google" ? Boolean(keys.google_key) : true);
+
+// ---------------------------------------------------------------------------------------------
+// What Measure opens on: this person's pick (saved on this device), else the team's (Settings >
+// Maps), else Auto. A default whose key was removed is passed over. State imagery isn't offered:
+// Auto already uses it wherever there is some.
+// ---------------------------------------------------------------------------------------------
+
+export const DEFAULT_CHOICES: ImageryChoice[] = ["auto", "naip", "usgs", "terrain", "street", "esri", "google"];
+const MY_DEFAULT_KEY = "crewtavo.measureImagery";
+
+export const choiceName = (choice: ImageryChoice) => (choice === "auto" ? AUTO_NAME : imageryInfo(choice).name);
+
+function asDefault(value: unknown, keys: MapKeys): ImageryChoice | null {
+  if (value === "auto") return "auto";
+  return isImageryId(value) && DEFAULT_CHOICES.includes(value) && imageryUsable(value, keys) ? value : null;
+}
+
+/** The team's default from Settings > Maps, when it's still usable. */
+export function teamDefault(settings: Record<string, unknown>, keys: MapKeys): ImageryChoice | null {
+  return asDefault(((settings.maps ?? {}) as MapSettings).default_imagery, keys);
+}
+
+/** This person's own default on this device, when it's still usable. */
+export function myDefault(keys: MapKeys): ImageryChoice | null {
+  try {
+    return asDefault(localStorage.getItem(MY_DEFAULT_KEY), keys);
+  } catch {
+    return null;
+  }
+}
+
+/** Remember (or with null, go back to the team's) what Measure opens on, on this device. */
+export function setMyDefault(choice: ImageryChoice | null) {
+  try {
+    if (choice) localStorage.setItem(MY_DEFAULT_KEY, choice);
+    else localStorage.removeItem(MY_DEFAULT_KEY);
+  } catch {
+    // private mode: the team's default each time
+  }
+}
+
+export function openingImagery(settings: Record<string, unknown>, keys: MapKeys): ImageryChoice {
+  return myDefault(keys) ?? teamDefault(settings, keys) ?? "auto";
 }
 
 // ---------------------------------------------------------------------------------------------

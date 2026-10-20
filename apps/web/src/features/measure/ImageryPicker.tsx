@@ -2,18 +2,25 @@
  * The Imagery button on the measuring map, like a model picker: Auto at the top (the sharpest free
  * imagery for wherever the map is), then sources to choose yourself, then what lies on top (slope,
  * contours, street names). A state's sharper imagery is listed when the map is over that state;
- * Esri and Google say how to turn them on when there's no key.
+ * Esri and Google say how to turn them on when there's no key. What Measure opens on is marked
+ * Default, and whatever's picked can become this person's default.
  */
 import { STATE_IMAGERY, stateImageryAt, type MapKeys } from "@crewtavo/core/imagery";
-import { useId, useRef, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
-import { AUTO_NAME, imageryInfo, OVERLAYS, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
+import { useSession } from "@/lib/session";
+import {
+  AUTO_NAME, choiceName, DEFAULT_CHOICES, imageryInfo, imageryUsable, mapKeys, myDefault, OVERLAYS, setMyDefault, stateId, teamDefault,
+  type ImageryChoice, type ImageryId, type OverlayId,
+} from "./imagery";
 
 export function ImageryPicker({
-  choice, showing, center, keys, isAdmin, streetMap, streetNames, overlays, onPick, onStreetNames, onOverlay,
+  choice, opening, showing, center, keys, isAdmin, streetMap, streetNames, overlays, onPick, onMakeDefault, onStreetNames, onOverlay,
 }: {
   choice: ImageryChoice;
+  /** What Measure opens on for this person (their default, the team's, or Auto). */
+  opening: ImageryChoice;
   /** What's on the map now (what Auto picked, when it's Auto). */
   showing: ImageryId | null;
   center: { lng: number; lat: number } | null;
@@ -24,6 +31,7 @@ export function ImageryPicker({
   streetNames: boolean;
   overlays: OverlayId[];
   onPick: (next: ImageryChoice) => void;
+  onMakeDefault: (choice: ImageryChoice) => void;
   onStreetNames: (show: boolean) => void;
   onOverlay: (id: OverlayId, on: boolean) => void;
 }) {
@@ -32,9 +40,12 @@ export function ImageryPicker({
   const button = useRef<HTMLButtonElement>(null);
   const here = center ? stateImageryAt(center.lng, center.lat) : [];
   const now = showing ? imageryInfo(showing) : null;
-  const pick = (next: ImageryChoice) => {
+  const close = () => {
     pop.current?.hidePopover();
     button.current?.focus();
+  };
+  const pick = (next: ImageryChoice) => {
+    close();
     onPick(next);
   };
   const place = () => {
@@ -53,7 +64,7 @@ export function ImageryPicker({
         <button type="button" role="menuitemradio" aria-checked={selected} className="imagery-option" disabled={Boolean(note)} onClick={() => pick(value)}>
           <span className="imagery-check" aria-hidden="true">{selected && <Icon name="check" size={15} />}</span>
           <span className="grow">
-            <strong>{name}</strong>
+            <strong>{name}{value === opening && <span className="chip imagery-chip">Default</span>}</strong>
             <span className="muted small">{detail}</span>
           </span>
         </button>
@@ -114,6 +125,18 @@ export function ImageryPicker({
         <div className="menu-label">Worldwide, with a key</div>
         {source("esri", keys.esri_key ? undefined : needsKey("Esri"))}
         {source("google", keys.google_key ? undefined : needsKey("Google"))}
+        {DEFAULT_CHOICES.includes(choice) && choice !== opening && (
+          <>
+            <div className="menu-sep" role="separator" />
+            <button type="button" role="menuitem" className="imagery-option" onClick={() => { close(); onMakeDefault(choice); }}>
+              <span className="imagery-check" aria-hidden="true"><Icon name="star" size={15} /></span>
+              <span className="grow">
+                <strong>Open Measure on {choiceName(choice)} every time</strong>
+                <span className="muted small">Just for you, on this device. Change it in Settings › Profile.</span>
+              </span>
+            </button>
+          </>
+        )}
         <div className="menu-sep" role="separator" />
         <div className="menu-label">On top</div>
         {(Object.keys(OVERLAYS) as OverlayId[]).map((o) => (
@@ -128,5 +151,34 @@ export function ImageryPicker({
         </label>
       </div>
     </>
+  );
+}
+
+/** Settings → Profile: what Measure opens on for this person, on this device. */
+export function MeasureMapSetting() {
+  const session = useSession();
+  const settings = session.company.settings ?? {};
+  const keys = mapKeys(settings, session.config.mapsBrowserKey);
+  const team = teamDefault(settings, keys) ?? "auto";
+  const [mine, setMine] = useState<ImageryChoice | "">(() => myDefault(keys) ?? "");
+  return (
+    <div className="card card-pad stack-sm">
+      <strong id="measure-map-title">Measure map</strong>
+      <select
+        className="select"
+        aria-labelledby="measure-map-title"
+        style={{ maxWidth: 280 }}
+        value={mine}
+        onChange={(e) => {
+          const next = e.target.value as ImageryChoice | "";
+          setMine(next);
+          setMyDefault(next || null);
+        }}
+      >
+        <option value="">Team default ({choiceName(team)})</option>
+        {DEFAULT_CHOICES.filter((c) => c === "auto" || imageryUsable(c, keys)).map((c) => <option key={c} value={c}>{choiceName(c)}</option>)}
+      </select>
+      <span className="muted small">The imagery Measure opens on. You can still switch any time from the Imagery button. Saved on this device.</span>
+    </div>
   );
 }

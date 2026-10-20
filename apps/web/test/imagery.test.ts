@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { autoOrder, imageryCredit, overlaySource, resolveAuto, SLOPE_CLASSES, type ImageryId } from "../src/features/measure/imagery";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { autoOrder, imageryCredit, openingImagery, overlaySource, resolveAuto, setMyDefault, SLOPE_CLASSES, type ImageryId } from "../src/features/measure/imagery";
 
 const ROCKY_MOUNT = [-79.8717, 37.0547] as const;
 const LONDON = [-0.13, 51.5] as const;
@@ -57,5 +57,40 @@ describe("slope and contours", () => {
     const url = overlaySource("contours").tiles![0];
     expect(url).toContain("bbox={bbox-epsg-3857}");
     expect(url).not.toMatch(/renderingRule=\{/);
+  });
+});
+
+describe("what Measure opens on", () => {
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const google = { google_key: "AIzaKey" };
+  const team = (default_imagery: string) => ({ maps: { default_imagery } });
+
+  it("opens on Auto unless the team or the person picked something", () => {
+    expect(openingImagery({}, {})).toBe("auto");
+    expect(openingImagery(team("terrain"), {})).toBe("terrain");
+  });
+
+  it("passes over a default whose key is gone, and anything that isn't a default", () => {
+    expect(openingImagery(team("google"), google)).toBe("google");
+    expect(openingImagery(team("google"), {})).toBe("auto");
+    expect(openingImagery(team("state:VA"), {})).toBe("auto");
+    expect(openingImagery(team("bogus"), {})).toBe("auto");
+  });
+
+  it("lets each person pick their own, Auto included, and go back to the team's", () => {
+    setMyDefault("street");
+    expect(openingImagery(team("google"), google)).toBe("street");
+    setMyDefault("auto");
+    expect(openingImagery(team("google"), google)).toBe("auto");
+    setMyDefault(null);
+    expect(openingImagery(team("google"), google)).toBe("google");
+    // Their pick needs its key too.
+    setMyDefault("esri");
+    expect(openingImagery(team("terrain"), google)).toBe("terrain");
   });
 });

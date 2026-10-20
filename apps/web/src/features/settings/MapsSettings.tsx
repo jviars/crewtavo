@@ -2,9 +2,10 @@
  * Settings → Maps: the imagery the measuring map draws on. Free US imagery needs nothing. A key
  * from Esri (free account) or Google adds sharp imagery worldwide; it's checked before it's saved,
  * and kept in the company's settings (settings.maps), since it's a browser key the whole team's map
- * uses anyway.
+ * uses anyway. What Measure opens on for the team is kept there too (each person can pick their
+ * own in Settings → Profile).
  */
-import { STATE_IMAGERY, type MapKeys } from "@crewtavo/core/imagery";
+import { STATE_IMAGERY, type MapKeys, type MapSettings } from "@crewtavo/core/imagery";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
@@ -16,7 +17,7 @@ import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useSession } from "@/lib/session";
-import { checkEsriKey, checkGoogleKey } from "../measure/imagery";
+import { AUTO_NAME, checkEsriKey, checkGoogleKey, choiceName, DEFAULT_CHOICES, imageryUsable, mapKeys, teamDefault, type ImageryChoice } from "../measure/imagery";
 
 type Provider = "esri" | "google";
 const FIELD: Record<Provider, keyof MapKeys> = { esri: "esri_key", google: "google_key" };
@@ -30,6 +31,16 @@ export function MapsSettings() {
     queryFn: async () => unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings as Record<string, unknown> | null,
   });
 
+  const writeMaps = async (patch: MapSettings) => {
+    // Read the settings fresh, so a change someone made meanwhile isn't undone.
+    const current = (unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings ?? {}) as Record<string, unknown>;
+    const maps = { ...((current.maps ?? {}) as MapSettings), ...patch };
+    unwrap(await supabase().from("companies").update({ settings: { ...current, maps } as never }).eq("id", company.id));
+  };
+  const saved = () => {
+    queryClient.invalidateQueries({ queryKey: ["company", company.id] });
+    session.refresh();
+  };
   const save = useMutation({
     meta: { inline: true },
     mutationFn: async ({ provider, key }: { provider: Provider; key: string | null }) => {
@@ -37,16 +48,20 @@ export function MapsSettings() {
         const problem = provider === "esri" ? await checkEsriKey(key) : await checkGoogleKey(key);
         if (problem) throw new Error(problem);
       }
-      // Read the settings fresh, so a change someone made meanwhile isn't undone.
-      const current = (unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings ?? {}) as Record<string, unknown>;
-      const maps = { ...((current.maps ?? {}) as MapKeys), [FIELD[provider]]: key };
-      unwrap(await supabase().from("companies").update({ settings: { ...current, maps } as never }).eq("id", company.id));
+      await writeMaps({ [FIELD[provider]]: key });
       return { provider, key };
     },
     onSuccess: ({ provider, key }) => {
-      queryClient.invalidateQueries({ queryKey: ["company", company.id] });
-      session.refresh();
-      toast.success(key ? `${provider === "esri" ? "Esri" : "Google"} imagery is ready. Pick it from the Imagery button on Measure.` : "Key removed");
+      saved();
+      toast.success(key ? `${provider === "esri" ? "Esri" : "Google"} imagery is ready. Pick it from the Imagery button on Measure, or make it the team's default above.` : "Key removed");
+    },
+  });
+  const saveDefault = useMutation({
+    meta: { inline: true },
+    mutationFn: (choice: ImageryChoice) => writeMaps({ default_imagery: choice }),
+    onSuccess: (_, choice) => {
+      saved();
+      toast.success(`Measure opens on ${choiceName(choice)} for the team`);
     },
   });
 
@@ -54,6 +69,8 @@ export function MapsSettings() {
   if (settings.error) return <div className="card"><ErrorState error={settings.error} onRetry={() => settings.refetch()} /></div>;
   const keys = ((settings.data ?? {}).maps ?? {}) as MapKeys;
   const deploymentGoogle = Boolean(session.config.mapsBrowserKey);
+  const usableKeys = mapKeys(settings.data ?? {}, session.config.mapsBrowserKey);
+  const opening = saveDefault.isPending ? saveDefault.variables : teamDefault(settings.data ?? {}, usableKeys) ?? "auto";
 
   return (
     <div className="stack" style={{ maxWidth: 860 }}>
@@ -63,7 +80,7 @@ export function MapsSettings() {
           <strong>Free imagery, nothing to set up</strong>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Measure opens on <strong>Auto</strong>, which picks the sharpest free imagery for wherever the map is: the state's own imagery where it publishes some
+          <strong>{AUTO_NAME}</strong> picks the sharpest free imagery for wherever the map is: the state's own imagery where it publishes some
           ({STATE_IMAGERY.filter((s) => s.state !== "DC").length} states and Washington, DC today, 3 in to 1 ft per pixel: {STATE_IMAGERY.map((s) => s.name).join(", ")}),
           else US aerial imagery (NAIP, every lower-48 state, about 2 ft), else USGS. None of it needs an account.
         </p>
@@ -71,6 +88,31 @@ export function MapsSettings() {
           Terrain, slope and 2 ft contour lines come free from USGS lidar across most of the US. Anywhere in the world you can also draw on the street map, which
           shows streets and building outlines.
         </p>
+      </div>
+
+      <div className="card card-pad stack-sm">
+        <div className="row" style={{ gap: 10 }}>
+          <span className="maps-settings-icon" aria-hidden="true"><Icon name="layers" size={18} /></span>
+          <strong id="team-map-title">What Measure opens on</strong>
+        </div>
+        <select
+          className="select"
+          aria-labelledby="team-map-title"
+          aria-describedby="team-map-help"
+          style={{ maxWidth: 320 }}
+          value={opening}
+          disabled={saveDefault.isPending}
+          onChange={(e) => saveDefault.mutate(e.target.value as ImageryChoice)}
+        >
+          {DEFAULT_CHOICES.map((c) => {
+            const ready = c === "auto" || imageryUsable(c, usableKeys);
+            return <option key={c} value={c} disabled={!ready}>{choiceName(c)}{c === "auto" ? " (recommended)" : ready ? "" : " (add a key below)"}</option>;
+          })}
+        </select>
+        <span id="team-map-help" className="muted small">
+          For everyone on the team. Anyone can still switch from the Imagery button on Measure, and each person can pick their own in Settings › Profile.
+        </span>
+        <FormError error={saveDefault.error} />
       </div>
 
       <KeyCard
@@ -94,7 +136,7 @@ export function MapsSettings() {
       <KeyCard
         provider="google"
         title="Google satellite"
-        badge="Optional"
+        badge="Needs Google Cloud"
         current={keys.google_key ?? null}
         inherited={!keys.google_key && deploymentGoogle}
         saving={save.isPending && save.variables?.provider === "google"}
