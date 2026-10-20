@@ -10,6 +10,7 @@ import { randomId, signToken, verifyToken } from "../lib/crypto";
 import { appUrl, dbError, HttpError, isoDate, must, readJson } from "../lib/http";
 import { adminClient } from "../lib/supabase";
 import { companyAnthropicKey, complete } from "../services/ai";
+import { analyticsSettings } from "../services/analytics";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, zohoAccountsServer, type Provider } from "../integrations/registry";
@@ -36,6 +37,8 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   // Built-in apps are on or off in the company's settings (team chat: routes/chat.ts).
   const builtinOn: Record<string, boolean> = { team_chat: (company.data?.settings as { team_chat?: { enabled?: boolean } } | null)?.team_chat?.enabled === true };
   const byProvider = new Map(integrations.map(({ settings, ...r }) => [r.provider, r]));
+  // Website analytics, while it counts visits (routes/analytics.ts).
+  builtinOn.website_analytics = analyticsSettings(company.data?.settings).enabled === true;
   const calendarRows = must(calendars);
   const ownKey = Boolean(stripeKey.count);
   const stripeSettings = (integrations.find((r) => r.provider === "stripe")?.settings ?? {}) as { webhook?: boolean; livemode?: boolean; import?: ImportState };

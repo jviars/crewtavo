@@ -40,6 +40,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "^/(api|mcp|\\.well-known)(/|$)": { target: API, changeOrigin: true },
+      // Website analytics: the script for the business's website and its page views.
+      "^/v(\\.js)?$": { target: API, changeOrigin: true },
     },
   },
 });

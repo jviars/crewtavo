@@ -18,7 +18,7 @@ import { downloadCsv, toCsv } from "@/lib/csv";
 import { formatDate, formatMoney, formatMoneyCents, formatMoneyCompact, formatNumber, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { localDate } from "@crewtavo/core/time";
-import { Breakdown, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Part } from "./Charts";
+import { Breakdown, Change, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Part } from "./Charts";
 import { agingBuckets, jobProfit, previousRange } from "@crewtavo/core/reports";
 import { bucketize, bucketizeShifted, bucketsFor, resolveRange, shortDate, type Range } from "./range";
 import { both, fetchAll, pct, plural, RangeHeader, rangeQuery, SectionHead, sum, TabBody, timeRates, useRangeParams, type Rates } from "./shared";
@@ -39,22 +39,6 @@ const running = (values: number[]) => {
 };
 /** "Oct 16, 4:52 PM" in the company's zone. */
 const paidAt = (iso: string, timeZone: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
-
-/** The change from the period before as a small signed percent (more is better for every figure it's used on). */
-function Change({ now, before }: { now: number; before: number }) {
-  if (!before && !now) return null;
-  if (!before) return <span className="change" data-tone="up" title="Nothing in the previous period">New</span>;
-  const change = Math.round(((now - before) / before) * 100);
-  // Ten times or more reads better as a multiple: "24×", not "+2,300%".
-  const text = change >= 900 ? `${formatNumber(Math.round(now / before))}×` : `${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change)}%`;
-  return (
-    <span className="change" data-tone={change > 0 ? "up" : change < 0 ? "down" : undefined} title="Compared with the previous period">
-      <span className="sr-only">{change < 0 ? "Down" : "Up"} </span>
-      {text}
-      <span className="sr-only"> from the previous period</span>
-    </span>
-  );
-}
 
 export function FinancePage() {
   const session = useSession();

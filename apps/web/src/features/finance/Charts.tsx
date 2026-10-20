@@ -1,6 +1,7 @@
 /**
- * Finance and Metrics visuals: a trend line over the period (Recharts), a split bar with its legend, a strip of
- * figures, a ranked bar list, cards to hold them and a sortable table with CSV export.
+ * Finance and Metrics visuals: a trend line over the period (Recharts), the change from the period before, a
+ * split bar with its legend, a strip of figures, a ranked bar list, cards to hold them and a sortable table with
+ * CSV export. Marketing's Website section uses them too.
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { CHART_MOTION, ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/Chart";
 import { Icon } from "@/components/ui/Icon";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { formatNumber } from "@/lib/format";
 import type { Bucket } from "./range";
 
 const edgeDate = (d: string, year: boolean) =>
@@ -63,6 +65,22 @@ export function TrendChart({ buckets, values, previous, format, label, color = "
         </div>
       )}
     </div>
+  );
+}
+
+/** The change from the period before as a small signed percent (more is better for every figure it's used on). */
+export function Change({ now, before }: { now: number; before: number }) {
+  if (!before && !now) return null;
+  if (!before) return <span className="change" data-tone="up" title="Nothing in the previous period">New</span>;
+  const change = Math.round(((now - before) / before) * 100);
+  // Ten times or more reads better as a multiple: "24×", not "+2,300%".
+  const text = change >= 900 ? `${formatNumber(Math.round(now / before))}×` : `${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change)}%`;
+  return (
+    <span className="change" data-tone={change > 0 ? "up" : change < 0 ? "down" : undefined} title="Compared with the previous period">
+      <span className="sr-only">{change < 0 ? "Down" : "Up"} </span>
+      {text}
+      <span className="sr-only"> from the previous period</span>
+    </span>
   );
 }
 

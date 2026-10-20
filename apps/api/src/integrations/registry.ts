@@ -4,7 +4,8 @@
  *   api_key   - the company pastes a key (or the deployment provides one in env)
  *   link      - calendars added by their ICS link (calendar_sources; see integrations/calendars.ts)
  *   connector - the app connects to us (Claude and ChatGPT via MCP at /mcp)
- *   builtin   - part of Crewtavo, turned on or off for the company (team chat: companies.settings.team_chat)
+ *   builtin   - part of Crewtavo, turned on or off for the company (team chat: companies.settings.team_chat;
+ *               website analytics: companies.settings.website_analytics, routes/analytics.ts)
  */
 import type { Env } from "../env";
 
@@ -12,7 +13,7 @@ import type { Env } from "../env";
 export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic" | "railway";
 /** Apps whose calendars are added by link. They're also the calendar_sources.app values (with google_calendar). */
 export type LinkApp = "zoho_calendar" | "outlook_calendar" | "apple_calendar" | "ics_calendar";
-export type AppId = Provider | LinkApp | "chatgpt" | "team_chat";
+export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "website_analytics";
 export type CalendarApp = LinkApp | "google_calendar";
 export const CALENDAR_APPS: readonly CalendarApp[] = ["google_calendar", "zoho_calendar", "outlook_calendar", "apple_calendar", "ics_calendar"];
 
@@ -40,6 +41,15 @@ export const CATALOG: CatalogEntry[] = [
     description: "Channels for the whole team, each crew and the office, with photos, @mentions and who's online.",
     auth: "builtin",
     docs: "https://crewtavo.com/docs/connections/team-chat/",
+    available: () => true,
+  },
+  {
+    id: "website_analytics",
+    name: "Crewtavo - Website Analytics",
+    category: "Team",
+    description: "See who visits your website, where they came from and which pages bring in booking requests, without cookies.",
+    auth: "builtin",
+    docs: "https://crewtavo.com/docs/connections/website-analytics/",
     available: () => true,
   },
   {

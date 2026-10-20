@@ -1522,14 +1522,14 @@ isOneToOne: false
                   ]
                 },"requests": {
                   Row: {
-                    "answers": NonNullable<Json>,"assigned_to": string | null,"client_id": string,"company_id": string,"created_at": string,"created_by": string | null,"details": string | null,"id": string,"intake_form_id": string | null,"number": number | null,"preferred_times": NonNullable<Json>,"promo_code": string | null,"property_id": string | null,"source": string,"status": string,"title": string,"updated_at": string
+                    "answers": NonNullable<Json>,"assigned_to": string | null,"client_id": string,"company_id": string,"created_at": string,"created_by": string | null,"details": string | null,"id": string,"intake_form_id": string | null,"number": number | null,"preferred_times": NonNullable<Json>,"promo_code": string | null,"property_id": string | null,"source": string,"status": string,"title": string,"updated_at": string,"web_visit": Json | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id": string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title": string,"updated_at"?: string
+                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id": string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title": string,"updated_at"?: string,"web_visit"?: Json | null
                   }
                   Update: {
-                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title"?: string,"updated_at"?: string
+                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title"?: string,"updated_at"?: string,"web_visit"?: Json | null
                   }
                   Relationships: [
                     {
@@ -1936,6 +1936,46 @@ isOneToOne: true
       referencedColumns: ["id"]
     }
                   ]
+                },"web_daily": {
+                  Row: {
+                    "company_id": string,"day": string,"key": string,"kind": string,"pageviews": number,"sub": string,"visitors": number,"visits": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"day": string,"key": string,"kind": string,"pageviews"?: number,"sub"?: string,"visitors"?: number,"visits"?: number
+                  }
+                  Update: {
+                    "company_id"?: string,"day"?: string,"key"?: string,"kind"?: string,"pageviews"?: number,"sub"?: string,"visitors"?: number,"visits"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "web_daily_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"web_hits": {
+                  Row: {
+                    "at": string,"campaign": string | null,"channel": string | null,"company_id": string,"day": string,"device": string,"entry": boolean,"id": number,"path": string,"referrer": string | null,"source": string | null,"visitor": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "at"?: string,"campaign"?: string | null,"channel"?: string | null,"company_id": string,"day": string,"device": string,"entry": boolean,"id"?: never,"path": string,"referrer"?: string | null,"source"?: string | null,"visitor": string
+                  }
+                  Update: {
+                    "at"?: string,"campaign"?: string | null,"channel"?: string | null,"company_id"?: string,"day"?: string,"device"?: string,"entry"?: boolean,"id"?: never,"path"?: string,"referrer"?: string | null,"source"?: string | null,"visitor"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "web_hits_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 }
           }
           Views: {
@@ -2188,6 +2228,21 @@ isOneToOne: false
                            },
 "user_id_for_email":
 { Args: { "p_email": string }; Returns: string
+                           },
+"web_analytics_save":
+{ Args: { "p_changes": Json,"p_company": string }; Returns: Json
+                           },
+"web_record_hit":
+{ Args: { "p_agent": string,"p_campaign"?: string,"p_channel"?: string,"p_device": string,"p_host": string,"p_ip": string,"p_path": string,"p_referrer"?: string,"p_site"?: string,"p_source"?: string }; Returns: boolean
+                           },
+"web_rollup":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"web_stats":
+{ Args: { "p_company": string,"p_from": string,"p_to": string }; Returns: Json
+                           },
+"web_visit_for":
+{ Args: { "p_agent": string,"p_company": string,"p_ip": string }; Returns: Json
                            }
           }
           Enums: {

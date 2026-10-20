@@ -135,6 +135,26 @@ export const APP_INFO: Record<string, AppInfo> = {
     website: "https://crewtavo.com/docs/connections/team-chat/",
     open: "/chat",
   },
+  website_analytics: {
+    developer: "Crewtavo",
+    tagline: "Who visits your website, and what brings in work",
+    about:
+      "Paste one line into your website and see how many people visit it, which pages they read, where they came from (Google, Facebook, Yelp, an email or a campaign) and whether they were on a phone or a computer, in Marketing. Booking requests from your website's form say which page and source brought them in, so you can tell what's worth your time and money. It works like Google Analytics without the cookies: nothing that tells who a visitor is gets kept, so most businesses don't need a cookie banner for it, and it's all in your own Crewtavo.",
+    highlights: [
+      { icon: "metrics", title: "Visits and pages", text: "Visitors and page views against the period before, and the pages people read most." },
+      { icon: "globe", title: "Where they came from", text: "Search, social, directories like Yelp, AI assistants, emails and your own campaign links." },
+      { icon: "requests", title: "What brings in work", text: "Booking requests from your website show the page and source behind each one." },
+    ],
+    access: [
+      "Count page views on your website, with the page, where the visitor came from and their kind of device",
+      "No cookies, and nothing kept that tells who a visitor is: a visitor is a code that changes every day",
+      "Skip people who asked websites not to track them",
+      "Uninstalling stops counting and keeps your numbers",
+    ],
+    connectsWith: "A line on your website",
+    website: "https://crewtavo.com/docs/connections/website-analytics/",
+    open: "/marketing?tab=website",
+  },
   google_calendar: {
     developer: "Google",
     tagline: "Your Google calendars on the schedule, and visits on Google",

@@ -17,6 +17,7 @@ import { clientLink, readClientLink, type LinkKind } from "../lib/links";
 import { adminClient } from "../lib/supabase";
 import { clientIp } from "../lib/visitor";
 import { buildCalendar } from "../lib/ics";
+import { bookingVisit } from "../services/analytics";
 import { StripeError, verifyStripeSignature, type StripeEvent } from "../services/stripe";
 import { UPLOAD_LIMIT } from "../services/uploads";
 
@@ -346,12 +347,14 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
       .select("id")
       .single(),
   );
+  // The website visit that brought them in, when the business counts its website's visits (Apps).
+  const visit = await bookingVisit(c, company.id);
   const request = must(
     await admin
       .from("requests")
       .insert({
         company_id: company.id, client_id: client.id, property_id: property.id, intake_form_id: form.id,
-        source: "web_form", title: form.name, answers: asJson(body.answers), promo_code: promo, created_by: null,
+        source: "web_form", title: form.name, answers: asJson(body.answers), promo_code: promo, created_by: null, web_visit: visit,
       })
       .select("id, number")
       .single(),
