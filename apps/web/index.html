@@ -17,6 +17,9 @@
     <style>
       html { background: #ffffff; }
       html.dark { background: #111110; color-scheme: dark; }
+      /* A booking form inside the business's own website (?embed=1) sits on that site's background, with no Crewtavo logo while it loads. */
+      html.embedded, html.embedded body { background: transparent; }
+      html.embedded .boot { display: none; }
     </style>
     <script>
       // Light or dark before first paint (src/lib/theme.ts keeps it up to date). Client pages stay light.
@@ -27,6 +30,7 @@
           document.querySelector('meta[name="theme-color"]').setAttribute("content", "#191918");
         }
       } catch (e) {}
+      if (/^\/book\//.test(location.pathname) && /[?&]embed=1(&|$)/.test(location.search)) document.documentElement.classList.add("embedded");
     </script>
   </head>
   <body>

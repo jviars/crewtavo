@@ -1,6 +1,6 @@
-/** Public booking / request form: /book/:company/:form (add ?embed=1 inside an iframe). No account needed. */
+/** Public booking / request form: /book/:company/:form (?embed=1 inside an iframe; see embed.ts). No account needed. */
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
 import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
+import { postToHost } from "./embed";
 
 /** The most files a request can bring (the API's limit too). */
 const MAX_FILES = 10;
@@ -30,6 +31,7 @@ export function BookingFormPage() {
   const { company = "", form = "" } = useParams();
   const [params] = useSearchParams();
   const embedded = params.get("embed") === "1";
+  const page = useFitFrame(embedded);
   const path = `/public/forms/${encodeURIComponent(company)}/${encodeURIComponent(form)}`;
   const view = useQuery({ queryKey: ["booking", company, form], retry: false, queryFn: () => publicFetch<FormView>(path) });
   const [contact, setContact] = useState({ name: "", email: "", phone: "", line1: "", city: "", postal_code: "" });
@@ -99,12 +101,13 @@ export function BookingFormPage() {
       return { reference: sent.reference, sentFiles: recorded, failed };
     },
     onSettled: () => setSending(null),
-    onSuccess: () => window.scrollTo({ top: 0, behavior: "smooth" }),
+    onSuccess: () => (embedded ? postToHost({ crewtavo: "top" }) : window.scrollTo({ top: 0, behavior: "smooth" })),
   });
   const set = (key: keyof typeof contact) => (e: { target: { value: string } }) => setContact({ ...contact, [key]: e.target.value });
 
   return (
-    <div className="public-page" style={embedded ? { padding: 0, background: "transparent", minHeight: 0 } : undefined}>
+    // Embedded, just enough room around the card for its shadow; index.html clears the page's own background.
+    <div ref={page} className="public-page" style={embedded ? { padding: "1px 1px 4px", background: "transparent", minHeight: 0 } : undefined}>
       <div className="public-wrap" style={{ maxWidth: 640 }}>
         {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="40%" height={12} /><Skeleton width="65%" height={26} /><Skeleton height={300} radius={10} /></div>}
         {view.error && (
@@ -195,6 +198,19 @@ export function BookingFormPage() {
       </div>
     </div>
   );
+}
+
+/** In an iframe on the business's website: keeps the frame as tall as the form (embed.ts). */
+function useFitFrame(embedded: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const page = ref.current;
+    if (!embedded || !page) return;
+    const observer = new ResizeObserver(() => postToHost({ crewtavo: "height", height: page.getBoundingClientRect().height }));
+    observer.observe(page);
+    return () => observer.disconnect();
+  }, [embedded]);
+  return ref;
 }
 
 /** A "Files" or "Photos" question: pick or drop files; they're sent once the request is in. */

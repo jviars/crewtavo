@@ -1,7 +1,7 @@
 /** Icons used across the app, from Lucide (24px grid, 2px stroke). Decorative unless given a label. */
 import {
   Archive, ArchiveRestore, ArrowLeft, AtSign, ArrowRight, Banknote, Bell, Bold, BookOpen, Calendar, CalendarCheck, Camera, ChartColumn, ChartLine, Check, ChevronDown, ChevronLeft,
-  ChevronRight, ChevronUp, CircleCheck, ClipboardCheck, Clock, Cloud, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileText,
+  ChevronRight, ChevronUp, CircleCheck, ClipboardCheck, Clock, Cloud, CodeXml, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileText,
   Funnel, Gauge, Gift, Globe, GripVertical, Hash, Heading, Hexagon, History, House, Image, Inbox, Info, Italic, Kanban, Landmark, Layers, LayoutGrid, Link,
   List, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, MessagesSquare, Minus, Monitor, Moon, MousePointer2, Navigation,
   Pause, Pencil, Percent, Phone, Pin, PinOff, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Reply, Search, Send, SeparatorHorizontal,
@@ -87,6 +87,7 @@ const ICONS = {
   map: Map,
   file: File,
   link: Link,
+  code: CodeXml,
   lock: Lock,
   history: History,
   note: StickyNote,
