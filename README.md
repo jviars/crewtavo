@@ -219,7 +219,7 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
 - **Jobs and invoicing:** one-off and recurring jobs, multi-day work, change orders the client
   approves, batch invoicing, payment reminders, deposits, progress billing and retainage. Invoices
   go through Stripe for card and bank payments; invoices made in Stripe come in too, with the fees
-  and bank deposits behind every payment. Refunds, expenses and job costing, timesheets.
+  and bank deposits behind every payment. Refunds, expenses and job costing, timesheets and pay.
 - **Plans and files:** plan sets, specs, permits and addenda on requests, quotes, jobs and
   properties, up to 200 MB each. New versions replace old ones (with the history kept), the crew
   sees only current sheets on their phones, and clients can attach plans to a booking request. A
@@ -232,10 +232,15 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   and notifications in the app, by email, by text or as phone push, each person's choice.
 - **Automations and marketing:** rules like "when a quote is sent, wait 3 days, then email the
   client", campaigns, promo codes, Google review requests and referrals.
-- **Claude and ChatGPT:** a built-in connector that can look things up and set Crewtavo up (price
-  list, crews, checklists, booking forms, guides, automations). Each person signs in with their own
-  account; an assistant only reads until that person chooses what it can change or gives it full
-  access (and never does more than their role allows), and every call is logged.
+- **Claude and ChatGPT:** a built-in connector that can look things up or run the business:
+  import customers and recurring services (with a preview first, and no duplicates on a second
+  run), manage the schedule, quotes, invoices and payments, read the money figures, invite people
+  and change roles, approve time and mark people paid. Each person signs in with their own account;
+  an assistant only reads until that person chooses what it can change, or gives it full access,
+  with or without money (and it never does more than their role allows). Every call is logged.
+- **Pay:** Timesheets → Pay sums each person's approved hours at their rate for a week or any
+  dates, flags overtime and unapproved time, downloads for your payroll service, and records who's
+  been paid and how. Paid time is locked. Crewtavo doesn't move the money.
 - **Every trade:** trade presets ([`packages/core/src/presets`](packages/core/src/presets)) load
   starter services, quote formulas, checklists, booking forms and SOP categories when a company
   signs up: lawn and exterior maintenance, paving and sitework, roofing and exteriors, or a general

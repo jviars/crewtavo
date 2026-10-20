@@ -1,4 +1,4 @@
-/** The team and its crews (Settings → Crews): who's on which crew. People and roles stay in Crewtavo itself. */
+/** Crews (Settings → Crews): who's on which crew. The team itself is in team.ts. */
 import { ROLE_LABELS, type Role } from "@crewtavo/core";
 import { z } from "zod";
 import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
@@ -14,11 +14,6 @@ async function team(ctx: ToolContext) {
 }
 
 export const crewTools = {
-  list_team: tool({
-    description: "The people on the team: name, email, role and user_id (for set_crew_members).",
-    input: z.object({ ...companyArg }),
-    run: (ctx) => team(ctx),
-  }),
   list_crews: tool({
     description: "The company's crews, with their color, whether they're in use, and who's on each.",
     input: z.object({ ...companyArg }),

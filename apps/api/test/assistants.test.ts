@@ -70,7 +70,7 @@ function supabase(company: { settings?: object } = {}) {
         return Response.json(client && CONNECTIONS[client] ? [CONNECTIONS[client]] : []);
       }
       case "/rest/v1/memberships":
-        return Response.json([{ company_id: "company-1", company: { timezone: "America/New_York", settings } }]);
+        return Response.json([{ company_id: "company-1", role: "owner", role_id: null, company: { timezone: "America/New_York", settings } }]);
       case "/rest/v1/companies":
         if (method === "PATCH") return Response.json([{ id: "company-1" }]);
         return Response.json([{ name: "Kilo Gardens", slug: "kilo", phone: null, email: null, website: null, address: { line1: "1 Main St", city: "Radford" }, timezone: "America/New_York", settings }]);
@@ -135,7 +135,8 @@ describe("MCP tools", () => {
     expect((await call(prices, "add_services", service)).structuredContent).toEqual({ result: { added: [{ id: "service-0", name: "Mulch install" }] } });
     expect(calls.find((c) => c.method === "POST" && c.path === "/rest/v1/services")?.body).toMatchObject([{ name: "Mulch install", unit: "yd", unit_price: 85, taxable: true, company_id: "company-1" }]);
     expect((await call(prices, "add_note", note)).content[0].text).toBe(assistantRefusal("records"));
-    expect((await call(prices, "delete_service", { service_id: SERVICE })).content[0].text).toBe(assistantRefusal("prices", true));
+    expect((await call(prices, "delete_service", { service_id: SERVICE })).content[0].text).toBe(assistantRefusal("prices", true, { level: "areas", areas: ["prices"] }));
+    expect(assistantRefusal("prices", true, { level: "areas", areas: ["prices"] })).toMatch(/^This assistant can't delete things\./);
     expect(wrote(calls, "/rest/v1/messages")).toBe(false);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
 
@@ -166,7 +167,8 @@ describe("MCP tools", () => {
     const nouns = Object.fromEntries([...hook.matchAll(/when '([a-z]+)' then '([^']+)'/g)].map((m) => [m[1], m[2]]));
     nouns.automations = /else '([^']+)' end\)/.exec(hook)![1];
     for (const { key } of ASSISTANT_AREAS) expect(template.replace("%s", nouns[key])).toBe(assistantRefusal(key));
-    expect(unquote(/when v_delete then '((?:[^']|'')*)'/.exec(hook)![1])).toBe(assistantRefusal("prices", true));
+    expect(unquote(/when v_delete and v_level = 'areas' then\s*'((?:[^']|'')*)'/.exec(hook)![1])).toBe(assistantRefusal("prices", true, { level: "areas", areas: [] }));
+    expect(unquote(/when v_level = 'full_no_money' and private\.assistant_money_area\(v_area\) then\s*'((?:[^']|'')*)'/.exec(hook)![1])).toBe(assistantRefusal("invoices", false, { level: "full_no_money", areas: [] }));
   });
 
   it("still won't change anything when the company only lets assistants look things up", async () => {
@@ -197,7 +199,10 @@ describe("MCP tools", () => {
     expect(hints.list_services).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect(hints.add_services).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(hints.delete_service).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    expect(tools.filter((t) => t.annotations.destructiveHint).map((t) => t.name)).toEqual(tools.filter((t) => t.name.startsWith("delete_")).map((t) => t.name));
+    // Every delete is marked, so the assistant asks first; so is voiding an invoice.
+    const destructive = tools.filter((t) => t.annotations.destructiveHint).map((t) => t.name);
+    expect(destructive.filter((n) => !n.startsWith("delete_"))).toEqual(["void_invoice"]);
+    expect(tools.filter((t) => t.name.startsWith("delete_")).every((t) => t.annotations.destructiveHint)).toBe(true);
   });
 
   it("each have a label for the activity log", () => {

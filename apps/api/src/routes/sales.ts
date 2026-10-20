@@ -16,21 +16,20 @@ import {
   type FormulaVariable,
   type MeasurementSummary,
 } from "@crewtavo/core";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
-import { syncStripeInvoice } from "../integrations/stripe";
 import { requireCompany, requireUser } from "../lib/auth";
-import { runInBackground } from "../lib/background";
-import { adminClient } from "../lib/supabase";
 import { appUrl, asJson, dbError, HttpError, must, param, readJson, requireEnv, uuid } from "../lib/http";
-import { firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink } from "../lib/links";
-import { sendEmail, sendSms } from "../lib/notify";
-import { companyAddress } from "../services/automations";
 import { roofSegments } from "../services/external";
+import { invoiceJobs, quoteFromRequest, remindInvoices, sendInvoice, sendQuote, sendSchema, type SalesScope } from "../services/sales";
 
 export const sales = new Hono<AppEnv>();
+
+/** The person's client, their company, and the address client links use (services/sales.ts). */
+const scope = (c: Context<AppEnv>): SalesScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, baseUrl: appUrl(c) });
 
 // ---------------------------------------------------------------------------------------------
 // Requests and quotes
@@ -38,23 +37,7 @@ export const sales = new Hono<AppEnv>();
 
 /** Start a draft quote from a request, carrying over the client, property and any measurement. */
 sales.post("/requests/:id/quote", requireUser, requireCompany(SALES, "sales"), async (c) => {
-  const id = param(c, "id");
-  const { db, companyId } = c.var;
-  const request = must(await db.from("requests").select("id, client_id, property_id, title, details").eq("id", id).eq("company_id", companyId).maybeSingle(), "Request not found.");
-  const company = must(await db.from("companies").select("settings").eq("id", companyId).maybeSingle());
-  const taxRate = Number((company.settings as { default_tax_rate?: number } | null)?.default_tax_rate ?? 0);
-  const quote = must(
-    await db
-      .from("quotes")
-      .insert({ company_id: companyId, client_id: request.client_id, property_id: request.property_id, request_id: request.id, title: request.title, tax_rate: taxRate })
-      .select("id, number")
-      .single(),
-  );
-  await Promise.all([
-    db.from("requests").update({ status: "quoted" }).eq("id", id),
-    db.from("measurements").update({ quote_id: quote.id }).eq("request_id", id).is("quote_id", null),
-  ]);
-  return c.json(quote, 201);
+  return c.json(await quoteFromRequest(scope(c), param(c, "id")), 201);
 });
 
 /** A saved measurement's roof slope, or null when its pitch doesn't read (formulas that use it say so). */
@@ -122,68 +105,8 @@ sales.post("/quotes/:id/convert", requireUser, requireCompany(SALES, "sales"), a
   return c.json({ job_id: data }, 201);
 });
 
-const sendSchema = z.object({
-  channel: z.enum(["email", "sms", "link"]).default("email"),
-  to: z.string().trim().max(200).optional(), // defaults to the client's email or phone
-  subject: z.string().trim().max(200).optional(),
-  message: z.string().max(4000).optional(),
-});
-
-async function deliver(
-  c: Parameters<typeof appUrl>[0],
-  kind: "quote" | "invoice",
-  record: { id: string; number: number | null; client_id: string; total?: number; balance_due?: number; client: { display_name: string; email: string | null; phone: string | null } | null },
-  body: z.infer<typeof sendSchema>,
-) {
-  const company = must(await c.var.db.from("companies").select("name, email, phone, address, currency").eq("id", c.var.companyId).maybeSingle());
-  const link = await clientLink(c.env, appUrl(c), { c: c.var.companyId, t: kind, id: record.id });
-  const label = `${kind === "quote" ? "Quote" : "Invoice"} #${record.number}`;
-  const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(kind === "quote" ? record.total ?? 0 : record.balance_due ?? 0));
-  const greeting = `Hi ${firstName(record.client?.display_name)},`;
-  const intro = body.message?.trim() || (kind === "quote" ? `Thanks for the opportunity. Here's your quote (${amount}). You can review the details, choose any options and approve it online:` : `Here's your invoice for ${amount}. You can view and pay it online:`);
-  const text = `${greeting}\n\n${intro}\n\n${link}\n\nThanks,\n${company.name}`;
-  let result: { sent: boolean; reason?: string; id?: string } = { sent: false, reason: "Link only" };
-  if (body.channel === "email") {
-    const to = body.to || record.client?.email;
-    if (!to || !isEmail(to)) throw new HttpError(400, "Add a valid email address for this client first.");
-    const subject = body.subject || `${label} from ${company.name}`;
-    const footer = [company.name, companyAddress(company.address as Record<string, string>), company.phone].filter(Boolean).join(" · ");
-    result = await sendEmail(c.env, { to, subject, ...renderEmail({ companyName: company.name, text, footer }), replyTo: company.email ?? undefined, fromName: company.name }, c.var.companyId);
-  } else if (body.channel === "sms") {
-    const to = body.to || record.client?.phone;
-    if (!to) throw new HttpError(400, "This client has no phone number.");
-    result = await sendSms(c.env, { to, body: `${company.name}: ${intro} ${link}` });
-  }
-  if (result.sent) {
-    await c.var.db.from("messages").insert({
-      company_id: c.var.companyId,
-      client_id: record.client_id,
-      channel: body.channel,
-      subject: body.channel === "email" ? body.subject || label : label,
-      body: text,
-      related_type: kind,
-      related_id: record.id,
-      external_id: result.id ?? null,
-    });
-  }
-  return { link, ...result };
-}
-
 sales.post("/quotes/:id/send", requireUser, requireCompany(SALES, "sales"), async (c) => {
-  const id = param(c, "id");
-  const body = await readJson(c, sendSchema);
-  const quote = must(
-    await c.var.db.from("quotes").select("id, number, status, total, client_id, client:clients(display_name, email, phone), lines:quote_line_items(id)").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(),
-    "Quote not found.",
-  );
-  if (["converted", "lost", "archived"].includes(quote.status)) throw new HttpError(400, `This quote is ${quote.status}, so it can't be sent.`);
-  if (!quote.lines.length) throw new HttpError(400, "Add at least one line item before sending.");
-  const result = await deliver(c, "quote", quote, body);
-  // Sent, or the office took the link to share themselves: the quote is now with the client.
-  if (result.sent || body.channel === "link") {
-    await c.var.db.from("quotes").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", id).in("status", ["draft", "changes_requested"]);
-  }
-  return c.json(result);
+  return c.json(await sendQuote(scope(c), param(c, "id"), await readJson(c, sendSchema)));
 });
 
 /** The client's link for a quote or invoice, without sending it or changing its status (preview, PDF). */
@@ -211,72 +134,13 @@ sales.post("/jobs/:id/invoice", requireUser, requireCompany(OFFICE, "invoices"),
 // optionally email each one. Each job succeeds or fails on its own.
 sales.post("/invoices/batch", requireUser, requireCompany(OFFICE, "invoices"), async (c) => {
   const body = await readJson(c, z.object({ job_ids: z.array(uuid).min(1).max(50), send: z.boolean().default(false) }));
-  const jobs = must(await c.var.db.from("jobs").select("id, number, title, kind, billing_mode").eq("company_id", c.var.companyId).in("id", body.job_ids));
-  const results: Array<{ job_id: string; number: number | null; ok: boolean; invoice_id?: string; sent?: boolean; error?: string }> = [];
-  for (const job of jobs) {
-    const kind = job.billing_mode === "per_visit" || job.kind === "recurring" ? "visits" : "standard";
-    const created = await c.var.db.rpc("create_invoice_for_job", { p_job: job.id, p_kind: kind });
-    if (created.error) {
-      results.push({ job_id: job.id, number: job.number, ok: false, error: dbError(created.error).message });
-      continue;
-    }
-    const invoiceId = created.data as string;
-    let sent = false;
-    let error: string | undefined;
-    if (body.send) {
-      const invoice = must(await c.var.db.from("invoices").select("id, number, status, total, balance_due, client_id, client:clients(display_name, email, phone)").eq("id", invoiceId).maybeSingle());
-      try {
-        const result = await deliver(c, "invoice", invoice, { channel: "email" });
-        sent = result.sent;
-        if (sent) await c.var.db.from("invoices").update({ status: "sent" }).eq("id", invoiceId);
-        else error = result.reason ?? "Not sent";
-      } catch (e) {
-        error = e instanceof HttpError ? e.message : "Couldn't send it";
-      }
-    }
-    results.push({ job_id: job.id, number: job.number, ok: true, invoice_id: invoiceId, sent, error });
-  }
-  return c.json({ results });
+  return c.json(await invoiceJobs(scope(c), body.job_ids, body.send));
 });
 
 // Friendly reminders for unpaid invoices, by email.
 sales.post("/invoices/remind", requireUser, requireCompany(OFFICE, "invoices"), async (c) => {
   const body = await readJson(c, z.object({ invoice_ids: z.array(uuid).min(1).max(100) }));
-  const company = must(await c.var.db.from("companies").select("name, currency").eq("id", c.var.companyId).maybeSingle());
-  const invoices = must(
-    await c.var.db
-      .from("invoices")
-      .select("id, number, status, total, balance_due, due_on, client_id, client:clients(display_name, email, phone)")
-      .eq("company_id", c.var.companyId)
-      .in("id", body.invoice_ids)
-      .in("status", ["sent", "partially_paid", "overdue"]),
-  );
-  let sent = 0;
-  const skipped: Array<{ number: number | null; reason: string }> = [];
-  // Don't ask again while a bank payment is on its way.
-  const { data: paying } = await c.var.db.from("stripe_invoices").select("invoice_id").eq("company_id", c.var.companyId).eq("status", "processing").in("invoice_id", invoices.map((i) => i.id));
-  const processing = new Set((paying ?? []).map((row) => row.invoice_id));
-  for (const invoice of invoices) {
-    if (Number(invoice.balance_due) <= 0) continue;
-    if (processing.has(invoice.id)) {
-      skipped.push({ number: invoice.number, reason: "A bank payment is on its way" });
-      continue;
-    }
-    const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(invoice.balance_due));
-    const due = invoice.due_on ? new Date(`${invoice.due_on}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : null;
-    try {
-      const result = await deliver(c, "invoice", invoice, {
-        channel: "email",
-        subject: `Reminder: invoice #${invoice.number} from ${company.name}`,
-        message: `A friendly reminder that ${amount} is still owed on invoice #${invoice.number}${due ? `, which was due ${due}` : ""}. You can view and pay it online:`,
-      });
-      if (result.sent) sent++;
-      else skipped.push({ number: invoice.number, reason: result.reason ?? "Not sent" });
-    } catch (e) {
-      skipped.push({ number: invoice.number, reason: e instanceof HttpError ? e.message : "Couldn't send it" });
-    }
-  }
-  return c.json({ sent, skipped });
+  return c.json(await remindInvoices(scope(c), body.invoice_ids));
 });
 
 // Promo codes: the database checks the code's rules and recalculates the totals.
@@ -296,21 +160,7 @@ for (const [path, kind, roles, area] of [["quotes", "quote", SALES, "sales"], ["
 }
 
 sales.post("/invoices/:id/send", requireUser, requireCompany(OFFICE, "invoices"), async (c) => {
-  const id = param(c, "id");
-  const body = await readJson(c, sendSchema);
-  const invoice = must(
-    await c.var.db.from("invoices").select("id, number, status, total, balance_due, client_id, client:clients(display_name, email, phone), lines:invoice_line_items(id)").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(),
-    "Invoice not found.",
-  );
-  if (invoice.status === "void") throw new HttpError(400, "This invoice is void.");
-  if (!invoice.lines.length) throw new HttpError(400, "Add at least one line item before sending.");
-  const result = await deliver(c, "invoice", invoice, body);
-  if (invoice.status === "draft" && (result.sent || body.channel === "link")) {
-    await c.var.db.from("invoices").update({ status: "sent" }).eq("id", id);
-    // Put it in Stripe now rather than at the next outbox run, so the client's Pay button is ready.
-    runInBackground(c, syncStripeInvoice(c.env, adminClient(c.env), c.var.companyId, id));
-  }
-  return c.json(result);
+  return c.json(await sendInvoice(scope(c), param(c, "id"), await readJson(c, sendSchema)));
 });
 
 // ---------------------------------------------------------------------------------------------

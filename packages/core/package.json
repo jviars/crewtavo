@@ -27,7 +27,10 @@
     "./dns": "./src/dns.ts",
     "./assistants": "./src/assistants.ts",
     "./forms": "./src/forms.ts",
-    "./markdown": "./src/markdown.ts"
+    "./markdown": "./src/markdown.ts",
+    "./clientImport": "./src/clientImport.ts",
+    "./reports": "./src/reports.ts",
+    "./pay": "./src/pay.ts"
   },
   "scripts": {
     "test": "vitest run",

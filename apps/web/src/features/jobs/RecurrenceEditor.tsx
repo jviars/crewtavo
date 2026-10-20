@@ -2,7 +2,7 @@
  * "Every 2 weeks on Tuesday, April to October" without typing an RRULE. Produces the rule string
  * (RFC 5545, no DTSTART) and season months, and previews the next visit dates.
  */
-import { occurrenceDates, parseRule } from "@crewtavo/core/recurrence";
+import { buildSimpleRule, occurrenceDates, parseRule, parseSimpleRule, type SimpleRepeat } from "@crewtavo/core/recurrence";
 import { useMemo } from "react";
 import { addDaysIso, formatDay, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -19,27 +19,9 @@ const DAYS = [
 ] as const;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-interface Parsed {
-  freq: "WEEKLY" | "MONTHLY";
-  interval: number;
-  days: string[];
-  monthDay: number;
-}
-
-export function parseSimpleRule(rule: string): Parsed {
-  const parts = Object.fromEntries(rule.split(";").map((p) => p.split("=")));
-  return {
-    freq: parts.FREQ === "MONTHLY" ? "MONTHLY" : "WEEKLY",
-    interval: Math.max(1, Number(parts.INTERVAL ?? 1) || 1),
-    days: parts.BYDAY ? String(parts.BYDAY).split(",").filter((d) => DAYS.some(([k]) => k === d)) : ["MO"],
-    monthDay: Math.min(28, Math.max(1, Number(parts.BYMONTHDAY ?? 1) || 1)),
-  };
-}
-
-function buildRule(p: Parsed): string {
-  if (p.freq === "MONTHLY") return `FREQ=MONTHLY;INTERVAL=${p.interval};BYMONTHDAY=${p.monthDay}`;
-  return `FREQ=WEEKLY;INTERVAL=${p.interval};BYDAY=${(p.days.length ? p.days : ["MO"]).join(",")}`;
-}
+type Parsed = SimpleRepeat;
+export { parseSimpleRule };
+const buildRule = buildSimpleRule;
 
 export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onChange: (v: Recurrence) => void }) {
   const { company } = useSession();

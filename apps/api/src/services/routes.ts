@@ -1,15 +1,16 @@
 /**
  * A crew's route for a day: which of its visits are stops, where the day starts, and the plan
  * (packages/core/src/routing.ts) turned into each visit's stop number and times. Used by Organize
- * route on the schedule, by anytime visits added to an organized day, and by automatic routes
- * (settings.schedule.auto_routes), which organize each crew's coming week once and never redo a
- * day someone ordered by hand.
+ * route on the schedule and by AI assistants (previewRoute, saveRoute, undoRoute), by anytime
+ * visits added to an organized day, and by automatic routes (settings.schedule.auto_routes), which
+ * organize each crew's coming week once and never redo a day someone ordered by hand.
  */
-import { addDays, localDate, localTime, planRoute, scheduleSettings, zonedTimeToUtc, type LatLng, type PlannedStop, type RouteStop } from "@crewtavo/core";
+import { addDays, DISPATCH, localDate, localTime, planRoute, scheduleSettings, zonedTimeToUtc, type LatLng, type PlannedStop, type RouteStop } from "@crewtavo/core";
 import type { Env } from "../env";
-import { HttpError } from "../lib/http";
+import { dbError, HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { geocodeAddress } from "./external";
+import type { Scope } from "./schedule";
 
 /** Ordering takes about a quarter second at 100 stops and grows fast (2.6 s at 200), blocking the server. */
 export const MAX_ROUTE_STOPS = 100;
@@ -306,4 +307,120 @@ export async function autoRoutes(env: Env, now = new Date()) {
     }
   }
   return { companies: companies?.length ?? 0, organized, fitted, problems };
+}
+
+// ---- Organize route, for the schedule and AI assistants -----------------------------------------
+
+async function companyClock(s: Scope): Promise<CompanyClock> {
+  const company = must(await s.db.from("companies").select("timezone, settings").eq("id", s.companyId).maybeSingle());
+  return { tz: company.timezone, settings: (company.settings ?? {}) as Record<string, any> };
+}
+
+/** With automatic routes on, anytime visits added to an organized day go into its route. Never fails the visit. */
+export async function fitQuietly(s: Scope, visitIds: string[], crewId: string | null, date: string, company?: CompanyClock) {
+  try {
+    const clock = company ?? (await companyClock(s));
+    if (!scheduleSettings(clock.settings).autoRoutes) return;
+    await fitIntoRoute(s.db, s.companyId, crewId, date, clock, s.userId ?? null, { only: visitIds });
+  } catch (error) {
+    // The visit is saved either way; the hourly routes task tries again.
+    console.error("Couldn't fit a visit into its route", error instanceof Error ? error.message : error);
+  }
+}
+
+/** People who schedule plan routes; a crew lead without "Schedule the whole team" only their own crew's. */
+async function mayRoute(s: Scope, crewId: string | null) {
+  if (!DISPATCH.includes(s.role)) throw new HttpError(403, "Your role can't plan routes.");
+  if (s.permissions.includes("schedule")) return;
+  const mine = crewId ? must(await s.db.rpc("my_crew_ids", { p_company: s.companyId })) : [];
+  if (!crewId || !(mine as string[]).includes(crewId)) throw new HttpError(403, "You can plan your own crew's route. Pick your crew.");
+}
+
+const miles = (m: number) => Math.round(m * 10) / 10;
+
+/** A day for a crew (crew_id null: the visits with no crew, never every crew's at once). */
+export interface RouteDay {
+  date: string;
+  crew_id?: string | null;
+  /** Someone's own order of the open stops; without it, the shortest. */
+  order?: string[];
+}
+
+/**
+ * A crew's day as Organize route would leave it: the shortest order (or `order`), each stop's time
+ * and the driving between stops, without saving anything.
+ */
+export async function previewRoute(s: Scope, env: Env, body: RouteDay) {
+  const crewId = body.crew_id ?? null;
+  await mayRoute(s, crewId);
+  const company = await companyClock(s);
+  const visits = await loadDay(s.db, s.companyId, crewId, body.date);
+  await locateMissing(s.db, env, visits);
+  const day = planDay(visits, company, body.date, { order: body.order });
+  const route = await dayRoute(s.db, s.companyId, crewId, body.date);
+  const stop = (v: DayVisit) => ({
+    id: v.id,
+    title: v.title,
+    status: v.status,
+    client: v.job?.client?.display_name ?? null,
+    address: v.property ? [v.property.line1, v.property.city].filter(Boolean).join(", ") : null,
+    lat: v.property?.lat ?? null,
+    lng: v.property?.lng ?? null,
+    was_order: v.route_order,
+    was_starts_at: v.starts_at,
+    was_ends_at: v.ends_at,
+  });
+  return {
+    date: body.date,
+    timezone: company.tz,
+    times: day.times,
+    shop: day.shop,
+    return_to_shop: day.returnToShop,
+    by_hand: route?.by_hand ?? false,
+    organized_at: route?.organized_at ?? null,
+    miles_before: miles(day.milesBefore),
+    miles_after: miles(day.milesAfter),
+    finish: day.stops.length ? clockLabel(day.finish) : null,
+    late_finish: day.stops.length > 0 && day.finish > day.workEnd,
+    changes: day.changes.length,
+    warnings: day.warnings,
+    started: day.started.map((v) => ({ ...stop(v), order: v.route_order, starts_at: v.starts_at, ends_at: v.ends_at })),
+    stops: day.stops.map((p) => ({
+      ...stop(p.visit),
+      order: p.order,
+      starts_at: p.starts_at,
+      ends_at: p.ends_at,
+      minutes: p.planned.end - p.planned.start,
+      drive_min: p.planned.driveMin,
+      drive_miles: miles(p.planned.driveMiles),
+      fixed: p.planned.fixed,
+      late: p.planned.late,
+      located: p.planned.located,
+    })),
+  };
+}
+
+/** Save a crew's route: the order (`by_hand` when someone arranged it) and each stop's time. Returns what to undo. */
+export async function saveRoute(s: Scope, body: RouteDay & { by_hand?: boolean }) {
+  const crewId = body.crew_id ?? null;
+  await mayRoute(s, crewId);
+  const company = await companyClock(s);
+  const visits = await loadDay(s.db, s.companyId, crewId, body.date);
+  const day = planDay(visits, company, body.date, { order: body.order });
+  const previous = await saveDay(s.db, s.companyId, crewId, day, { byHand: Boolean(body.by_hand), userId: s.userId ?? null });
+  return { saved: previous.length, previous, miles_before: miles(day.milesBefore), miles_after: miles(day.milesAfter), warnings: day.warnings };
+}
+
+/** Undo Organize route: the visits' order and times as they were. The day is then left as it is. */
+export async function undoRoute(s: Scope, body: { date: string; crew_id?: string | null; visits: Previous }) {
+  const crewId = body.crew_id ?? null;
+  await mayRoute(s, crewId);
+  for (const { id, ...fields } of body.visits) {
+    let query = s.db.from("visits").update(fields).eq("id", id).eq("company_id", s.companyId).eq("status", "scheduled");
+    query = crewId ? query.eq("crew_id", crewId) : query.is("crew_id", null);
+    const { error } = await query;
+    if (error) throw dbError(error);
+  }
+  await markDay(s.db, s.companyId, crewId, body.date, { byHand: true, userId: s.userId ?? null });
+  return { restored: body.visits.length };
 }
