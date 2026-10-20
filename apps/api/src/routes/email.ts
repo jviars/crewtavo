@@ -1,6 +1,6 @@
 /**
- * Settings → Email: connect the company's own mailbox (Gmail, Google Workspace, Zoho, Microsoft 365,
- * Yahoo, iCloud or any SMTP server, with an app password) or its Resend key. Saving signs in and
+ * Settings → Email: connect the company's Resend key (recommended) or its own mailbox (Gmail, Google
+ * Workspace, Zoho, Microsoft 365, Yahoo, iCloud or any SMTP server, with an app password). Saving signs in and
  * sends a test email first, so a connected mailbox is one that works. The password or key is
  * encrypted with ENCRYPTION_KEY and never sent back to the browser.
  */
@@ -42,8 +42,13 @@ email.get("/email", ...requireEmailAdmin, async (c) => {
     mailbox: row && row.status !== "disconnected" ? { ...(row.settings as unknown as MailboxSettings), status: row.status, last_error: row.last_error, connected_at: row.connected_at } : null,
     // What happens without a mailbox: the install's own Resend account, the dev inbox, or nothing.
     fallback: c.env.RESEND_API_KEY && c.env.EMAIL_FROM ? "server" : c.env.MAILPIT_URL ? "dev" : null,
+    // Railway's trial and Hobby plans block mail servers, so the screen points people to Resend.
+    on_railway: Boolean(c.env.RAILWAY_PROJECT_ID),
   });
 });
+
+/** Railway's trial and Hobby plans block outgoing mail servers: a mailbox times out there, Resend doesn't. */
+const RAILWAY_SMTP = " Railway's trial and Hobby plans block sending from a mailbox, so on those plans connect Resend instead.";
 
 const connectSchema = z.object({
   preset: z.enum(PRESET_IDS),
@@ -88,7 +93,8 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
     try {
       await smtpSend({ host, port, security, username, password }, null);
     } catch (error) {
-      throw new HttpError(400, error instanceof SmtpError ? error.message : "Couldn't sign in to the mail server.");
+      const message = error instanceof SmtpError ? error.message : "Couldn't sign in to the mail server.";
+      throw new HttpError(400, c.env.RAILWAY_PROJECT_ID && /^Couldn't connect/.test(message) ? message + RAILWAY_SMTP : message);
     }
   }
 

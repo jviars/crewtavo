@@ -7,6 +7,7 @@
  * SMS uses Twilio over REST. When nothing is set up, sends are skipped and the caller gets
  * { sent: false } plus the reason; the UI can then offer the link to copy instead.
  */
+import { isPersonalMailDomain } from "@crewtavo/core/email";
 import type { Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
@@ -17,6 +18,8 @@ export interface SendResult {
   sent: boolean;
   id?: string;
   reason?: string;
+  /** The provider's HTTP status when it turned the email down: 401/403 is the key, 429 a limit. */
+  status?: number;
 }
 
 export interface EmailMessage {
@@ -149,7 +152,7 @@ export async function sendEmail(env: Env, message: EmailMessage, companyId?: str
  * allowed to send) in Settings, and clear it once it works again.
  */
 async function noteMailboxHealth(env: Env, companyId: string, mailbox: Mailbox, result: SendResult) {
-  const failedSignIn = !result.sent && /password|sign-in|didn't accept|turned off|refused it \(40[13]\b/i.test(result.reason ?? "");
+  const failedSignIn = !result.sent && (result.status === 401 || result.status === 403 || /password|sign-in|didn't accept|turned off/i.test(result.reason ?? ""));
   const next = result.sent ? "connected" : failedSignIn ? "error" : mailbox.status;
   if (next === mailbox.status) return;
   mailbox.status = next;
@@ -175,13 +178,47 @@ async function resendSend(apiKey: string, from: string, message: EmailMessage): 
     }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => null);
-  if (!response) return { sent: false, reason: "Couldn't reach the email provider. Try again." };
+  if (!response) return { sent: false, reason: "Couldn't reach Resend. Try again." };
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as { message?: string };
-    return { sent: false, reason: `The email provider refused it (${response.status}${detail.message ? `: ${detail.message}` : ""}).` };
+    return { sent: false, status: response.status, reason: resendProblem(response.status, detail.message ?? "") };
   }
   const body = (await response.json().catch(() => ({}))) as { id?: string };
   return { sent: true, id: body.id };
+}
+
+/**
+ * Resend's refusals in words the person setting up email can act on. These show in Settings → Email
+ * and wherever a send fails; anything not listed keeps Resend's own message.
+ */
+export function resendProblem(status: number, message: string): string {
+  const keyDomain = message.match(/not authorized to send emails from ([a-z0-9.-]+[a-z0-9])/i)?.[1];
+  if (keyDomain) {
+    return `This Resend API key can only send from a different domain, not ${keyDomain}. In Resend, create a new API key with Sending access for all domains (or for ${keyDomain}) and use it instead, or send from an address on the domain the key is for.`;
+  }
+  const unverified = message.match(/the\s+`?([a-z0-9.-]+[a-z0-9])`?\s+domain is not verified/i)?.[1];
+  if (unverified && isPersonalMailDomain(unverified)) {
+    return `Resend can't send from a ${unverified} address. Send from an address on your own domain (the one you added in Resend), like office@yourcompany.com.`;
+  }
+  if (unverified) {
+    return `${unverified} isn't verified in Resend yet. In Resend, open Domains, check every DNS record for it is added, and wait until it shows Verified (usually within 15 minutes). Or send from an address on a domain that's already verified.`;
+  }
+  if (/only send testing emails to your own email/i.test(message)) {
+    return "This Resend account has no verified domain yet, so it only sends tests to its owner. Add your domain under Domains in Resend, wait until it shows Verified, and send from an address on it.";
+  }
+  if (/suspended/i.test(message)) return "Resend has suspended this API key. Check the Resend account, or ask Resend's support why.";
+  if (status === 401 || /api key is (invalid|not active)|missing api key/i.test(message)) {
+    return "Resend didn't accept this API key. It may have been deleted, or only part of it was copied. Create a new one under API keys in Resend and paste the whole key (it starts with re_).";
+  }
+  if (/daily .*quota/i.test(message)) {
+    return "This Resend account has reached its daily sending limit (100 emails on the free plan). Sending starts again after midnight UTC, or upgrade the Resend plan to send more.";
+  }
+  if (/monthly .*quota/i.test(message)) {
+    return "This Resend account has reached its monthly sending limit (3,000 emails on the free plan). Upgrade the Resend plan to keep sending this month.";
+  }
+  if (status === 429) return "Resend got too many emails at once. Try again in a minute.";
+  if (status >= 500) return "Resend is having trouble right now. Try again in a few minutes.";
+  return `Resend refused it (${status}${message ? `: ${message}` : ""}).`;
 }
 
 /** Development transport: Mailpit's HTTP send API. */
