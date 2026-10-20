@@ -15,6 +15,7 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { can, hasRole, useSession } from "@/lib/session";
+import { EmbedDialog } from "./EmbedDialog";
 
 const KIND: Record<string, string> = { request: "Request form", assessment: "Book an estimate", booking: "Book a service" };
 type QType = "text" | "long_text" | "number" | "yes_no" | "choice" | "multi_choice" | "files" | "photos";
@@ -28,6 +29,7 @@ export function BookingAdminPage() {
   const { company } = session;
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<FormRow | "new" | null>(null);
+  const [embedding, setEmbedding] = useState<FormRow | null>(null);
   const canEdit = hasRole(session, "admin", "office") && can(session, "settings");
   const forms = useQuery({
     queryKey: ["intake-forms", company.id],
@@ -53,7 +55,6 @@ export function BookingAdminPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["intake-forms", company.id] }),
   });
   const link = (slug: string) => `${window.location.origin}/book/${company.slug}/${slug}`;
-  const embed = (slug: string) => `<iframe src="${link(slug)}?embed=1" style="width:100%;min-height:900px;border:0" title="Request a quote"></iframe>`;
 
   return (
     <>
@@ -73,7 +74,6 @@ export function BookingAdminPage() {
                     triggerClassName="btn btn-sm btn-ghost btn-icon"
                     items={[
                       { label: "Edit form", icon: "edit", onSelect: () => setEditing(f) },
-                      { label: "Copy embed code", icon: "copy", onSelect: () => copyText(embed(f.slug), "Embed code copied. Paste it into your website.") },
                       { label: f.active ? "Turn off" : "Turn on", icon: f.active ? "pause" : "play", onSelect: () => toggle.mutate({ id: f.id, active: !f.active }) },
                       { separator: true },
                       { label: "Delete form", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: `Delete “${f.name}”?`, body: "The link stops working. Requests it already brought in are kept.", confirmLabel: "Delete", danger: true })) && remove.mutate(f.id) },
@@ -89,11 +89,13 @@ export function BookingAdminPage() {
               <div className="row wrap">
                 <Button size="sm" icon="copy" onClick={() => copyText(link(f.slug), "Link copied")}>Copy link</Button>
                 <a className="btn btn-sm" href={link(f.slug)} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Open</a>
+                <Button size="sm" icon="code" onClick={() => setEmbedding(f)}>Embed</Button>
               </div>
             </div>
           ))}
         </div>
       )}
+      {embedding && <EmbedDialog name={embedding.name} url={link(embedding.slug)} onClose={() => setEmbedding(null)} />}
       {editing && <FormEditor form={editing === "new" ? null : editing} taken={forms.data?.map((f) => f.slug) ?? []} onClose={() => setEditing(null)} />}
     </>
   );
