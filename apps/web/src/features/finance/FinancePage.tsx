@@ -511,13 +511,15 @@ function Payments({ range }: { range: Range }) {
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const db = supabase();
-      const [invoices, open, payouts] = await Promise.all([
+      const [invoices, open, writtenOff, payouts] = await Promise.all([
         fetchAll((a, b) => db.from("invoices").select("total, tax_amount").eq("company_id", cid).not("status", "in", "(draft,void)").gte("issued_on", range.from).lte("issued_on", range.to).range(a, b)),
         fetchAll((a, b) => db.from("invoices").select("balance_due, due_on, client:clients(id, display_name)").eq("company_id", cid).in("status", ["sent", "partially_paid", "overdue"]).range(a, b)),
+        // Bad debt: what was left on invoices written off in the range.
+        fetchAll((a, b) => db.from("invoices").select("balance_due").eq("company_id", cid).eq("status", "written_off").gte("written_off_at", range.start).lt("written_off_at", range.end).range(a, b)),
         db.from("payouts").select("id", { count: "exact", head: true }).eq("company_id", cid),
       ]);
       if (payouts.error) throw payouts.error;
-      return { invoices, open, payouts: payouts.count ?? 0 };
+      return { invoices, open, writtenOff, payouts: payouts.count ?? 0 };
     },
   });
   return (
@@ -527,6 +529,7 @@ function Payments({ range }: { range: Range }) {
         const refunds = pay.filter((p) => Number(p.amount) < 0);
         const collected = sum(pay, (p) => Number(p.amount));
         const fees = sum(pay, (p) => Number(p.fee_amount ?? 0));
+        const writtenOff = sum(d.writtenOff, (i) => Number(i.balance_due));
         const filters = [
           { key: "all", label: "All", rows: pay },
           ...Object.keys(METHODS).map((k) => ({ key: k, label: METHODS[k]!.label, rows: pay.filter((p) => Number(p.amount) >= 0 && (METHODS[p.method] ? p.method : "other") === k) })),
@@ -567,6 +570,7 @@ function Payments({ range }: { range: Range }) {
               <Kpi label="Net after fees" value={formatMoney(collected - fees)} />
               <Kpi label="Tips" value={formatMoney(sum(pay, (p) => Number(p.tip_amount ?? 0)))} />
               <Kpi label="Sales tax billed" value={formatMoney(sum(d.invoices, (i) => Number(i.tax_amount)))} hint={`On ${plural(d.invoices.length, "invoice")}`} />
+              {writtenOff > 0 && <Kpi label="Written off" value={formatMoneyCents(writtenOff)} hint={<Link to="/invoices?status=written_off">{plural(d.writtenOff.length, "invoice")}</Link>} />}
             </KpiStrip>
 
             <section className="stack" style={{ gap: 12 }}>
