@@ -50,6 +50,8 @@ export interface ViewImage {
   px: (at: LngLat) => [number, number];
 }
 
+export type SpotPicker = (at: LngLat, how: { alt: boolean }) => void;
+
 export interface MeasureMapHandle {
   setTool(tool: Tool): void;
   /** Takes back the last point while drawing, or the last change. */
@@ -85,20 +87,25 @@ export interface MeasureMapHandle {
   capture(options?: { imagery?: ImageryId; sheet?: SheetInfo }): Promise<Blob | null>;
   /**
    * The imagery in view as a picture with no drawing on it, for finding paving on it (detect.ts),
-   * and where each of its pixels is on the map. Square from the middle of the map, `size` px across,
-   * or with `whole` all of the view, `size` px along its longer side. Null before the map is ready.
+   * and where each of its pixels is on the map. Square from the middle of the map, `size` px across;
+   * with `whole` all of the view, or with `bounds` ([west, south, east, north]) just that part of it
+   * at the screen's full detail, `size` px along the longer side. Null before the map is ready.
    * With `imagery`, taken on that source instead (Google's terms don't allow sending it on).
    */
-  viewImage(size: number, options?: { imagery?: ImageryId; whole?: boolean }): Promise<ViewImage | null>;
+  viewImage(size: number, options?: { imagery?: ImageryId; whole?: boolean; bounds?: [number, number, number, number] }): Promise<ViewImage | null>;
   /** A plan sheet on the map, over the imagery and under the drawing; null takes it off. */
   setPlan(plan: { url: string; corners: Corners; opacity: number } | null): void;
   /**
-   * While set, taps on the map go here instead of drawing (lining a plan up, tap to outline). Null
-   * with `owner` stops them only if they still go to `owner`.
+   * While set, taps on the map go here instead of drawing (lining a plan up, tap to outline), with
+   * whether Alt (Option) was held. Null with `owner` stops them only if they still go to `owner`.
    */
-  pickSpots(onPick: ((at: LngLat) => void) | null, owner?: (at: LngLat) => void): void;
-  /** Numbered pins for the spots picked so far. */
-  setPins(pins: Array<{ at: LngLat; label: string; tone: "plan" | "map" }>): void;
+  pickSpots(onPick: SpotPicker | null, owner?: SpotPicker): void;
+  /** While set, dragging on the map draws a box (its two corners go here) instead of moving the map. */
+  pickBox(onBox: ((a: LngLat, b: LngLat) => void) | null): void;
+  /** Pins for the spots picked so far: green on the map, blue on a plan, red for left out. */
+  setPins(pins: Array<{ at: LngLat; label: string; tone: "plan" | "map" | "out" }>): void;
+  /** Whether a shape is still on the map (Undo can take one away). */
+  has(id: string): boolean;
   /** The view's middle and its west and east edges. */
   viewBox(): { center: LngLat; west: number; east: number } | null;
 }
@@ -295,7 +302,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   const trouble = useRef({ errors: 0, loaded: 0, since: 0 });
   const planRef = useRef<{ url: string; corners: Corners; opacity: number } | null>(null);
   const planUrl = useRef<string | null>(null);
-  const pickRef = useRef<((at: LngLat) => void) | null>(null);
+  const pickRef = useRef<SpotPicker | null>(null);
+  const boxRef = useRef<(() => void) | null>(null); // stops drawing a box
   const pins = useRef<Marker[]>([]);
   // Callbacks change every render; the map's listeners read the latest through this.
   const live = useRef(props);
@@ -455,7 +463,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         draw.on("deselect", () => live.current.onSelect(null));
         draw.on("history", () => live.current.onHistory?.(draw.canUndo(), draw.canRedo()));
         // Lining up a plan: taps pick spots instead of drawing.
-        map!.on("click", (e) => pickRef.current?.([e.lngLat.lng, e.lngLat.lat]));
+        map!.on("click", (e) => pickRef.current?.([e.lngLat.lng, e.lngLat.lat], { alt: e.originalEvent.altKey }));
         trouble.current = { errors: 0, loaded: 0, since: Date.now() };
         applyOverlays(live.current.overlays);
         applyPlan();
@@ -819,7 +827,15 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         });
         const canvas = map.getCanvas();
         const side = Math.min(canvas.width, canvas.height);
-        const [sx, sy, sw, sh] = options.whole ? [0, 0, canvas.width, canvas.height] : [(canvas.width - side) / 2, (canvas.height - side) / 2, side, side];
+        let [sx, sy, sw, sh] = options.whole ? [0, 0, canvas.width, canvas.height] : [(canvas.width - side) / 2, (canvas.height - side) / 2, side, side];
+        if (options.bounds) {
+          const [w, s, e, n] = options.bounds;
+          const k = canvas.width / Math.max(1, canvas.clientWidth);
+          const [a, b] = [map.project([w, n]), map.project([e, s])];
+          const [x0, y0] = [Math.max(0, Math.floor(a.x * k)), Math.max(0, Math.floor(a.y * k))];
+          const [x1, y1] = [Math.min(canvas.width, Math.ceil(b.x * k)), Math.min(canvas.height, Math.ceil(b.y * k))];
+          if (x1 - x0 >= 8 && y1 - y0 >= 8) [sx, sy, sw, sh] = [x0, y0, x1 - x0, y1 - y0];
+        }
         const scale = size / Math.max(sw, sh);
         const picture = document.createElement("canvas");
         picture.width = Math.round(sw * scale);
@@ -864,6 +880,66 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       draw.setMode(onPick ? "static" : toolRef.current);
       map.getCanvas().style.cursor = onPick ? "crosshair" : "";
     },
+    pickBox(onBox) {
+      boxRef.current?.();
+      boxRef.current = null;
+      const map = mapRef.current;
+      const container = el.current;
+      if (!onBox || !map || !container) return;
+      const target = map.getCanvasContainer();
+      const rect = document.createElement("div");
+      rect.className = "measure-box";
+      let start: { x: number; y: number; id: number } | null = null;
+      const local = (e: PointerEvent) => {
+        const r = container.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+      };
+      const down = (e: PointerEvent) => {
+        if (e.button !== 0 || !e.isPrimary) return;
+        start = { ...local(e), id: e.pointerId };
+        target.setPointerCapture(e.pointerId);
+      };
+      const move = (e: PointerEvent) => {
+        if (!start || e.pointerId !== start.id) return;
+        const p = local(e);
+        Object.assign(rect.style, { left: `${Math.min(p.x, start.x)}px`, top: `${Math.min(p.y, start.y)}px`, width: `${Math.abs(p.x - start.x)}px`, height: `${Math.abs(p.y - start.y)}px` });
+        if (!rect.isConnected) container.append(rect);
+      };
+      const up = (e: PointerEvent) => {
+        if (!start || e.pointerId !== start.id) return;
+        const [a, b] = [start, local(e)];
+        start = null;
+        rect.remove();
+        // Barely moved: a tap, not a box.
+        if (Math.abs(b.x - a.x) < 12 || Math.abs(b.y - a.y) < 12) return;
+        const [p, q] = [map.unproject([a.x, a.y]), map.unproject([b.x, b.y])];
+        onBox([p.lng, p.lat], [q.lng, q.lat]);
+      };
+      const cancel = () => {
+        start = null;
+        rect.remove();
+      };
+      // One finger or the mouse draws; two fingers still zoom.
+      map.dragPan.disable();
+      const touchAction = target.style.touchAction;
+      target.style.touchAction = "none";
+      target.addEventListener("pointerdown", down);
+      target.addEventListener("pointermove", move);
+      target.addEventListener("pointerup", up);
+      target.addEventListener("pointercancel", cancel);
+      boxRef.current = () => {
+        target.removeEventListener("pointerdown", down);
+        target.removeEventListener("pointermove", move);
+        target.removeEventListener("pointerup", up);
+        target.removeEventListener("pointercancel", cancel);
+        target.style.touchAction = touchAction;
+        rect.remove();
+        map.dragPan.enable();
+      };
+    },
+    has(id) {
+      return Boolean(drawRef.current?.hasFeature(id));
+    },
     setPins(list) {
       const map = mapRef.current;
       for (const pin of pins.current) pin.remove();
@@ -872,10 +948,10 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       for (const p of list) {
         const el = document.createElement("div");
         el.textContent = p.label;
-        el.setAttribute("aria-label", `${p.tone === "plan" ? "Spot on the plan" : "Spot on the map"} ${p.label}`);
+        el.setAttribute("aria-label", `${p.tone === "plan" ? "Spot on the plan" : p.tone === "out" ? "Left out" : "Spot on the map"} ${p.label}`);
         Object.assign(el.style, {
           width: "26px", height: "26px", display: "grid", placeItems: "center", borderRadius: "50%", border: "2px solid #fff",
-          background: p.tone === "plan" ? "#2563eb" : "#16a34a", color: "#fff", font: "700 13px/1 system-ui, sans-serif",
+          background: p.tone === "plan" ? "#2563eb" : p.tone === "out" ? "#dc2626" : "#16a34a", color: "#fff", font: "700 13px/1 system-ui, sans-serif",
           boxShadow: "0 1px 4px rgba(0, 0, 0, 0.45)", pointerEvents: "none",
         });
         pins.current.push(new maplibregl.Marker({ element: el }).setLngLat(p.at).addTo(map));

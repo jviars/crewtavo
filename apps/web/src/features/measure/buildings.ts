@@ -3,7 +3,7 @@
  * roof from its outline. Free and keyless (ODbL, so drawings that use them carry the credit). The map
  * usually has them already, in the street map's tiles (MeasureMap's buildings()); when it doesn't,
  * they're asked from the browser through the public Overpass API, with a second server for when the
- * first is busy.
+ * first is busy. Tap to outline asks for the parking lots mapped around the view at the same time.
  * Coverage is good in towns and patchy in the country, and outlines follow the walls, not the eaves.
  */
 import { cutOut, polygonAreaM2, type Position } from "@crewtavo/core/geo";
@@ -16,7 +16,7 @@ const MAX_SPAN_DEG = 0.012;
 /** [west, south, east, north] */
 export type Box = [number, number, number, number];
 type Ring = Position[];
-type Element = { type: string; geometry?: Array<{ lat: number; lon: number }>; members?: Array<{ role: string; geometry?: Array<{ lat: number; lon: number }> }> };
+type Element = { type: string; tags?: Record<string, string>; geometry?: Array<{ lat: number; lon: number }>; members?: Array<{ role: string; geometry?: Array<{ lat: number; lon: number }> }> };
 
 export class BuildingsError extends Error {}
 
@@ -28,22 +28,60 @@ const ring = (points: Array<{ lat: number; lon: number }>): Ring => {
 };
 const isRing = (points?: Array<unknown>) => (points?.length ?? 0) >= 4;
 
-/** Outlines of the buildings in a box, as Polygon coordinates (outer ring first, then courtyards). */
-export async function buildingsIn([w, s, e, n]: Box): Promise<Ring[][]> {
-  if (e - w > MAX_SPAN_DEG || n - s > MAX_SPAN_DEG) throw new BuildingsError("That's too big an area to look for buildings in. Zoom in to the property, or draw the building with Cut out.");
-  const query = `[out:json][timeout:15];(way["building"](${s},${w},${n},${e});relation["building"]["type"="multipolygon"](${s},${w},${n},${e}););out geom;`;
+/** Asks Overpass, then the second server when the first is busy. Null when neither answers. */
+async function ask(query: string, waits = [35_000, 15_000]): Promise<Element[] | null> {
   for (const [i, server] of SERVERS.entries()) {
     try {
       // GET: the main server turns POSTs from browsers away. It can be slow when busy, so it gets longer.
-      const response = await fetch(`${server}?data=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(i ? 15_000 : 35_000) });
+      const response = await fetch(`${server}?data=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(waits[i] ?? 15_000) });
       if (!response.ok) continue;
       const body = (await response.json()) as { elements?: Element[] };
-      return toPolygons(body.elements ?? []);
+      return body.elements ?? [];
     } catch {
       /* busy or down: try the next one */
     }
   }
-  throw new BuildingsError("OpenStreetMap's building server isn't answering right now. Try again in a minute, or draw the building with Cut out.");
+  return null;
+}
+
+/** Outlines of the buildings in a box, as Polygon coordinates (outer ring first, then courtyards). */
+export async function buildingsIn([w, s, e, n]: Box): Promise<Ring[][]> {
+  if (e - w > MAX_SPAN_DEG || n - s > MAX_SPAN_DEG) throw new BuildingsError("That's too big an area to look for buildings in. Zoom in to the property, or draw the building with Cut out.");
+  const elements = await ask(`[out:json][timeout:15];(way["building"](${s},${w},${n},${e});relation["building"]["type"="multipolygon"](${s},${w},${n},${e}););out geom;`);
+  if (!elements) throw new BuildingsError("OpenStreetMap's building server isn't answering right now. Try again in a minute, or draw the building with Cut out.");
+  return toPolygons(elements);
+}
+
+/**
+ * For tap to outline: the surface parking lots and the buildings in a box (cut down to about a
+ * kilometer around its middle), in one question. A lot mapped around a tap tells the model where the
+ * lot ends; buildings come out of what it outlines. Null when OpenStreetMap doesn't answer in time.
+ */
+export async function lotsAndBuildingsIn([w, s, e, n]: Box): Promise<{ lots: Ring[][]; buildings: Ring[][] } | null> {
+  const [cx, cy, half] = [(w + e) / 2, (s + n) / 2, MAX_SPAN_DEG / 2];
+  const b = `${Math.max(s, cy - half)},${Math.max(w, cx - half)},${Math.min(n, cy + half)},${Math.min(e, cx + half)}`;
+  // Garages and rooftop decks are buildings, not pavement.
+  const surface = `["parking"!~"^(underground|multi-storey|rooftop)$"]`;
+  const elements = await ask(
+    `[out:json][timeout:15];(way["amenity"="parking"]${surface}(${b});relation["amenity"="parking"]["type"="multipolygon"]${surface}(${b});way["building"](${b});relation["building"]["type"="multipolygon"](${b}););out geom;`,
+    [12_000, 10_000],
+  );
+  if (!elements) return null;
+  return {
+    lots: toPolygons(elements.filter((el) => el.tags?.amenity === "parking" && !el.tags.building)),
+    buildings: toPolygons(elements.filter((el) => el.tags?.building)),
+  };
+}
+
+/** The lot a spot is in (the smallest, when lots are mapped inside lots), else null. */
+export function lotAt(lots: Ring[][], [lng, lat]: [number, number]): Ring[] | null {
+  let best: { lot: Ring[]; area: number } | null = null;
+  for (const lot of lots) {
+    if (!contains(lot[0], lng, lat) || lot.slice(1).some((hole) => contains(hole, lng, lat))) continue;
+    const area = polygonAreaM2(lot);
+    if (!best || area < best.area) best = { lot, area };
+  }
+  return best?.lot ?? null;
 }
 
 function toPolygons(elements: Element[]): Ring[][] {
