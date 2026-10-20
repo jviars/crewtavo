@@ -378,6 +378,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .chart-tooltip-label { color: var(--text-3); font-weight: 600; white-space: nowrap; }
 .chart-tooltip-row { display: flex; align-items: center; gap: 6px; }
 .chart-tooltip-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.chart-tooltip-line { width: 12px; height: 0; border-top: 2px solid; border-radius: 2px; flex: none; }
+.chart-tooltip-line.dashed { border-top-style: dashed; }
 .chart-tooltip-name { color: var(--text-2); white-space: nowrap; }
 .chart-tooltip-value { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sparkline { width: 100%; }

@@ -7,7 +7,7 @@ export interface NavItem {
   label: string;
   icon: IconName;
   roles?: string[]; // limit to these access levels (owners always see everything)
-  perm?: Permission; // and to roles that include this area
+  perm?: Permission | Permission[]; // and to roles that include this area (all of them, for a list)
   only?: string[]; // only these access levels, owners included (e.g. "My day" for crews)
   also?: string[]; // other screens that count as this section (highlighted in the sidebar)
   keywords?: string; // other words people search for it by
@@ -34,7 +34,8 @@ export const NAV_GROUPS: NavItem[][] = [
   ],
   [
     { to: "/marketing", label: "Marketing", icon: "marketing", roles: ["admin", "office"], perm: "marketing", keywords: "campaigns email blasts reviews referrals" },
-    { to: "/reports", label: "Reports", icon: "reports", roles: ["admin", "office"], perm: "reports", keywords: "analytics revenue profit numbers" },
+    { to: "/finance", label: "Finance", icon: "finance", roles: ["admin", "office"], perm: ["reports", "invoices"], keywords: "reports revenue profit payments money collected net volume fees deposits owed goal" },
+    { to: "/metrics", label: "Metrics", icon: "metrics", roles: ["admin", "office"], perm: "reports", keywords: "reports analytics numbers sales conversion lead sources visits hours team clients" },
     { to: "/timesheets", label: "Timesheets", icon: "clock", keywords: "time clock hours payroll" },
     { to: "/equipment", label: "Equipment", icon: "truck", keywords: "trucks mowers trailers tools fleet maintenance" },
     { to: "/kb", label: "Knowledge base", icon: "book", keywords: "sop procedures training how to guides" },
@@ -84,7 +85,7 @@ export function navVisible(session: { role: string; permissions: readonly string
   if (item.only) return item.only.includes(session.role);
   if (session.role === "owner") return true;
   if (item.roles && !item.roles.includes(session.role)) return false;
-  return !item.perm || session.permissions.includes(item.perm);
+  return [item.perm ?? []].flat().every((p) => session.permissions.includes(p));
 }
 
 /** A built-in app the business turned on in Apps (companies.settings.team_chat.enabled). */

@@ -58,6 +58,17 @@ export function bucketsFor(range: Range): Bucket[] {
   return out;
 }
 
+/**
+ * The period before, lined up under this one: each row's date moves forward by `days` (the range's
+ * length) before it's bucketed, so a "vs previous period" line sits under the same dates.
+ */
+export function bucketizeShifted<T>(rows: T[], buckets: Bucket[], dateOf: (row: T) => string | null | undefined, valueOf: (row: T) => number, tz: string, days: number) {
+  return bucketize(rows, buckets, (row) => {
+    const raw = dateOf(row);
+    return raw ? addDays(raw.length > 10 ? localDate(new Date(raw), tz) : raw, days) : null;
+  }, valueOf, tz);
+}
+
 /** Sum values into buckets by a local date (YYYY-MM-DD) or an instant (converted to the company's zone). */
 export function bucketize<T>(rows: T[], buckets: Bucket[], dateOf: (row: T) => string | null | undefined, valueOf: (row: T) => number, tz: string) {
   const totals = buckets.map(() => 0);
