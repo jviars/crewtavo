@@ -12,12 +12,15 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useInstallHint } from "@/lib/install";
 import { disablePush, enablePush, pushState } from "@/lib/push";
-import { useSession } from "@/lib/session";
+import { hasRole, useSession, type Session } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { InstallAppButton } from "../field/InstallAppCard";
 import { chatOn } from "../chat/data";
 
 type Prefs = Record<NotificationChannel, NotificationTopic[]>;
+
+/** Railway's warnings go to owners and admins of a Crewtavo on Railway (Settings → Hosting). */
+const railwayWarnings = (session: Session) => hasRole(session, "admin") && session.config.platform === "railway";
 
 const COLUMNS: Array<{ channel: NotificationChannel; label: string }> = [
   { channel: "push", label: "This phone" },
@@ -97,7 +100,7 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
               </tr>
             </thead>
             <tbody>
-              {NOTIFICATION_TOPICS.filter((t) => t.key !== "chat" || chatOn(session)).map((t) => (
+              {NOTIFICATION_TOPICS.filter((t) => (t.key !== "chat" || chatOn(session)) && (t.key !== "hosting" || railwayWarnings(session))).map((t) => (
                 <tr key={t.key}>
                   <th scope="row" style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", whiteSpace: "normal", padding: "10px 8px 10px 0" }}>
                     {t.label}
