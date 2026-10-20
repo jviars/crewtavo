@@ -2,11 +2,12 @@
  * The measuring map: MapLibre with aerial imagery underneath and Terra Draw on top. The page talks
  * to it through a handle (tools, undo, fit, capture a picture) and hears back through callbacks.
  * Every shape gets its own color and a label on the map with its size, so the list beside the map
- * and the picture sent to clients read the same.
+ * and the picture sent to clients read the same. Cutouts (the house out of the yard) are drawn in
+ * red, and the areas under them are filled with the hole showing.
  */
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapKeys } from "@crewtavo/core/imagery";
-import { lineLengthM, mToFt, polygonAreaM2, sqmToSqft, type Feature } from "@crewtavo/core/geo";
+import { cutOut, lineLengthM, mergePolygons, mToFt, polygonAreaM2, sqmToSqft, type Feature, type Position } from "@crewtavo/core/geo";
 import maplibregl, { type GeoJSONSource, type ImageSource, type LayerSpecification, type Map as MapLibreMap, type Marker, type StyleSpecification } from "maplibre-gl";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import {
@@ -24,17 +25,17 @@ import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { KeyError, OVERLAYS, overlaySource, rasterSource, type ImageryId, type OverlayId } from "./imagery";
 import type { Corners, LngLat } from "./planAlign";
 
-export type Tool = "polygon" | "linestring" | "point" | "select";
+export type Tool = "polygon" | "cutout" | "linestring" | "point" | "select";
 /** The geometry each drawing mode makes; anything else in its layer (closing and snapping points) is a guide. */
-const MODE_GEOMETRY: Record<string, string> = { polygon: "Polygon", linestring: "LineString", point: "Point" };
+const MODE_GEOMETRY: Record<string, string> = { polygon: "Polygon", cutout: "Polygon", linestring: "LineString", point: "Point" };
 
 /** A finished shape as the page sees it. */
 export interface Shape {
   id: string;
-  kind: "Area" | "Length" | "Count";
+  kind: "Area" | "Length" | "Count" | "Cutout";
   geometry: Feature["geometry"];
   color: string;
-  /** Square feet, feet, or 1 for a count. */
+  /** Square feet (a cutout's whole size), feet along the map, or 1 for a count. */
   value: number;
 }
 
@@ -47,6 +48,15 @@ export interface MeasureMapHandle {
   /** Stops the shape being drawn without keeping it. */
   cancel(): void;
   remove(id: string): void;
+  /** Makes an area a cutout or a cutout an area. Returns its new id (it moves to the end), or null. */
+  convert(id: string, kind: "Area" | "Cutout"): string | null;
+  /** Adds shapes drawn elsewhere (building outlines), as areas or cutouts. Returns their ids. */
+  add(polygons: number[][][][], kind: "Area" | "Cutout"): string[];
+  /**
+   * Building outlines from the street map's tiles already loaded for this view (OpenStreetMap data
+   * from OpenFreeMap), as Polygon coordinates; null when none are loaded (street names off, say).
+   */
+  buildings(): Position[][][] | null;
   clear(): void;
   select(id: string): void;
   fitShapes(): void;
@@ -76,7 +86,10 @@ export interface MeasureMapProps {
   /** Bump to load the imagery again (after it failed). */
   imageryRevision?: number;
   keys: MapKeys;
+  /** Each shape's name for its label on the map. */
   labels: Record<string, string>;
+  /** Sizes for the labels when they differ from the shape's own: areas after cutouts, what each cutout took out, roof edges at true length. */
+  values?: Record<string, number>;
   showStreetNames: boolean;
   /** Slope and contours, on top of the imagery and under the drawing. */
   overlays: OverlayId[];
@@ -96,8 +109,9 @@ const PALETTE = ["#22c55e", "#f59e0b", "#38bdf8", "#f472b6", "#a78bfa", "#facc15
 const OPENFREEMAP = "https://tiles.openfreemap.org/styles/liberty";
 const GLYPHS = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
 const LABEL_FONT = ["Noto Sans Bold"];
+const CUT_COLOR = "#ef4444";
 
-const kindOf = (type: string): Shape["kind"] => (type === "Polygon" ? "Area" : type === "LineString" ? "Length" : "Count");
+const kindOf = (mode: string, type: string): Shape["kind"] => (mode === "cutout" ? "Cutout" : type === "Polygon" ? "Area" : type === "LineString" ? "Length" : "Count");
 
 export function shapeValue(geometry: Feature["geometry"]): number {
   if (!geometry) return 0;
@@ -106,20 +120,24 @@ export function shapeValue(geometry: Feature["geometry"]): number {
   return 1;
 }
 
-/** Names for unnamed shapes, numbered within their kind: Area 1, Area 2, Line 1, Count 1. */
-export function defaultNames(shapes: Array<Pick<Shape, "id" | "kind">>): Record<string, string> {
+/**
+ * Names for unnamed shapes, numbered within their kind: Area 1, Area 2, Cutout 1, Line 1, Count 1.
+ * A line marked as a roof edge is named for it: Eave 1, Rake 1.
+ */
+export function defaultNames(shapes: Array<Pick<Shape, "id" | "kind"> & { edge?: string | null }>): Record<string, string> {
   const seen: Record<string, number> = {};
   return Object.fromEntries(shapes.map((s) => {
-    const word = s.kind === "Length" ? "Line" : s.kind;
+    const word = s.kind === "Length" && s.edge ? s.edge[0].toUpperCase() + s.edge.slice(1) : s.kind === "Length" ? "Line" : s.kind;
     seen[word] = (seen[word] ?? 0) + 1;
     return [s.id, `${word} ${seen[word]}`];
   }));
 }
 /** A name we made up rather than one someone typed (so reopening a drawing renumbers it). */
-export const isDefaultName = (name: string) => /^(Area|Line|Length|Count) \d+$/.test(name.trim());
+export const isDefaultName = (name: string) => /^(Area|Cutout|Line|Length|Count|Eave|Rake|Ridge|Hip|Valley) \d+$/.test(name.trim());
 
 export function formatShapeValue(kind: Shape["kind"], value: number): string {
   const n = (v: number, d = 0) => v.toLocaleString(undefined, { maximumFractionDigits: d });
+  if (kind === "Cutout") return `−${n(value)} sq ft`;
   if (kind === "Area") return value >= 43_560 ? `${n(value)} sq ft · ${n(value / 43_560, 2)} ac` : `${n(value)} sq ft`;
   if (kind === "Length") return `${n(value, value < 100 ? 1 : 0)} ft`;
   return "";
@@ -160,6 +178,51 @@ function labelPoint(geometry: Feature["geometry"]): [number, number] | null {
     return [ox + x / (3 * a), oy + y / (3 * a)];
   }
   return null;
+}
+
+/**
+ * Where an area's label sits once cutouts have taken some of it: its middle when nothing came out
+ * of the middle, else the spot in its biggest piece farthest from any edge, so the label sits in the
+ * yard rather than on the house (a grid search is plenty at this size).
+ */
+function labelInside(polygons: number[][][][]): [number, number] | null {
+  const pieces = polygons.filter((p) => p[0]?.length >= 4).map((p) => ({ p, a: polygonAreaM2(p) })).sort((x, y) => y.a - x.a);
+  const piece = pieces[0]?.p;
+  if (!piece) return null;
+  const inRing = (r: number[][], x: number, y: number) => {
+    let inside = false;
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      if (r[i][1] > y !== r[j][1] > y && x < ((r[j][0] - r[i][0]) * (y - r[i][1])) / (r[j][1] - r[i][1]) + r[i][0]) inside = !inside;
+    }
+    return inside;
+  };
+  const inside = (x: number, y: number) => inRing(piece[0], x, y) && !piece.slice(1).some((hole) => inRing(hole, x, y));
+  const middle = labelPoint({ type: "Polygon", coordinates: [piece[0]] });
+  if (middle && piece.length === 1 && inside(...middle)) return middle;
+  const [[w, s], [e, n]] = boundsOf([{ geometry: { type: "Polygon", coordinates: piece } }])!;
+  const k = Math.cos((((s + n) / 2) * Math.PI) / 180); // longitude degrees are shorter
+  const edgeDistance = (x: number, y: number) => {
+    let best = Infinity;
+    for (const r of piece) {
+      for (let i = 1; i < r.length; i++) {
+        const [ax, ay, bx, by] = [r[i - 1][0] * k, r[i - 1][1], r[i][0] * k, r[i][1]];
+        const t = Math.max(0, Math.min(1, ((x * k - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2 || 1)));
+        best = Math.min(best, Math.hypot(x * k - (ax + t * (bx - ax)), y - (ay + t * (by - ay))));
+      }
+    }
+    return best;
+  };
+  let spot: { at: [number, number]; d: number } | null = null;
+  const steps = 16;
+  for (let i = 0; i <= steps; i++) {
+    for (let j = 0; j <= steps; j++) {
+      const [x, y] = [w + ((e - w) * i) / steps, s + ((n - s) * j) / steps];
+      if (!inside(x, y)) continue;
+      const d = edgeDistance(x, y);
+      if (!spot || d > spot.d) spot = { at: [x, y], d };
+    }
+  }
+  return spot?.at ?? middle;
 }
 
 function boundsOf(shapes: Array<{ geometry: Feature["geometry"] }>): [[number, number], [number, number]] | null {
@@ -217,6 +280,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     return c;
   };
   const styleColor = (feature: GeoJSONStoreFeatures) => colorOf(String(feature.id)) as HexColor;
+  /** Fill while a shape is being drawn, and after (Terra Draw asks for each shape). */
+  const drawingFill = (drawing: number, done = 0) => (feature: GeoJSONStoreFeatures) => (feature.properties.currentlyDrawing ? drawing : done);
 
   // ----- Map and drawing, once ---------------------------------------------------------------
   useEffect(() => {
@@ -229,7 +294,11 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         version: 8,
         glyphs: GLYPHS,
         ...(streets?.sprite ? { sprite: streets.sprite } : {}),
-        sources: { ...(streets?.sources ?? {}), "measure-labels": { type: "geojson", data: { type: "FeatureCollection", features: [] } } },
+        sources: {
+          ...(streets?.sources ?? {}),
+          "measure-labels": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "measure-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+        },
         layers: [
           { id: "background", type: "background", paint: { "background-color": "#d9ded9" } },
           ...(streets?.layers ?? []).map((l) => ({ ...l, layout: { ...(l.layout ?? {}), visibility: "none" } }) as LayerSpecification),
@@ -287,14 +356,20 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         const draw = new TerraDraw({
           adapter: new TerraDrawMapLibreGLAdapter({ map: map!, coordinatePrecision: 9 }),
           modes: [
+            // A finished area's fill is the measure-fill layer, so a cutout shows as a hole in it.
             new TerraDrawPolygonMode({
               snapping: { toCoordinate: true },
-              styles: { fillColor: styleColor, fillOpacity: 0.28, outlineColor: styleColor, outlineWidth: 3, closingPointColor: "#ffffff", closingPointWidth: 6, closingPointOutlineColor: "#0f2a35", closingPointOutlineWidth: 2 },
+              styles: { fillColor: styleColor, fillOpacity: drawingFill(0.28), outlineColor: styleColor, outlineWidth: 3, closingPointColor: "#ffffff", closingPointWidth: 6, closingPointOutlineColor: "#0f2a35", closingPointOutlineWidth: 2 },
+            }),
+            new TerraDrawPolygonMode({
+              modeName: "cutout",
+              snapping: { toCoordinate: true },
+              styles: { fillColor: CUT_COLOR, fillOpacity: drawingFill(0.22, 0.1), outlineColor: CUT_COLOR, outlineWidth: 3, closingPointColor: "#ffffff", closingPointWidth: 6, closingPointOutlineColor: "#0f2a35", closingPointOutlineWidth: 2 },
             }),
             new TerraDrawLineStringMode({ snapping: { toCoordinate: true }, styles: { lineStringColor: styleColor, lineStringWidth: 4, closingPointColor: "#ffffff", closingPointWidth: 6 } }),
             new TerraDrawPointMode({ styles: { pointColor: styleColor, pointWidth: 7, pointOutlineColor: "#ffffff", pointOutlineWidth: 2 } }),
             new TerraDrawSelectMode({
-              flags: { polygon: editable, linestring: editable, point: { feature: { draggable: true } } },
+              flags: { polygon: editable, cutout: editable, linestring: editable, point: { feature: { draggable: true } } },
               styles: { selectionPointColor: "#ffffff", selectionPointOutlineColor: "#0f2a35", selectionPointWidth: 6, selectionPointOutlineWidth: 2, midPointColor: "#0f2a35", midPointOutlineColor: "#ffffff", midPointWidth: 4 },
             }),
           ],
@@ -303,6 +378,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         draw.start();
         draw.setMode(toolRef.current);
         drawRef.current = draw;
+        // Under Terra Draw's own layers, so corners and outlines stay on top.
+        map!.addLayer({ id: "measure-fill", type: "fill", source: "measure-fill", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.28 } }, map!.getLayer("td-polygon") ? "td-polygon" : undefined);
         map!.addLayer({
           id: "measure-labels",
           type: "symbol",
@@ -362,13 +439,28 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     for (const f of draw.getSnapshot()) {
       if (!f.geometry || MODE_GEOMETRY[String(f.properties.mode)] !== f.geometry.type) continue;
       const geometry = f.geometry as Feature["geometry"];
-      const shape: Shape = { id: String(f.id), kind: kindOf(f.geometry.type), geometry, color: colorOf(String(f.id)), value: shapeValue(geometry) };
+      const kind = kindOf(String(f.properties.mode), f.geometry.type);
+      const shape: Shape = { id: String(f.id), kind, geometry, color: kind === "Cutout" ? CUT_COLOR : colorOf(String(f.id)), value: shapeValue(geometry) };
       if (f.properties.currentlyDrawing) drawing = shape;
       else shapes.push(shape);
     }
     shapesRef.current = shapes;
     live.current.onShapes(shapes, drawing);
+    paintFill();
     paintLabels();
+  }
+
+  /** Each finished area's fill, with the cutouts over it left out. */
+  function paintFill() {
+    const source = mapRef.current?.getSource("measure-fill") as GeoJSONSource | undefined;
+    if (!source) return;
+    const cuts = shapesRef.current.filter((s) => s.kind === "Cutout" && s.geometry).map((s) => s.geometry!);
+    const features = shapesRef.current.flatMap((s) =>
+      s.kind === "Area" && s.geometry
+        ? [{ type: "Feature" as const, geometry: { type: "MultiPolygon" as const, coordinates: cutOut(s.geometry, cuts) }, properties: { color: s.color } }]
+        : [],
+    );
+    source.setData({ type: "FeatureCollection", features });
   }
 
   function paintLabels() {
@@ -376,11 +468,13 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     if (!source) return;
     let count = 0;
     const names = defaultNames(shapesRef.current);
+    const cuts = shapesRef.current.filter((s) => s.kind === "Cutout" && s.geometry).map((s) => s.geometry!);
     const features = shapesRef.current.flatMap((s) => {
-      const at = labelPoint(s.geometry);
+      // An area with a hole in its middle (the house) gets its label off to the side, in the yard.
+      const at = s.kind === "Area" && cuts.length && s.geometry ? labelInside(cutOut(s.geometry, cuts) as number[][][][]) : labelPoint(s.geometry);
       if (!at) return [];
       const name = live.current.labels[s.id]?.trim() || names[s.id];
-      const text = s.kind === "Count" ? String(++count) : `${name}\n${formatShapeValue(s.kind, s.value)}`;
+      const text = s.kind === "Count" ? String(++count) : `${name}\n${formatShapeValue(s.kind, live.current.values?.[s.id] ?? s.value)}`;
       return [{ type: "Feature" as const, geometry: { type: "Point" as const, coordinates: at }, properties: { text, kind: s.kind } }];
     });
     source.setData({ type: "FeatureCollection", features });
@@ -428,7 +522,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
 
   /** The first layer above the imagery that stays on top: street names, else the drawing. */
   function drawingBelow(map: MapLibreMap) {
-    return nameLayers.current.find((l) => map.getLayer(l)) ?? (map.getLayer("td-polygon") ? "td-polygon" : "measure-labels");
+    return nameLayers.current.find((l) => map.getLayer(l)) ?? ["measure-fill", "td-polygon"].find((l) => map.getLayer(l)) ?? "measure-labels";
   }
 
   function applyPlan() {
@@ -468,7 +562,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   useEffect(() => applyStreetNames(props.showStreetNames), [props.showStreetNames]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => applyOverlays(props.overlays), [props.overlays.join()]);
-  useEffect(paintLabels, [props.labels]);
+  useEffect(paintLabels, [props.labels, props.values]);
 
   useImperativeHandle(ref, () => ({
     setTool(tool) {
@@ -497,6 +591,51 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       if (draw.getMode() === "select") draw.deselectFeature(id);
       draw.removeFeatures([id]);
       live.current.onSelect(null);
+    },
+    convert(id, kind) {
+      const draw = drawRef.current;
+      const feature = draw?.hasFeature(id) ? draw.getSnapshotFeature(id) : undefined;
+      if (!draw || !feature || feature.geometry.type !== "Polygon") return null;
+      const mode = kind === "Cutout" ? "cutout" : "polygon";
+      if (feature.properties.mode === mode) return id;
+      // Terra Draw keeps which mode drew a shape to itself, so it's drawn again in the other one.
+      if (draw.getMode() === "select") draw.deselectFeature(id);
+      const next = String(draw.getFeatureId());
+      draw.removeFeatures([id]);
+      const [result] = draw.addFeatures([{ type: "Feature", id: next, geometry: feature.geometry, properties: { mode } } as GeoJSONStoreFeatures]);
+      if (result?.valid === false) {
+        draw.addFeatures([feature]);
+        return null;
+      }
+      live.current.onSelect(null);
+      report();
+      return next;
+    },
+    add(polygons, kind) {
+      const draw = drawRef.current;
+      if (!draw) return [];
+      const mode = kind === "Cutout" ? "cutout" : "polygon";
+      // Terra Draw refuses points finer than the 9 decimals it keeps (map tiles give about 15).
+      const round = (n: number) => Math.round(n * 1e9) / 1e9;
+      const rows = polygons.map((p) => ({ type: "Feature", id: String(draw.getFeatureId()), geometry: { type: "Polygon", coordinates: p.map((ring) => ring.map(([x, y]) => [round(x), round(y)])) }, properties: { mode } }) as GeoJSONStoreFeatures);
+      const results = draw.addFeatures(rows);
+      report();
+      return rows.filter((_, i) => results[i]?.valid !== false).map((r) => String(r.id));
+    },
+    buildings() {
+      const map = mapRef.current;
+      if (!map?.getSource("street-openmaptiles")) return null;
+      const features = map.querySourceFeatures("street-openmaptiles", { sourceLayer: "building" });
+      if (!features.length) return null;
+      // A building crossing a tile edge comes back in pieces (and twice near the edge): join them.
+      const byId = new Map<string, Position[][][]>();
+      features.forEach((f, i) => {
+        const g = f.geometry;
+        const parts = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+        const key = f.id === undefined ? `#${i}` : String(f.id);
+        byId.set(key, [...(byId.get(key) ?? []), ...(parts as Position[][][])]);
+      });
+      return [...byId.values()].flatMap((parts) => (parts.length > 1 ? mergePolygons(parts) : parts));
     },
     clear() {
       drawRef.current?.clear();
@@ -534,7 +673,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         if (!f.geometry || !["Polygon", "LineString", "Point"].includes(f.geometry.type)) return [];
         const id = String(draw.getFeatureId());
         ids.push(id);
-        const mode = f.geometry.type === "Polygon" ? "polygon" : f.geometry.type === "LineString" ? "linestring" : "point";
+        const mode = f.geometry.type === "Polygon" ? (f.properties?.cutout === true ? "cutout" : "polygon") : f.geometry.type === "LineString" ? "linestring" : "point";
         return [{ type: "Feature", id, geometry: f.geometry, properties: { mode } } as GeoJSONStoreFeatures];
       });
       const results = draw.addFeatures(rows);

@@ -78,7 +78,8 @@ async function hubDrawings(admin: ReturnType<typeof adminClient>, companyId: str
     id: m.id,
     title: m.title,
     has_picture: Boolean(m.snapshot_path),
-    sections: ((m.sections ?? []) as Array<{ label: string; kind: string; value: number; unit: string }>).map((s) => ({ label: s.label, kind: s.kind, value: s.value, unit: s.unit })),
+    // A roof section's pitch, so one at another pitch (a porch) can say so.
+    sections: ((m.sections ?? []) as Array<{ label: string; kind: string; value: number; unit: string; pitch?: string | null }>).map((s) => ({ label: s.label, kind: s.kind, value: s.value, unit: s.unit, ...(s.kind === "Area" && s.pitch ? { pitch: s.pitch } : {}) })),
     total_area_sqft: m.total_area_sqft,
     total_length_ft: m.total_length_ft,
     roofing_squares: m.roofing_squares,

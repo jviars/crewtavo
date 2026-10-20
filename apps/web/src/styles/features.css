@@ -380,6 +380,51 @@ a.field-card:active { transform: scale(0.99); }
 .measure-extra summary::-webkit-details-marker { display: none; }
 .measure-extra summary strong::after { content: " ›"; color: var(--text-3); }
 .measure-extra[open] summary strong::after { content: " ⌄"; }
+.measure-shape-body { display: grid; gap: 6px; min-width: 0; }
+.measure-shape-more { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.measure-shape .num[data-cut] { color: var(--danger); }
+.measure-shape[data-kind="Cutout"] .measure-swatch { background-image: repeating-linear-gradient(135deg, transparent 0 3px, rgba(255, 255, 255, 0.75) 3px 5px); }
+.measure-shape .btn-icon[aria-pressed="true"] { color: var(--danger); }
+.measure-edge { width: auto; height: 28px; padding-top: 0; padding-bottom: 0; font-size: 12px; }
+.measure-pitch-chip { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.measure-pitch-chip:hover { background: var(--fill-3); }
+.measure-pitch-chip:focus-visible { outline: none; box-shadow: var(--ring); }
+.measure-pitch-chip[data-own] { background: var(--info-tint); color: var(--info); }
+.measure-buildings { flex-wrap: wrap; gap: 6px 10px; padding: 10px 16px; }
+.measure-breakdown { display: grid; gap: 2px; }
+.measure-breakdown-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.measure-breakdown-row:hover { background: var(--fill-2); }
+.measure-breakdown-row:focus-visible { outline: none; box-shadow: var(--ring); }
+.measure-edges { padding: 10px 12px; border-top: 0; border-radius: 10px; }
+
+/* Roof pitch: the picker and the phone and photo gauges (measure/RoofPitch.tsx) */
+.pitch-picker { display: grid; gap: 8px; }
+.pitch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 6px; }
+.pitch-grid button { display: grid; justify-items: center; align-content: center; gap: 3px; min-height: 48px; padding: 6px 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pitch-grid button:hover { border-color: var(--border-strong); color: var(--ink); }
+.pitch-grid button:focus-visible { outline: none; box-shadow: var(--ring); }
+.pitch-grid button[aria-pressed="true"] { border-color: var(--green-solid); background: var(--green-tint); color: var(--green-dark); }
+.pitch-grid .pitch-inherit { grid-column: span 2; }
+.pitch-grid .pitch-inherit small { color: var(--text-3); font-weight: 600; }
+.roof-glyph { fill: currentColor; opacity: 0.85; }
+.pitch-other { display: flex; align-items: center; gap: 8px; }
+.pitch-other .input { max-width: 200px; height: 34px; }
+.pitch-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pitch-reading { display: grid; justify-items: center; gap: 6px; padding: 18px 0; }
+.pitch-reading strong { font-size: 40px; line-height: 1; }
+.pitch-reading .roof-glyph { color: var(--green); }
+.pitch-photo { position: relative; margin: 0 auto; overflow: hidden; border-radius: 10px; background: #000; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pitch-photo img, .pitch-photo svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.pitch-photo line { stroke-width: 3; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.pitch-photo line[data-line="roof"], .pitch-handle[data-line="roof"] { stroke: #f97316; border-color: #f97316; }
+.pitch-photo line[data-line="level"], .pitch-handle[data-line="level"] { stroke: #2563eb; border-color: #2563eb; }
+.pitch-handle { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; padding: 0; border: 3px solid; border-radius: 50%; background: rgba(255, 255, 255, 0.25); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); cursor: grab; touch-action: none; }
+.pitch-handle:focus-visible { outline: none; box-shadow: var(--ring); }
+.lidar-progress { display: flex; align-items: center; gap: 10px; padding: 14px 0; font-weight: 600; }
+.lidar-sections { display: grid; gap: 4px; }
+.lidar-section { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--fill); }
+.lidar-section .roof-glyph { flex: none; color: var(--green); }
+.lidar-planes { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 2px; }
 
 .measure-help-steps { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
 .measure-help-steps li { display: flex; gap: 12px; align-items: flex-start; }

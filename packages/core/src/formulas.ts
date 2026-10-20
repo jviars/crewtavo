@@ -19,6 +19,8 @@ export class FormulaError extends Error {
  */
 export const FORMULA_VARIABLES = [
   "area_sqft", "area_sqyd", "length_ft", "count", "depth_in", "pitch_factor", "waste", "waste_pct",
+  // Lines marked as roof edges, at true length (ROOF_EDGES in geo.ts).
+  "eave_ft", "rake_ft", "ridge_ft", "hip_ft", "valley_ft",
 ] as const;
 export type FormulaVariable = (typeof FORMULA_VARIABLES)[number];
 

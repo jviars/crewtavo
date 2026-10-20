@@ -14,7 +14,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { ImportPriceListDialog } from "./ImportPriceList";
 
-const SAMPLE = { area_sqft: 1000, area_sqyd: 111.1, length_ft: 100, count: 4, depth_in: 2, pitch_factor: 1.12, waste: 0.1, waste_pct: 10 };
+const SAMPLE = { area_sqft: 1000, area_sqyd: 111.1, length_ft: 100, count: 4, depth_in: 2, pitch_factor: 1.12, waste: 0.1, waste_pct: 10, eave_ft: 120, rake_ft: 80, ridge_ft: 40, hip_ft: 0, valley_ft: 20 };
 
 export function PriceList() {
   const session = useSession();
@@ -85,7 +85,7 @@ export function PriceList() {
       {importing && <ImportPriceListDialog existing={(services.data ?? []).map((x) => x.name)} onClose={() => setImporting(false)} />}
       <details className="muted small">
         <summary style={{ cursor: "pointer", fontWeight: 600 }}>Using formulas</summary>
-        <p style={{ margin: "6px 0 0" }}>A formula fills in the quantity from a map measurement, for example <code>area_sqft * 1.1</code>. You can use area_sqft (square feet), area_sqyd (square yards), length_ft (feet), count, depth_in (inches), pitch_factor and waste.</p>
+        <p style={{ margin: "6px 0 0" }}>A formula fills in the quantity from a map measurement, for example <code>area_sqft * 1.1</code>. You can use area_sqft (square feet), area_sqyd (square yards), length_ft (feet), count, depth_in (inches), pitch_factor and waste, and for roofs eave_ft, rake_ft, ridge_ft, hip_ft and valley_ft (feet of lines marked as those edges on the map).</p>
       </details>
       {!rows.length ? (
         <div className="card"><EmptyState icon="list" title={term ? "No services match" : "No services yet"} action={canEdit && !term && <Button variant="primary" icon="plus" onClick={() => add.mutate()}>Add your first service</Button>} /></div>

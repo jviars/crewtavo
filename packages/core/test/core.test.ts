@@ -11,7 +11,14 @@ import {
   FORMULA_VARIABLES,
   FormulaError,
   checkCondition,
+  cutOut,
   describeRuleSentence,
+  drawingPitchFactor,
+  drawingSquares,
+  edgeLengths,
+  hipFactor,
+  normalizePitch,
+  pitchProblem,
   evaluateConditions,
   renderTemplate,
   validateRule,
@@ -92,6 +99,92 @@ describe("geo", () => {
       expect(() => pitchFactor(bad), bad).toThrow(RangeError);
     }
     expect(() => roofingSquares(2000, "90deg")).toThrow(RangeError);
+  });
+
+  it("reads pitches the ways roofers write them", () => {
+    for (const same of ["6/12", "6-12", "6:12", "6 in 12", "6 on 12", "6in12", "6", "6/12 pitch", " 6 / 12 ", "8/16"]) {
+      expect(pitchFactor(same), same).toBeCloseTo(1.118, 3);
+      expect(normalizePitch(same), same).toBe("6/12");
+    }
+    expect(pitchFactor("26.565°")).toBeCloseTo(1.118, 3);
+    expect(pitchFactor("26.565 degrees")).toBeCloseTo(1.118, 3);
+    expect(pitchFactor("flat")).toBe(1);
+    expect(normalizePitch("")).toBe("");
+    expect(normalizePitch("6.5-12")).toBe("6.5/12");
+    // A hip on a 12/12 roof: rises 12 for every 17 across, so about 1.22 times its length from above.
+    expect(hipFactor("12/12")).toBeCloseTo(Math.sqrt(1.5), 6);
+    expect(() => normalizePitch("6/12/12")).toThrow(RangeError);
+  });
+
+  it("takes cutouts out of the areas under them", () => {
+    const inset = (f: number, at = 0.25) => RECT.map((p) => [RECT[0][0] + DLNG * (at + (p[0] - RECT[0][0]) / DLNG * f), RECT[0][1] + DLAT * (at + (p[1] - RECT[0][1]) / DLAT * f)]);
+    const yard = { type: "Polygon", coordinates: [RECT] };
+    const house = { type: "Polygon", coordinates: [inset(0.5)] }; // a quarter of the yard, inside it
+    const summary = summarizeFeatureCollection({
+      type: "FeatureCollection",
+      features: [
+        { type: "Feature", id: "y", properties: { label: "Yard" }, geometry: yard },
+        { type: "Feature", id: "h", properties: { label: "House", cutout: true }, geometry: house },
+      ],
+    });
+    const [y, h] = summary.sections;
+    expect(h.kind).toBe("Cutout");
+    expect(y.uncut_value! - 5000).toBeLessThan(50);
+    expect(y.value / y.uncut_value!).toBeCloseTo(0.75, 3);
+    expect(h.value / y.uncut_value!).toBeCloseTo(0.25, 3);
+    expect(summary.total_area_sqft).toBe(y.value);
+
+    // Hanging off the yard's edge, only the part over the yard comes off.
+    const over = { type: "Polygon", coordinates: [inset(0.5, 0.75)] }; // half of it is past the edge
+    const half = summarizeFeatureCollection({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: yard }, { type: "Feature", properties: { cutout: true }, geometry: over }] });
+    expect(half.sections[0].value / half.sections[0].uncut_value!).toBeCloseTo(1 - 0.0625, 3);
+    expect(half.sections[1].value / half.sections[0].uncut_value!).toBeCloseTo(0.0625, 3);
+    // Two areas under one cutout both lose it; a cutout over nothing takes nothing.
+    const two = summarizeFeatureCollection({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: yard }, { type: "Feature", properties: {}, geometry: yard }, { type: "Feature", properties: { cutout: true }, geometry: house }] });
+    expect(two.total_area_sqft / (2 * y.uncut_value!)).toBeCloseTo(0.75, 3);
+    const alone = summarizeFeatureCollection({ type: "FeatureCollection", features: [{ type: "Feature", properties: { cutout: true }, geometry: house }] });
+    expect(alone.sections[0].value).toBe(0);
+    expect(alone.total_area_sqft).toBe(0);
+    // A hole drawn as a hole works the same, and cutOut() hands back the yard with a hole for the map.
+    expect(cutOut(yard, [house])[0]).toHaveLength(2);
+    expect(cutOut(yard, [])).toEqual([[RECT]]);
+  });
+
+  it("works out squares with a pitch for each roof section", () => {
+    const area = (pitch?: string) => ({ type: "Feature" as const, properties: pitch ? { pitch } : {}, geometry: { type: "Polygon", coordinates: [RECT] } });
+    const flat = summarizeFeatureCollection({ type: "FeatureCollection", features: [area()] });
+    const sqft = flat.total_area_sqft;
+    expect(drawingSquares(flat, null)).toBeNull();
+    expect(drawingSquares(flat, "")).toBeNull();
+    expect(drawingSquares(flat, "6/12", 10)).toBeCloseTo((sqft * 1.118 * 1.1) / 100, 2);
+    const mixed = summarizeFeatureCollection({ type: "FeatureCollection", features: [area(), area("3/12")] });
+    // The first follows the drawing's 6/12; the porch is 3/12.
+    expect(drawingSquares(mixed, "6/12")).toBeCloseTo((sqft * pitchFactor("6/12") + sqft * pitchFactor("3/12")) / 100, 2);
+    expect(drawingPitchFactor(mixed, "6/12")).toBeCloseTo((pitchFactor("6/12") + pitchFactor("3/12")) / 2, 4);
+    // With only the porch pitched, the rest counts as flat.
+    expect(drawingSquares(mixed, null)).toBeCloseTo((sqft + sqft * pitchFactor("3/12")) / 100, 2);
+    expect(pitchProblem(mixed, "6/12")).toBeNull();
+    expect(pitchProblem(mixed, "steep")).toBe("Roof pitch should look like 7/12.");
+    const bad = summarizeFeatureCollection({ type: "FeatureCollection", features: [{ ...area("lots"), properties: { pitch: "lots", label: "Porch" } }] });
+    expect(pitchProblem(bad, "6/12")).toBe("The pitch for Porch should look like 7/12.");
+  });
+
+  it("stretches rakes, hips and valleys by the pitch", () => {
+    const line = (edge: string | undefined, pitch?: string) => ({ type: "Feature" as const, properties: { edge, pitch }, geometry: { type: "LineString", coordinates: [RECT[0], RECT[1]] } });
+    const summary = summarizeFeatureCollection({ type: "FeatureCollection", features: [line("eave"), line("rake"), line("hip"), line("ridge"), line("rake", "12/12"), line(undefined), line("gutter")] }, { pitch: "6/12" });
+    const [eave, rake, hip, ridge, steep, plain, unknown] = summary.sections;
+    expect(eave.edge).toBe("eave");
+    expect(eave.plan_value).toBeUndefined();
+    expect(rake.value / rake.plan_value!).toBeCloseTo(pitchFactor("6/12"), 3);
+    expect(hip.value / hip.plan_value!).toBeCloseTo(hipFactor("6/12"), 3);
+    expect(ridge.value).toBe(eave.value);
+    expect(steep.value / steep.plan_value!).toBeCloseTo(Math.SQRT2, 3);
+    expect(plain.edge).toBeUndefined();
+    expect(unknown.edge).toBeUndefined();
+    const edges = edgeLengths(summary);
+    expect(edges.rake).toBeCloseTo(rake.value + steep.value, 1);
+    expect(edges.valley).toBe(0);
+    expect(summary.total_length_ft).toBeCloseTo(summary.sections.reduce((t, s) => t + s.value, 0), 1);
   });
 
   it("summarizes a drawing", () => {
