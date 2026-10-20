@@ -11,7 +11,7 @@ import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
 import { TagInput } from "@/components/ui/TagInput";
 import { ApiError, supabase, unwrap } from "@/lib/api";
-import { htmlToText } from "@/lib/html";
+import { hasContent, htmlToText } from "@/lib/html";
 import { useSession } from "@/lib/session";
 import { ROLE_LABELS, useCategories, useIsEditor } from "./kbData";
 
@@ -63,7 +63,7 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
         titleRef.current?.focus();
         throw new Error("Give the guide a title.");
       }
-      if (draft.required && draft.status === "published" && !text.current.trim()) throw new Error("Add some content before making this required reading.");
+      if (draft.required && draft.status === "published" && !hasContent(draft.html)) throw new Error("Add some content before making this required reading.");
       const row = {
         title,
         category_id: draft.category_id || null,

@@ -23,5 +23,6 @@ export * from "./roles";
 export * from "./routing";
 export * from "./terms";
 export * from "./time";
+export * from "./video";
 export * from "./weather";
 export type { Database, Json, Tables, TablesInsert, TablesUpdate, Enums } from "./database.types";
