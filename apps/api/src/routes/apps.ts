@@ -3,13 +3,13 @@ import { ADMINS } from "@crewtavo/core";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
-import type { AppEnv, Env } from "../env";
+import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { runInBackground } from "../lib/background";
 import { randomId, signToken, verifyToken } from "../lib/crypto";
 import { appUrl, dbError, HttpError, isoDate, must, readJson } from "../lib/http";
-import { adminClient, type Db } from "../lib/supabase";
-import { complete } from "../services/ai";
+import { adminClient } from "../lib/supabase";
+import { companyAnthropicKey, complete } from "../services/ai";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { CATALOG, catalogEntry, isCalendarApp, OAUTH, UntrustedServerError, type Provider } from "../integrations/registry";
@@ -210,11 +210,6 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
 // AI helpers (use the company's own Anthropic key when it has one)
 // ---------------------------------------------------------------------------------------------
 
-export async function companyAnthropicKey(env: Env, admin: Db, companyId: string): Promise<string | null> {
-  const secret = await loadSecret(env, admin, companyId, "anthropic").catch(() => null);
-  return secret?.api_key ?? null;
-}
-
 apps.post("/ai/rewrite", requireUser, requireCompany(), async (c) => {
   const body = await readJson(
     c,
@@ -238,7 +233,8 @@ apps.post("/ai/rewrite", requireUser, requireCompany(), async (c) => {
 /** Answer a question using only the company's SOPs, with numbered citations. */
 apps.post("/kb/ask", requireUser, requireCompany(), async (c) => {
   const body = await readJson(c, z.object({ question: z.string().trim().min(3).max(500) }));
-  const { data, error } = await c.var.db.rpc("search_sops", { p_company: c.var.companyId, p_query: body.question, p_limit: 4 });
+  // Guides with any of the question's words, best matches first: a whole question rarely has every word in one guide.
+  const { data, error } = await c.var.db.rpc("search_sops", { p_company: c.var.companyId, p_query: body.question, p_limit: 4, p_any: true });
   if (error) throw dbError(error);
   const hits = (data ?? []) as Array<{ id: string; title: string; body_text: string }>;
   if (!hits.length) return c.json({ answer: "I couldn't find a guide that covers that. Try different words, or ask the office.", sources: [] });

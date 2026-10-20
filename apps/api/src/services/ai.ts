@@ -4,7 +4,9 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import type { Env } from "../env";
+import { loadSecret } from "../integrations/tokens";
 import { HttpError } from "../lib/http";
+import type { Db } from "../lib/supabase";
 
 export interface CompleteOptions {
   system: string;
@@ -12,6 +14,12 @@ export interface CompleteOptions {
   effort?: "low" | "medium" | "high";
   maxTokens?: number;
   apiKey?: string | null;
+}
+
+/** The key a company added under Apps → Claude, if any. */
+export async function companyAnthropicKey(env: Env, admin: Db, companyId: string): Promise<string | null> {
+  const secret = await loadSecret(env, admin, companyId, "anthropic").catch(() => null);
+  return secret?.api_key ?? null;
 }
 
 export async function complete(env: Env, options: CompleteOptions): Promise<string> {

@@ -108,6 +108,8 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   const setup = phase === "waiting";
   const refresh = () => {
     for (const key of ["apps", "calendars", "google-calendars"]) queryClient.invalidateQueries({ queryKey: [key] });
+    // The company's own Anthropic key turns on Ask and the other AI buttons (lib/session.tsx).
+    if (app.id === "anthropic") session.refresh();
   };
   const connect = useMutation({
     mutationFn: () => api.post<{ authorization_url: string }>(`/apps/${app.id}/connect`),

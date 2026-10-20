@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { companyFeatures } from "../src/lib/api";
 import { parseCsv, toCsv } from "../src/lib/csv";
 import { bucketize, bucketizeShifted, bucketsFor, resolveRange } from "../src/features/finance/range";
 import { previousRange } from "@crewtavo/core/reports";
@@ -66,5 +67,20 @@ describe("csv", () => {
   it("defuses spreadsheet formulas but keeps negative numbers", () => {
     const csv = toCsv([{ a: "=HYPERLINK(1)", b: -250.5, c: "-12", d: "+1 540 555" }], ["a", "b", "c", "d"].map((k) => ({ key: k, label: k })));
     expect(csv.split("\r\n")[1]).toBe("'=HYPERLINK(1),-250.5,-12,'+1 540 555");
+  });
+});
+
+describe("what's on for a business", () => {
+  const off = { ai: false, payments: false, email: false, sms: false, roofInsights: false, devMail: true };
+
+  it("turns AI on with the business's own Anthropic key, without one on the server", () => {
+    expect(companyFeatures(off, { ai_connected: true }).ai).toBe(true);
+    expect(companyFeatures(off, {}).ai).toBe(false);
+    expect(companyFeatures({ ...off, ai: true }, { ai_connected: false }).ai).toBe(true);
+  });
+
+  it("turns email on with the business's own mailbox, which also ends test mode", () => {
+    expect(companyFeatures(off, { email_connected: true })).toMatchObject({ email: true, devMail: false });
+    expect(companyFeatures(off, {})).toMatchObject({ email: false, devMail: true });
   });
 });
