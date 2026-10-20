@@ -15,7 +15,13 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { disconnect, loadConnections, setAccess, type AssistantConnection } from "./assistantConnections";
+import { assistantAppFor, disconnect, loadConnections, setAccess, type AssistantConnection } from "./assistantConnections";
+
+/** The assistants the signed-in person has connected; `poll` checks again every so many milliseconds. */
+export function useAssistantConnections(poll: number | false = false) {
+  const session = useSession();
+  return useQuery({ queryKey: ["assistant-connections", session.userId], queryFn: () => loadConnections(supabase()), refetchInterval: poll });
+}
 
 export function AssistantAccess() {
   const session = useSession();
@@ -81,9 +87,9 @@ export function AssistantAccess() {
 /**
  * The assistants this person has connected, with what each can change. Everyone has it in Settings
  * → AI assistants, whatever their role; owners and admins also see it on the Claude and ChatGPT
- * pages, under the steps to connect.
+ * pages, under the steps to connect, with only that app's own (`app`) and ones that are neither's.
  */
-export function ConnectedAssistants({ card = false }: { card?: boolean }) {
+export function ConnectedAssistants({ card = false, app }: { card?: boolean; app?: string }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const key = ["assistant-connections", session.userId];
@@ -95,7 +101,8 @@ export function ConnectedAssistants({ card = false }: { card?: boolean }) {
       : settings.assistants?.read_only === true
         ? `For now ${session.company.name} only lets assistants look things up, whatever you choose here.`
         : null;
-  const connections = useQuery({ queryKey: key, queryFn: () => loadConnections(supabase()) });
+  const connections = useAssistantConnections();
+  const shown = (connections.data ?? []).filter((c) => !app || (assistantAppFor(c.name) ?? app) === app);
   const [editing, setEditing] = useState<AssistantConnection | null>(null);
   const remove = useMutation({
     meta: { success: "Disconnected" },
@@ -117,11 +124,11 @@ export function ConnectedAssistants({ card = false }: { card?: boolean }) {
         <Skeleton height={52} radius={8} />
       ) : connections.error ? (
         <span className="muted small">{(connections.error as Error).message}</span>
-      ) : !connections.data.length ? (
+      ) : !shown.length ? (
         <span className="muted small">None yet. Once you connect one with the link above, it shows up here.</span>
       ) : (
         <div className="card" style={{ boxShadow: "none" }}>
-          {connections.data.map((c) => (
+          {shown.map((c) => (
             <div key={c.clientId} className="card-row" style={{ gap: 10, flexWrap: "wrap" }}>
               <span className="app-icon" data-size="sm" aria-hidden="true">
                 {c.logo ? <img src={c.logo} alt="" /> : <span className="app-icon-letter">{c.name.slice(0, 1)}</span>}

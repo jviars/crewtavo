@@ -103,14 +103,14 @@ export function ChatPage() {
   );
 }
 
-/** Chat is off: say so, and where to turn it on for those who can. */
+/** Chat is off: say so, and where to install it for those who can. */
 function ChatOff() {
   const session = useSession();
   const canTurnOn = hasRole(session, "admin") && can(session, "apps");
   return (
     <div className="card" style={{ margin: "24px auto", maxWidth: 560 }}>
-      <EmptyState icon="chat" title="Team chat is off" action={canTurnOn ? <Link className="btn btn-primary" to="/apps/team_chat">Turn it on in Apps</Link> : undefined}>
-        {canTurnOn ? "Channels for the whole team, each crew and the office, with photos and @mentions." : "Ask an owner or admin to turn on Team chat in Apps."}
+      <EmptyState icon="chat" title="Team chat is off" action={canTurnOn ? <Link className="btn btn-primary" to="/apps/team_chat">Install it from Apps</Link> : undefined}>
+        {canTurnOn ? "Channels for the whole team, each crew and the office, with photos and @mentions." : "Ask an owner or admin to install Team chat from Apps."}
       </EmptyState>
     </div>
   );

@@ -69,6 +69,9 @@ export const CATEGORY_LABELS: Record<AppRow["category"], string> = {
   Messaging: "Messaging",
 };
 
+/** An app's category on its own page: the built-in ones are simply Crewtavo's. */
+export const categoryName = (category: AppRow["category"]) => (category === "Team" ? "Crewtavo" : (CATEGORY_LABELS[category] ?? category));
+
 /** The row of related apps at the bottom of an app's page. */
 export const MORE_LABELS: Record<AppRow["category"], string> = {
   Team: "More built-in apps",
@@ -100,6 +103,8 @@ export interface AppInfo {
   /** Where to find a calendar's ICS link (calendar apps added by link). */
   steps?: string[];
   website: string;
+  /** Where Open goes once it's installed, when not the website: a page in Crewtavo, or the app itself. */
+  open?: string;
 }
 
 const CALENDAR_HIGHLIGHTS: AppInfo["highlights"] = [
@@ -122,8 +127,9 @@ export const APP_INFO: Record<string, AppInfo> = {
       { icon: "camera", title: "Photos and jobs", text: "Send photos from the job site and link a job so everyone opens the same one." },
     ],
     access: ["Show chat to the people on your team, by their role", "Keep messages and photos in your own Crewtavo, like everything else", "Turning it off hides chat and keeps every message"],
-    connectsWith: "Built into Crewtavo",
+    connectsWith: "Crewtavo",
     website: "https://crewtavo.com/docs/connections/team-chat/",
+    open: "/chat",
   },
   google_calendar: {
     developer: "Google",
@@ -148,6 +154,7 @@ export const APP_INFO: Record<string, AppInfo> = {
       "In Integrate calendar, copy the Secret address in iCal format.",
     ],
     website: "https://calendar.google.com/",
+    open: "/schedule",
   },
   zoho_calendar: {
     developer: "Zoho",
@@ -163,6 +170,7 @@ export const APP_INFO: Record<string, AppInfo> = {
       "Copy the private ICS link.",
     ],
     website: "https://www.zoho.com/calendar/",
+    open: "/schedule",
   },
   outlook_calendar: {
     developer: "Microsoft",
@@ -178,6 +186,7 @@ export const APP_INFO: Record<string, AppInfo> = {
       "Copy the ICS link (not the HTML one).",
     ],
     website: "https://outlook.office.com/calendar/",
+    open: "/schedule",
   },
   apple_calendar: {
     developer: "Apple",
@@ -193,6 +202,7 @@ export const APP_INFO: Record<string, AppInfo> = {
       "Tap Share Link, then Copy. (On a Mac or at icloud.com, the share button next to the calendar has the same option.)",
     ],
     website: "https://www.icloud.com/calendar/",
+    open: "/schedule",
   },
   ics_calendar: {
     developer: "Any calendar app",
@@ -207,6 +217,7 @@ export const APP_INFO: Record<string, AppInfo> = {
       "Copy the link that ends in .ics or starts with webcal://.",
     ],
     website: "https://en.wikipedia.org/wiki/ICalendar",
+    open: "/schedule",
   },
   anthropic: {
     developer: "Anthropic",
@@ -249,6 +260,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     access: ["Read your company's name", "Add customers, invoices and payments"],
     connectsWith: "Intuit sign-in",
     website: "https://quickbooks.intuit.com/",
+    open: "https://qbo.intuit.com/",
   },
   zoho_books: {
     developer: "Zoho",
@@ -263,6 +275,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     access: ["Read your organization's name", "Add contacts, invoices and payments"],
     connectsWith: "Zoho sign-in",
     website: "https://www.zoho.com/books/",
+    open: "https://books.zoho.com/",
   },
   stripe: {
     developer: "Stripe",
@@ -281,6 +294,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     ],
     connectsWith: "Key from Stripe",
     website: "https://stripe.com/",
+    open: "https://dashboard.stripe.com/",
   },
   twilio: {
     developer: "Twilio",
@@ -294,6 +308,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     access: ["Send texts from your number", "Receive replies"],
     connectsWith: "API key",
     website: "https://www.twilio.com/",
+    open: "/messages",
   },
 };
 

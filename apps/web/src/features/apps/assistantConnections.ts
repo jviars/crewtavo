@@ -17,6 +17,16 @@ export const CONNECTOR_STEPS: Record<string, string[]> = {
   chatgpt: ["In ChatGPT, open Settings, then Apps and connectors.", "With developer mode on, add a connector and paste the link above.", "Sign in with your Crewtavo account when ChatGPT asks."],
 };
 
+/**
+ * Which app's page an assistant belongs on, from the name it signed up with (Codex is OpenAI's, like
+ * ChatGPT). Others, like an editor someone connected, belong to neither and show on both.
+ */
+export function assistantAppFor(name: string): "anthropic" | "chatgpt" | null {
+  if (/claude|anthropic/i.test(name)) return "anthropic";
+  if (/chatgpt|openai|codex|\bgpt/i.test(name)) return "chatgpt";
+  return null;
+}
+
 export interface AssistantConnection {
   clientId: string;
   name: string;

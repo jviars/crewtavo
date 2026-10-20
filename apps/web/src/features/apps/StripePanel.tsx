@@ -1,6 +1,6 @@
 /**
- * Stripe's page, once it's set up: the account, a warning when Stripe can't reach this server,
- * bringing in Stripe history, and links to the deposits it fills in.
+ * Stripe's page, once it's installed: the account, a warning when Stripe can't reach this server,
+ * bringing in Stripe history, and links to the deposits it fills in. Uninstall is at the top.
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -13,7 +13,7 @@ import { importRunning, type AppRow } from "./catalog";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export function StripePanel({ app, disconnecting, onDisconnect, onChanged }: { app: AppRow; disconnecting: boolean; onDisconnect: () => void; onChanged: () => void }) {
+export function StripePanel({ app, onChanged }: { app: AppRow; onChanged: () => void }) {
   const details = app.stripe!;
   const year = new Date().getFullYear();
   const [since, setSince] = useState(`${year}-01-01`);
@@ -43,7 +43,6 @@ export function StripePanel({ app, disconnecting, onDisconnect, onChanged }: { a
         {app.last_sync_at && <span className="muted small">Last heard from Stripe {timeAgo(app.last_sync_at)}</span>}
         <div className="row wrap" style={{ gap: 8 }}>
           <Link className="btn btn-sm" to="/payouts"><Icon name="dollar" size={14} /> Deposits</Link>
-          {details.own && <Button size="sm" variant="ghost" loading={disconnecting} onClick={onDisconnect}>Disconnect Stripe</Button>}
         </div>
       </section>
 
