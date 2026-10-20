@@ -55,6 +55,36 @@ function useOnline() {
   return online;
 }
 
+// Fields that don't bring up the phone's keyboard (or a picker in its place).
+const NO_KEYBOARD = new Set(["button", "checkbox", "radio", "range", "color", "file", "submit", "reset", "image", "hidden"]);
+const opensKeyboard = (el: Element | null) =>
+  el instanceof HTMLInputElement ? !NO_KEYBOARD.has(el.type) && !el.readOnly : el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el instanceof HTMLElement && el.isContentEditable);
+
+/**
+ * Whether the phone's keyboard is up: something you type in has focus on a touch screen. iOS keeps
+ * the bottom bar pinned to the page behind the keyboard, so it floats over the form as you scroll;
+ * the bar steps aside until you're done typing.
+ */
+function useTyping() {
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    const touch = window.matchMedia("(pointer: coarse)");
+    const check = () => setTyping(touch.matches && opensKeyboard(document.activeElement));
+    // Moving to the next field blurs this one first, so look once focus has landed.
+    const later = () => setTimeout(check);
+    document.addEventListener("focusin", check);
+    document.addEventListener("focusout", later);
+    // The keyboard closing resizes the visible area, even when the field vanished without a blur.
+    window.visualViewport?.addEventListener("resize", later);
+    return () => {
+      document.removeEventListener("focusin", check);
+      document.removeEventListener("focusout", later);
+      window.visualViewport?.removeEventListener("resize", later);
+    };
+  }, []);
+  return typing;
+}
+
 export function AppShell() {
   const session = useSession();
   const groups = useVisibleGroups();
@@ -64,6 +94,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const navigation = useNavigation();
   const online = useOnline();
+  const typing = useTyping();
   const counts = useNewRequests();
   const chat = useChatBadge();
   useChatLive();
@@ -177,7 +208,7 @@ export function AppShell() {
         <Screen key={location.pathname} />
       </div>
 
-      <nav className="mobile-nav" aria-label="Primary" style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, 1fr)` }}>
+      <nav className="mobile-nav" aria-label="Primary" data-typing={typing || undefined} style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, 1fr)` }}>
         {tabs.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.to === "/"} viewTransition>
             <span className="mobile-tab-icon">
