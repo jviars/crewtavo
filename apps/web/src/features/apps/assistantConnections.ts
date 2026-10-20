@@ -7,9 +7,23 @@
 import { toAssistantAccess, type AssistantAccess } from "@crewtavo/core/assistants";
 import type { Database } from "@crewtavo/core/database";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import chatgptLogo from "@/assets/apps/chatgpt.svg";
+import claudeLogo from "@/assets/apps/claude.svg";
+import codexLogo from "@/assets/apps/codex.svg";
 import { ApiError, unwrap } from "@/lib/api";
 
 type Db = SupabaseClient<Database>;
+
+/**
+ * The real logo for the assistants we know, by the name each signs up with ("Codex", "Claude",
+ * "Claude Code", "ChatGPT"): most don't send one, and then the card showed just a letter.
+ */
+export function assistantLogo(name: string): string | null {
+  if (/\bcodex\b/i.test(name)) return codexLogo;
+  if (/\bclaude\b/i.test(name)) return claudeLogo;
+  if (/\b(chatgpt|openai)\b/i.test(name)) return chatgptLogo;
+  return null;
+}
 
 /** Where each assistant keeps its connector settings, after copying the link. */
 export const CONNECTOR_STEPS: Record<string, string[]> = {
@@ -34,13 +48,16 @@ export async function loadConnections(db: Db): Promise<AssistantConnection[]> {
   const rows = unwrap(await db.from("assistant_connections").select("client_id, level, areas"));
   const access = new Map(rows.map((r) => [r.client_id, toAssistantAccess(r)]));
   return grants
-    .map((g) => ({
-      clientId: g.client.id,
-      name: g.client.name?.trim() || "AI assistant",
-      logo: g.client.logo_uri || null,
-      connectedAt: g.granted_at,
-      access: access.get(g.client.id) ?? toAssistantAccess(null),
-    }))
+    .map((g) => {
+      const name = g.client.name?.trim() || "AI assistant";
+      return {
+        clientId: g.client.id,
+        name,
+        logo: assistantLogo(name) ?? (g.client.logo_uri || null),
+        connectedAt: g.granted_at,
+        access: access.get(g.client.id) ?? toAssistantAccess(null),
+      };
+    })
     .sort((a, b) => b.connectedAt.localeCompare(a.connectedAt));
 }
 
