@@ -1,14 +1,13 @@
 .page { max-width: 860px; }
 .title { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
 
-/* The period so far, Railway's forecast behind it, and marks for what the plan includes and the limit. */
+/* The month so far, the forecast behind it, and a mark for what the plan includes. */
 .meter { position: relative; height: 12px; border-radius: 999px; background: var(--fill-2); }
 .meter > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; transition: width var(--dur-slow) var(--ease-out); }
 .spent { background: var(--green); }
 .forecast { background: color-mix(in srgb, var(--green) 30%, transparent); }
 .over { background: color-mix(in srgb, var(--warning) 45%, transparent); }
 .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
-.mark.limit { background: var(--danger); }
 
 .legend { gap: 6px 16px; color: var(--text-3); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -16,8 +15,7 @@
 .keySpent { background: var(--green); }
 .keyForecast { background: color-mix(in srgb, var(--green) 30%, transparent); }
 .keyOver { background: color-mix(in srgb, var(--warning) 45%, transparent); }
-.keyMark, .keyLimit { width: 3px !important; height: 12px !important; border-radius: 1px !important; background: var(--ink); }
-.keyLimit { background: var(--danger); }
+.keyMark { width: 3px !important; height: 12px !important; border-radius: 1px !important; background: var(--ink); }
 
 .services { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
 .services li { display: grid; grid-template-columns: minmax(110px, 160px) 1fr auto; align-items: center; gap: 12px; }

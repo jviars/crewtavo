@@ -1,11 +1,10 @@
 /**
  * What the owner of a Crewtavo on Railway sees at sign-in until it's done (lib/session.tsx):
  *
- *   1. Connect Railway (`needed`, from GET /me): required, since the warnings before Railway's trial,
- *      credit or card runs out need it (Settings → Hosting). Owners have just deployed from Railway
- *      and are still signed in there, so it's one press of Allow. A sign-in from before Crewtavo
- *      asked to read billing is asked again. Only "Ask me tomorrow" gets past it without connecting,
- *      for when Railway is down or someone else looks after it.
+ *   1. Connect Railway (`needed`, from GET /me): required, since the warnings before Railway's trial
+ *      runs out need it (Settings → Hosting). Owners have just deployed from Railway and are still
+ *      signed in there, so it's one press of Authorize. Only "Ask me tomorrow" gets past it without
+ *      connecting, for when Railway is down or someone else looks after it.
  *   2. Right after setting up the business (companies.settings.railway_setup is "pending"): the same
  *      four steps as Settings → Web address, with step 1 already done. That one can be skipped.
  *
@@ -42,13 +41,13 @@ export function RailwaySetupPage({ companyName, needed, onDone, onSignOut }: { c
   const later = useMutation({ meta: { inline: true }, mutationFn: () => api.post("/railway/later"), onSuccess: onDone });
   useRailwayReturn();
   // Connected with a pasted token (no trip to Railway): GET /me no longer asks, so move on, once.
-  const current = Boolean(overview.data?.railway?.current);
+  const linked = Boolean(overview.data?.railway?.connected);
   const movedOn = useRef(false);
   useEffect(() => {
-    if (!needed || !current || movedOn.current) return;
+    if (!needed || !linked || movedOn.current) return;
     movedOn.current = true;
     onDone();
-  }, [needed, current, onDone]);
+  }, [needed, linked, onDone]);
 
   if (needed) {
     const railway = overview.data?.railway;
@@ -56,7 +55,7 @@ export function RailwaySetupPage({ companyName, needed, onDone, onSignOut }: { c
       <AuthLayout>
         <div className={`stack ${authStyles.wide}`}>
           <div className="stack-sm" style={{ gap: 6 }}>
-            <h1 className={authStyles.title}>{railway?.connected ? "Log in with Railway again" : "Connect Railway"}</h1>
+            <h1 className={authStyles.title}>{railway?.error ? "Connect Railway again" : "Connect Railway"}</h1>
             <p className="muted" style={{ margin: 0 }}>{companyName}'s Crewtavo runs on Railway. This takes a minute, and you only do it once.</p>
           </div>
           {overview.isPending ? (

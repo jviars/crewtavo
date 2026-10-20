@@ -81,7 +81,7 @@ account.get("/me", requireUser, async (c) => {
     ? await Promise.all([
         adminClient(c.env).from("integrations").select("company_id, provider").in("provider", ["email", "anthropic", "fal"]).neq("status", "disconnected").in("company_id", companyIds),
         adminClient(c.env).from("terms_acceptances").select("company_id").eq("version", TERMS_VERSION).in("company_id", companyIds),
-        adminClient(c.env).from("integrations").select("company_id, status, settings").eq("provider", "railway").in("company_id", companyIds),
+        adminClient(c.env).from("integrations").select("company_id, status").eq("provider", "railway").in("company_id", companyIds),
       ]).then(([apps, terms, railway]) => [must(apps), must(terms), must(railway)] as const)
     : [[], [], []];
   const withMailbox = new Set(connected.filter((r) => r.provider === "email").map((r) => r.company_id));

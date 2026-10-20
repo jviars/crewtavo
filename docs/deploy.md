@@ -40,25 +40,26 @@ month, including $5 of usage). Use grows with data and traffic; check
 [Railway's pricing](https://railway.com/pricing), or **Settings → Hosting** in the instance.
 
 **Connect Railway (required):** right after setting up the business, the owner is asked to **Log in
-with Railway**. They're still signed in after deploying, so they pick the workspace and this project
-and press Allow. Crewtavo asks for `project:member` (changes in this project only) and
-`workspace:admin` (only admins can read billing). Until it's connected, or after a sign-in from
-before Crewtavo asked for billing, the owner sees this step whenever they open Crewtavo; **Ask me
-tomorrow** lets them in for a day, for when Railway is down or someone else looks after it
-(`railwayNeeded` in `apps/api/src/services/railway.ts`). A pasted project token counts too, but it
-can't see billing.
+with Railway**. They're still signed in after deploying, so they press Authorize (Railway's
+default is all their projects; **Change → Selected projects** limits it to this one). Crewtavo asks
+for `project:member` only. It doesn't ask for `workspace:admin`, which billing would need: Railway
+shows that to owners in red as "full control of your account", and a sign-in asking for both was
+refused the project. Until Railway is connected, the owner sees this step whenever they open
+Crewtavo; **Ask me tomorrow** lets them in for a day, for when Railway is down or someone else
+looks after it (`railwayNeeded` in `apps/api/src/services/railway.ts`). A pasted project token
+counts too.
 
-**Settings → Hosting** (`apps/api/src/services/hosting.ts`) shows what Railway charges: usage so far
-this billing period against what the plan includes, Railway's forecast, what each service used
-(priced at Railway's rates, so estimates), the last week's memory and CPU, and how full the volumes
-are. Plans, credit and the card open Railway's own pages, since Railway's API can't change a plan
-or take a payment; the usage limit Crewtavo changes itself. A task twice a day (`hosting`) sends the
-owner and admins each new warning once, by the bell, email and push (the `hosting` notification
-topic): the trial ending in 7, 3 or 1 days or its credit nearly gone, a card Railway couldn't
-charge, prepaid credit running out, usage on track to reach the limit or to go over what the plan
-includes, a volume over 85% full, or a Railway sign-in that stopped working. These usage and
-billing queries are the ones Railway's dashboard uses but aren't in Railway's API docs, so each is
-optional: what Railway doesn't share is left out.
+**Settings → Hosting** (`apps/api/src/services/hosting.ts`) shows what Railway charges: this month
+so far against what the plan includes, the last day's rate and a forecast for the month at it,
+what each service used, the last week's memory and CPU, and how full the volumes are. Railway
+reports usage in vCPU- and GB-minutes, priced at Railway's rates (they matched Railway's own
+figure on a trial project). On the trial, the days and credit left are counted from when the
+project was made. Plans, credit, the card and the usage limit open Railway's own pages. A task
+twice a day (`hosting`) sends the owner and admins each new warning once, by the bell, email and
+push (the `hosting` notification topic): the trial ending in about 7, 3 or 1 days or its credit
+nearly gone, usage on track to go over what the plan includes, a volume over 85% full, or a
+Railway sign-in that stopped working. These usage queries are the ones Railway's dashboard uses
+but aren't in Railway's API docs, so each is optional: what Railway doesn't share is left out.
 
 **Your own domain:** after connecting Railway, the owner sees **Your web address**: four steps on a
 timeline, ticked off as they're done, with what to do now opened under the current one.

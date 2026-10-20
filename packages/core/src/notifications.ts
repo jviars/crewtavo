@@ -10,7 +10,7 @@ export const NOTIFICATION_TOPICS = [
   { key: "alerts", label: "Other alerts", hint: "From your company's automations, like a quote being approved" },
   { key: "chat", label: "Team chat", hint: "When someone @mentions you or your role" },
   // Owners and admins of a Crewtavo on Railway only (services/hosting.ts).
-  { key: "hosting", label: "Railway", hint: "Before the trial, credit or card runs out, or the bill goes over the plan" },
+  { key: "hosting", label: "Railway", hint: "Before the trial runs out, or when the bill goes over the plan or storage fills up" },
 ] as const;
 export type NotificationTopic = (typeof NOTIFICATION_TOPICS)[number]["key"];
 

@@ -1,10 +1,10 @@
 /**
  * Crewtavo's access to its own Railway project. The owner connects it in setup right after
- * deploying (Login with Railway: still signed in to Railway, they pick the workspace and project
- * and press Allow), or pastes a project token. It's required on Railway: until it's there, the
- * owner is asked at sign-in (railwayNeeded), since the warnings before the trial, credit or card
- * runs out need it (services/hosting.ts). Crewtavo keeps it, encrypted, until the owner removes it;
- * Settings → Web address and Settings → Hosting use it.
+ * deploying (Login with Railway: still signed in to Railway, they press Authorize), or pastes a
+ * project token. It's required on Railway: until it's there, the owner is asked at sign-in
+ * (railwayNeeded), since the warnings before the trial runs out need it (services/hosting.ts).
+ * Crewtavo keeps it, encrypted, until the owner removes it; Settings → Web address and Settings →
+ * Hosting use it.
  *
  * OAuth access tokens last an hour and refresh themselves when used; the refresh token lasts a
  * year from when it was issued and rotates on every refresh, so the daily "railway" task refreshes
@@ -43,10 +43,8 @@ export async function railwayState(env: Env, admin: Db, companyId: string): Prom
     loadSecret(env, admin, companyId, "railway").catch(() => null),
   ]);
   const links = railwayLinks(env);
-  const connected = Boolean(row?.status === "connected" && (secret?.access_token || secret?.api_key));
   return {
-    connected,
-    current: connected && askedEnough(row?.settings),
+    connected: Boolean(row?.status === "connected" && (secret?.access_token || secret?.api_key)),
     oauth: Boolean(links) && (row?.settings as { oauth_refused?: boolean } | null)?.oauth_refused !== true,
     settingsUrl: links?.settingsUrl ?? null,
     variablesUrl: links?.variablesUrl ?? null,
@@ -56,29 +54,19 @@ export async function railwayState(env: Env, admin: Db, companyId: string): Prom
   };
 }
 
-/**
- * A sign-in made before Crewtavo asked for billing access is asked again. A project token can't
- * have it, so a token counts as enough; so does an owner whose Railway role is lower than admin,
- * once they've been asked.
- */
-function askedEnough(settings: unknown): boolean {
-  const s = (settings ?? {}) as { method?: string; scope?: string };
-  return s.method === "token" || s.scope === SCOPE;
-}
-
 /** How long "Ask me tomorrow" puts off connecting Railway, for an owner who can't right now. */
 export const LATER_MS = 24 * 60 * 60_000;
 
 /**
- * Whether the owner still has to connect Railway (or log in again for billing access): on a
- * one-business instance on Railway, until they have, or for a day after "Ask me tomorrow". GET /me
- * says so, and the app asks at sign-in.
+ * Whether the owner still has to connect Railway: on a one-business instance on Railway, until
+ * they have (or after Railway stopped accepting the sign-in), except for a day after "Ask me
+ * tomorrow". GET /me says so, and the app asks at sign-in.
  */
-export function railwayNeeded(env: Env, row: { status: string; settings: unknown } | null, companySettings: unknown, now = Date.now()): boolean {
+export function railwayNeeded(env: Env, row: { status: string } | null, companySettings: unknown, now = Date.now()): boolean {
   if (env.CREWTAVO_SINGLE_COMPANY !== "1" || platformOf(env) !== "railway" || !railwayIds(env)) return false;
   const later = Date.parse(String((companySettings as { railway_later?: string } | null)?.railway_later ?? ""));
   if (later > now) return false;
-  return !(row?.status === "connected" && askedEnough(row.settings));
+  return row?.status !== "connected";
 }
 
 /** "Ask me tomorrow": the owner can't connect Railway right now (Railway is down, or someone else looks after it). */
@@ -142,7 +130,8 @@ export async function railwayAccess(env: Env, admin: Db, companyId: string): Pro
 export async function railwayClient(env: Env, admin: Db, companyId: string, redirectUri: string, name: string): Promise<RailwayClient> {
   const secret = await loadSecret(env, admin, companyId, "railway").catch(() => null);
   const known = clientOf(secret);
-  if (known?.redirect_uri === redirectUri && known.scope === SCOPE) return known;
+  // A client from before the scope was recorded asked for SCOPE too; one made for another scope is replaced.
+  if (known?.redirect_uri === redirectUri && (!known.scope || known.scope === SCOPE)) return known;
   let client: RailwayClient;
   try {
     client = await registerClient(redirectUri, name);
@@ -179,7 +168,6 @@ export async function saveRailwayAccess(env: Env, admin: Db, companyId: string, 
         };
   const { error } = await admin.from("integrations").upsert({
     company_id: companyId, provider: "railway", status: "connected", account_label: env.RAILWAY_PROJECT_NAME ?? "Railway", connected_by: userId, connected_at: new Date().toISOString(), last_error: null,
-    // What it was asked for, so a sign-in from before billing access is asked again (railwayNeeded).
     settings: asJson(access.method === "token" ? { method: "token" } : { method: "oauth", scope: SCOPE }),
   });
   if (error) throw new HttpError(500, "Couldn't save the Railway sign-in. Try again.");
