@@ -13,7 +13,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { initials } from "@/components/shell/AppShell";
+import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -61,7 +61,7 @@ interface TeamMember {
   user_id: string;
   role: string;
   active: boolean;
-  profile: { full_name: string; color: string | null } | null;
+  profile: { full_name: string; color: string | null; avatar_url?: string | null } | null;
 }
 
 export function useDispatchOptions() {
@@ -366,7 +366,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                       onClick={() => setAssignees(on ? assignees.filter((x) => x !== m.user_id) : [...assignees, m.user_id])}
                       style={{ paddingLeft: 4 }}
                     >
-                      <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: m.profile?.color || "var(--text-3)" }}>{initials(name)}</span>
+                      <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
                       {name}
                       {on && <Icon name="check" size={12} strokeWidth={3} />}
                     </button>

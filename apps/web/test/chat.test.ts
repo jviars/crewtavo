@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 // data.ts talks to the backend; these tests only use what it does with what comes back.
 vi.mock("@/lib/api", () => ({ activeCompany: () => null, api: {}, refreshSignIn: async () => "ok", supabase: () => ({}) }));
 vi.mock("@/lib/session", () => ({ useSession: () => ({}) }));
-vi.mock("@/components/shell/AppShell", () => ({ initials: (n: string) => n.slice(0, 2).toUpperCase() }));
 
 const { readEvents } = await import("../src/features/chat/data");
 const { groupMembers } = await import("../src/features/chat/Members");
@@ -43,7 +42,7 @@ describe("the live connection", () => {
 
 describe("the member list", () => {
   const person = (id: string, role_key: string, role_label: string, show_separately: boolean, online: boolean) => ({
-    id, name: id, avatar_color: null, role: role_key, role_key, role_label, color: "default" as const, show_separately, online,
+    id, name: id, avatar_color: null, avatar_url: null, role: role_key, role_key, role_label, color: "default" as const, show_separately, online,
   });
 
   it("groups online people by role (owner first), the rest online together, then offline", () => {

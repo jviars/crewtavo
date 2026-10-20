@@ -22,6 +22,29 @@ export async function compressImage(file: File, max = 2000, quality = 0.82): Pro
 }
 
 /**
+ * A profile photo: the middle of the picture as a square JPEG of at most `size` pixels (for a tall
+ * picture, a little above the middle, where faces usually are). Null when the browser can't open it.
+ */
+export async function squarePhoto(file: File, size = 512): Promise<Blob | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const side = Math.min(bitmap.width, bitmap.height);
+    const out = Math.min(size, side);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = out;
+    const ctx = canvas.getContext("2d")!;
+    // A transparent picture would turn black as a JPEG.
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, out, out);
+    ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 3, side, side, 0, 0, out, out);
+    bitmap.close();
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+  } catch {
+    return null; // HEIC in a browser that can't decode it, or not a picture at all
+  }
+}
+
+/**
  * What gets uploaded: photos are shrunk first, so the 15 MB limit applies to what's actually
  * sent (a 20 MB phone photo is usually a few MB once shrunk). Other files are checked as they are.
  */

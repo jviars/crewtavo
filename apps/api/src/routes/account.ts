@@ -11,6 +11,7 @@ import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
 import { timeRates } from "../services/payRates";
+import { removePhoto, setPhoto } from "../services/photos";
 import { invitePerson, inviteStatus, sendInvite, welcomeLink, type TeamScope } from "../services/team";
 import { clientIp } from "../lib/visitor";
 import { setRailwaySetup } from "../services/railway";
@@ -221,7 +222,7 @@ account.get("/team", requireUser, requireCompany(), async (c) => {
   const { db, companyId } = c.var;
   const members = must(await db.from("memberships").select("user_id, role, role_id, active").eq("company_id", companyId));
   const profiles = must(
-    await db.from("profiles").select("user_id, full_name, email, phone, color").in("user_id", members.map((m) => m.user_id)),
+    await db.from("profiles").select("user_id, full_name, email, phone, color, avatar_url").in("user_id", members.map((m) => m.user_id)),
   );
   const byId = new Map(profiles.map((p) => [p.user_id, p]));
   // Pay rates are for the office (the column isn't readable by members directly); crews see names and roles.
@@ -282,6 +283,37 @@ account.get("/team/invites", requireUser, requireCompany(ADMINS, "team"), async 
     }),
   );
 });
+
+/**
+ * Someone's photo, shown in place of their initials (services/photos.ts). The browser sends it as a
+ * small square JPEG, base64. People set their own; owners and admins who manage the team set anyone's
+ * on it, and as with roles, only an owner sets another owner's.
+ */
+account.put("/team/:userId/photo", requireUser, requireCompany(), async (c) => {
+  const targetId = await photoTarget(c);
+  const body = await readJson(c, z.object({ photo: z.string().min(100).max(1_400_000).regex(/^[A-Za-z0-9+/]+={0,2}$/) }));
+  if (!(await allow(c.env, `photo:${c.var.userId}`, 30, 3600))) throw new HttpError(429, "Too many photo changes. Wait a while and try again.");
+  return c.json({ avatar_url: await setPhoto(adminClient(c.env), c.var.companyId, targetId, body.photo) });
+});
+
+account.delete("/team/:userId/photo", requireUser, requireCompany(), async (c) => {
+  await removePhoto(adminClient(c.env), await photoTarget(c));
+  return c.json({ ok: true });
+});
+
+/** Whose photo the request changes: the person's own, or a teammate's for those who manage the team. */
+async function photoTarget(c: Context<AppEnv>): Promise<string> {
+  const parsed = uuid.safeParse(c.req.param("userId"));
+  if (!parsed.success) throw new HttpError(404, "That person isn't on your team.");
+  const { companyId, userId, role, permissions } = c.var;
+  if (parsed.data === userId) return userId;
+  if (!ADMINS.includes(role) || !permissions.includes("team")) throw new HttpError(403, "You don't have permission to do that. Ask an admin if you need it.");
+  const { data: member, error } = await c.var.db.from("memberships").select("role").eq("company_id", companyId).eq("user_id", parsed.data).maybeSingle();
+  if (error) throw dbError(error);
+  if (!member) throw new HttpError(404, "That person isn't on your team.");
+  if (member.role === "owner" && role !== "owner") throw new HttpError(403, "Only an owner can do that for another owner.");
+  return parsed.data;
+}
 
 /**
  * A new invite for someone who hasn't set up their account yet (the first link expired, or never

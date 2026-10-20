@@ -10,14 +10,14 @@ import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState, PageError } from "@/components/ui/States";
-import { initials } from "@/components/shell/AppShell";
+import { Face } from "@/components/ui/Avatar";
 import { ApiError, api, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { htmlToText, sanitizeHtml } from "@/lib/html";
 import { useSession } from "@/lib/session";
 import { ROLE_LABELS, useIsEditor } from "./kbData";
 
-interface TeamMember { user_id: string; role: string; active: boolean; profile: { full_name: string; color: string | null } | null }
+interface TeamMember { user_id: string; role: string; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null }
 
 export function SopPage() {
   const { pageId = "" } = useParams();
@@ -127,7 +127,7 @@ export function SopPage() {
                 <div className="stack-sm" style={{ gap: 8 }}>
                   {readers.map((r) => (
                     <div key={r.user_id} className="row" style={{ gap: 8 }}>
-                      <span className="avatar" style={{ width: 26, height: 26, fontSize: 10 }}>{initials(name(r.user_id))}</span>
+                      <span className="avatar" style={{ width: 26, height: 26, fontSize: 10 }}><Face name={name(r.user_id)} photo={team.data?.find((m) => m.user_id === r.user_id)?.profile?.avatar_url} /></span>
                       <span className="grow small strong">{name(r.user_id)}</span>
                       <span className="muted small" title={formatDateTime(r.acknowledged_at)}>{formatDate(r.acknowledged_at)}</span>
                     </div>

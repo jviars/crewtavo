@@ -19,7 +19,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
   const connectsApps = isAdmin && can(session, "apps");
 
   const groups: Array<{ title: string; items: Array<SettingsItem | false | undefined> }> = [
-    { title: "You", items: [{ tab: "profile", label: "Profile", icon: "user", keywords: "my account name password phone notifications theme dark mode appearance spare keys recovery calendar feed" }] },
+    { title: "You", items: [{ tab: "profile", label: "Profile", icon: "user", keywords: "my account name photo picture avatar password phone notifications theme dark mode appearance spare keys recovery calendar feed" }] },
     {
       title: "Business",
       items: [
@@ -34,7 +34,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
     {
       title: "Team",
       items: [
-        managesTeam && { tab: "team", label: "People", icon: "users", keywords: "team members staff employees invite users" },
+        managesTeam && { tab: "team", label: "People", icon: "users", keywords: "team members staff employees invite users photos pictures" },
         managesTeam && { tab: "roles", label: "Roles", icon: "lock", keywords: "permissions access levels custom roles" },
         managesSettings && { tab: "crews", label: "Crews", icon: "clients", keywords: "teams groups" },
         managesSettings && { tab: "checklists", label: "Checklists", icon: "clipboard", keywords: "forms inspections job checklist" },

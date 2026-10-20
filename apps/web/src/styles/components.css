@@ -74,6 +74,12 @@ a.card-row:hover, button.card-row:hover { background: var(--fill); color: inheri
 .badge-green { background: var(--green-solid); color: #fff; }
 .badge-red { background: var(--danger-solid); color: #fff; }
 .avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; background: var(--avatar); color: #fff; font-weight: 800; letter-spacing: 0.02em; }
+/* Someone's photo in place of their initials (components/ui/Avatar.tsx), in any avatar circle. */
+.avatar-photo { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: inherit; }
+/* An avatar to press to change the photo, with a little camera on it (People and Roles). */
+.avatar-edit { position: relative; border: 0; padding: 0; }
+.avatar-edit-badge { position: absolute; right: -4px; bottom: -4px; width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--text-2); box-shadow: 0 0 0 1px var(--border), var(--shadow-xs); }
+.avatar-edit:hover .avatar-edit-badge, .avatar-edit:focus-visible .avatar-edit-badge { color: var(--ink); }
 
 /* ---------- Forms ---------- */
 .field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink); align-content: start; }

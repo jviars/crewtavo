@@ -50,6 +50,8 @@ export interface ChatPerson {
   id: string;
   name: string;
   avatar_color: string | null;
+  /** Their photo in the files bucket, or null for initials. */
+  avatar_url: string | null;
   role_key: string;
   role_label: string;
   color: ChatColor;

@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigation, useView
 import { supabase } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { prefetchScreens } from "@/routes";
+import { Face, initials } from "../ui/Avatar";
 import { Icon } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { CommandPalette, openPalette } from "./CommandPalette";
@@ -11,15 +12,6 @@ import { useChatBadge, useChatLive } from "@/features/chat/data";
 import { createItems, featureOn, MOBILE_TABS, NAV_GROUPS, navVisible, SETTINGS_ITEM, type NavItem } from "./nav";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
-
-export function initials(name: string | null | undefined) {
-  return (name || "?")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-}
 
 function useVisibleGroups(): NavItem[][] {
   const session = useSession();
@@ -194,7 +186,7 @@ export function AppShell() {
           <Menu
             label="Account"
             triggerClassName="icon-btn"
-            trigger={<span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: session.profile.color || "var(--avatar)" }}>{initials(session.profile.full_name || session.profile.email)}</span>}
+            trigger={<span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: session.profile.color || "var(--avatar)" }}><Face name={session.profile.full_name || session.profile.email} photo={session.profile.avatar_url} /></span>}
             items={[
               { heading: session.profile.full_name || session.profile.email || "Account" },
               { label: "Your profile", icon: "user", onSelect: () => navigate("/settings?tab=profile") },

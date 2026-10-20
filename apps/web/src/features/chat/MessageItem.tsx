@@ -8,6 +8,7 @@ import { Fragment, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { CHAT_REACTIONS, fromEditable, messageParts, toEditable, type Mentionable } from "@crewtavo/core/chat";
 import { BrandMark } from "@/components/shell/BrandMark";
+import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon, type IconName } from "@/components/ui/Icon";
@@ -160,7 +161,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
       {head ? (
         author ? (
           <button type="button" className={s.avatar} style={{ background: author.avatar_color || "var(--avatar)" }} onClick={() => ctx.onPerson(author.id)} aria-label={author.name}>
-            {initialsOf(author.name)}
+            <Face name={author.name} photo={author.avatar_url} />
           </button>
         ) : (
           <span className={s.avatar} style={{ background: "var(--fill-2)", cursor: "default" }} aria-hidden="true"><BrandMark size={20} /></span>
@@ -283,11 +284,3 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
     </div>
   );
 }
-
-const initialsOf = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("") || "?";

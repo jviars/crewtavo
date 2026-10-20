@@ -36,6 +36,8 @@ export interface ChatPerson {
   id: string;
   name: string;
   avatar_color: string | null;
+  /** Their photo in the files bucket, or null for initials. */
+  avatar_url: string | null;
   role_key: string;
   role_label: string;
   color: ChatColor;
@@ -91,7 +93,7 @@ async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Pro
   if (!wanted.length) return out;
   const [members, profiles, roles, settings] = await Promise.all([
     db.from("memberships").select("user_id, role, role_id").eq("company_id", companyId).in("user_id", wanted),
-    db.from("profiles").select("user_id, full_name, email, color").in("user_id", wanted),
+    db.from("profiles").select("user_id, full_name, email, color, avatar_url").in("user_id", wanted),
     db.from("company_roles").select("id, name, base_role").eq("company_id", companyId),
     db.from("chat_role_settings").select("role, role_id, color").eq("company_id", companyId),
   ]);
@@ -110,6 +112,7 @@ async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Pro
       id: m.user_id,
       name: p?.full_name || p?.email || "Someone",
       avatar_color: p?.color ?? null,
+      avatar_url: p?.avatar_url ?? null,
       role_key: key,
       role_label: roleLabel(key, custom),
       color: colorOf(m.role, m.role_id),
@@ -258,11 +261,14 @@ chat.get("/chat/channels/:id/members", requireUser, requireCompany(), async (c) 
     user_id: string; full_name: string; avatar_color: string | null; role: Role; role_id: string | null; role_key: string; role_name: string; color: string; show_separately: boolean;
   }>;
   const online = new Set(onlineUsers(companyId));
+  const photos = rows.length ? must(await db.from("profiles").select("user_id, avatar_url").in("user_id", rows.map((m) => m.user_id)).not("avatar_url", "is", null)) : [];
+  const photoOf = new Map(photos.map((p) => [p.user_id, p.avatar_url]));
   return c.json({
     members: rows.map((m) => ({
       id: m.user_id,
       name: m.full_name,
       avatar_color: m.avatar_color,
+      avatar_url: photoOf.get(m.user_id) ?? null,
       role: m.role,
       role_key: m.role_key,
       role_label: m.role_name,
@@ -469,10 +475,10 @@ chat.get("/chat/settings", requireUser, requireCompany(ADMINS), async (c) => {
   for (const r of [channels, rules, settings, roles, members, crews]) if (r.error) throw dbError(r.error);
   const people = members.data ?? [];
   const ids = people.map((m) => m.user_id);
-  const profiles = ids.length ? must(await db.from("profiles").select("user_id, full_name, email, color").in("user_id", ids)) : [];
-  const nameOf = new Map(profiles.map((p) => [p.user_id, { name: p.full_name || p.email || "Someone", color: p.color }]));
+  const profiles = ids.length ? must(await db.from("profiles").select("user_id, full_name, email, color, avatar_url").in("user_id", ids)) : [];
+  const nameOf = new Map(profiles.map((p) => [p.user_id, { name: p.full_name || p.email || "Someone", color: p.color, photo: p.avatar_url }]));
   const peopleFor = (key: string) =>
-    people.filter((m) => chatRoleKey(m.role, m.role_id) === key).map((m) => ({ id: m.user_id, ...(nameOf.get(m.user_id) ?? { name: "Someone", color: null }) }));
+    people.filter((m) => chatRoleKey(m.role, m.role_id) === key).map((m) => ({ id: m.user_id, ...(nameOf.get(m.user_id) ?? { name: "Someone", color: null, photo: null }) }));
   return c.json({
     channels: (channels.data ?? []).map((ch) => ({ ...ch, archived: Boolean(ch.archived_at) })),
     rules: rules.data ?? [],

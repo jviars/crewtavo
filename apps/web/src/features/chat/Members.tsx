@@ -4,6 +4,7 @@
  * and phone, with a button to @mention them.
  */
 import { useQuery } from "@tanstack/react-query";
+import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
@@ -48,7 +49,7 @@ export function MembersPanel({ members, onPerson, onClose }: { members: ChatMemb
               return (
                 <button key={m.id} type="button" className={s.member} onClick={() => onPerson(m.id)}>
                   <span className={s.memberAvatar} data-offline={!on || undefined} style={{ background: m.avatar_color || "var(--avatar)" }} aria-hidden="true">
-                    {m.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}
+                    <Face name={m.name} photo={m.avatar_url} />
                     {on && <span className={s.presence} />}
                   </span>
                   <span className="grow">
@@ -92,7 +93,7 @@ export function PersonDialog({ person, onClose, onMention }: { person: ChatMembe
       <div className="dialog-body">
         <div className={s.profile}>
           <div className={s.profileHead}>
-            <Avatar name={person.name} color={person.avatar_color} size={64} className={s.profileAvatar} />
+            <Avatar name={person.name} color={person.avatar_color} photo={person.avatar_url} size={64} className={s.profileAvatar} />
             <div className="stack-sm" style={{ gap: 4 }}>
               <span className={s.roleChip}><span className={s.roleDot} style={{ background: roleColor(person.color) }} />{person.role_label}</span>
               <span className="muted small">{person.id === userId ? "You" : on ? "Online now" : "Offline"}</span>
