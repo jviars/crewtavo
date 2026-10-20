@@ -70,7 +70,7 @@ await shot(office, "dashboard", "/");
 await office.evaluate(() => localStorage.setItem("crewtavo.schedule.panel", "closed"));
 await shot(office, "schedule", "/schedule?view=week");
 await shot(office, "pipeline", "/pipeline");
-await shot(office, "reports", "/reports");
+await shot(office, "finance", "/finance");
 await shot(office, "equipment", "/equipment");
 await shot(office, "knowledge-base", "/kb");
 

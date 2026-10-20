@@ -1,8 +1,8 @@
 /**
- * The business's figures, as the Reports page and the home dashboard show them: the same rows and
+ * The business's figures, as the Finance page and the home dashboard show them: the same rows and
  * the same sums (packages/core/src/reports.ts), for the same people. The database hides money from
- * roles without it; who sees reports at all (owners, admins and office staff with "Reports") and
- * job costs is checked here, as the Reports page checks it.
+ * roles without it; who sees reports at all (owners, admins and office staff with "Finance and
+ * metrics") and job costs is checked here, as the Finance page checks it.
  */
 import { jobProfit, localDate, moneyFigures, previousRange, REPORT_PRESETS, resolveRange, salesFigures, teamHours, type ReportPreset } from "@crewtavo/core";
 import { z } from "zod";
@@ -22,7 +22,7 @@ function rangeOf(ctx: ToolContext, a: { range: ReportPreset; from?: string; to?:
   return resolveRange(custom, localDate(new Date(), ctx.timezone), ctx.timezone, { from: a.from, to: a.to });
 }
 
-/** Up to 25,000 rows, a page at a time, as the Reports page reads them. */
+/** Up to 25,000 rows, a page at a time, as the Finance page reads them. */
 async function all<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
   const out: T[] = [];
   for (let i = 0; i < 25; i++) {

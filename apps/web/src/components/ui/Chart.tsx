@@ -37,9 +37,11 @@ type TooltipContent = Partial<TooltipContentProps<number, string>> & {
   labelKey?: string;
   hideLabel?: boolean;
   hideIndicator?: boolean;
+  /** A short line (dashed for a dashed series) instead of a square, for line charts. */
+  indicator?: "dot" | "line";
 };
 
-export function ChartTooltipContent({ active, payload, label, format = String, labelKey, hideLabel, hideIndicator }: TooltipContent) {
+export function ChartTooltipContent({ active, payload, label, format = String, labelKey, hideLabel, hideIndicator, indicator = "dot" }: TooltipContent) {
   const config = useContext(ChartContext);
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload as Record<string, unknown> | undefined;
@@ -54,7 +56,12 @@ export function ChartTooltipContent({ active, payload, label, format = String, l
         if (item.value == null) return null;
         return (
           <div key={key} className="chart-tooltip-row">
-            {!hideIndicator && <span className="chart-tooltip-dot" style={{ background: `var(--color-${key}, ${item.color ?? "currentColor"})` }} />}
+            {!hideIndicator &&
+              (indicator === "line" ? (
+                <span className={`chart-tooltip-line${series?.dashed ? " dashed" : ""}`} style={{ borderColor: `var(--color-${key}, ${item.color ?? "currentColor"})` }} />
+              ) : (
+                <span className="chart-tooltip-dot" style={{ background: `var(--color-${key}, ${item.color ?? "currentColor"})` }} />
+              ))}
             {many && <span className="chart-tooltip-name">{series?.label ?? item.name}</span>}
             <span className="chart-tooltip-value">{format(Number(item.value))}</span>
           </div>

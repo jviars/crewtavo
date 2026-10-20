@@ -29,7 +29,7 @@ export const PERMISSIONS = [
   { key: "sales", label: "Quotes and sales" },
   { key: "invoices", label: "Invoices and payments" },
   { key: "job_costs", label: "Job costs and profit" },
-  { key: "reports", label: "Reports" },
+  { key: "reports", label: "Finance and metrics" },
   { key: "marketing", label: "Marketing" },
   { key: "automations", label: "Automations" },
   { key: "schedule", label: "Schedule the whole team" },

@@ -16,7 +16,7 @@ import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { addDaysIso, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
-import { Stat } from "../reports/Charts";
+import { Stat } from "../finance/Charts";
 
 const STATUS: Record<string, { label: string; tone: Tone }> = {
   paid: { label: "Deposited", tone: "good" },

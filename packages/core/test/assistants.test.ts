@@ -197,7 +197,7 @@ describe("repeats", () => {
 });
 
 describe("figures", () => {
-  it("ages unpaid invoices and sums money the way Reports does", () => {
+  it("ages unpaid invoices and sums money the way Finance does", () => {
     const open = [
       { balance_due: 100, due_on: "2026-10-25", client: { id: "a", display_name: "Ana" } },
       { balance_due: "50.5", due_on: "2026-10-01", client: { id: "a", display_name: "Ana" } },

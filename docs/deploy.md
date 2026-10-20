@@ -254,7 +254,7 @@ the Sentry project's security settings so the server never infers them.
 - **Marketing > Reviews**: paste your Google review link so review requests point at it.
 - **Marketing > Referrals**: set the reward you offer, if any.
 - **Automations**: the starter rules are on; adjust their wording or delays, or add your own.
-- **Reports > Overview**: an admin can set the yearly revenue goal and a target job margin.
+- **Finance > Overview**: an admin can set the yearly revenue goal and a target job margin.
 
 ## Connecting Stripe
 
@@ -292,7 +292,7 @@ Then:
   invoice and the client adds a tip in the Client Hub, Stripe charges only the tip: that's recorded
   as a payment of just the tip, with its fee and deposit. A credit note you issue in Stripe
   before the invoice is paid is recorded on it, so it isn't asked for again. Tips aren't sent to
-  QuickBooks or Zoho Books (they aren't on the invoice there); Reports shows them.
+  QuickBooks or Zoho Books (they aren't on the invoice there); Finance shows them.
 - **Bring in your Stripe history** on the Stripe card imports past invoices, their clients and
   payments, and deposits, from a date you choose. History comes in quietly: no automations,
   reminders or notifications. Running it again only updates what's already there. On the

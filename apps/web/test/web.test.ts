@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCsv, toCsv } from "../src/lib/csv";
-import { bucketize, bucketsFor, resolveRange } from "../src/features/reports/range";
+import { bucketize, bucketizeShifted, bucketsFor, resolveRange } from "../src/features/finance/range";
+import { previousRange } from "@crewtavo/core/reports";
 
 describe("report ranges", () => {
   const tz = "America/New_York";
@@ -41,6 +42,18 @@ describe("report ranges", () => {
     expect(totals[0]).toBe(5);
     expect(totals[2]).toBe(2);
     expect(totals.reduce((a, b) => a + b, 0)).toBe(7);
+  });
+
+  it("lines the previous period up under this one", () => {
+    const range = resolveRange("month", "2026-10-16", tz);
+    const before = previousRange(range);
+    expect(before).toMatchObject({ from: "2026-09-15", to: "2026-09-30" });
+    const buckets = bucketsFor(range);
+    // Sep 15 is the previous period's first day, so it sits under Oct 1; 11:30pm Sep 30 in New York under Oct 16.
+    const totals = bucketizeShifted([{ at: "2026-09-15", n: 4 }, { at: "2026-10-01T03:30:00Z", n: 6 }, { at: "2026-09-14", n: 9 }], buckets, (r) => r.at, (r) => r.n, tz, range.days);
+    expect(totals[0]).toBe(4);
+    expect(totals[15]).toBe(6);
+    expect(totals.reduce((a, b) => a + b, 0)).toBe(10);
   });
 });
 

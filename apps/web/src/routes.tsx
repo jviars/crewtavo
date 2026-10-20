@@ -1,4 +1,4 @@
-import type { RouteObject } from "react-router-dom";
+import { Navigate, useLocation, type RouteObject } from "react-router-dom";
 import { AppShell } from "@/components/shell/AppShell";
 import { RouteError } from "@/components/shell/RouteError";
 import { OAuthConsentPage } from "@/features/auth/OAuthConsentPage";
@@ -18,7 +18,8 @@ const screens = {
   chat: () => import("@/features/chat/ChatPage"),
   chatSettings: () => import("@/features/chat/ChatSettingsPage"),
   timesheets: () => import("@/features/timesheets/TimesheetsPage"),
-  reports: () => import("@/features/reports/ReportsPage"),
+  finance: () => import("@/features/finance/FinancePage"),
+  metrics: () => import("@/features/metrics/MetricsPage"),
   field: () => import("@/features/field/FieldTodayPage"),
   fieldVisit: () => import("@/features/field/FieldVisitPage"),
   kb: () => import("@/features/kb/KnowledgeBasePage"),
@@ -47,6 +48,12 @@ const screens = {
 
 /** The measuring tool pulls in map libraries, so it's only fetched when opened. */
 const measure = () => import("@/features/measure/MeasurePage");
+
+/** An address that moved: keeps the query string (tab, date range) so old links and bookmarks still land. */
+function Moved({ to }: { to: string }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: to, search, hash }} replace />;
+}
 
 const page = (load: Loader, name: string): Pick<RouteObject, "lazy"> => ({
   lazy: async () => ({ Component: (await load())[name] as React.ComponentType }),
@@ -86,7 +93,10 @@ export const routes: RouteObject[] = [
           { path: "chat/settings", ...page(screens.chatSettings, "ChatSettingsPage") },
           { path: "chat/:channelId", ...page(screens.chat, "ChatPage") },
           { path: "timesheets", ...page(screens.timesheets, "TimesheetsPage") },
-          { path: "reports", ...page(screens.reports, "ReportsPage") },
+          { path: "finance", ...page(screens.finance, "FinancePage") },
+          { path: "metrics", ...page(screens.metrics, "MetricsPage") },
+          // Reports became Finance and Metrics; Finance sends the tabs that moved on to Metrics.
+          { path: "reports", element: <Moved to="/finance" /> },
           { path: "field", ...page(screens.field, "FieldTodayPage") },
           { path: "field/visits/:id", ...page(screens.fieldVisit, "FieldVisitPage") },
           { path: "measure", ...page(measure, "MeasurePage") },
