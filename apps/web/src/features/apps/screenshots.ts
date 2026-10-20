@@ -13,6 +13,12 @@ import sveltiaPostDark from "@/assets/apps/screenshots/sveltia-post-dark.webp";
 import sveltiaPostLight from "@/assets/apps/screenshots/sveltia-post-light.webp";
 import sveltiaServicesDark from "@/assets/apps/screenshots/sveltia-services-dark.webp";
 import sveltiaServicesLight from "@/assets/apps/screenshots/sveltia-services-light.webp";
+import findDark from "@/assets/apps/screenshots/fal-find-paving-dark.webp";
+import findLight from "@/assets/apps/screenshots/fal-find-paving-light.webp";
+import projectDark from "@/assets/apps/screenshots/fal-project-dark.webp";
+import projectLight from "@/assets/apps/screenshots/fal-project-light.webp";
+import takeoffDark from "@/assets/apps/screenshots/fal-takeoff-dark.webp";
+import takeoffLight from "@/assets/apps/screenshots/fal-takeoff-light.webp";
 
 /** One screenshot, in the app's light and dark themes. */
 export interface Screenshot {
@@ -34,5 +40,10 @@ export const SCREENSHOTS: Record<string, Screenshot[]> = {
     { light: sveltiaPostLight, dark: sveltiaPostDark, alt: "Writing a blog post in Sveltia CMS, with a preview of the page beside it" },
     { light: sveltiaHoursLight, dark: sveltiaHoursDark, alt: "Changing the business's phone number, service area and hours" },
     { light: sveltiaServicesLight, dark: sveltiaServicesDark, alt: "The website's services, each with its starting price and season" },
+  ],
+  fal: [
+    { light: findLight, dark: findDark, alt: "Find paving on the measuring map: asphalt, concrete and stalls, found on the aerial in view" },
+    { light: takeoffLight, dark: takeoffDark, alt: "A parking lot takeoff on the aerial: asphalt outlined, stall rows, ADA stalls and crack seal, each in its own color" },
+    { light: projectLight, dark: projectDark, alt: "The paving project: the takeoff sheet with its quantities, on the way from estimate to invoice" },
   ],
 };

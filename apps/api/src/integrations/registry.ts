@@ -11,7 +11,7 @@
 import type { Env } from "../env";
 
 /** Apps with a row in integrations (and maybe integration_secrets). */
-export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic" | "railway";
+export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic" | "fal" | "railway";
 /** Apps whose calendars are added by link. They're also the calendar_sources.app values (with google_calendar). */
 export type LinkApp = "zoho_calendar" | "outlook_calendar" | "apple_calendar" | "ics_calendar";
 export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "website_analytics" | "sveltia";
@@ -105,6 +105,15 @@ export const CATALOG: CatalogEntry[] = [
     description: "Use Crewtavo from Claude, and power Crewtavo's writing help and SOP answers with your own Anthropic key.",
     auth: "api_key",
     docs: "https://docs.claude.com/",
+    available: () => true,
+  },
+  {
+    id: "fal",
+    name: "fal.ai",
+    category: "AI",
+    description: "Find paving on the aerial in one tap: asphalt, concrete and stalls outlined for you, with your own fal.ai account.",
+    auth: "api_key",
+    docs: "https://crewtavo.com/docs/connections/fal/",
     available: () => true,
   },
   {

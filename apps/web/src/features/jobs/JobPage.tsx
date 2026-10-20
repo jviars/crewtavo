@@ -2,7 +2,7 @@ import { describeRule } from "@crewtavo/core/recurrence";
 import type { TablesUpdate } from "@crewtavo/core/database";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
@@ -33,7 +33,9 @@ export function JobPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [visit, setVisit] = useState<VisitInput | null>(null);
-  const [dialog, setDialog] = useState<null | "details" | "invoice">(null);
+  // ?invoice=1 (from a paving project's Invoice step) opens Create invoice straight away.
+  const [params] = useSearchParams();
+  const [dialog, setDialog] = useState<null | "details" | "invoice">(() => (params.get("invoice") ? "invoice" : null));
   const [showPast, setShowPast] = useState(false);
   const isOffice = hasRole(session, "admin", "office");
   const seesInvoices = isOffice && can(session, "invoices");

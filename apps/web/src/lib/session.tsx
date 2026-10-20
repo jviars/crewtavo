@@ -35,7 +35,7 @@ export interface Company {
 
 interface Me {
   profile: { user_id: string; email: string | null; full_name: string; phone: string | null; color?: string | null; avatar_url?: string | null };
-  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; email_connected?: boolean; ai_connected?: boolean; terms_accepted?: boolean }>;
+  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; email_connected?: boolean; ai_connected?: boolean; fal_connected?: boolean; terms_accepted?: boolean }>;
 }
 
 export interface Session {

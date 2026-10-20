@@ -1,4 +1,5 @@
 import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { PRESETS } from "@crewtavo/core/presets";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -17,7 +18,7 @@ export function CompanySettings() {
   const queryClient = useQueryClient();
   const details = useQuery({
     queryKey: ["company", company.id],
-    queryFn: async () => unwrap(await supabase().from("companies").select("name, slug, phone, email, website, address, timezone, settings").eq("id", company.id).single()),
+    queryFn: async () => unwrap(await supabase().from("companies").select("name, slug, phone, email, website, address, timezone, settings, trade_preset").eq("id", company.id).single()),
   });
   const [f, setF] = useState<Record<string, string> | null>(null);
   useEffect(() => {
@@ -26,7 +27,7 @@ export function CompanySettings() {
     const a = (d.address ?? {}) as Record<string, string>;
     const s = (d.settings ?? {}) as Record<string, any>;
     setF({
-      name: d.name, phone: d.phone ?? "", email: d.email ?? "", website: d.website ?? "",
+      name: d.name, phone: d.phone ?? "", email: d.email ?? "", website: d.website ?? "", trade: d.trade_preset,
       line1: a.line1 ?? "", city: a.city ?? "", region: a.region ?? "", postal_code: a.postal_code ?? "",
       timezone: d.timezone, payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(taxPercent(s.default_tax_rate ?? 0)),
       quote_valid_days: String(s.quote_valid_days ?? 30), hours_start: s.working_hours?.start ?? "07:00", hours_end: s.working_hours?.end ?? "18:00",
@@ -67,7 +68,7 @@ export function CompanySettings() {
       unwrap(
         await supabase()
           .from("companies")
-          .update({ name: v.name.trim(), phone: v.phone.trim() || null, email: v.email.trim() || null, website: v.website.trim() || null, timezone: v.timezone, address, settings: settings as never })
+          .update({ name: v.name.trim(), phone: v.phone.trim() || null, email: v.email.trim() || null, website: v.website.trim() || null, timezone: v.timezone, address, settings: settings as never, ...(v.trade in PRESETS ? { trade_preset: v.trade } : {}) })
           .eq("id", company.id),
       );
       return { located };
@@ -90,6 +91,11 @@ export function CompanySettings() {
           <Field label="Phone"><input className="input" type="tel" value={f.phone} onChange={set("phone")} maxLength={40} /></Field>
           <Field label="Email"><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={200} /></Field>
           <Field label="Website" optional><input className="input" value={f.website} onChange={set("website")} maxLength={200} placeholder="https://" /></Field>
+          <Field label="Trade" hint={f.trade === "paving" ? "Paving adds the Paving section to the sidebar: takeoff, estimate, proposal, schedule and invoice in one place." : "What's opened up front for your kind of work, like roof tools for roofers and the Paving section for pavers."}>
+            <select className="select" value={f.trade} onChange={set("trade")}>
+              {Object.values(PRESETS).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Field>
         </div>
         <div className="field">
           <span>Brand color <span className="optional">(Client Hub and emails)</span></span>

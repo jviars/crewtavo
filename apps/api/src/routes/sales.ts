@@ -11,6 +11,7 @@ import {
   FormulaError,
   normalizePitch,
   OFFICE,
+  pavingQuantities,
   pitchProblem,
   SALES,
   summarizeFeatureCollection,
@@ -90,6 +91,8 @@ sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "
     ridge_ft: edges.ridge,
     hip_ft: edges.hip,
     valley_ft: edges.valley,
+    // A paving takeoff's items: asphalt, striping, stalls and the rest.
+    ...pavingQuantities(sections),
   };
 
   const lines = must(await db.from("quote_line_items").select("id, name, formula, service:services(formula_target)").eq("quote_id", id));

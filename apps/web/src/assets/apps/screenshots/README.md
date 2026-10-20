@@ -12,3 +12,7 @@ chat screen changes, render it with sample data and screenshot it with Playwrigh
 The Sveltia CMS ones are the real Sveltia CMS (0.248.1) with its test backend, seeded with a made-up
 lawn care business's website (Green Valley Lawn Care: blog posts, services, pages, hours), rendered
 at 1440×900 in light and dark with Playwright and saved as WebP by Chromium.
+
+The fal.ai ones are the real measuring map and Paving project page, with a demo paving business's
+takeoff of a parking lot in Radford, VA on Virginia's state imagery (VGIN), taken from a local
+instance with Playwright at 1440×900 in both themes and saved as WebP from Chromium's canvas.

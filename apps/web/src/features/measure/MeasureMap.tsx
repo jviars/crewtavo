@@ -8,6 +8,7 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapKeys } from "@crewtavo/core/imagery";
 import { cutOut, lineLengthM, mergePolygons, mToFt, polygonAreaM2, sqmToSqft, type Feature, type Position } from "@crewtavo/core/geo";
+import { PAVING_ITEMS } from "@crewtavo/core/paving";
 import maplibregl, { type GeoJSONSource, type ImageSource, type LayerSpecification, type Map as MapLibreMap, type Marker, type StyleSpecification } from "maplibre-gl";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import {
@@ -23,7 +24,8 @@ import {
 } from "terra-draw";
 import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import { KeyError, OVERLAYS, overlaySource, rasterSource, type ImageryId, type OverlayId } from "./imagery";
-import type { Corners, LngLat } from "./planAlign";
+import { fromMercator, toMercator, type Corners, type LngLat } from "./planAlign";
+import { drawSheet, feetPerPixel, type SheetInfo } from "./takeoffSheet";
 
 export type Tool = "polygon" | "cutout" | "linestring" | "point" | "select";
 /** The geometry each drawing mode makes; anything else in its layer (closing and snapping points) is a guide. */
@@ -52,6 +54,8 @@ export interface MeasureMapHandle {
   convert(id: string, kind: "Area" | "Cutout"): string | null;
   /** Adds shapes drawn elsewhere (building outlines), as areas or cutouts. Returns their ids. */
   add(polygons: number[][][][], kind: "Area" | "Cutout"): string[];
+  /** Adds points (counts found on the imagery). Returns their ids. */
+  addPoints(points: Array<[number, number]>): string[];
   /**
    * Building outlines from the street map's tiles already loaded for this view (OpenStreetMap data
    * from OpenFreeMap), as Polygon coordinates; null when none are loaded (street names off, say).
@@ -69,7 +73,13 @@ export interface MeasureMapHandle {
    * `imagery`, the picture is taken on that source instead (for one whose terms don't allow keeping
    * pictures of it), and the map goes back afterwards.
    */
-  capture(options?: { imagery?: ImageryId }): Promise<Blob | null>;
+  capture(options?: { imagery?: ImageryId; sheet?: SheetInfo }): Promise<Blob | null>;
+  /**
+   * The imagery in view as a square picture with no drawing on it, for finding paving on it
+   * (detect.ts), and where each of its pixels is on the map. Null before the map is ready.
+   * With `imagery`, taken on that source instead (Google's terms don't allow sending it on).
+   */
+  viewImage(size: number, options?: { imagery?: ImageryId }): Promise<{ image: Blob; at: (x: number, y: number) => [number, number] } | null>;
   /** A plan sheet on the map, over the imagery and under the drawing; null takes it off. */
   setPlan(plan: { url: string; corners: Corners; opacity: number } | null): void;
   /** While set, taps on the map go here instead of drawing (lining a plan up). */
@@ -90,6 +100,10 @@ export interface MeasureMapProps {
   labels: Record<string, string>;
   /** Sizes for the labels when they differ from the shape's own: areas after cutouts, what each cutout took out, roof edges at true length. */
   values?: Record<string, number>;
+  /** A line under a shape's size on the map ("11 stalls" on a stall row). */
+  notes?: Record<string, string>;
+  /** A shape's own color (its paving item's) instead of one from the palette. */
+  colors?: Record<string, string>;
   showStreetNames: boolean;
   /** House numbers from the street map's tiles (OpenStreetMap addresses), zoomed in close. */
   showHouseNumbers: boolean;
@@ -124,18 +138,19 @@ export function shapeValue(geometry: Feature["geometry"]): number {
 
 /**
  * Names for unnamed shapes, numbered within their kind: Area 1, Area 2, Cutout 1, Line 1, Count 1.
- * A line marked as a roof edge is named for it: Eave 1, Rake 1.
+ * A line marked as a roof edge is named for it: Eave 1, Rake 1; a paving item too: Asphalt 1, Stall row 1.
  */
-export function defaultNames(shapes: Array<Pick<Shape, "id" | "kind"> & { edge?: string | null }>): Record<string, string> {
+export function defaultNames(shapes: Array<Pick<Shape, "id" | "kind"> & { edge?: string | null; itemName?: string | null }>): Record<string, string> {
   const seen: Record<string, number> = {};
   return Object.fromEntries(shapes.map((s) => {
-    const word = s.kind === "Length" && s.edge ? s.edge[0].toUpperCase() + s.edge.slice(1) : s.kind === "Length" ? "Line" : s.kind;
+    const word = s.itemName && s.kind !== "Cutout" ? s.itemName : s.kind === "Length" && s.edge ? s.edge[0].toUpperCase() + s.edge.slice(1) : s.kind === "Length" ? "Line" : s.kind;
     seen[word] = (seen[word] ?? 0) + 1;
     return [s.id, `${word} ${seen[word]}`];
   }));
 }
+const MADE_UP = new RegExp(`^(Area|Cutout|Line|Length|Count|Eave|Rake|Ridge|Hip|Valley|${PAVING_ITEMS.map((i) => i.name).join("|")}) \\d+$`);
 /** A name we made up rather than one someone typed (so reopening a drawing renumbers it). */
-export const isDefaultName = (name: string) => /^(Area|Cutout|Line|Length|Count|Eave|Rake|Ridge|Hip|Valley) \d+$/.test(name.trim());
+export const isDefaultName = (name: string) => MADE_UP.test(name.trim());
 
 export function formatShapeValue(kind: Shape["kind"], value: number): string {
   const n = (v: number, d = 0) => v.toLocaleString(undefined, { maximumFractionDigits: d });
@@ -274,6 +289,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   live.current = props;
 
   const colorOf = (id: string) => {
+    const own = live.current.colors?.[id];
+    if (own) return own;
     let c = colors.current.get(id);
     if (!c) {
       c = PALETTE[colors.current.size % PALETTE.length];
@@ -281,7 +298,13 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     }
     return c;
   };
-  const styleColor = (feature: GeoJSONStoreFeatures) => colorOf(String(feature.id)) as HexColor;
+  // The color Terra Draw last drew each shape in, so a shape whose item changes gets redrawn.
+  const drawnColors = useRef(new Map<string, string>());
+  const styleColor = (feature: GeoJSONStoreFeatures) => {
+    const color = colorOf(String(feature.id));
+    drawnColors.current.set(String(feature.id), color);
+    return color as HexColor;
+  };
   /** Fill while a shape is being drawn, and after (Terra Draw asks for each shape). */
   const drawingFill = (drawing: number, done = 0) => (feature: GeoJSONStoreFeatures) => (feature.properties.currentlyDrawing ? drawing : done);
 
@@ -489,7 +512,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       const at = s.kind === "Area" && cuts.length && s.geometry ? labelInside(cutOut(s.geometry, cuts) as number[][][][]) : labelPoint(s.geometry);
       if (!at) return [];
       const name = live.current.labels[s.id]?.trim() || names[s.id];
-      const text = s.kind === "Count" ? String(++count) : `${name}\n${formatShapeValue(s.kind, live.current.values?.[s.id] ?? s.value)}`;
+      const note = live.current.notes?.[s.id];
+      const text = s.kind === "Count" ? String(++count) : `${name}\n${formatShapeValue(s.kind, live.current.values?.[s.id] ?? s.value)}${note ? `\n${note}` : ""}`;
       return [{ type: "Feature" as const, geometry: { type: "Point" as const, coordinates: at }, properties: { text, kind: s.kind } }];
     });
     source.setData({ type: "FeatureCollection", features });
@@ -581,7 +605,23 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   }, [props.showHouseNumbers]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => applyOverlays(props.overlays), [props.overlays.join()]);
-  useEffect(paintLabels, [props.labels, props.values]);
+  useEffect(paintLabels, [props.labels, props.values, props.notes]);
+  // A shape given an item (or a new one) is redrawn in its color, and its fill follows.
+  useEffect(() => {
+    const draw = drawRef.current;
+    if (!draw) return;
+    let changed = false;
+    for (const s of shapesRef.current) {
+      if (s.kind === "Cutout" || !draw.hasFeature(s.id)) continue;
+      const color = colorOf(s.id);
+      // Terra Draw only restyles a shape when it changes (styleColor notes what it drew), so this nudges it.
+      if (drawnColors.current.get(s.id) === color && s.color === color) continue;
+      draw.updateFeatureProperties(s.id, { color });
+      changed = true;
+    }
+    if (changed) report();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.colors]);
 
   useImperativeHandle(ref, () => ({
     setTool(tool) {
@@ -637,6 +677,15 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       // Terra Draw refuses points finer than the 9 decimals it keeps (map tiles give about 15).
       const round = (n: number) => Math.round(n * 1e9) / 1e9;
       const rows = polygons.map((p) => ({ type: "Feature", id: String(draw.getFeatureId()), geometry: { type: "Polygon", coordinates: p.map((ring) => ring.map(([x, y]) => [round(x), round(y)])) }, properties: { mode } }) as GeoJSONStoreFeatures);
+      const results = draw.addFeatures(rows);
+      report();
+      return rows.filter((_, i) => results[i]?.valid !== false).map((r) => String(r.id));
+    },
+    addPoints(points) {
+      const draw = drawRef.current;
+      if (!draw) return [];
+      const round = (n: number) => Math.round(n * 1e9) / 1e9;
+      const rows = points.map(([x, y]) => ({ type: "Feature", id: String(draw.getFeatureId()), geometry: { type: "Point", coordinates: [round(x), round(y)] }, properties: { mode: "point" } }) as GeoJSONStoreFeatures);
       const results = draw.addFeatures(rows);
       report();
       return rows.filter((_, i) => results[i]?.valid !== false).map((r) => String(r.id));
@@ -721,7 +770,11 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       });
       const blob = await new Promise<Blob | null>((resolve) => {
         try {
-          map.getCanvas().toBlob(resolve, "image/jpeg", 0.86);
+          const canvas = map.getCanvas();
+          // With the graphic scale, north arrow, title block and legend when asked (takeoffSheet.ts).
+          const ratio = canvas.width / Math.max(1, canvas.clientWidth);
+          const picture = options.sheet ? drawSheet(canvas, feetPerPixel(map.getZoom(), map.getCenter().lat, ratio), options.sheet) : canvas;
+          picture.toBlob(resolve, "image/jpeg", 0.86);
         } catch {
           resolve(null);
         }
@@ -730,6 +783,50 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       if (swap) await applyImagery(live.current.imagery);
       draw.setMode(mode === "static" ? toolRef.current : mode);
       return blob;
+    },
+    async viewImage(size, options = {}) {
+      const map = mapRef.current;
+      const draw = drawRef.current;
+      if (!map || !draw) return null;
+      const mode = draw.getMode();
+      const swap = options.imagery && options.imagery !== live.current.imagery ? options.imagery : null;
+      // Only the imagery: no shapes, labels, street names, overlays or plan sheet.
+      draw.setMode("static");
+      const hidden = map.getStyle().layers.filter((l) => l.id !== "imagery" && l.id !== "background" && map.getLayoutProperty(l.id, "visibility") !== "none").map((l) => l.id);
+      for (const id of hidden) map.setLayoutProperty(id, "visibility", "none");
+      try {
+        if (swap) await applyImagery(swap);
+        await new Promise<void>((resolve) => {
+          const done = setTimeout(resolve, 10_000);
+          map.once("idle", () => {
+            clearTimeout(done);
+            resolve();
+          });
+          map.triggerRepaint();
+        });
+        const canvas = map.getCanvas();
+        const side = Math.min(canvas.width, canvas.height);
+        const [sx, sy] = [(canvas.width - side) / 2, (canvas.height - side) / 2];
+        const square = document.createElement("canvas");
+        square.width = square.height = size;
+        square.getContext("2d")?.drawImage(canvas, sx, sy, side, side, 0, 0, size, size);
+        const image = await new Promise<Blob | null>((resolve) => square.toBlob(resolve, "image/jpeg", 0.9));
+        if (!image) return null;
+        // Where the square's corners are, so each pixel's place is known after the map moves on.
+        const ratio = canvas.width / Math.max(1, canvas.clientWidth);
+        const corner = (x: number, y: number) => {
+          const p = map.unproject([x / ratio, y / ratio]);
+          return toMercator([p.lng, p.lat]);
+        };
+        const [mx0, my0] = corner(sx, sy);
+        const [mx1, my1] = corner(sx + side, sy + side);
+        const at = (x: number, y: number): [number, number] => fromMercator([mx0 + ((mx1 - mx0) * x) / size, my0 + ((my1 - my0) * y) / size]);
+        return { image, at };
+      } finally {
+        for (const id of hidden) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "visible");
+        if (swap) await applyImagery(live.current.imagery);
+        draw.setMode(mode === "static" ? toolRef.current : mode);
+      }
     },
     setPlan(plan) {
       planRef.current = plan;

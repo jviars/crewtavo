@@ -169,7 +169,7 @@ await quote("Jordan Rivera", "Driveway replacement, 418 Pell Ave", "sent", [
   line("Hot-mix asphalt surface", 31),
   line("Sealcoat", 1650, { optional: true, selected: false, description: "Recommended after 6 months" }),
 ], { sent_at: daysAgo(4), message: "Thanks for having us out. This covers full removal and a new 2.5 inch surface." });
-await quote("Meadowbrook HOA", "Clubhouse lot sealcoat and restripe", "draft", [line("Crack seal", 600), line("Sealcoat", 18400), line("Line striping", 44)]);
+await quote("Meadowbrook HOA", "Clubhouse lot sealcoat and restripe", "draft", [line("Hot-pour crack seal", 600), line("Sealcoat", 18400), line("Line striping", 846)]);
 const approvedQuote = await quote("Summit Ridge Builders", "Phase 2 subdivision roads (binder + surface)", "approved", [
   line("Grade and compact stone base", 410),
   line("Hot-mix asphalt surface", 620),
@@ -183,7 +183,7 @@ const [townJob] = await must(
   db.from("jobs").insert(c({ client_id: byName["Town of Rocky Mount"], property_id: propOf[byName["Town of Rocky Mount"]], title: "Alley program, block 4 overlay", status: "requires_invoicing", default_crew_id: paveCrew.id, po_number: "WO-24-118" })).select("id"),
   "town job",
 );
-const { formula: _formula, ...overlay } = line("Asphalt overlay 2 inch", 5200); // job lines don't keep formulas
+const { formula: _formula, ...overlay } = line("Mill and overlay 2 inch", 5200); // job lines don't keep formulas
 await must(db.from("job_line_items").insert([c({ job_id: townJob.id, ...overlay })]), "town job lines");
 
 const [hoaJob] = await must(

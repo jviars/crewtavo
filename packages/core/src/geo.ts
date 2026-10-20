@@ -6,6 +6,7 @@
  * recomputes from the stored GeoJSON; totals sent by the browser are ignored.
  */
 import polygonClipping, { type MultiPolygon as ClipMultiPolygon, type Polygon as ClipPolygon } from "polygon-clipping";
+import { itemFits } from "./paving";
 
 export const EARTH_RADIUS_M = 6371008.8;
 export const SQFT_PER_SQM = 10.763910416709722;
@@ -58,6 +59,8 @@ export interface Section {
   edge?: RoofEdge | null;
   /** A rake, hip or valley's length as seen from above, before the pitch stretched it. */
   plan_value?: number;
+  /** What the shape is in a paving takeoff (asphalt, a stall row...): PAVING_ITEMS in paving.ts. */
+  item?: string | null;
 }
 
 export interface MeasurementSummary {
@@ -283,8 +286,9 @@ export interface SummaryOptions {
 /**
  * Per-shape values and totals for a FeatureCollection. Feature properties understood: label,
  * depth_in, pitch, manual_value (overrides the computed value, for shapes measured on site),
- * cutout (true: an area taken out of the areas under it) and edge (a line along a roof edge, see
- * ROOF_EDGES). Cutouts come off every area they cover, and lines along a rake, hip or valley are
+ * cutout (true: an area taken out of the areas under it), edge (a line along a roof edge, see
+ * ROOF_EDGES) and item (what it is in a paving takeoff, see PAVING_ITEMS; kept only on a shape it
+ * fits). Cutouts come off every area they cover, and lines along a rake, hip or valley are
  * stretched by their pitch. Throws RangeError, with a message to show, for a shape whose points or
  * value aren't numbers.
  */
@@ -349,6 +353,7 @@ export function summarizeFeatureCollection(collection: FeatureCollection, option
       manual_override: hasManual,
       ...(edge ? { edge } : {}),
       ...(stretch !== 1 ? { plan_value: round2(value) } : {}),
+      ...(itemFits(props.item, kind) ? { item: props.item as string } : {}),
     };
     sections.push(section);
     if (kind === "Area" && !hasManual) areas.push({ section, geometry, sqft: value });
