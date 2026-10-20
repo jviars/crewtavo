@@ -38,7 +38,7 @@ const ENTITY_TONES: Record<string, Record<string, Tone>> = {
   request: { new: "warning", assessment_scheduled: "info", assessment_complete: "info", quoted: "good", converted: "good", archived: "muted" },
   quote: { draft: "muted", sent: "info", changes_requested: "warning", approved: "good", converted: "good", lost: "danger", archived: "muted" },
   job: { active: "info", requires_invoicing: "warning", completed: "good", archived: "muted" },
-  invoice: { draft: "muted", sent: "info", partially_paid: "warning", paid: "good", overdue: "danger", void: "muted" },
+  invoice: { draft: "muted", sent: "info", partially_paid: "warning", paid: "good", overdue: "danger", void: "muted", written_off: "muted" },
 };
 
 const LABELS: Record<string, string> = {

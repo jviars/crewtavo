@@ -115,6 +115,8 @@ export function ClientPage() {
   if (client.error || !c) return <PageError error={client.error} onRetry={() => client.refetch()} back={<BackLink to="/clients">Clients</BackLink>} />;
 
   const owed = work.data?.invoices.reduce((sum, i) => sum + (["sent", "partially_paid", "overdue"].includes(i.status) ? Number(i.balance_due) : 0), 0) ?? 0;
+  // Never paid, and taken as a loss: worth knowing before taking on more work for them.
+  const writtenOff = work.data?.invoices.reduce((sum, i) => sum + (i.status === "written_off" ? Number(i.balance_due) : 0), 0) ?? 0;
   const counts = { requests: work.data?.requests.length ?? 0, quotes: work.data?.quotes.length ?? 0, jobs: work.data?.jobs.length ?? 0, invoices: work.data?.invoices.length ?? 0 };
   const hasWork = counts.quotes + counts.jobs + counts.invoices > 0;
   const accessFor = (pid: string) => access.data?.find((a) => a.property_id === pid) ?? null;
@@ -272,6 +274,7 @@ export function ClientPage() {
             <Link to="/invoices" className="card card-pad stat card-link" style={{ display: "block" }}>
               <div className="label">Balance owing</div>
               <div className="value" style={{ color: owed > 0 ? "var(--danger)" : undefined }}>{work.isPending ? <Skeleton width={90} height={24} /> : formatMoney(owed)}</div>
+              {writtenOff > 0 && <div className="muted small">{formatMoney(writtenOff)} written off</div>}
             </Link>
           )}
           <ContactsCard clientId={c.id} canEdit={canSell} />

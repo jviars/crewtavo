@@ -168,6 +168,8 @@ export const ASSISTANT_TOOL_LABELS: Record<string, string> = {
   send_reminders: "Sent payment reminders",
   record_payment: "Recorded a payment",
   void_invoice: "Voided an invoice",
+  write_off_invoice: "Wrote off an invoice",
+  undo_write_off: "Undid an invoice write-off",
   // Team, time and pay
   list_team: "Looked at the team",
   invite_person: "Invited someone",

@@ -219,7 +219,8 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
 - **Jobs and invoicing:** one-off and recurring jobs, multi-day work, change orders the client
   approves, batch invoicing, payment reminders, deposits, progress billing and retainage. Invoices
   go through Stripe for card and bank payments; invoices made in Stripe come in too, with the fees
-  and bank deposits behind every payment. Refunds, expenses and job costing, timesheets and pay.
+  and bank deposits behind every payment. Refunds, write-offs for invoices that won't be paid,
+  expenses and job costing, timesheets and pay.
 - **Plans and files:** plan sets, specs, permits and addenda on requests, quotes, jobs and
   properties, up to 200 MB each. New versions replace old ones (with the history kept), the crew
   sees only current sheets on their phones, and clients can attach plans to a booking request. A

@@ -23,6 +23,7 @@ const FILTERS = [
   { key: "overdue", label: "Past due", statuses: ["overdue"] },
   { key: "draft", label: "Draft", statuses: ["draft"] },
   { key: "paid", label: "Paid", statuses: ["paid"] },
+  { key: "written_off", label: "Written off", statuses: ["written_off"] },
   { key: "void", label: "Void", statuses: ["void"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
@@ -40,6 +41,8 @@ function InvoicesPageScreen() {
   const [search, setSearch] = useState("");
   const term = useDeferredValue(searchTerm(search));
   const statuses = FILTERS.find((f) => f.key === filter)!.statuses;
+  // Settled ones (paid, written off, void) newest first; ones still owed by when they're due.
+  const settled = filter === "paid" || filter === "written_off" || filter === "void";
   const counts = useStatusCounts("invoices", company.id, Object.fromEntries(FILTERS.map((f) => [f.key, f.statuses])));
   const today = todayIn(company.timezone);
 
@@ -52,7 +55,7 @@ function InvoicesPageScreen() {
         .select("id, number, kind, status, subject, issued_on, due_on, total, balance_due, client:clients(display_name)")
         .eq("company_id", company.id)
         .in("status", [...statuses])
-        .order(filter === "paid" || filter === "void" ? "issued_on" : "due_on", { ascending: !(filter === "paid" || filter === "void"), nullsFirst: false })
+        .order(settled ? "issued_on" : "due_on", { ascending: !settled, nullsFirst: false })
         .limit(300);
       if (term) {
         if (/^\d+$/.test(term)) q = q.eq("number", Number(term));
@@ -66,7 +69,7 @@ function InvoicesPageScreen() {
     },
   });
 
-  if (invoices.isPending) return <ListPageSkeleton columns={6} tabs={5} />;
+  if (invoices.isPending) return <ListPageSkeleton columns={6} tabs={FILTERS.length} />;
   const rows = invoices.data ?? [];
   const owed = rows.reduce((s, i) => s + Number(i.balance_due), 0);
   const billed = rows.reduce((s, i) => s + Number(i.total), 0);
@@ -125,7 +128,13 @@ function InvoicesPageScreen() {
             <EmptyState icon="search" title="No invoices match" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
           ) : (
             <EmptyState icon="invoice" title={filter === "open" ? "Nothing waiting on payment" : filter === "overdue" ? "Nothing past due" : "Nothing here"} action={filter === "open" && <Link className="btn" to="/jobs">Find jobs to invoice</Link>}>
-              {filter === "open" ? "Invoice finished jobs from the job page, or create a standalone invoice." : filter === "overdue" ? "Every sent invoice is within its terms." : "No invoices have this status."}
+              {filter === "open"
+                ? "Invoice finished jobs from the job page, or create a standalone invoice."
+                : filter === "overdue"
+                  ? "Every sent invoice is within its terms."
+                  : filter === "written_off"
+                    ? "When a client is never going to pay, open the invoice and choose Write off from its menu."
+                    : "No invoices have this status."}
             </EmptyState>
           )}
         </div>
@@ -135,7 +144,7 @@ function InvoicesPageScreen() {
             <thead><tr><th>#</th><th>Client</th><th>Due</th><th className="num">Total</th><th className="num">Balance</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((i) => {
-                const late = i.due_on && Number(i.balance_due) > 0 && i.status !== "draft" && i.due_on < today;
+                const late = i.due_on && Number(i.balance_due) > 0 && i.status !== "draft" && i.status !== "written_off" && i.due_on < today;
                 return (
                   <tr key={i.id} className="row-link" onClick={() => navigate(`/invoices/${i.id}`)}>
                     <td className="muted tabular" style={{ width: 56 }}>#{i.number}</td>
@@ -154,7 +163,7 @@ function InvoicesPageScreen() {
           </table>
           <div className="list-foot">
             <span>{rows.length} {rows.length === 1 ? "invoice" : "invoices"} · {formatMoney(billed)} billed</span>
-            <strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(owed)} owed</strong>
+            <strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(owed)} {filter === "written_off" ? "written off" : "owed"}</strong>
           </div>
         </div>
       )}

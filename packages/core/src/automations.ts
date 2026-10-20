@@ -73,7 +73,7 @@ const STATUS_CHOICES: Record<SubjectKind, Array<{ value: string; label: string }
   ],
   invoice: [
     { value: "draft", label: "Draft" }, { value: "sent", label: "Awaiting payment" }, { value: "partially_paid", label: "Partly paid" },
-    { value: "paid", label: "Paid" }, { value: "overdue", label: "Past due" }, { value: "void", label: "Void" },
+    { value: "paid", label: "Paid" }, { value: "overdue", label: "Past due" }, { value: "void", label: "Void" }, { value: "written_off", label: "Written off" },
   ],
 };
 

@@ -186,7 +186,7 @@ export interface StripeInvoice {
   payment_intent: string | null;
   charge: string | StripeCharge | null;
   metadata: Record<string, string> | null;
-  status_transitions: { finalized_at: number | null; paid_at: number | null };
+  status_transitions: { finalized_at: number | null; paid_at: number | null; marked_uncollectible_at?: number | null };
   lines: { data: StripeInvoiceLine[]; has_more: boolean };
 }
 
