@@ -604,10 +604,11 @@ export function MeasurePage() {
     setShapes(next);
     setDrawing(inProgress);
   };
-  /** Shapes Find paving added, as the items it found them as. */
-  const addFound = (ids: string[], item: string) => {
+  /** Shapes Find paving added, as the items it found them as (`osm` when OpenStreetMap's buildings shaped them). */
+  const addFound = (ids: string[], item: string, osm = false) => {
     ids.forEach((id) => knownIds.current.add(id));
     setItems((list) => ({ ...list, ...Object.fromEntries(ids.map((id) => [id, item])) }));
+    if (osm) setFromOsm((list) => [...list, ...ids]);
   };
   const setShapePitch = (id: string, value: string) =>
     setPitches(({ [id]: _, ...rest }) => (value.trim() ? { ...rest, [id]: value } : rest));

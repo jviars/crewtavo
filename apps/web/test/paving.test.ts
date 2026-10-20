@@ -1,7 +1,10 @@
-import type { Section } from "@crewtavo/core/geo";
+import { polygonAreaM2, type Section } from "@crewtavo/core/geo";
 import { describe, expect, it } from "vitest";
 import { centers, gridPolygons, outlines, pieceAt, ringArea, simplifyRing } from "../src/features/measure/detect";
-import { maskGrids, pickMask, pixelValues, SAM_GRID, SAM_SIZE } from "../src/features/measure/samLocal";
+import { lotAt } from "../src/features/measure/buildings";
+import { contours, guessPolygons, opened } from "../src/features/measure/maskOutline";
+import { pickMask, pixelValues, SAM_SIZE } from "../src/features/measure/samLocal";
+import { combine, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
 import { feetPerPixel, scaleLength } from "../src/features/measure/takeoffSheet";
 import { currentStep, formulaValue, serviceKind, stageLabel, takeoffVariables, usesDepth, type TakeoffRow } from "../src/features/paving/data";
 
@@ -71,24 +74,7 @@ describe("tap to outline (the free model)", () => {
     expect(pieceAt(g, 2, 16, { cells: 20 }).reduce((n, v) => n + v, 0)).toBe(0);
   });
 
-  it("turns the model's masks into grids, leaving the padding under the picture off", () => {
-    const side = 256;
-    const logits = new Float32Array(3 * side * side).fill(-5);
-    const on = (m: number, x0: number, y0: number, x1: number, y1: number) => {
-      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) logits[m * side * side + y * side + x] = 3;
-    };
-    on(0, 10, 10, 20, 20);
-    on(1, 0, 100, 50, 200); // half of it below a 1024 × 512 picture
-    const { grids, scores } = maskGrids(logits, [1, 1, 3, side, side], [0.9, 0.8, 0.1], SAM_SIZE, 512);
-    expect(grids).toHaveLength(3);
-    expect(scores).toEqual([0.9, 0.8, 0.1]);
-    expect(grids[0].reduce((n, v) => n + v, 0)).toBe(100);
-    expect(grids[1].reduce((n, v) => n + v, 0)).toBe(50 * 28); // rows 100 to 127 only
-    expect(grids[2].every((v) => v === 0)).toBe(true);
-    expect(grids[0].length).toBe(SAM_GRID * SAM_GRID);
-  });
-
-  it("starts on the whole lot, not the speck SAM scores highest", () => {
+  it("starts a single tap on the whole lot, not the speck SAM scores highest", () => {
     // Answers from a tap on the Radford lot: the lot, then two specks around the tap.
     expect(pickMask([{ cells: 19526, score: 0.72 }, { cells: 21, score: 0.87 }, { cells: 18, score: 0.9 }])).toBe(0);
     expect(pickMask([{ cells: 2356, score: 0.44 }, { cells: 13251, score: 0.84 }, { cells: 900, score: 0.95 }])).toBe(1);
@@ -97,15 +83,138 @@ describe("tap to outline (the free model)", () => {
     expect(pickMask([])).toBe(-1);
   });
 
-  it("normalizes the picture the way SAM was trained, top-left in the padded square", () => {
-    const rgba = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255]); // white, black
-    const out = pixelValues(rgba, 2, 1);
+  it("takes the surest guess to take something out: the thing under the tap", () => {
+    // A tap on a planted island: the island, the island and the aisle beside it, the whole lot.
+    expect(pickMask([{ cells: 120, score: 0.93 }, { cells: 900, score: 0.71 }, { cells: 19000, score: 0.62 }], { prefer: "surest" })).toBe(0);
+  });
+
+  it("normalizes the picture the way SAM was trained", () => {
+    const rgba = new Uint8ClampedArray(SAM_SIZE * SAM_SIZE * 4);
+    rgba.set([255, 255, 255, 255, 0, 0, 0, 255]); // white, then black
+    const out = pixelValues(rgba);
     const plane = SAM_SIZE * SAM_SIZE;
     expect(out.length).toBe(3 * plane);
     expect(out[0]).toBeCloseTo((1 - 0.485) / 0.229, 4); // white's red
     expect(out[plane + 1]).toBeCloseTo(-0.456 / 0.224, 4); // black's green
-    expect(out[2]).toBe(0); // padding
-    expect(out[SAM_SIZE]).toBe(0);
+  });
+});
+
+/** Scores over a cells-square grid: above 0 inside the rectangles, -2 elsewhere. */
+function scores(cells: number, ...rects: Array<[number, number, number, number]>) {
+  const out = new Float32Array(cells * cells).fill(-2);
+  for (const [x0, y0, x1, y1] of rects) for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) out[y * cells + x] = 2;
+  return out;
+}
+
+describe("outlines from the model's mask", () => {
+  it("traces the edge halfway between grid points, not round whole cells", () => {
+    const [polygon] = contours(scores(20, [5, 5, 15, 10]), 20);
+    expect(polygon).toHaveLength(1);
+    // Cells 5 to 14 have their scores at 5.5 to 14.5; the edge sits halfway to the next ones.
+    const xs = polygon[0].map((p) => p[0]);
+    const ys = polygon[0].map((p) => p[1]);
+    expect(Math.min(...xs)).toBeCloseTo(5, 5);
+    expect(Math.max(...xs)).toBeCloseTo(15, 5);
+    expect(Math.min(...ys)).toBeCloseTo(5, 5);
+    expect(Math.max(...ys)).toBeCloseTo(10, 5);
+  });
+
+  it("puts the edge where the scores cross zero", () => {
+    const values = scores(10, [2, 2, 6, 6]);
+    for (let y = 2; y < 6; y++) values[y * 10 + 5] = 0.5; // the right column only just in
+    const [[ring]] = contours(values, 10);
+    // Between 0.5 (at 5.5) and -2 (at 6.5): a fifth of the way.
+    expect(Math.max(...ring.map((p) => p[0]))).toBeCloseTo(5.7, 5);
+  });
+
+  it("keeps an island as a hole, and an island in the island as a piece of its own", () => {
+    const values = scores(30, [2, 2, 28, 28]);
+    for (let y = 8; y < 22; y++) for (let x = 8; x < 22; x++) values[y * 30 + x] = -2;
+    for (let y = 12; y < 18; y++) for (let x = 12; x < 18; x++) values[y * 30 + x] = 2;
+    const polygons = contours(values, 30);
+    expect(polygons).toHaveLength(2);
+    expect(polygons[0]).toHaveLength(2); // the lot and its island
+    expect(polygons[1]).toHaveLength(1);
+    // Marching squares trims each square corner by an eighth of a cell.
+    expect(ringArea(polygons[0][1])).toBeCloseTo(14 * 14 - 0.5, 5);
+  });
+
+  it("takes off a lot's spurs and keeps the rest, square corners and all", () => {
+    const g = grid(20, [4, 4, 12, 12], [12, 7, 18, 8]); // a lot with a curb line running off it
+    const open = opened(g, 20);
+    expect(open.reduce((n, v) => n + v, 0)).toBe(64);
+    expect(open[7 * 20 + 15]).toBe(0);
+  });
+
+  it("keeps a sidewalk a cell or two wide when it isn't a lot", () => {
+    const walk = scores(40, [5, 10, 35, 12]); // two cells wide
+    expect(guessPolygons(walk, { seeds: [[20, 11]], cells: 40 })).toHaveLength(1);
+    expect(guessPolygons(walk, { seeds: [[20, 11]], open: true, cells: 40 })).toHaveLength(0);
+  });
+
+  it("outlines just the piece under the tap, or just what's in the box", () => {
+    const values = scores(40, [2, 2, 18, 18], [24, 24, 38, 38]);
+    const tapped = guessPolygons(values, { seeds: [[30, 30]], cells: 40 });
+    expect(tapped).toHaveLength(1);
+    expect(Math.abs(ringArea(tapped[0][0]) - 14 * 14)).toBeLessThan(1);
+    const boxed = guessPolygons(values, { box: [0, 0, 20, 20], open: true, cells: 40 });
+    expect(boxed).toHaveLength(1);
+    expect(Math.abs(ringArea(boxed[0][0]) - 16 * 16)).toBeLessThan(1);
+    // A straight edge comes out as a handful of corners.
+    expect(boxed[0][0].length).toBeLessThanOrEqual(9);
+  });
+});
+
+/** A square ring in degrees, [west, south] corner and size. */
+const square = (w: number, s: number, size: number) => [[w, s], [w + size, s], [w + size, s + size], [w, s + size], [w, s]];
+
+describe("adding to and taking out of an outline", () => {
+  const lot = [square(-79.183, 37.362, 0.001)];
+  const lane = [square(-79.1822, 37.3622, 0.0005)];
+
+  it("adds a tap's piece to the outline as one shape", () => {
+    const joined = combine([lot], [lane], "add");
+    expect(joined).toHaveLength(1);
+    expect(polygonAreaM2(joined[0])).toBeGreaterThan(polygonAreaM2(lot));
+  });
+
+  it("takes out what's under a tap as a hole", () => {
+    const island = [square(-79.1827, 37.3623, 0.0002)];
+    const out = combine([lot], [island], "out");
+    expect(out).toHaveLength(1);
+    expect(out[0]).toHaveLength(2);
+  });
+
+  it("cuts OpenStreetMap's buildings out of a guess and says so", () => {
+    const roof = [square(-79.1825, 37.3625, 0.0002)];
+    const cut = withoutBuildings([lot], [roof]);
+    expect(cut.osm).toBe(true);
+    expect(polygonAreaM2(cut.polygons[0])).toBeLessThan(polygonAreaM2(lot));
+    expect(withoutBuildings([lot], [[square(-79.2, 37.4, 0.0002)]]).osm).toBe(false);
+  });
+
+  it("drops scraps and car-sized holes", () => {
+    const car = square(-79.1825, 37.3625, 0.00002); // about 2 m across
+    const scrap = [square(-79.19, 37.36, 0.00001)];
+    expect(tidy([[lot[0], car], scrap])).toEqual([[lot[0]]]);
+  });
+
+  it("drops a sliver left beside the lot when a building is cut out", () => {
+    const sliver = [square(-79.1815, 37.362, 0.00008)]; // about 9 m across: big enough alone, tiny beside the lot
+    expect(withoutScraps([lot, sliver])).toEqual([lot]);
+    expect(withoutScraps([sliver])).toEqual([sliver]);
+  });
+
+  it("finds the mapped lot a tap is on, the smallest when lots are mapped inside lots", () => {
+    const small = [square(-79.1828, 37.3622, 0.0003)];
+    expect(lotAt([lot, small], [-79.1826, 37.3624])).toBe(small);
+    expect(lotAt([lot, small], [-79.1822, 37.3628])).toBe(lot);
+    expect(lotAt([lot], [-79.19, 37.36])).toBeNull();
+  });
+
+  it("pads a box a little and keeps it on the picture", () => {
+    expect(padBox([[100, 100], [300, 200]], 1024, 800)).toEqual([88, 88, 312, 212]);
+    expect(padBox([[0, 0], [1000, 790]], 1024, 800)).toEqual([0, 0, 1024, 800]);
   });
 });
 

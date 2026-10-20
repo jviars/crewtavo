@@ -1,5 +1,5 @@
 /**
- * Find paving, two ways. **Tap to outline** is free: a small Segment Anything runs in the browser
+ * Find paving, two ways. **Tap to outline** is free: SAM 2.1 runs in the browser
  * and outlines the surface under each tap (TapOutline.tsx). **Find everything in view** outlines all
  * the asphalt and concrete on the aerial and counts its stalls, with Meta's SAM 3 on the business's
  * own fal.ai account (Apps → fal.ai; routes/paving.ts on the server). What either finds lands on the
@@ -8,7 +8,7 @@
  */
 import { lineLengthM, polygonAreaM2, SQFT_PER_SQM } from "@crewtavo/core/geo";
 import { useMutation } from "@tanstack/react-query";
-import { useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -19,7 +19,8 @@ import { toast } from "@/lib/toast";
 import { anyOf, centers, GRID, maskGrid, outlines } from "./detect";
 import type { ImageryId } from "./imagery";
 import type { MeasureMapHandle } from "./MeasureMap";
-import { TAP_ITEMS } from "./TapOutline";
+import { hasWebGpu } from "./samLocal";
+import { SLOW_NO_WEBGPU, TAP_ITEMS } from "./TapOutline";
 
 type Method = "tap" | "fal";
 type Target = "asphalt" | "concrete" | "stalls";
@@ -86,6 +87,11 @@ export function FindPaving({
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<Method>(() => savedMethod() ?? (connected ? "fal" : "tap"));
   const [tapItem, setTapItem] = useState("asphalt");
+  // Tap to outline is about 30 times slower without the graphics card: said before starting.
+  const [gpu, setGpu] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (open && gpu === null) void hasWebGpu().then(setGpu);
+  }, [open, gpu]);
   const [targets, setTargets] = useState<Target[]>(["asphalt", "concrete"]);
   const notAerial = imagery === "street" || imagery === "terrain";
   const tooFar = zoom < 16;
@@ -151,7 +157,7 @@ export function FindPaving({
   };
   const blocked = notAerial ? "Switch to aerial imagery first: Find paving needs a photo of the lot." : tooFar ? "Zoom in closer to the lot first." : null;
   const methods: Array<{ id: Method; title: string; badge: string; body: string }> = [
-    { id: "tap", title: "Tap to outline", badge: "Free", body: "Tap a lot, drive or sidewalk and it's outlined, one tap at a time. It runs in this browser, so nothing is sent anywhere." },
+    { id: "tap", title: "Tap to outline", badge: "Free", body: "Tap a lot, drive or sidewalk, or drag a box around a lot, and it's outlined. It runs in this browser, so the aerial isn't sent anywhere." },
     { id: "fal", title: "Find everything in view", badge: "fal.ai", body: `Outlines all the asphalt and concrete in view at once and counts stalls, for about half a cent a thing found on your fal.ai account.${connected ? "" : " Needs fal.ai installed."}` },
   ];
 
@@ -195,10 +201,16 @@ export function FindPaving({
                 <div className="callout" role="note">
                   <Icon name="info" size={16} />
                   <span className="small" style={{ fontWeight: 400 }}>
-                    Tap the middle of each surface. If an outline takes too much or too little, <strong>Smaller</strong> and <strong>Bigger</strong> change it. The first time, the model (about 14 MB) downloads, then it stays in this browser.
+                    Tap the middle of each surface, or choose <strong>Box</strong> and drag a box around a lot. Tap again to add what it missed, and <strong>Take out</strong> what doesn't belong. The first time, the model (about 60 MB) downloads, then it stays in this browser.
                     {imagery === "google" ? " Google's imagery can't be used for this, so it looks at the free imagery here instead." : ""}
                   </span>
                 </div>
+                {gpu === false && (
+                  <div className="callout callout-warning" role="note">
+                    <Icon name="alert" size={16} />
+                    <span className="small" style={{ fontWeight: 400 }}>{SLOW_NO_WEBGPU}</span>
+                  </div>
+                )}
               </>
             ) : connected ? (
               <>
