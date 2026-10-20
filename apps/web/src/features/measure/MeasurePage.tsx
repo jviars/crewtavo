@@ -1,13 +1,16 @@
 /**
  * Measure on aerial imagery: draw areas, lines and counts and see their sizes as you go (the server
- * recomputes them on save), keep a picture of the drawing, and put it on a quote or invoice for the
- * client. The map opens on Auto: the state's own imagery where it has some, else US aerial (NAIP),
- * else USGS, else (outside the US) Esri with a key from Settings > Maps, or the street map. Anyone
- * can pick a source themselves instead, from the Imagery button, and make it what Measure opens on
- * (an admin can set that for the whole team in Settings > Maps).
+ * recomputes them on save), cut the house or a bed out of an area, keep a picture of the drawing,
+ * and put it on a quote or invoice for the client. For roofs, each section can have its own pitch
+ * (picked, read from USGS lidar, or measured with a phone or a photo: RoofPitch.tsx) and lines can
+ * be marked as eaves, rakes, ridges, hips and valleys. The map opens on Auto: the state's own
+ * imagery where it has some, else US aerial (NAIP), else USGS, else (outside the US) Esri with a key
+ * from Settings > Maps, or the street map. Anyone can pick a source themselves instead, from the
+ * Imagery button, and make it what Measure opens on (an admin can set that for the whole team in
+ * Settings > Maps).
  */
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
-import { roofingSquares, summarizeFeatureCollection, type Feature } from "@crewtavo/core/geo";
+import { drawingSquares, edgeLengths, isPitch, isRoofEdge, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type Position, type RoofEdge } from "@crewtavo/core/geo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useSearchParams } from "react-router-dom";
@@ -24,6 +27,7 @@ import { addressLine, formatNumber } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { AddressSearch, type ClientSuggestion, type PlaceSuggestion } from "./AddressSearch";
+import { boxAround, buildingAt, buildingsIn, BuildingsError, buildingsOn, OSM_BUILDINGS_CREDIT } from "./buildings";
 import { ShareDrawing, type DrawingRow } from "./drawings";
 import { AUTO_NAME, choiceName, ELEVATION_CREDIT, imageryCredit, imageryInfo, imageryUsable, isImageryId, mapKeys, openingImagery, OVERLAYS, probeImagery, resolveAuto, setMyDefault, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
 import { ImageryPicker } from "./ImageryPicker";
@@ -31,9 +35,11 @@ import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
 import { useTooLarge } from "../plans/UploadLimit";
 import { isSavedPlan, LineUpBanner, PlanCard, usePlanOnMap } from "./PlanOnMap";
+import { MeasurePitch, PitchPicker, pitchLabel, riseOf, STEEP_FROM } from "./RoofPitch";
 
 const TOOLS: Array<{ tool: Tool; label: string; icon: IconName; key: string; what: string }> = [
   { tool: "polygon", label: "Area", icon: "area", key: "A", what: "Lawns, roofs, lots, driveways" },
+  { tool: "cutout", label: "Cut out", icon: "scissors", key: "X", what: "Leave out the house, a pool or a bed" },
   { tool: "linestring", label: "Line", icon: "line", key: "L", what: "Edges, fences, curbs" },
   { tool: "point", label: "Count", icon: "pin", key: "C", what: "Trees, drains, posts" },
   { tool: "select", label: "Edit", icon: "pointer", key: "E", what: "Move corners, delete shapes" },
@@ -50,13 +56,14 @@ interface SaveResult { id: string; total_area_sqft: number; total_area_sqyd: num
 interface SavedView { center?: [number, number]; zoom?: number; imagery?: string; mode?: "auto" | "manual"; overlays?: string[] }
 interface Found { found: boolean; lat?: number; lng?: number; formatted?: string | null; country?: string | null }
 
-const safeSquares = (areaSqft: number, pitch: string, wastePct: number) => {
-  try {
-    return roofingSquares(areaSqft, pitch, wastePct);
-  } catch {
-    return null; // pitch still being typed
-  }
-};
+/** A pitch the way it's saved ("6/12" for 6-12), or as typed while it doesn't read yet. */
+const tidyPitch = (pitch: string) => (pitch.trim() && isPitch(pitch) ? normalizePitch(pitch) : pitch.trim());
+const EDGE_NAMES: Record<RoofEdge, string> = { eave: "Eave", rake: "Rake", ridge: "Ridge", hip: "Hip", valley: "Valley" };
+const EDGE_PLURALS: Record<RoofEdge, string> = { eave: "Eaves", rake: "Rakes", ridge: "Ridges", hip: "Hips", valley: "Valleys" };
+/** Edges that run up the roof, so their length depends on the pitch. */
+const slopedEdge = (edge: RoofEdge | undefined) => edge === "rake" || edge === "hip" || edge === "valley";
+const polygonsOf = (shapes: Shape[], kind: Shape["kind"]) =>
+  shapes.filter((s) => s.kind === kind && s.geometry?.type === "Polygon").map((s) => s.geometry!.coordinates as Position[][]);
 // Slope and contours stay on (or off) between visits, per browser.
 const OVERLAYS_KEY = "crewtavo.measureOverlays";
 function savedOverlays(): OverlayId[] {
@@ -77,6 +84,10 @@ function hintFor(tool: Tool, drawing: Shape | null, selected: boolean, shapes: n
       return drawing
         ? `${formatShapeValue("Area", drawing.value) || "0 sq ft"} so far. ${tap} the first point${touch ? "" : " or press Enter"} to finish.`
         : `${tap} each corner of the area you're measuring.`;
+    case "cutout":
+      return drawing
+        ? `${formatShapeValue("Area", drawing.value) || "0 sq ft"} to leave out so far. ${tap} the first point${touch ? "" : " or press Enter"} to finish.`
+        : `${tap} each corner of what to leave out, like the house. It comes off the areas under it.`;
     case "linestring":
       return drawing
         ? `${formatShapeValue("Length", drawing.value)} so far. Double-${tap.toLowerCase()}${touch ? "" : " or press Enter"} to finish.`
@@ -109,6 +120,13 @@ export function MeasurePage() {
   const [drawing, setDrawing] = useState<Shape | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [labels, setLabels] = useState<Record<string, string>>({});
+  // A roof section's own pitch (blank follows the drawing's), roof edges, and outlines from OpenStreetMap.
+  const [pitches, setPitches] = useState<Record<string, string>>({});
+  const [edges, setEdges] = useState<Record<string, RoofEdge>>({});
+  const [fromOsm, setFromOsm] = useState<string[]>([]);
+  const [pitchFor, setPitchFor] = useState<string | null>(null);
+  const [finding, setFinding] = useState<"cut" | "outline" | null>(null);
+  const [roofOpen, setRoofOpen] = useState(false);
   const [depth, setDepth] = useState("");
   const [pitch, setPitch] = useState("");
   const [waste, setWaste] = useState("10");
@@ -227,19 +245,45 @@ export function MeasurePage() {
   }, [mapState]);
 
   // ----- What's drawn ---------------------------------------------------------------------------
-  const names = useMemo(() => defaultNames(shapes), [shapes]);
+  const names = useMemo(() => defaultNames(shapes.map((s) => ({ ...s, edge: edges[s.id] }))), [shapes, edges]);
+  const nameOf = (id: string) => labels[id]?.trim() || names[id] || "this shape";
   // Unnamed shapes are saved as "Area 1", "Line 1", so the client sees the same names as the map.
+  // Roof sections and the edges that run up the roof carry the pitch they're measured at.
   const features: Feature[] = useMemo(
-    () => shapes.map((s) => ({ type: "Feature", id: s.id, geometry: s.geometry, properties: { label: labels[s.id]?.trim() || names[s.id], depth_in: Number(depth) || undefined, pitch: pitch || undefined } })),
-    [shapes, labels, names, depth, pitch],
+    () =>
+      shapes.map((s) => {
+        const edge = s.kind === "Length" ? edges[s.id] : undefined;
+        const own = s.kind === "Area" || slopedEdge(edge) ? tidyPitch(pitches[s.id] ?? "") || tidyPitch(pitch) : "";
+        return {
+          type: "Feature",
+          id: s.id,
+          geometry: s.geometry,
+          properties: {
+            label: labels[s.id]?.trim() || names[s.id],
+            depth_in: Number(depth) || undefined,
+            pitch: own || undefined,
+            ...(s.kind === "Cutout" ? { cutout: true } : {}),
+            ...(edge ? { edge } : {}),
+            ...(fromOsm.includes(s.id) ? { source: "openstreetmap" } : {}),
+          },
+        };
+      }),
+    [shapes, labels, names, depth, pitch, pitches, edges, fromOsm],
   );
   // Same math the server uses on save (packages/core), so live numbers match stored ones.
-  const summary = useMemo(() => summarizeFeatureCollection({ type: "FeatureCollection", features }), [features]);
+  const summary = useMemo(() => summarizeFeatureCollection({ type: "FeatureCollection", features }, { pitch }), [features, pitch]);
+  const sections = useMemo(() => new Map(summary.sections.map((s) => [s.feature_id, s])), [summary]);
   const depthIn = Number(depth) || 0;
-  const squares = pitch ? safeSquares(summary.total_area_sqft, pitch, Number(waste || 0)) : null;
+  const pitchError = pitchProblem(summary, pitch);
+  const squares = pitchError ? null : drawingSquares(summary, pitch, Number(waste || 0));
+  const roofEdges = edgeLengths(summary);
   const cubicYards = depthIn ? (summary.total_area_sqft * (depthIn / 12)) / 27 : 0;
   const asphaltTons = depthIn ? (summary.total_area_sqyd * depthIn * 110) / 2000 : 0;
-  const signature = JSON.stringify([shapes.map((s) => s.geometry), shapes.map((s) => labels[s.id] ?? ""), title, depth, pitch, waste]);
+  // Roofing shows the roof tools on every row; anyone else gets them once they set a pitch or an edge.
+  const roofing = company.trade_preset === "roofing_exteriors" || roofOpen || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
+  const mapNames = useMemo(() => Object.fromEntries(shapes.map((s) => [s.id, labels[s.id]?.trim() || names[s.id]])), [shapes, labels, names]);
+  const mapValues = useMemo(() => Object.fromEntries(summary.sections.map((s) => [s.feature_id, s.value])), [summary]);
+  const signature = JSON.stringify([shapes.map((s) => [s.kind, s.geometry]), shapes.map((s) => labels[s.id] ?? ""), title, depth, pitch, waste, pitches, edges, fromOsm]);
   const shapesDirty = shapes.length > 0 && signature !== savedSignature;
   // A reopened drawing starts out saved.
   useEffect(() => {
@@ -262,6 +306,14 @@ export function MeasurePage() {
     })));
     const savedDepth = kept.find((f) => f.properties?.depth_in)?.properties?.depth_in;
     if (savedDepth) setDepth(String(savedDepth));
+    // A section saved at the drawing's own pitch follows it; one at another pitch keeps its own.
+    const roofPitch = tidyPitch(m?.roof_pitch ?? "");
+    setPitches(Object.fromEntries(ids.flatMap((id, i) => {
+      const own = kept[i]?.properties?.pitch;
+      return typeof own === "string" && own && tidyPitch(own) !== roofPitch ? [[id, own]] : [];
+    })));
+    setEdges(Object.fromEntries(ids.flatMap((id, i) => (isRoofEdge(kept[i]?.properties?.edge) ? [[id, kept[i]!.properties!.edge as RoofEdge]] : []))));
+    setFromOsm(ids.filter((_, i) => kept[i]?.properties?.source === "openstreetmap"));
     baseline.current = ids.length;
     setTimeout(() => mapRef.current?.fitShapes(), 50);
     if (ids.length < kept.length) toast.error("Some shapes in this drawing couldn't be shown. Check it before saving again.");
@@ -470,6 +522,68 @@ export function MeasurePage() {
     mapRef.current?.remove(selected);
     setSelected(null);
   };
+  /** An area becomes a cutout or back. Its name and pitch go with it to its new id. */
+  const convert = (id: string, kind: "Area" | "Cutout") => {
+    const next = mapRef.current?.convert(id, kind);
+    if (!next || next === id) return;
+    const move = <T,>(map: Record<string, T>): Record<string, T> => {
+      if (!(id in map)) return map;
+      const { [id]: value, ...rest } = map;
+      return { ...rest, [next]: value };
+    };
+    setLabels(move);
+    setPitches(move);
+    setFromOsm((list) => list.map((x) => (x === id ? next : x)));
+    setSelected(null);
+  };
+  const setEdge = (id: string, edge: RoofEdge | "") =>
+    setEdges(({ [id]: _, ...rest }) => (edge ? { ...rest, [id]: edge } : rest));
+  const setShapePitch = (id: string, value: string) =>
+    setPitches(({ [id]: _, ...rest }) => (value.trim() ? { ...rest, [id]: value } : rest));
+
+  // ----- Building outlines from OpenStreetMap (buildings.ts) -----------------------------------
+  const cutBuildings = async () => {
+    const areas = polygonsOf(shapes, "Area");
+    const box = boxAround(areas);
+    if (!box) return;
+    setFinding("cut");
+    try {
+      // The street map's tiles have them already, most places; OpenStreetMap's own server is slower.
+      const found = buildingsOn(mapRef.current?.buildings() ?? (await buildingsIn(box)), areas, polygonsOf(shapes, "Cutout"));
+      if (!found.length) return void toast.info("OpenStreetMap has no buildings on these areas. Draw them with Cut out.");
+      const ids = mapRef.current?.add(found, "Cutout") ?? [];
+      if (!ids.length) return void toast.error("Those building outlines couldn't be added. Draw them with Cut out.");
+      setFromOsm((list) => [...list, ...ids]);
+      setLabels((l) => ({ ...l, ...Object.fromEntries(ids.map((id, i) => [id, ids.length === 1 ? "Building" : `Building ${i + 1}`])) }));
+      toast.success(`Cut out ${ids.length === 1 ? "a building" : `${ids.length} buildings`} from OpenStreetMap. Check the outlines against the imagery and drag any corners that are off.`);
+    } catch (error) {
+      toast.error(error instanceof BuildingsError ? error.message : "Couldn't look up buildings. Try again.");
+    } finally {
+      setFinding(null);
+    }
+  };
+  const outlineBuilding = async () => {
+    const view = mapRef.current?.view();
+    if (!view) return;
+    if (view.zoom < 16) return void toast.info("Zoom in until the building fills most of the map, then try again.");
+    const [lng, lat] = view.center;
+    const d = 0.0007;
+    setFinding("outline");
+    try {
+      const loaded = mapRef.current?.buildings();
+      const building = (loaded && buildingAt(loaded, [lng, lat])) || buildingAt(await buildingsIn([lng - d, lat - d, lng + d, lat + d]), [lng, lat]);
+      if (!building) return void toast.info("OpenStreetMap has no outline for the building in the middle of the map. Draw the roof with Area.");
+      const ids = mapRef.current?.add([building], "Area") ?? [];
+      if (!ids.length) return void toast.error("That building's outline couldn't be added. Draw the roof with Area.");
+      setFromOsm((list) => [...list, ...ids]);
+      toast.success("Added the building's outline. It follows the walls, so drag the corners out to the eaves (often 1 to 2 ft).");
+    } catch (error) {
+      toast.error(error instanceof BuildingsError ? error.message : "Couldn't look up the building. Try again.");
+    } finally {
+      setFinding(null);
+    }
+  };
+
   const clearAll = async () => {
     if (!shapes.length) return;
     if (!(await confirm({ title: "Clear every shape?", body: "This removes everything you've drawn on the map. Undo can bring it back.", confirmLabel: "Clear", danger: true }))) return;
@@ -536,7 +650,7 @@ export function MeasurePage() {
       if (!shapes.length) throw new Error("Draw at least one shape first.");
       if (drawing) throw new Error("Finish or cancel the shape you're drawing first.");
       if (aligning) throw new Error("Finish lining up the plan first, or cancel it.");
-      if (pitch && squares === null) throw new Error("Roof pitch should look like 7/12.");
+      if (pitchError) throw new Error(pitchError);
       // A picture of the drawing for the quote, invoice and PDF. Saving goes ahead without one.
       let snapshot: string | undefined;
       let pictureProblem = false;
@@ -571,11 +685,11 @@ export function MeasurePage() {
         quote_id: saved ? undefined : ctx?.ids.quote ?? undefined,
         invoice_id: saved ? undefined : ctx?.ids.invoice ?? undefined,
         provider: shown,
-        roof_pitch: pitch.trim() || null,
+        roof_pitch: tidyPitch(pitch) || null,
         waste_pct: Math.min(100, Math.max(0, Number(waste || 0))),
         geojson: { type: "FeatureCollection", features },
         view: view
-          ? { ...view, imagery: shown, mode: choice === "auto" ? "auto" : "manual", overlays, plan: plan.savedPlan ?? undefined, attribution: [imageryCredit(pictureOn), overlays.length && pictureOn !== "terrain" ? ELEVATION_CREDIT : null].filter(Boolean).join(" · ") }
+          ? { ...view, imagery: shown, mode: choice === "auto" ? "auto" : "manual", overlays, plan: plan.savedPlan ?? undefined, attribution: [imageryCredit(pictureOn), overlays.length && pictureOn !== "terrain" ? ELEVATION_CREDIT : null, shapes.some((sh) => fromOsm.includes(sh.id)) ? OSM_BUILDINGS_CREDIT : null].filter(Boolean).join(" · ") }
           : undefined,
         snapshot_path: snapshot,
       });
@@ -616,6 +730,65 @@ export function MeasurePage() {
   const p = ctx?.property;
   const rows = summary.sections.map((s, i) => ({ id: s.feature_id, kind: s.kind, value: s.value, unit: s.unit, color: shapes[i]?.color ?? "#999" }));
   const counts = rows.filter((r) => r.kind === "Count").length;
+  const cutTotal = summary.sections.reduce((t, s) => (s.kind === "Cutout" ? t + s.value : t), 0);
+  const selectedShape = shapes.find((s) => s.id === selected) ?? null;
+  // Each roof section at the pitch it's measured at, for the squares line and the breakdown.
+  const roofSections = summary.sections.filter((s) => s.kind === "Area").map((s) => ({ id: s.feature_id, label: nameOf(s.feature_id), sqft: s.value, pitch: tidyPitch(s.pitch ?? "") || tidyPitch(pitch) }));
+  const roofPitches = [...new Set(roofSections.map((r) => r.pitch))];
+  const sectionSquares = (sqft: number, at: string) => (sqft * pitchFactor(at) * (1 + Number(waste || 0) / 100)) / 100;
+  const near = center ? { lat: center.lat, lng: center.lng } : null;
+  // The roof sections drawn, for reading their pitch from lidar.
+  const roofOutlines = shapes.filter((s) => s.kind === "Area" && s.geometry?.type === "Polygon").map((s) => ({ id: s.id, name: nameOf(s.id), ring: (s.geometry!.coordinates as Position[][])[0] }));
+  const hasEdges = ROOF_EDGES.some((e) => roofEdges[e] > 0);
+  const roofCard = (
+    <details key="roof" className="card measure-extra" open={roofing} onToggle={(e) => setRoofOpen(e.currentTarget.open)}>
+      <summary className="card-pad"><strong>Roof pitch and edges</strong><span className="muted small">For roofing squares, drip edge and ridge cap</span></summary>
+      <div className="card-pad stack" style={{ paddingTop: 0 }}>
+        <PitchPicker value={pitch} onChange={setPitch} />
+        <MeasurePitch near={near} onPick={setPitch} roofs={roofOutlines} onPickSection={setShapePitch} />
+        <Field label="Waste %" hint="About 10% for a plain gable roof, 15% or more with hips and valleys.">
+          <input className="input" inputMode="decimal" value={waste} onChange={(e) => setWaste(e.target.value.replace(/[^0-9.]/g, ""))} style={{ maxWidth: 120 }} />
+        </Field>
+        {squares !== null && roofSections.length > 1 && (
+          <div className="measure-breakdown">
+            <span className="small strong">Each roof section</span>
+            {roofSections.map((r) => (
+              <button key={r.id} type="button" className="measure-breakdown-row" onClick={() => setPitchFor(r.id)}>
+                <span className="grow">{r.label}</span>
+                <span className="muted small">{r.pitch ? pitchLabel(r.pitch) : "Flat"}</span>
+                <strong className="num">{formatNumber(sectionSquares(r.sqft, r.pitch), 1)} sq</strong>
+              </button>
+            ))}
+          </div>
+        )}
+        {hasEdges ? (
+          <div className="measure-totals measure-edges">
+            {ROOF_EDGES.filter((e) => roofEdges[e] > 0).map((e) => <div key={e}><span className="muted">{EDGE_PLURALS[e]}</span><strong>{formatNumber(roofEdges[e])} ft</strong></div>)}
+            <div><span className="muted">Drip edge (eaves and rakes)</span><strong>{formatNumber(roofEdges.eave + roofEdges.rake)} ft</strong></div>
+            {roofEdges.ridge + roofEdges.hip > 0 && <div><span className="muted">Ridge cap (ridges and hips)</span><strong>{formatNumber(roofEdges.ridge + roofEdges.hip)} ft</strong></div>}
+          </div>
+        ) : (
+          <span className="muted small">
+            {rows.some((r) => r.kind === "Length")
+              ? "Mark your lines as eaves, rakes, ridges, hips or valleys in the Shapes list to get drip edge and ridge cap lengths."
+              : "Draw the roof's edges with Line, then mark each as an eave, rake, ridge, hip or valley for drip edge and ridge cap lengths. Rakes, hips and valleys are stretched by the pitch."}
+          </span>
+        )}
+        <div className="stack-sm">
+          <Button size="sm" icon="home" loading={finding === "outline"} disabled={Boolean(finding) || mapState !== "ready"} onClick={outlineBuilding} style={{ justifySelf: "start" }}>Outline the building in the middle</Button>
+          <span className="muted small">Starts the roof from OpenStreetMap's outline of the building in the middle of the map, where it has one.</span>
+        </div>
+      </div>
+    </details>
+  );
+  const depthCard = (
+    <details key="depth" className="card measure-extra" open={Boolean(depth)}>
+      <summary className="card-pad"><strong>Depth</strong><span className="muted small">For mulch, gravel and asphalt</span></summary>
+      <div className="card-pad" style={{ paddingTop: 0 }}>
+        <Field label="Depth (in)"><input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" style={{ maxWidth: 120 }} /></Field>
+      </div>
+    </details>
+  );
 
   return (
     <>
@@ -673,7 +846,8 @@ export function MeasurePage() {
                   imagery={imagery}
                   imageryRevision={imageryRevision}
                   keys={keys}
-                  labels={labels}
+                  labels={mapNames}
+                  values={mapValues}
                   showStreetNames={streetNames}
                   overlays={overlays}
                   onReady={onReady}
@@ -707,6 +881,17 @@ export function MeasurePage() {
                     <button type="button" className="measure-tool" onClick={() => mapRef.current?.redo()} disabled={!history.redo} title={touch ? "Redo" : "Redo (Ctrl+Shift+Z)"}>
                       <Icon name="redo" size={18} /><span>Redo</span>
                     </button>
+                    {tool === "select" && selectedShape && (selectedShape.kind === "Area" || selectedShape.kind === "Cutout") && (
+                      <button
+                        type="button"
+                        className="measure-tool"
+                        aria-pressed={selectedShape.kind === "Cutout"}
+                        onClick={() => convert(selectedShape.id, selectedShape.kind === "Cutout" ? "Area" : "Cutout")}
+                        title={selectedShape.kind === "Cutout" ? "This is a cutout. Tap to count it as an area again." : "Make this a cutout: leave it out of the areas under it"}
+                      >
+                        <Icon name="scissors" size={18} /><span>Cut out</span>
+                      </button>
+                    )}
                     {tool === "select" && selected && (
                       <button type="button" className="measure-tool" data-danger onClick={removeSelected} title={touch ? "Delete this shape" : "Delete this shape (Delete)"}>
                         <Icon name="trash" size={18} /><span>Delete</span>
@@ -753,29 +938,79 @@ export function MeasurePage() {
             <div className="card-head"><strong>Shapes</strong><span className="badge">{rows.length}</span>{shapes.length > 0 && <Button size="sm" variant="ghost" icon="trash" onClick={clearAll} style={{ marginLeft: "auto" }}>Clear all</Button>}</div>
             {rows.length === 0 ? (
               <EmptyState compact icon="area" title="Nothing drawn yet">
-                Pick <strong>Area</strong>, <strong>Line</strong> or <strong>Count</strong> on the map, then {touch ? "tap" : "click"} to draw. Sizes show up here as you go.
+                Pick <strong>Area</strong>, <strong>Line</strong> or <strong>Count</strong> on the map, then {touch ? "tap" : "click"} to draw. <strong>Cut out</strong> leaves the house or a bed out of an area. Sizes show up here as you go.
               </EmptyState>
             ) : (
-              rows.map((row, i) => (
-                <div key={row.id} className="card-row measure-shape" data-selected={selected === row.id || undefined}>
-                  <button type="button" className="measure-swatch" style={{ background: row.color }} onClick={() => { pickTool("select"); mapRef.current?.select(row.id); }} aria-label={`Select ${labels[row.id] || names[row.id]} on the map`} />
-                  <input
-                    className="input grow"
-                    style={{ height: 32 }}
-                    aria-label={`Name for shape ${i + 1}`}
-                    placeholder={`${names[row.id] ?? ""}${row.kind === "Area" ? " (e.g. Front lawn)" : row.kind === "Length" ? " (e.g. Fence)" : ""}`}
-                    value={labels[row.id] ?? ""}
-                    onChange={(e) => setLabels({ ...labels, [row.id]: e.target.value })}
-                    maxLength={80}
-                  />
-                  <span className="num strong nowrap">{row.kind === "Count" ? "1" : `${formatNumber(row.value, row.kind === "Length" ? 1 : 0)} ${row.unit}`}</span>
-                  <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => mapRef.current?.remove(row.id)} aria-label={`Delete shape ${i + 1}`} title="Delete this shape"><Icon name="trash" size={15} /></button>
-                </div>
-              ))
+              rows.map((row, i) => {
+                const section = sections.get(row.id);
+                const edge = edges[row.id];
+                const own = pitches[row.id] ?? "";
+                const at = own || pitch;
+                const showPitch = roofing && (row.kind === "Area" || slopedEdge(edge));
+                const polygon = row.kind === "Area" || row.kind === "Cutout";
+                const more = (row.kind === "Area" && section?.uncut_value !== undefined) || row.kind === "Cutout" || (roofing && row.kind === "Length") || showPitch;
+                return (
+                  <div key={row.id} className="card-row measure-shape" data-selected={selected === row.id || undefined} data-kind={row.kind}>
+                    <button type="button" className="measure-swatch" style={{ background: row.color }} onClick={() => { pickTool("select"); mapRef.current?.select(row.id); }} aria-label={`Select ${nameOf(row.id)} on the map`} />
+                    <div className="grow measure-shape-body">
+                      <input
+                        className="input"
+                        style={{ height: 32 }}
+                        aria-label={`Name for shape ${i + 1}`}
+                        placeholder={`${names[row.id] ?? ""}${row.kind === "Area" ? " (e.g. Front lawn)" : row.kind === "Cutout" ? " (e.g. House)" : row.kind === "Length" && !roofing ? " (e.g. Fence)" : ""}`}
+                        value={labels[row.id] ?? ""}
+                        onChange={(e) => setLabels({ ...labels, [row.id]: e.target.value })}
+                        maxLength={80}
+                      />
+                      {more && (
+                        <div className="measure-shape-more">
+                          {row.kind === "Area" && section?.uncut_value !== undefined && <span className="muted small">{formatNumber(section.uncut_value)} sq ft before cutouts</span>}
+                          {row.kind === "Cutout" && <span className="muted small">{row.value > 0 ? "Left out of the areas under it" : "Not over an area, so nothing comes off"}</span>}
+                          {roofing && row.kind === "Length" && (
+                            <select className="select measure-edge" value={edge ?? ""} onChange={(e) => setEdge(row.id, e.target.value as RoofEdge | "")} aria-label={`Roof edge for ${nameOf(row.id)}`}>
+                              <option value="">Not a roof edge</option>
+                              {ROOF_EDGES.map((e) => <option key={e} value={e}>{EDGE_NAMES[e]}</option>)}
+                            </select>
+                          )}
+                          {showPitch && (
+                            <button type="button" className="chip measure-pitch-chip" data-own={own ? true : undefined} data-steep={(riseOf(at) ?? 0) >= STEEP_FROM || undefined} onClick={() => setPitchFor(row.id)} aria-label={`Pitch for ${nameOf(row.id)}: ${at.trim() ? pitchLabel(at) : "not set"}. Change it`}>
+                              <Icon name="pitch" size={12} />{at.trim() ? pitchLabel(at) : "Set pitch"}{!own && at.trim() ? " · roof" : ""}
+                            </button>
+                          )}
+                          {section?.plan_value !== undefined && <span className="muted small">{formatNumber(section.plan_value, 1)} ft from above</span>}
+                        </div>
+                      )}
+                    </div>
+                    <span className="num strong nowrap" data-cut={row.kind === "Cutout" || undefined}>
+                      {row.kind === "Count" ? "1" : row.kind === "Cutout" ? `−${formatNumber(row.value)} sq ft` : `${formatNumber(row.value, row.kind === "Length" ? 1 : 0)} ${row.unit}`}
+                    </span>
+                    {polygon && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost btn-icon"
+                        aria-pressed={row.kind === "Cutout"}
+                        onClick={() => convert(row.id, row.kind === "Cutout" ? "Area" : "Cutout")}
+                        aria-label={row.kind === "Cutout" ? `Count ${nameOf(row.id)} as an area` : `Make ${nameOf(row.id)} a cutout`}
+                        title={row.kind === "Cutout" ? "Count it as an area again" : "Make it a cutout: leave it out of the areas under it"}
+                      >
+                        <Icon name={row.kind === "Cutout" ? "area" : "scissors"} size={15} />
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => mapRef.current?.remove(row.id)} aria-label={`Delete shape ${i + 1}`} title="Delete this shape"><Icon name="trash" size={15} /></button>
+                  </div>
+                );
+              })
+            )}
+            {rows.some((r) => r.kind === "Area") && (
+              <div className="card-row measure-buildings">
+                <Button size="sm" icon="home" loading={finding === "cut"} disabled={Boolean(finding)} onClick={cutBuildings}>Cut out buildings</Button>
+                <span className="muted small">Finds the buildings on your areas in OpenStreetMap and leaves them out.</span>
+              </div>
             )}
             <div className="measure-totals">
               <div><span className="muted">Area</span><strong>{formatNumber(summary.total_area_sqft)} sq ft</strong><span className="muted small">{formatNumber(summary.total_area_sqyd, 1)} sq yd{summary.total_area_sqft >= 4356 ? ` · ${formatNumber(summary.total_area_sqft / 43_560, 2)} acres` : ""}</span></div>
               <div><span className="muted">Length</span><strong>{formatNumber(summary.total_length_ft)} ft</strong></div>
+              {cutTotal > 0 && <div><span className="muted">Cut out</span><strong>{formatNumber(cutTotal)} sq ft</strong><span className="muted small">not counted in the area</span></div>}
               {counts > 0 && <div><span className="muted">Count</span><strong>{counts}</strong></div>}
               {depthIn > 0 && summary.total_area_sqft > 0 && (
                 <>
@@ -783,7 +1018,7 @@ export function MeasurePage() {
                   <div><span className="muted">Asphalt (approx.)</span><strong>{formatNumber(asphaltTons, 1)} tons</strong><span className="muted small">at 110 lb per sq yd per inch</span></div>
                 </>
               )}
-              {squares !== null && <div><span className="muted">Roofing squares</span><strong>{formatNumber(squares, 1)}</strong><span className="muted small">{pitch} pitch, {waste || 0}% waste</span></div>}
+              {squares !== null && <div><span className="muted">Roofing squares</span><strong>{formatNumber(squares, 1)}</strong><span className="muted small">{roofPitches.length > 1 ? "mixed pitches" : `${roofPitches[0] ? pitchLabel(roofPitches[0]) : "flat"} pitch`}, {waste || 0}% waste</span></div>}
             </div>
           </div>
 
@@ -791,18 +1026,21 @@ export function MeasurePage() {
             <PlanCard plan={plan} canAdd={canAddPlans} hasPlace={Boolean(ctx?.ids.property || picked?.property_id || ctx?.ids.quote)} />
           )}
 
-          <details className="card measure-extra" open={Boolean(depth || pitch)}>
-            <summary className="card-pad"><strong>Depth, roof pitch and waste</strong><span className="muted small">For mulch, gravel, asphalt and roofing math</span></summary>
-            <div className="card-pad form-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, paddingTop: 0 }}>
-              <Field label="Depth (in)"><input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" /></Field>
-              <Field label="Roof pitch" error={pitch && squares === null ? "e.g. 7/12" : null}><input className="input" value={pitch} onChange={(e) => setPitch(e.target.value)} placeholder="7/12" /></Field>
-              <Field label="Waste %"><input className="input" inputMode="decimal" value={waste} onChange={(e) => setWaste(e.target.value.replace(/[^0-9.]/g, ""))} /></Field>
-            </div>
-          </details>
+          {pitchError && shapes.length > 0 && <div className="field-error" role="alert">{pitchError}</div>}
+          {company.trade_preset === "roofing_exteriors" ? [roofCard, depthCard] : [depthCard, roofCard]}
         </aside>
       </div>
 
       <MeasureHelp open={help} touch={touch} onClose={() => { markHelpSeen(); setHelp(false); }} />
+      {pitchFor && shapes.some((s) => s.id === pitchFor) && (
+        <Dialog open onClose={() => setPitchFor(null)} title={`Pitch for ${nameOf(pitchFor)}`} description="For a porch, dormer or addition that isn't at the main roof's pitch." size="md">
+          <div className="dialog-body stack">
+            <PitchPicker value={pitches[pitchFor] ?? ""} inherit={pitch} label={`Pitch for ${nameOf(pitchFor)}`} onChange={(value) => setShapePitch(pitchFor, value)} />
+            <MeasurePitch near={near} onPick={(value) => setShapePitch(pitchFor, value)} roofs={roofOutlines.filter((r) => r.id === pitchFor)} />
+            <div className="form-actions"><Button variant="primary" onClick={() => setPitchFor(null)}>Done</Button></div>
+          </div>
+        </Dialog>
+      )}
       {tooLarge.dialog}
       {abroad && (
         <OutsideUs

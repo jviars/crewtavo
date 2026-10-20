@@ -137,6 +137,60 @@ describe("saving a measurement", () => {
   });
 });
 
+describe("roofs and cutouts", () => {
+  const INNER = [[-80.57631, 37.13183], [-80.57615, 37.13183], [-80.57615, 37.13191], [-80.57631, 37.13191], [-80.57631, 37.13183]];
+  const feature = (geometry: unknown, properties: Record<string, unknown> = {}) => ({ type: "Feature", geometry, properties });
+
+  it("takes a cutout out of the area under it", async () => {
+    const yard = await post("/measurements", { geojson: { type: "FeatureCollection", features: [feature({ type: "Polygon", coordinates: [RECT] })] } });
+    const cut = await post("/measurements", { geojson: { type: "FeatureCollection", features: [feature({ type: "Polygon", coordinates: [RECT] }, { label: "Yard" }), feature({ type: "Polygon", coordinates: [INNER] }, { label: "House", cutout: true })] } });
+    expect(cut.status).toBe(201);
+    const [whole, body] = [await yard.json(), await cut.json()];
+    expect(body.total_area_sqft).toBeLessThan(whole.total_area_sqft);
+    expect(body.sections[0].uncut_value).toBe(whole.total_area_sqft);
+    expect(body.sections[1]).toMatchObject({ kind: "Cutout", label: "House" });
+    expect(body.total_area_sqft + body.sections[1].value).toBeCloseTo(whole.total_area_sqft, 1);
+  });
+
+  it("gives each roof section its own pitch, and writes pitches one way", async () => {
+    const res = await post("/measurements", {
+      geojson: { type: "FeatureCollection", features: [feature({ type: "Polygon", coordinates: [RECT] }), feature({ type: "Polygon", coordinates: [RECT] }, { label: "Porch", pitch: "3:12" })] },
+      roof_pitch: "6-12",
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    const one = body.total_area_sqft / 2;
+    expect(body.roofing_squares).toBeCloseTo((one * Math.sqrt(1.25) + one * Math.sqrt(1 + 1 / 16)) / 100, 1);
+    expect(state.writes.at(-1)?.row).toMatchObject({ roof_pitch: "6/12" });
+    const bad = await post("/measurements", { geojson: { type: "FeatureCollection", features: [feature({ type: "Polygon", coordinates: [RECT] }, { label: "Porch", pitch: "low" })] }, roof_pitch: "6/12" });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toBe("The pitch for Porch should look like 7/12.");
+  });
+
+  it("hands formulas the roof edges and a weighted pitch", async () => {
+    state.measurement = {
+      total_area_sqft: 2000, total_area_sqyd: 222.22, total_length_ft: 180, roof_pitch: "6/12", waste_pct: 0,
+      sections: [
+        { kind: "Area", value: 1500, pitch: "6/12" },
+        { kind: "Area", value: 500, pitch: "12/12" },
+        { kind: "Length", value: 100, edge: "eave" },
+        { kind: "Length", value: 50, edge: "rake" },
+        { kind: "Length", value: 30, edge: "ridge" },
+      ],
+    };
+    state.lines = [
+      { id: "line-1", name: "Shingles", formula: "area_sqft * pitch_factor / 100", service: null },
+      { id: "line-2", name: "Drip edge", formula: "eave_ft + rake_ft", service: null },
+      { id: "line-3", name: "Ridge cap", formula: "ridge_ft + hip_ft", service: null },
+    ];
+    const res = await post("/quotes/00000000-0000-4000-8000-0000000000b1/apply-measurement", { measurement_id: "00000000-0000-4000-8000-0000000000c1" });
+    const body = await res.json();
+    expect(body.lines[0].value).toBeCloseTo((1500 * Math.sqrt(1.25) + 500 * Math.SQRT2) / 100, 2);
+    expect(body.lines[1].value).toBe(150);
+    expect(body.lines[2].value).toBe(30);
+  });
+});
+
 describe("quote formulas", () => {
   it("checks a formula only against values a measurement supplies", async () => {
     const res = await post("/formulas/evaluate", { formula: "hours * 2", variables: { hours: 3 } });

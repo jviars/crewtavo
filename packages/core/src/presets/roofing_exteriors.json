@@ -28,6 +28,18 @@
       "formula_name": "Roof squares without waste"
     },
     {
+      "name": "Drip edge",
+      "unit": "ft",
+      "unit_price": 3.5,
+      "formula_name": "Drip edge"
+    },
+    {
+      "name": "Ridge cap",
+      "unit": "ft",
+      "unit_price": 9,
+      "formula_name": "Ridge cap"
+    },
+    {
       "name": "Seamless gutters",
       "unit": "ft",
       "unit_price": 12,
@@ -91,6 +103,18 @@
     {
       "name": "Roof squares without waste",
       "formula": "area_sqft * pitch_factor / 100"
+    },
+    {
+      "name": "Drip edge",
+      "formula": "eave_ft + rake_ft"
+    },
+    {
+      "name": "Ridge cap",
+      "formula": "ridge_ft + hip_ft"
+    },
+    {
+      "name": "Valley flashing",
+      "formula": "valley_ft"
     }
   ],
   "checklists": [

@@ -33,6 +33,9 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: { output: { manualChunks: vendorChunk } },
   },
+  // laz-perf (Measure's lidar pitch) is CommonJS and only loaded on demand: bundle it up front so the
+  // dev server doesn't stop to do it the first time someone asks.
+  optimizeDeps: { include: ["laz-perf"] },
   server: {
     port: 5173,
     proxy: {

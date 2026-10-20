@@ -37,7 +37,7 @@ interface HubDrawing {
   id: string;
   title: string;
   has_picture: boolean;
-  sections: Array<{ label: string; kind: string; value: number; unit: string }>;
+  sections: Array<{ label: string; kind: string; value: number; unit: string; pitch?: string }>;
   total_area_sqft: number;
   total_length_ft: number;
   roofing_squares: number | null;
@@ -179,7 +179,11 @@ function HubDrawings({ token, drawings }: { token: string; drawings?: HubDrawing
   return (
     <>
       {drawings.map((d) => {
-        const measured = d.sections.filter((s) => s.kind !== "Count");
+        const measured = d.sections.filter((s) => s.kind !== "Count" && s.kind !== "Cutout");
+        // Already taken out of the areas above them; listed so the client sees what was left out.
+        const cutouts = d.sections.filter((s) => s.kind === "Cutout" && Number(s.value) > 0);
+        // Roof sections at different pitches each say theirs.
+        const mixed = d.roofing_squares ? new Set(d.sections.filter((s) => s.kind === "Area").map((s) => s.pitch ?? d.roof_pitch)).size > 1 : false;
         // Counts read better added up: "Trees: 4" rather than four rows of one.
         const counts = new Map<string, number>();
         for (const s of d.sections.filter((s) => s.kind === "Count")) {
@@ -194,10 +198,11 @@ function HubDrawings({ token, drawings }: { token: string; drawings?: HubDrawing
             <div className="card-pad stack-sm">
               <strong>{d.title}</strong>
               <div className="totals">
-                {measured.map((s, i) => <div key={i} className="line"><span>{s.label}</span><span className="tabular">{sizeText(s.value, s.unit)}</span></div>)}
+                {measured.map((s, i) => <div key={i} className="line"><span>{s.label}{mixed && s.kind === "Area" && s.pitch ? ` (${s.pitch} pitch)` : ""}</span><span className="tabular">{sizeText(s.value, s.unit)}</span></div>)}
                 {[...counts].map(([label, n]) => <div key={label} className="line"><span>{label}</span><span className="tabular">{n.toLocaleString()}</span></div>)}
+                {cutouts.map((s, i) => <div key={`cut${i}`} className="line muted"><span>{/^Cutout \d+$/.test(s.label) ? "Left out" : `${s.label} (left out)`}</span><span className="tabular">{sizeText(s.value, s.unit)}</span></div>)}
                 {measured.filter((s) => s.kind === "Area").length > 1 && <div className="line grand"><span>Total area</span><span className="tabular">{sizeText(d.total_area_sqft, "sq ft")}</span></div>}
-                {d.roofing_squares && <div className="line"><span>Roofing squares{d.roof_pitch ? ` (${d.roof_pitch} pitch)` : ""}</span><span className="tabular">{Number(d.roofing_squares).toLocaleString()}</span></div>}
+                {d.roofing_squares && <div className="line"><span>Roofing squares{mixed ? "" : d.roof_pitch ? ` (${d.roof_pitch} pitch)` : ""}</span><span className="tabular">{Number(d.roofing_squares).toLocaleString()}</span></div>}
               </div>
               <span className="muted small">Measured from aerial imagery{d.imagery ? ` (${d.imagery})` : ""}. Sizes on site may differ slightly.</span>
             </div>

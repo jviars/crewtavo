@@ -4,17 +4,21 @@
  * the steps with rules, side effects or secrets.
  */
 import {
+  drawingPitchFactor,
+  drawingSquares,
+  edgeLengths,
   evaluateFormula,
   FormulaError,
+  normalizePitch,
   OFFICE,
-  pitchFactor,
-  roofingSquares,
+  pitchProblem,
   SALES,
   summarizeFeatureCollection,
   validateFormula,
   type FeatureCollection,
   type FormulaVariable,
   type MeasurementSummary,
+  type Section,
 } from "@crewtavo/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -40,10 +44,13 @@ sales.post("/requests/:id/quote", requireUser, requireCompany(SALES, "sales"), a
   return c.json(await quoteFromRequest(scope(c), param(c, "id")), 201);
 });
 
-/** A saved measurement's roof slope, or null when its pitch doesn't read (formulas that use it say so). */
-function savedPitchFactor(pitch: string | null): number | null {
+/**
+ * A saved measurement's roof slope (weighted by area when its sections have their own pitches), or
+ * null when a pitch doesn't read (formulas that use it say so).
+ */
+function savedPitchFactor(sections: Section[], pitch: string | null): number | null {
   try {
-    return pitchFactor(pitch);
+    return drawingPitchFactor({ sections }, pitch);
   } catch {
     return null;
   }
@@ -51,7 +58,7 @@ function savedPitchFactor(pitch: string | null): number | null {
 
 /**
  * Fill quote line quantities (or prices) from a measurement using each line's formula.
- * Variables: area_sqft, area_sqyd, length_ft, count, depth_in, pitch_factor, waste, waste_pct.
+ * Variables: FORMULA_VARIABLES (area_sqft, length_ft, pitch_factor, the roof edges and so on).
  */
 sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "sales"), async (c) => {
   const id = param(c, "id");
@@ -66,7 +73,8 @@ sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "
       .maybeSingle(),
     "Measurement not found.",
   );
-  const sections = (m.sections ?? []) as Array<{ kind: string; depth_in?: number | null }>;
+  const sections = (m.sections ?? []) as unknown as Section[];
+  const edges = edgeLengths({ sections });
   // Every value a formula may use (FORMULA_VARIABLES), and nothing else.
   const vars: Record<FormulaVariable, number | null> = {
     area_sqft: Number(m.total_area_sqft),
@@ -74,9 +82,14 @@ sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "
     length_ft: Number(m.total_length_ft),
     count: sections.filter((s) => s.kind === "Count").length,
     depth_in: body.depth_in ?? sections.find((s) => s.depth_in)?.depth_in ?? null,
-    pitch_factor: savedPitchFactor(m.roof_pitch),
+    pitch_factor: savedPitchFactor(sections, m.roof_pitch),
     waste: Number(m.waste_pct) / 100,
     waste_pct: Number(m.waste_pct),
+    eave_ft: edges.eave,
+    rake_ft: edges.rake,
+    ridge_ft: edges.ridge,
+    hip_ft: edges.hip,
+    valley_ft: edges.valley,
   };
 
   const lines = must(await db.from("quote_line_items").select("id, name, formula, service:services(formula_target)").eq("quote_id", id));
@@ -230,19 +243,18 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
     throw new HttpError(400, "That map picture isn't one of this company's.");
   }
   // Totals always come from the shapes, recomputed here; nothing the browser computed is trusted.
+  // Cutouts come off the areas under them, and each roof section can have its own pitch.
   let summary: MeasurementSummary;
   try {
-    summary = summarizeFeatureCollection(body.geojson as FeatureCollection);
+    summary = summarizeFeatureCollection(body.geojson as FeatureCollection, { pitch: body.roof_pitch });
   } catch (error) {
     if (error instanceof RangeError) throw new HttpError(400, error.message);
     throw error;
   }
-  let squares: number | null = null;
-  try {
-    squares = body.roof_pitch ? Math.round(roofingSquares(summary.total_area_sqft, body.roof_pitch, body.waste_pct) * 100) / 100 : null;
-  } catch {
-    throw new HttpError(400, "Roof pitch should look like 7/12.");
-  }
+  const problem = pitchProblem(summary, body.roof_pitch);
+  if (problem) throw new HttpError(400, problem);
+  const raw = drawingSquares(summary, body.roof_pitch, body.waste_pct);
+  const squares = raw === null ? null : Math.round(raw * 100) / 100;
   // As much as the columns hold: under a trillion square feet or feet, a hundred million squares.
   if (summary.total_area_sqft >= 1e12 || summary.total_length_ft >= 1e12 || (squares ?? 0) >= 1e8) {
     throw new HttpError(400, "This measurement is too large to save. Check the shapes and measured values.");
@@ -250,6 +262,8 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
   const { id, view, ...fields } = body;
   const row = {
     ...fields,
+    // Written the one way ("4/12" for 4-12 or 4:12), so the quote and the client read the same.
+    roof_pitch: fields.roof_pitch ? normalizePitch(fields.roof_pitch) : fields.roof_pitch,
     ...(view ? { view: asJson(view) } : {}),
     geojson: asJson(fields.geojson),
     company_id: c.var.companyId,
