@@ -157,7 +157,7 @@ export function FindPaving({
   };
   const blocked = notAerial ? "Switch to aerial imagery first: Find paving needs a photo of the lot." : tooFar ? "Zoom in closer to the lot first." : null;
   const methods: Array<{ id: Method; title: string; badge: string; body: string }> = [
-    { id: "tap", title: "Tap to outline", badge: "Free", body: "Tap a lot, drive or sidewalk, or drag a box around a lot, and it's outlined. It runs in this browser, so the aerial isn't sent anywhere." },
+    { id: "tap", title: "Tap to outline", badge: "Free", body: "Put a box round a lot and press Outline, or tap a drive or sidewalk, and it follows the pavement's edges. It runs in this browser, so the aerial isn't sent anywhere." },
     { id: "fal", title: "Find everything in view", badge: "fal.ai", body: `Outlines all the asphalt and concrete in view at once and counts stalls, for about half a cent a thing found on your fal.ai account.${connected ? "" : " Needs fal.ai installed."}` },
   ];
 
@@ -201,7 +201,7 @@ export function FindPaving({
                 <div className="callout" role="note">
                   <Icon name="info" size={16} />
                   <span className="small" style={{ fontWeight: 400 }}>
-                    Tap the middle of each surface, or choose <strong>Box</strong> and drag a box around a lot. Tap again to add what it missed, and <strong>Take out</strong> what doesn't belong. The first time, the model (about 60 MB) downloads, then it stays in this browser.
+                    For a lot, click two corners of a box around it, drag the corners to fit, and press <strong>Outline</strong>; for a drive or sidewalk, tap it. Then tap to add what it missed, and <strong>Take out</strong> what doesn't belong. The first time, the model (about 60 MB) downloads, then it stays in this browser.
                     {imagery === "google" ? " Google's imagery can't be used for this, so it looks at the free imagery here instead." : ""}
                   </span>
                 </div>
@@ -246,7 +246,7 @@ export function FindPaving({
             <div className="form-actions">
               <Button onClick={() => setOpen(false)} disabled={run.isPending}>Cancel</Button>
               {method === "tap" ? (
-                <Button type="submit" variant="primary" icon="sparkle" disabled={Boolean(blocked)}>Start tapping</Button>
+                <Button type="submit" variant="primary" icon="sparkle" disabled={Boolean(blocked)}>Start outlining</Button>
               ) : connected ? (
                 <Button type="submit" variant="primary" icon="sparkle" loading={run.isPending} disabled={!targets.length || Boolean(blocked)}>Find</Button>
               ) : (

@@ -665,6 +665,7 @@ export function MeasurePage() {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target) || mapState !== "ready") return;
       if (tap.item && e.key === "Escape") return void tap.stop();
+      if (tap.item && e.key === "Enter" && tap.mode === "box" && tap.box) return void tap.outlineBox();
       if (aligning) {
         if (e.key === "Escape") plan.cancelLineUp();
         return;
