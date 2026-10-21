@@ -13,6 +13,7 @@ import { adminClient } from "../lib/supabase";
 import { renderTemplate } from "@crewtavo/core";
 import { companyAnthropicKey, complete } from "../services/ai";
 import { companyAddress } from "../services/automations";
+import { logoImage } from "../services/logo";
 import { sendReviewRequest } from "../services/reviews";
 
 export const marketing = new Hono<AppEnv>();
@@ -91,10 +92,11 @@ marketing.post("/campaigns/:id/test", requireUser, requireCompany(OFFICE, "marke
   const me = must(await c.var.db.from("profiles").select("email, full_name").eq("user_id", c.var.userId).maybeSingle());
   const to = body.to ?? me.email;
   if (!to || !isEmail(to)) throw new HttpError(400, "Add an email address to send the test to.");
-  const company = must(await c.var.db.from("companies").select("name, phone, email, address").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await c.var.db.from("companies").select("name, phone, email, address, settings").eq("id", c.var.companyId).maybeSingle());
   const vars = { client: { first_name: firstName(me.full_name), name: me.full_name }, company: { name: company.name, phone: company.phone ?? "" } };
   const email = renderEmail({
     companyName: company.name,
+    logo: logoImage(appUrl(c), c.var.companyId, company.settings),
     text: renderTemplate(campaign.body, vars),
     footer: [company.name, companyAddress(company.address as Record<string, string>)].filter(Boolean).join(" · "),
     unsubscribeUrl: `${appUrl(c)}/u/test`,

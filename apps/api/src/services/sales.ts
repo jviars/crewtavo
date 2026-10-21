@@ -13,6 +13,7 @@ import { clientLink } from "../lib/links";
 import { sendEmail, sendSms } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 import { companyAddress } from "./automations";
+import { logoImage } from "./logo";
 
 /** Who's sending, from where: the person's client, their company, and the address client links use. */
 export interface SalesScope {
@@ -34,7 +35,7 @@ type Deliverable = { id: string; number: number | null; client_id: string; total
 
 /** Email or text the client their link to a quote or invoice (or just make the link), and log it on their timeline. */
 export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: Deliverable, body: SendBody) {
-  const company = must(await s.db.from("companies").select("name, email, phone, address, currency").eq("id", s.companyId).maybeSingle());
+  const company = must(await s.db.from("companies").select("name, email, phone, address, currency, settings").eq("id", s.companyId).maybeSingle());
   const link = await clientLink(s.env, s.baseUrl, { c: s.companyId, t: kind, id: record.id });
   const label = `${kind === "quote" ? "Quote" : "Invoice"} #${record.number}`;
   const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(kind === "quote" ? record.total ?? 0 : record.balance_due ?? 0));
@@ -47,7 +48,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
     if (!to || !isEmail(to)) throw new HttpError(400, "Add a valid email address for this client first.");
     const subject = body.subject || `${label} from ${company.name}`;
     const footer = [company.name, companyAddress(company.address as Record<string, string>), company.phone].filter(Boolean).join(" · ");
-    result = await sendEmail(s.env, { to, subject, ...renderEmail({ companyName: company.name, text, footer }), replyTo: company.email ?? undefined, fromName: company.name }, s.companyId);
+    result = await sendEmail(s.env, { to, subject, ...renderEmail({ companyName: company.name, logo: logoImage(s.baseUrl, s.companyId, company.settings), text, footer }), replyTo: company.email ?? undefined, fromName: company.name }, s.companyId);
   } else if (body.channel === "sms") {
     const to = body.to || record.client?.phone;
     if (!to) throw new HttpError(400, "This client has no phone number.");

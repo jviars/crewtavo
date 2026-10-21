@@ -278,7 +278,7 @@ export function ClientPicker({ value, onChange, allowCreate = true }: { value: P
             <div key={i} className="card-row" style={{ padding: "10px 12px" }}><Skeleton width={`${60 - i * 12}%`} height={12} /></div>
           ))}
         {rows.map((c, i) => (
-          <button key={c.id} type="button" role="option" aria-selected={i === index} className="card-row" onMouseMove={() => setIndex(i)} onClick={() => choose(i)} style={{ padding: "9px 12px", background: i === index ? "var(--fill-2)" : "#fff" }}>
+          <button key={c.id} type="button" role="option" aria-selected={i === index} className="card-row" onMouseMove={() => setIndex(i)} onClick={() => choose(i)} style={{ padding: "9px 12px", background: i === index ? "var(--fill-2)" : "var(--surface)" }}>
             <span className="grow">
               <strong>{c.display_name}</strong>
               {c.company_name && c.company_name !== c.display_name && <span className="muted"> · {c.company_name}</span>}
@@ -287,7 +287,7 @@ export function ClientPicker({ value, onChange, allowCreate = true }: { value: P
           </button>
         ))}
         {canCreate && (
-          <button type="button" role="option" aria-selected={index === rows.length} className="card-row" onMouseMove={() => setIndex(rows.length)} onClick={() => choose(rows.length)} disabled={create.isPending} style={{ padding: "10px 12px", background: index === rows.length ? "var(--fill-2)" : "#fff", color: "var(--green-dark)", fontWeight: 700 }}>
+          <button type="button" role="option" aria-selected={index === rows.length} className="card-row" onMouseMove={() => setIndex(rows.length)} onClick={() => choose(rows.length)} disabled={create.isPending} style={{ padding: "10px 12px", background: index === rows.length ? "var(--fill-2)" : "var(--surface)", color: "var(--green-dark)", fontWeight: 700 }}>
             <Icon name="plus" size={16} />
             {create.isPending ? "Creating…" : `Create “${term.trim()}” as a new client`}
           </button>

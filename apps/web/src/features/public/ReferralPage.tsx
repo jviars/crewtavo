@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
 
 interface ReferralView {
-  company: { name: string; phone: string | null; website: string | null };
+  company: { name: string; phone: string | null; website: string | null; logo?: string | null };
   referrer: string;
   offer: string | null;
 }
@@ -46,7 +46,7 @@ export function ReferralPage() {
         {view.data && (
           <>
             <header className="public-brand">
-              <span className="tile" aria-hidden="true">{view.data.company.name.slice(0, 2).toUpperCase()}</span>
+              {view.data.company.logo ? <img className="logo" src={view.data.company.logo} alt="" /> : <span className="tile" aria-hidden="true">{view.data.company.name.slice(0, 2).toUpperCase()}</span>}
               <div><strong>{view.data.company.name}</strong>{view.data.company.phone && <div className="muted text-sm">{view.data.company.phone}</div>}</div>
             </header>
             {submit.isSuccess ? (

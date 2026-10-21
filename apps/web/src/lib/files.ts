@@ -45,6 +45,68 @@ export async function squarePhoto(file: File, size = 512): Promise<Blob | null> 
 }
 
 /**
+ * A business logo: the picture as a PNG of at most `maxWidth` × `maxHeight` pixels, with its
+ * see-through background kept and any empty margin around it cut off. An SVG is drawn as large as
+ * fits. Null when the browser can't open it, or there's nothing in it.
+ */
+export async function logoPicture(file: File, maxWidth = 720, maxHeight = 240): Promise<Blob | null> {
+  const url = URL.createObjectURL(file);
+  try {
+    // An <img> opens SVGs too, which createImageBitmap doesn't.
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const vector = file.type === "image/svg+xml" || /\.svg$/i.test(file.name);
+    const width = image.naturalWidth || 300;
+    const height = image.naturalHeight || 150;
+    const fit = (w: number, h: number) => Math.min(maxWidth / w, maxHeight / h, vector ? Infinity : 1);
+    // Draw the whole picture to find what isn't see-through...
+    const scale = fit(width, height);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    let ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let [left, top, right, bottom] = [canvas.width, canvas.height, -1, -1];
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        if (data[(y * canvas.width + x) * 4 + 3] < 8) continue;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        top = Math.min(top, y);
+        bottom = Math.max(bottom, y);
+      }
+    }
+    if (right < 0) return null;
+    // ...then draw just that, again as large as fits.
+    const [sx, sy, sw, sh] = [left / scale, top / scale, (right - left + 1) / scale, (bottom - top + 1) / scale];
+    const crop = fit(sw, sh);
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(sw * crop));
+    out.height = Math.max(1, Math.round(sh * crop));
+    ctx = out.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    return await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
+  } catch {
+    return null; // HEIC in a browser that can't decode it, or not a picture at all
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** A file's contents as base64, for sending a small picture as JSON. */
+export function base64Of(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * What gets uploaded: photos are shrunk first, so the 15 MB limit applies to what's actually
  * sent (a 20 MB phone photo is usually a few MB once shrunk). Other files are checked as they are.
  */

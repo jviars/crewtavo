@@ -11,6 +11,7 @@ import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
 import { timeRates } from "../services/payRates";
+import { removeLogo, setLogo } from "../services/logo";
 import { removePhoto, setPhoto } from "../services/photos";
 import { invitePerson, inviteStatus, sendInvite, welcomeLink, type TeamScope } from "../services/team";
 import { clientIp } from "../lib/visitor";
@@ -312,6 +313,21 @@ account.put("/team/:userId/photo", requireUser, requireCompany(), async (c) => {
 
 account.delete("/team/:userId/photo", requireUser, requireCompany(), async (c) => {
   await removePhoto(adminClient(c.env), await photoTarget(c));
+  return c.json({ ok: true });
+});
+
+/**
+ * The business logo (services/logo.ts), from Settings → Company. The browser sends it as a PNG,
+ * base64. Owners and admins change it, as they do the rest of the company's settings.
+ */
+account.put("/company/logo", requireUser, requireCompany(ADMINS), async (c) => {
+  const body = await readJson(c, z.object({ logo: z.string().min(100).max(1_400_000).regex(/^[A-Za-z0-9+/]+={0,2}$/) }));
+  if (!(await allow(c.env, `logo:${c.var.companyId}`, 30, 3600))) throw new HttpError(429, "Too many logo changes. Wait a while and try again.");
+  return c.json({ logo: await setLogo(adminClient(c.env), c.var.companyId, body.logo) });
+});
+
+account.delete("/company/logo", requireUser, requireCompany(ADMINS), async (c) => {
+  await removeLogo(adminClient(c.env), c.var.companyId);
   return c.json({ ok: true });
 });
 

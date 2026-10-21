@@ -15,6 +15,7 @@ import { appUrl, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { sendEmail, sendSms } from "../lib/notify";
 import { adminClient } from "../lib/supabase";
 import { companyAddress } from "../services/automations";
+import { logoImage } from "../services/logo";
 
 export const messages = new Hono<AppEnv>();
 
@@ -31,7 +32,7 @@ messages.post("/messages/send", requireUser, requireCompany(SALES), async (c) =>
   );
   const { db, companyId } = c.var;
   const client = must(await db.from("clients").select("id, display_name, email, phone").eq("id", body.client_id).eq("company_id", companyId).maybeSingle(), "Client not found.");
-  const company = must(await db.from("companies").select("name, email, phone, address").eq("id", companyId).maybeSingle());
+  const company = must(await db.from("companies").select("name, email, phone, address, settings").eq("id", companyId).maybeSingle());
   let result: { sent: boolean; id?: string; reason?: string };
   let to: string;
   if (body.channel === "email") {
@@ -39,7 +40,7 @@ messages.post("/messages/send", requireUser, requireCompany(SALES), async (c) =>
     if (!isEmail(to)) throw new HttpError(400, `${client.display_name} has no valid email address.`);
     if (!body.subject) throw new HttpError(400, "Add a subject.");
     const footer = [company.name, companyAddress(company.address as Record<string, string>), company.phone].filter(Boolean).join(" · ");
-    result = await sendEmail(c.env, { to, subject: body.subject, ...renderEmail({ companyName: company.name, text: body.body, footer }), replyTo: company.email ?? undefined, fromName: company.name }, companyId);
+    result = await sendEmail(c.env, { to, subject: body.subject, ...renderEmail({ companyName: company.name, logo: logoImage(appUrl(c), companyId, company.settings), text: body.body, footer }), replyTo: company.email ?? undefined, fromName: company.name }, companyId);
   } else {
     to = body.to || client.phone || "";
     if (!to) throw new HttpError(400, `${client.display_name} has no phone number.`);

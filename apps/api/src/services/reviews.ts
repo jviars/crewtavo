@@ -8,6 +8,7 @@ import { firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink } from "../lib/links";
 import { sendEmail, sendSms } from "../lib/notify";
 import type { Db } from "../lib/supabase";
+import { logoImage } from "./logo";
 
 export const DEFAULT_REVIEW_MESSAGE =
   "Hi {{client.first_name}}, thank you for choosing {{company.name}}! If you have a minute, would you leave us a quick review? It really helps a small business like ours.\n\n{{link}}";
@@ -57,7 +58,7 @@ export async function sendReviewRequest(env: Env, admin: Db, args: ReviewArgs): 
   });
   const result =
     args.channel === "email"
-      ? await sendEmail(env, { to: args.client.email!.trim(), subject: `How did we do? A quick favor from ${company.name}`, ...renderEmail({ companyName: company.name, text }), replyTo: company.email ?? undefined, fromName: company.name }, args.companyId)
+      ? await sendEmail(env, { to: args.client.email!.trim(), subject: `How did we do? A quick favor from ${company.name}`, ...renderEmail({ companyName: company.name, logo: logoImage(args.baseUrl, args.companyId, company.settings), text }), replyTo: company.email ?? undefined, fromName: company.name }, args.companyId)
       : await sendSms(env, { to: args.client.phone!, body: text });
 
   if (!result.sent) {
