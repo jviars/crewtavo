@@ -40,7 +40,7 @@ import { FindPaving } from "./FindPaving";
 import { formatItemTotal, ItemSelect, PavingItemsCard } from "./PavingItems";
 import { MeasurePitch, PitchPicker, pitchLabel, riseOf, STEEP_FROM } from "./RoofPitch";
 import type { SheetInfo } from "./takeoffSheet";
-import { TapBanner, useTapOutline } from "./TapOutline";
+import { TAP_ITEMS, TapBanner, useTapOutline } from "./TapOutline";
 
 const TOOLS: Array<{ tool: Tool; label: string; icon: IconName; key: string; what: string }> = [
   { tool: "polygon", label: "Area", icon: "area", key: "A", what: "Lawns, roofs, lots, driveways" },
@@ -81,6 +81,11 @@ function savedOverlays(): OverlayId[] {
 }
 // House numbers stay on (or off) between visits too.
 const HOUSE_NUMBERS_KEY = "crewtavo.measureHouseNumbers";
+/** The panel beside the map (open or not), kept per browser. */
+const PANEL_KEY = "crewtavo.measurePanel";
+/** Room the panel takes on the map's right (its width and its gap), on a wide screen. */
+const PANEL_ROOM = 384;
+const WIDE = "(min-width: 901px)";
 function savedHouseNumbers(): boolean {
   try {
     return localStorage.getItem(HOUSE_NUMBERS_KEY) !== "off";
@@ -127,6 +132,30 @@ export function MeasurePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const opening = useMemo(() => openingImagery(company.settings ?? {}, keys), [company.settings, keys, defaultRevision]);
   const touch = useMemo(touchScreen, []);
+  // On a wide screen the map fills the page and the panel floats over its right side.
+  const [wide, setWide] = useState(() => window.matchMedia(WIDE).matches);
+  useEffect(() => {
+    const query = window.matchMedia(WIDE);
+    const change = () => setWide(query.matches);
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  }, []);
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try {
+      return localStorage.getItem(PANEL_KEY) !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const showPanel = (open: boolean) => {
+    setPanelOpen(open);
+    try {
+      localStorage.setItem(PANEL_KEY, open ? "open" : "closed");
+    } catch {
+      /* nothing to remember it in */
+    }
+  };
+  const panelShown = panelOpen || !wide;
 
   const mapRef = useRef<MeasureMapHandle>(null);
   const [tool, setTool] = useState<Tool>("polygon");
@@ -664,7 +693,7 @@ export function MeasurePage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target) || mapState !== "ready") return;
-      if (tap.item && e.key === "Escape") return void tap.stop();
+      if (tap.item && e.key === "Escape") return void tap.done();
       if (tap.item && e.key === "Enter" && tap.mode === "box" && tap.box) return void tap.outlineBox();
       if (aligning) {
         if (e.key === "Escape") plan.cancelLineUp();
@@ -686,6 +715,7 @@ export function MeasurePage() {
       const next = TOOLS.find((t) => t.key.toLowerCase() === e.key.toLowerCase());
       if (next) pickTool(next.tool);
       else if (e.key.toLowerCase() === "f") mapRef.current?.fitShapes();
+      else if (e.key.toLowerCase() === "b" && paving) startFind();
       else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
         e.preventDefault();
         removeSelected();
@@ -728,11 +758,34 @@ export function MeasurePage() {
     return (await resolveAuto(center.lng, center.lat, 19, { ...keys, esri_key: null }, (source) => probe(source, center.lng, center.lat), (source) => (down.current.get(source) ?? 0) > now)).id;
   };
   // Tap to outline (TapOutline.tsx): the free way to find paving. Lining up a plan takes the taps.
-  const tap = useTapOutline({ map: mapRef, imagery, pictureImagery: freePicture, onFound: addFound });
+  // Done (or Esc) goes over to Edit, so the outline's corners can be fixed and a click doesn't start
+  // a shape by mistake.
+  const editShapes = () => {
+    setActiveItem(null);
+    setTool("select");
+    mapRef.current?.setTool("select");
+  };
+  const tap = useTapOutline({ map: mapRef, imagery, pictureImagery: freePicture, onFound: addFound, onDone: editShapes });
   useEffect(() => {
     if (aligning) tap.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aligning]);
+  /** Find paving: a box round a lot, then Outline, as the item picked (if it's an area) or asphalt. */
+  const startFind = () => {
+    if (imagery === "street" || imagery === "terrain") return void toast.info("Switch to aerial imagery first: Find paving needs a photo of the lot.");
+    setSelected(null);
+    if (tap.item) return void tap.setMode("box");
+    tap.start(activeItem && TAP_ITEMS.some((i) => i.id === activeItem.id) ? activeItem.id : "asphalt");
+  };
+  // A new paving takeoff opens on Find paving: the box is the quickest way to measure a lot.
+  const hasSaved = Boolean(((context.data?.measurement?.geojson ?? null) as { features?: unknown[] } | null)?.features?.length);
+  const openedOnFind = useRef(false);
+  useEffect(() => {
+    if (openedOnFind.current || mapState !== "ready" || !context.data || !paving || aligning) return;
+    openedOnFind.current = true;
+    if (!hasSaved && imagery !== "street" && imagery !== "terrain") startFind();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapState, context.data, paving, aligning, hasSaved]);
 
   /** What the takeoff sheet under the saved picture says (takeoffSheet.ts). */
   const sheetInfo = (pictureOn: ImageryId): SheetInfo => {
@@ -836,10 +889,12 @@ export function MeasurePage() {
   // ----- Render ---------------------------------------------------------------------------------
   if (context.error) {
     return (
-      <>
-        <PageHeader title="Measure" />
-        <div className="card"><EmptyState icon="map" title="Couldn't open this drawing" action={<Button onClick={() => context.refetch()}>Try again</Button>}>{(context.error as Error).message}</EmptyState></div>
-      </>
+      <div className="measure-page">
+        <div className="measure-head">
+          <PageHeader title="Measure" />
+          <div className="card"><EmptyState icon="map" title="Couldn't open this drawing" action={<Button onClick={() => context.refetch()}>Try again</Button>}>{(context.error as Error).message}</EmptyState></div>
+        </div>
+      </div>
     );
   }
   const p = ctx?.property;
@@ -906,278 +961,296 @@ export function MeasurePage() {
   );
 
   return (
-    <>
-      {back && <BackLink to={back.to}>{back.label}</BackLink>}
-      <PageHeader
-        title={saved ? title || "Measurement" : "Measure"}
-        actions={
-          <>
-            <Button variant="ghost" icon="info" onClick={() => setHelp(true)}>How it works</Button>
-            {!dirty && saved && pavingProject ? (
-              <Link to={`/paving/${pavingProject.id}#estimate`} className="btn btn-primary">Next: Estimate <Icon name="arrowRight" size={15} /></Link>
-            ) : (
-              !dirty && saved && back && <Link to={back.to} className="btn">Back to {back.label}</Link>
-            )}
-            <Button variant="primary" icon={!dirty && saved ? "check" : undefined} loading={save.isPending} disabled={!shapes.length || aligning || (!dirty && Boolean(saved))} onClick={() => save.mutate()}>
-              {!dirty && saved ? "Saved" : saved ? "Save changes" : "Save measurement"}
-            </Button>
-          </>
-        }
-      />
-      {p && <p className="page-subtitle">{addressLine(p)}{p.client && ` · ${p.client.display_name}`}{ctx?.quote && ` · for quote #${ctx.quote.number}`}{ctx?.invoice && ` · for invoice #${ctx.invoice.number}`}</p>}
-      {!p && picked && (
-        <p className="page-subtitle">
-          For {picked.label}{picked.client && ` · ${picked.client}`}
-          {!saved && <button type="button" className="link-btn" style={{ marginLeft: 8 }} onClick={unpick}>Not for this client</button>}
-        </p>
-      )}
-      <FormError error={save.error} />
-      <div className="two-col measure-layout">
-        <div className="wide card measure-card">
-          {mapState !== "error" && (
-            <div className="measure-toolbar">
-              <AddressSearch
-                disabled={mapState !== "ready"}
-                busy={find.isPending}
-                near={center && center.zoom >= 8 ? center : null}
-                onSubmit={(address) => find.mutate(address)}
-                onPickClient={pickClient}
-                onPickPlace={pickPlace}
-                onEdit={() => find.isError && find.reset()}
-              />
-              {imagery && (
-                <ImageryPicker choice={choice ?? "auto"} opening={opening} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} houseNumbers={houseNumbers} overlays={overlays} onPick={(next) => chooseImagery(next)} onMakeDefault={makeDefault} onStreetNames={setStreetNames} onHouseNumbers={showHouseNumbers} onOverlay={toggleOverlay} />
+    <div className="measure-page">
+      <div className="measure-head">
+        {back && <BackLink to={back.to}>{back.label}</BackLink>}
+        <PageHeader
+          title={saved ? title || "Measurement" : "Measure"}
+          actions={
+            <>
+              <Button variant="ghost" icon="info" onClick={() => setHelp(true)}>How it works</Button>
+              {!dirty && saved && pavingProject ? (
+                <Link to={`/paving/${pavingProject.id}#estimate`} className="btn btn-primary">Next: Estimate <Icon name="arrowRight" size={15} /></Link>
+              ) : (
+                !dirty && saved && back && <Link to={back.to} className="btn">Back to {back.label}</Link>
               )}
-            </div>
-          )}
-          {find.error && <div className="field-error" role="alert" style={{ padding: "6px 12px 0" }}>{(find.error as Error).message}</div>}
-          {mapState === "error" ? (
+              <Button variant="primary" icon={!dirty && saved ? "check" : undefined} loading={save.isPending} disabled={!shapes.length || aligning || (!dirty && Boolean(saved))} onClick={() => save.mutate()}>
+                {!dirty && saved ? "Saved" : saved ? "Save changes" : "Save measurement"}
+              </Button>
+            </>
+          }
+        />
+        {p && <p className="page-subtitle">{addressLine(p)}{p.client && ` · ${p.client.display_name}`}{ctx?.quote && ` · for quote #${ctx.quote.number}`}{ctx?.invoice && ` · for invoice #${ctx.invoice.number}`}</p>}
+        {!p && picked && (
+          <p className="page-subtitle">
+            For {picked.label}{picked.client && ` · ${picked.client}`}
+            {!saved && <button type="button" className="link-btn" style={{ marginLeft: 8 }} onClick={unpick}>Not for this client</button>}
+          </p>
+        )}
+        <FormError error={save.error} />
+      </div>
+      <div className="measure-stage" data-panel={panelShown ? "open" : "closed"}>
+        {mapState !== "error" && (
+          <div className="measure-toolbar measure-searchbar">
+            <AddressSearch
+              disabled={mapState !== "ready"}
+              busy={find.isPending}
+              near={center && center.zoom >= 8 ? center : null}
+              onSubmit={(address) => find.mutate(address)}
+              onPickClient={pickClient}
+              onPickPlace={pickPlace}
+              onEdit={() => find.isError && find.reset()}
+            />
+            {imagery && (
+              <ImageryPicker choice={choice ?? "auto"} opening={opening} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} houseNumbers={houseNumbers} overlays={overlays} onPick={(next) => chooseImagery(next)} onMakeDefault={makeDefault} onStreetNames={setStreetNames} onHouseNumbers={showHouseNumbers} onOverlay={toggleOverlay} />
+            )}
+          </div>
+        )}
+        {find.error && <div className="field-error measure-find-error" role="alert">{(find.error as Error).message}</div>}
+        {mapState === "error" ? (
+          <div className="measure-map-error">
             <EmptyState icon="map" title="The map isn't available" action={<div className="row" style={{ gap: 8 }}><Button onClick={() => window.location.reload()}>Reload</Button>{back && <Link className="btn" to={back.to}>Back to {back.label}</Link>}</div>}>{mapError}</EmptyState>
-          ) : (
-            <div className="measure-map-wrap">
-              {mapState === "loading" && (
-                <div className="measure-map-skeleton" aria-label="Loading map"><Skeleton height="100%" radius={0} /><span className="muted small strong"><Icon name="map" size={16} /> Loading imagery…</span></div>
-              )}
-              {start && imagery && (
-                <MeasureMap
-                  ref={mapRef}
-                  start={start}
-                  imagery={imagery}
-                  imageryRevision={imageryRevision}
-                  keys={keys}
-                  labels={mapNames}
-                  values={mapValues}
-                  notes={mapNotes}
-                  colors={mapColors}
-                  showStreetNames={streetNames}
-                  showHouseNumbers={houseNumbers}
-                  overlays={overlays}
-                  onReady={onReady}
-                  onFailed={(message) => { setMapError(message); setMapState("error"); }}
-                  onShapes={onShapes}
-                  onSelect={setSelected}
-                  onMoved={(c, zoom) => setCenter({ ...c, zoom })}
-                  onImageryTrouble={imageryTrouble}
-                  onHistory={(undo, redo) => setHistory({ undo, redo })}
-                  onStreetMap={setStreetMap}
-                />
-              )}
-              {mapState === "ready" && (
-                <>
-                  {!aligning && <div className="measure-rail" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
-                    {TOOLS.map((t) => (
-                      <button key={t.tool} type="button" className="measure-tool" aria-pressed={tool === t.tool} onClick={() => pickTool(t.tool)} title={touch ? t.what : `${t.label} (${t.key}): ${t.what}`}>
-                        <Icon name={t.icon} size={18} />
-                        <span>{t.label}</span>
-                      </button>
-                    ))}
-                    <span className="measure-rail-sep" aria-hidden="true" />
-                    {drawing ? (
-                      <button type="button" className="measure-tool" onClick={() => mapRef.current?.cancel()} title={touch ? "Stop drawing this shape" : "Stop drawing this shape (Esc)"}>
-                        <Icon name="x" size={18} /><span>Cancel</span>
-                      </button>
-                    ) : null}
-                    <button type="button" className="measure-tool" onClick={() => mapRef.current?.undo()} disabled={!history.undo && !drawing} title={touch ? "Undo" : "Undo (Ctrl+Z)"}>
-                      <Icon name="undo" size={18} /><span>Undo</span>
+          </div>
+        ) : (
+          <div className="measure-map-wrap">
+            {mapState === "loading" && (
+              <div className="measure-map-skeleton" aria-label="Loading map"><Skeleton height="100%" radius={0} /><span className="muted small strong"><Icon name="map" size={16} /> Loading imagery…</span></div>
+            )}
+            {start && imagery && (
+              <MeasureMap
+                ref={mapRef}
+                start={start}
+                imagery={imagery}
+                imageryRevision={imageryRevision}
+                keys={keys}
+                labels={mapNames}
+                values={mapValues}
+                notes={mapNotes}
+                colors={mapColors}
+                showStreetNames={streetNames}
+                showHouseNumbers={houseNumbers}
+                overlays={overlays}
+                onReady={onReady}
+                onFailed={(message) => { setMapError(message); setMapState("error"); }}
+                onShapes={onShapes}
+                onSelect={setSelected}
+                onMoved={(c, zoom) => setCenter({ ...c, zoom })}
+                onImageryTrouble={imageryTrouble}
+                onHistory={(undo, redo) => setHistory({ undo, redo })}
+                onStreetMap={setStreetMap}
+                padding={wide ? { top: 64, right: panelShown ? PANEL_ROOM : 0, bottom: 0, left: 76 } : undefined}
+              />
+            )}
+            {mapState === "ready" && (
+              <>
+                {!aligning && <div className="measure-rail" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
+                  {paving && (
+                    <button type="button" className="measure-tool measure-tool-find" aria-pressed={Boolean(tap.item)} onClick={startFind} title={touch ? "Find paving: put a box round a lot, then press Outline" : "Find paving (B): put a box round a lot, then press Outline"}>
+                      <Icon name="sparkle" size={18} />
+                      <span>Find</span>
                     </button>
-                    <button type="button" className="measure-tool" onClick={() => mapRef.current?.redo()} disabled={!history.redo} title={touch ? "Redo" : "Redo (Ctrl+Shift+Z)"}>
-                      <Icon name="redo" size={18} /><span>Redo</span>
+                  )}
+                  {TOOLS.map((t) => (
+                    <button key={t.tool} type="button" className="measure-tool" aria-pressed={tool === t.tool && !tap.item} onClick={() => pickTool(t.tool)} title={touch ? t.what : `${t.label} (${t.key}): ${t.what}`}>
+                      <Icon name={t.icon} size={18} />
+                      <span>{t.label}</span>
                     </button>
-                    {tool === "select" && selectedShape && (selectedShape.kind === "Area" || selectedShape.kind === "Cutout") && (
-                      <button
-                        type="button"
-                        className="measure-tool"
-                        aria-pressed={selectedShape.kind === "Cutout"}
-                        onClick={() => convert(selectedShape.id, selectedShape.kind === "Cutout" ? "Area" : "Cutout")}
-                        title={selectedShape.kind === "Cutout" ? "This is a cutout. Tap to count it as an area again." : "Make this a cutout: leave it out of the areas under it"}
-                      >
-                        <Icon name="scissors" size={18} /><span>Cut out</span>
-                      </button>
-                    )}
-                    {tool === "select" && selected && (
-                      <button type="button" className="measure-tool" data-danger onClick={removeSelected} title={touch ? "Delete this shape" : "Delete this shape (Delete)"}>
-                        <Icon name="trash" size={18} /><span>Delete</span>
-                      </button>
-                    )}
-                  </div>}
-                  <div className="measure-corner">
-                    <button type="button" className="measure-round" onClick={locate} title="Go to where I am" aria-label="Go to where I am"><Icon name="navigation" size={17} /></button>
-                    {shapes.length > 0 && <button type="button" className="measure-round" onClick={() => mapRef.current?.fitShapes()} title={touch ? "Show all shapes" : "Show all shapes (F)"} aria-label="Show all shapes"><Icon name="eye" size={17} /></button>}
-                    <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={17} /></button>
+                  ))}
+                  <span className="measure-rail-sep" aria-hidden="true" />
+                  {drawing ? (
+                    <button type="button" className="measure-tool" onClick={() => mapRef.current?.cancel()} title={touch ? "Stop drawing this shape" : "Stop drawing this shape (Esc)"}>
+                      <Icon name="x" size={18} /><span>Cancel</span>
+                    </button>
+                  ) : null}
+                  <button type="button" className="measure-tool" onClick={() => mapRef.current?.undo()} disabled={!history.undo && !drawing} title={touch ? "Undo" : "Undo (Ctrl+Z)"}>
+                    <Icon name="undo" size={18} /><span>Undo</span>
+                  </button>
+                  <button type="button" className="measure-tool" onClick={() => mapRef.current?.redo()} disabled={!history.redo} title={touch ? "Redo" : "Redo (Ctrl+Shift+Z)"}>
+                    <Icon name="redo" size={18} /><span>Redo</span>
+                  </button>
+                  {tool === "select" && selectedShape && (selectedShape.kind === "Area" || selectedShape.kind === "Cutout") && (
+                    <button
+                      type="button"
+                      className="measure-tool"
+                      aria-pressed={selectedShape.kind === "Cutout"}
+                      onClick={() => convert(selectedShape.id, selectedShape.kind === "Cutout" ? "Area" : "Cutout")}
+                      title={selectedShape.kind === "Cutout" ? "This is a cutout. Tap to count it as an area again." : "Make this a cutout: leave it out of the areas under it"}
+                    >
+                      <Icon name="scissors" size={18} /><span>Cut out</span>
+                    </button>
+                  )}
+                  {tool === "select" && selected && (
+                    <button type="button" className="measure-tool" data-danger onClick={removeSelected} title={touch ? "Delete this shape" : "Delete this shape (Delete)"}>
+                      <Icon name="trash" size={18} /><span>Delete</span>
+                    </button>
+                  )}
+                </div>}
+                <div className="measure-corner">
+                  <button type="button" className="measure-round" onClick={locate} title="Go to where I am" aria-label="Go to where I am"><Icon name="navigation" size={17} /></button>
+                  {shapes.length > 0 && <button type="button" className="measure-round" onClick={() => mapRef.current?.fitShapes()} title={touch ? "Show all shapes" : "Show all shapes (F)"} aria-label="Show all shapes"><Icon name="eye" size={17} /></button>}
+                  <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={17} /></button>
+                </div>
+                {aligning ? <LineUpBanner plan={plan} /> : tap.item ? <TapBanner tap={tap} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
+                {overlays.includes("slope") && (
+                  <div className="measure-legend" aria-label="Slope colors">
+                    <strong>Slope</strong>
+                    {SLOPE_CLASSES.map((c) => <span key={c.label}><i style={{ background: c.color }} />{c.label}<span className="muted"> · {c.note}</span></span>)}
                   </div>
-                  {aligning ? <LineUpBanner plan={plan} /> : tap.item ? <TapBanner tap={tap} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
-                  {overlays.includes("slope") && (
-                    <div className="measure-legend" aria-label="Slope colors">
-                      <strong>Slope</strong>
-                      {SLOPE_CLASSES.map((c) => <span key={c.label}><i style={{ background: c.color }} />{c.label}<span className="muted"> · {c.note}</span></span>)}
-                    </div>
-                  )}
-                  {!aligning && !tap.item && <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>}
-                  {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
-                  {center && center.zoom < 12 && !shapes.length && !banner && !aligning && (
-                    <div className="measure-zoom-note">Search an address or zoom in to the property to start measuring.</div>
-                  )}
-                </>
-              )}
+                )}
+                {!aligning && !tap.item && <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>}
+                {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
+                {center && center.zoom < 12 && !shapes.length && !banner && !aligning && (
+                  <div className="measure-zoom-note">Search an address or zoom in to the property to start measuring.</div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        <aside className="measure-panel stack" aria-label={paving ? "Takeoff" : "Measurement"}>
+          {wide && (
+            <div className="measure-panel-head">
+              <strong>{paving ? "Takeoff" : "Measurement"}</strong>
+              <span className="muted small grow">{formatNumber(summary.total_area_sqft)} sq ft{summary.total_length_ft ? ` · ${formatNumber(summary.total_length_ft)} ft` : ""}</span>
+              <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => showPanel(false)} aria-label="Hide this panel" title="Hide this panel, for more map"><Icon name="chevronRight" size={16} /></button>
             </div>
           )}
-        </div>
+            {saved && (
+              <ShareDrawing
+                drawing={saved}
+                clientId={ctx?.clientId ?? picked?.client_id ?? null}
+                hasPicture={Boolean(saved.snapshot_path)}
+                onChange={(patch) => setSaved((s) => (s ? { ...s, ...patch } : s))}
+              />
+            )}
+            <div className="card card-pad stack-sm">
+              <Field label="Name this measurement"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="Front lawn and driveway" /></Field>
+            </div>
 
-        <aside className="narrow stack" style={{ gap: 16 }}>
-          {saved && (
-            <ShareDrawing
-              drawing={saved}
-              clientId={ctx?.clientId ?? picked?.client_id ?? null}
-              hasPicture={Boolean(saved.snapshot_path)}
-              onChange={(patch) => setSaved((s) => (s ? { ...s, ...patch } : s))}
-            />
-          )}
-          <div className="card card-pad stack-sm">
-            <Field label="Name this measurement"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="Front lawn and driveway" /></Field>
-          </div>
+            {paving && (
+              <PavingItemsCard
+                sections={summary.sections}
+                active={activeItem?.id ?? null}
+                onPick={pickItem}
+                finder={
+                  <FindPaving
+                    map={mapRef}
+                    ready={mapState === "ready" && !aligning && !tap.item}
+                    connected={Boolean(session.config.features.findPaving)}
+                    isAdmin={isAdmin}
+                    imagery={imagery}
+                    pictureImagery={freePicture}
+                    zoom={center?.zoom ?? 0}
+                    onFound={addFound}
+                    onStart={startFind}
+                  />
+                }
+              />
+            )}
 
-          {paving && (
-            <PavingItemsCard
-              sections={summary.sections}
-              active={activeItem?.id ?? null}
-              onPick={pickItem}
-              finder={
-                <FindPaving
-                  map={mapRef}
-                  ready={mapState === "ready" && !aligning && !tap.item}
-                  connected={Boolean(session.config.features.findPaving)}
-                  isAdmin={isAdmin}
-                  imagery={imagery}
-                  pictureImagery={freePicture}
-                  zoom={center?.zoom ?? 0}
-                  activeItem={activeItem?.id ?? null}
-                  onFound={addFound}
-                  onTap={(item) => {
-                    setSelected(null);
-                    tap.start(item);
-                  }}
-                />
-              }
-            />
-          )}
-
-          <div className="card">
-            <div className="card-head"><strong>Shapes</strong><span className="badge">{rows.length}</span>{shapes.length > 0 && <Button size="sm" variant="ghost" icon="trash" onClick={clearAll} style={{ marginLeft: "auto" }}>Clear all</Button>}</div>
-            {rows.length === 0 ? (
-              <EmptyState compact icon="area" title="Nothing drawn yet">
-                Pick <strong>Area</strong>, <strong>Line</strong> or <strong>Count</strong> on the map, then {touch ? "tap" : "click"} to draw. <strong>Cut out</strong> leaves the house or a bed out of an area. Sizes show up here as you go.
-              </EmptyState>
-            ) : (
-              rows.map((row, i) => {
-                const section = sections.get(row.id);
-                const edge = edges[row.id];
-                const own = pitches[row.id] ?? "";
-                const at = own || pitch;
-                const showPitch = roofing && (row.kind === "Area" || slopedEdge(edge));
-                const polygon = row.kind === "Area" || row.kind === "Cutout";
-                const more = (row.kind === "Area" && section?.uncut_value !== undefined) || row.kind === "Cutout" || (roofing && row.kind === "Length") || showPitch || paving;
-                return (
-                  <div key={row.id} className="card-row measure-shape" data-selected={selected === row.id || undefined} data-kind={row.kind}>
-                    <button type="button" className="measure-swatch" style={{ background: row.color }} onClick={() => { pickTool("select"); mapRef.current?.select(row.id); }} aria-label={`Select ${nameOf(row.id)} on the map`} />
-                    <div className="grow measure-shape-body">
-                      <input
-                        className="input"
-                        style={{ height: 32 }}
-                        aria-label={`Name for shape ${i + 1}`}
-                        placeholder={`${names[row.id] ?? ""}${items[row.id] ? "" : row.kind === "Area" ? " (e.g. Front lawn)" : row.kind === "Cutout" ? " (e.g. House)" : row.kind === "Length" && !roofing ? " (e.g. Fence)" : ""}`}
-                        value={labels[row.id] ?? ""}
-                        onChange={(e) => setLabels({ ...labels, [row.id]: e.target.value })}
-                        maxLength={80}
-                      />
-                      {more && (
-                        <div className="measure-shape-more">
-                          {paving && row.kind !== "Cutout" && <ItemSelect kind={row.kind} value={items[row.id]} label={nameOf(row.id)} onChange={(item) => setItem(row.id, item)} />}
-                          {section?.item === "stall_row" && <span className="muted small">{stallsAlong(section.value)} stalls</span>}
-                          {row.kind === "Area" && section?.uncut_value !== undefined && <span className="muted small">{formatNumber(section.uncut_value)} sq ft before cutouts</span>}
-                          {row.kind === "Cutout" && <span className="muted small">{row.value > 0 ? "Left out of the areas under it" : "Not over an area, so nothing comes off"}</span>}
-                          {roofing && row.kind === "Length" && (
-                            <select className="select measure-edge" value={edge ?? ""} onChange={(e) => setEdge(row.id, e.target.value as RoofEdge | "")} aria-label={`Roof edge for ${nameOf(row.id)}`}>
-                              <option value="">Not a roof edge</option>
-                              {ROOF_EDGES.map((e) => <option key={e} value={e}>{EDGE_NAMES[e]}</option>)}
-                            </select>
-                          )}
-                          {showPitch && (
-                            <button type="button" className="chip measure-pitch-chip" data-own={own ? true : undefined} data-steep={(riseOf(at) ?? 0) >= STEEP_FROM || undefined} onClick={() => setPitchFor(row.id)} aria-label={`Pitch for ${nameOf(row.id)}: ${at.trim() ? pitchLabel(at) : "not set"}. Change it`}>
-                              <Icon name="pitch" size={12} />{at.trim() ? pitchLabel(at) : "Set pitch"}{!own && at.trim() ? " · roof" : ""}
-                            </button>
-                          )}
-                          {section?.plan_value !== undefined && <span className="muted small">{formatNumber(section.plan_value, 1)} ft from above</span>}
-                        </div>
+            <div className="card">
+              <div className="card-head"><strong>Shapes</strong><span className="badge">{rows.length}</span>{shapes.length > 0 && <Button size="sm" variant="ghost" icon="trash" onClick={clearAll} style={{ marginLeft: "auto" }}>Clear all</Button>}</div>
+              {rows.length === 0 ? (
+                <EmptyState compact icon="area" title="Nothing drawn yet">
+                  Pick <strong>Area</strong>, <strong>Line</strong> or <strong>Count</strong> on the map, then {touch ? "tap" : "click"} to draw. <strong>Cut out</strong> leaves the house or a bed out of an area. Sizes show up here as you go.
+                </EmptyState>
+              ) : (
+                rows.map((row, i) => {
+                  const section = sections.get(row.id);
+                  const edge = edges[row.id];
+                  const own = pitches[row.id] ?? "";
+                  const at = own || pitch;
+                  const showPitch = roofing && (row.kind === "Area" || slopedEdge(edge));
+                  const polygon = row.kind === "Area" || row.kind === "Cutout";
+                  const more = (row.kind === "Area" && section?.uncut_value !== undefined) || row.kind === "Cutout" || (roofing && row.kind === "Length") || showPitch || paving;
+                  return (
+                    <div key={row.id} className="card-row measure-shape" data-selected={selected === row.id || undefined} data-kind={row.kind}>
+                      <button type="button" className="measure-swatch" style={{ background: row.color }} onClick={() => { pickTool("select"); mapRef.current?.select(row.id); }} aria-label={`Select ${nameOf(row.id)} on the map`} />
+                      <div className="grow measure-shape-body">
+                        <input
+                          className="input"
+                          style={{ height: 32 }}
+                          aria-label={`Name for shape ${i + 1}`}
+                          placeholder={`${names[row.id] ?? ""}${items[row.id] ? "" : row.kind === "Area" ? " (e.g. Front lawn)" : row.kind === "Cutout" ? " (e.g. House)" : row.kind === "Length" && !roofing ? " (e.g. Fence)" : ""}`}
+                          value={labels[row.id] ?? ""}
+                          onChange={(e) => setLabels({ ...labels, [row.id]: e.target.value })}
+                          maxLength={80}
+                        />
+                        {more && (
+                          <div className="measure-shape-more">
+                            {paving && row.kind !== "Cutout" && <ItemSelect kind={row.kind} value={items[row.id]} label={nameOf(row.id)} onChange={(item) => setItem(row.id, item)} />}
+                            {section?.item === "stall_row" && <span className="muted small">{stallsAlong(section.value)} stalls</span>}
+                            {row.kind === "Area" && section?.uncut_value !== undefined && <span className="muted small">{formatNumber(section.uncut_value)} sq ft before cutouts</span>}
+                            {row.kind === "Cutout" && <span className="muted small">{row.value > 0 ? "Left out of the areas under it" : "Not over an area, so nothing comes off"}</span>}
+                            {roofing && row.kind === "Length" && (
+                              <select className="select measure-edge" value={edge ?? ""} onChange={(e) => setEdge(row.id, e.target.value as RoofEdge | "")} aria-label={`Roof edge for ${nameOf(row.id)}`}>
+                                <option value="">Not a roof edge</option>
+                                {ROOF_EDGES.map((e) => <option key={e} value={e}>{EDGE_NAMES[e]}</option>)}
+                              </select>
+                            )}
+                            {showPitch && (
+                              <button type="button" className="chip measure-pitch-chip" data-own={own ? true : undefined} data-steep={(riseOf(at) ?? 0) >= STEEP_FROM || undefined} onClick={() => setPitchFor(row.id)} aria-label={`Pitch for ${nameOf(row.id)}: ${at.trim() ? pitchLabel(at) : "not set"}. Change it`}>
+                                <Icon name="pitch" size={12} />{at.trim() ? pitchLabel(at) : "Set pitch"}{!own && at.trim() ? " · roof" : ""}
+                              </button>
+                            )}
+                            {section?.plan_value !== undefined && <span className="muted small">{formatNumber(section.plan_value, 1)} ft from above</span>}
+                          </div>
+                        )}
+                      </div>
+                      <span className="num strong nowrap" data-cut={row.kind === "Cutout" || undefined}>
+                        {row.kind === "Count" ? "1" : row.kind === "Cutout" ? `−${formatNumber(row.value)} sq ft` : `${formatNumber(row.value, row.kind === "Length" ? 1 : 0)} ${row.unit}`}
+                      </span>
+                      {polygon && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost btn-icon"
+                          aria-pressed={row.kind === "Cutout"}
+                          onClick={() => convert(row.id, row.kind === "Cutout" ? "Area" : "Cutout")}
+                          aria-label={row.kind === "Cutout" ? `Count ${nameOf(row.id)} as an area` : `Make ${nameOf(row.id)} a cutout`}
+                          title={row.kind === "Cutout" ? "Count it as an area again" : "Make it a cutout: leave it out of the areas under it"}
+                        >
+                          <Icon name={row.kind === "Cutout" ? "area" : "scissors"} size={15} />
+                        </button>
                       )}
+                      <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => mapRef.current?.remove(row.id)} aria-label={`Delete shape ${i + 1}`} title="Delete this shape"><Icon name="trash" size={15} /></button>
                     </div>
-                    <span className="num strong nowrap" data-cut={row.kind === "Cutout" || undefined}>
-                      {row.kind === "Count" ? "1" : row.kind === "Cutout" ? `−${formatNumber(row.value)} sq ft` : `${formatNumber(row.value, row.kind === "Length" ? 1 : 0)} ${row.unit}`}
-                    </span>
-                    {polygon && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-ghost btn-icon"
-                        aria-pressed={row.kind === "Cutout"}
-                        onClick={() => convert(row.id, row.kind === "Cutout" ? "Area" : "Cutout")}
-                        aria-label={row.kind === "Cutout" ? `Count ${nameOf(row.id)} as an area` : `Make ${nameOf(row.id)} a cutout`}
-                        title={row.kind === "Cutout" ? "Count it as an area again" : "Make it a cutout: leave it out of the areas under it"}
-                      >
-                        <Icon name={row.kind === "Cutout" ? "area" : "scissors"} size={15} />
-                      </button>
-                    )}
-                    <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => mapRef.current?.remove(row.id)} aria-label={`Delete shape ${i + 1}`} title="Delete this shape"><Icon name="trash" size={15} /></button>
-                  </div>
-                );
-              })
-            )}
-            {rows.some((r) => r.kind === "Area") && (
-              <div className="card-row measure-buildings">
-                <Button size="sm" icon="home" loading={finding === "cut"} disabled={Boolean(finding)} onClick={cutBuildings}>Cut out buildings</Button>
-                <span className="muted small">Finds the buildings on your areas in OpenStreetMap and leaves them out.</span>
-              </div>
-            )}
-            <div className="measure-totals">
-              <div><span className="muted">Area</span><strong>{formatNumber(summary.total_area_sqft)} sq ft</strong><span className="muted small">{formatNumber(summary.total_area_sqyd, 1)} sq yd{summary.total_area_sqft >= 4356 ? ` · ${formatNumber(summary.total_area_sqft / 43_560, 2)} acres` : ""}</span></div>
-              <div><span className="muted">Length</span><strong>{formatNumber(summary.total_length_ft)} ft</strong></div>
-              {cutTotal > 0 && <div><span className="muted">Cut out</span><strong>{formatNumber(cutTotal)} sq ft</strong><span className="muted small">not counted in the area</span></div>}
-              {counts > 0 && <div><span className="muted">Count</span><strong>{counts}</strong></div>}
-              {depthIn > 0 && summary.total_area_sqft > 0 && (
-                <>
-                  <div><span className="muted">Volume at {depthIn}"</span><strong>{formatNumber(cubicYards, 1)} cu yd</strong></div>
-                  <div><span className="muted">Asphalt (approx.)</span><strong>{formatNumber(asphaltTons, 1)} tons</strong><span className="muted small">at 110 lb per sq yd per inch</span></div>
-                </>
+                  );
+                })
               )}
-              {squares !== null && <div><span className="muted">Roofing squares</span><strong>{formatNumber(squares, 1)}</strong><span className="muted small">{roofPitches.length > 1 ? "mixed pitches" : `${roofPitches[0] ? pitchLabel(roofPitches[0]) : "flat"} pitch`}, {waste || 0}% waste</span></div>}
+              {rows.some((r) => r.kind === "Area") && (
+                <div className="card-row measure-buildings">
+                  <Button size="sm" icon="home" loading={finding === "cut"} disabled={Boolean(finding)} onClick={cutBuildings}>Cut out buildings</Button>
+                  <span className="muted small">Finds the buildings on your areas in OpenStreetMap and leaves them out.</span>
+                </div>
+              )}
+              <div className="measure-totals">
+                <div><span className="muted">Area</span><strong>{formatNumber(summary.total_area_sqft)} sq ft</strong><span className="muted small">{formatNumber(summary.total_area_sqyd, 1)} sq yd{summary.total_area_sqft >= 4356 ? ` · ${formatNumber(summary.total_area_sqft / 43_560, 2)} acres` : ""}</span></div>
+                <div><span className="muted">Length</span><strong>{formatNumber(summary.total_length_ft)} ft</strong></div>
+                {cutTotal > 0 && <div><span className="muted">Cut out</span><strong>{formatNumber(cutTotal)} sq ft</strong><span className="muted small">not counted in the area</span></div>}
+                {counts > 0 && <div><span className="muted">Count</span><strong>{counts}</strong></div>}
+                {depthIn > 0 && summary.total_area_sqft > 0 && (
+                  <>
+                    <div><span className="muted">Volume at {depthIn}"</span><strong>{formatNumber(cubicYards, 1)} cu yd</strong></div>
+                    <div><span className="muted">Asphalt (approx.)</span><strong>{formatNumber(asphaltTons, 1)} tons</strong><span className="muted small">at 110 lb per sq yd per inch</span></div>
+                  </>
+                )}
+                {squares !== null && <div><span className="muted">Roofing squares</span><strong>{formatNumber(squares, 1)}</strong><span className="muted small">{roofPitches.length > 1 ? "mixed pitches" : `${roofPitches[0] ? pitchLabel(roofPitches[0]) : "flat"} pitch`}, {waste || 0}% waste</span></div>}
+              </div>
             </div>
-          </div>
 
-          {(plan.shown || plan.plans.data?.length || plan.sending || company.trade_preset !== "lawn_exterior") && (
-            <PlanCard plan={plan} canAdd={canAddPlans} hasPlace={Boolean(ctx?.ids.property || picked?.property_id || ctx?.ids.quote)} />
-          )}
+            {(plan.shown || plan.plans.data?.length || plan.sending || company.trade_preset !== "lawn_exterior") && (
+              <PlanCard plan={plan} canAdd={canAddPlans} hasPlace={Boolean(ctx?.ids.property || picked?.property_id || ctx?.ids.quote)} />
+            )}
 
-          {pitchError && shapes.length > 0 && <div className="field-error" role="alert">{pitchError}</div>}
-          {company.trade_preset === "roofing_exteriors" ? [roofCard, depthCard] : [depthCard, roofCard]}
+            {pitchError && shapes.length > 0 && <div className="field-error" role="alert">{pitchError}</div>}
+            {company.trade_preset === "roofing_exteriors" ? [roofCard, depthCard] : [depthCard, roofCard]}
         </aside>
+        {!panelShown && (
+          <button type="button" className="measure-panel-show" onClick={() => showPanel(true)} title="Show the panel: takeoff items, shapes and totals">
+            <Icon name="chevronLeft" size={16} />
+            <strong>{paving ? "Takeoff" : "Measurement"}</strong>
+            <span className="muted">{formatNumber(summary.total_area_sqft)} sq ft</span>
+          </button>
+        )}
       </div>
 
       <MeasureHelp open={help} touch={touch} onClose={() => { markHelpSeen(); setHelp(false); }} />
@@ -1201,7 +1274,7 @@ export function MeasurePage() {
           onClose={() => setAbroad(null)}
         />
       )}
-    </>
+    </div>
   );
 }
 

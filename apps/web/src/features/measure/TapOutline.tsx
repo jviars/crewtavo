@@ -8,8 +8,9 @@
  * - A box (dragged, or the mapped lot's) is read close up, at the screen's full detail rather than
  *   the whole view shrunk: parked cars are then big enough to read as part of the lot, not holes.
  * - OpenStreetMap's buildings come out of every outline: a grey roof reads as pavement.
- * - For a lot, as with TruTec: two clicks put a box round it, its corners drag to fit, and Outline
- *   makes the outline follow the lot inside it. A lot item starts in Box; other items start on taps.
+ * - As with TruTec: two clicks put a box round a lot, its corners drag to fit, and Outline (floating
+ *   under the box) makes the outline follow the lot inside it. It starts in Box; taps are for touch-ups.
+ *   The model downloads when the first box is finished, not when the page opens.
  * - More taps add to the same outline; Take out (or Alt-tap) takes out what's under the tap, like an
  *   island or parked cars; New outline starts the next one. Smaller and Bigger swap the last tap's
  *   piece for the model's other guesses.
@@ -29,7 +30,7 @@ import { ringArea } from "./detect";
 import { guessPolygons } from "./maskOutline";
 import type { MeasureMapHandle, SpotPicker, ViewImage } from "./MeasureMap";
 import type { LngLat } from "./planAlign";
-import { decode, embed, loadSam, pickMask, SAM_GRID, SAM_SIZE, type Embedding, type Prompt, type Sam } from "./samLocal";
+import { decode, embed, hasWebGpu, loadSam, pickMask, SAM_GRID, SAM_SIZE, type Embedding, type Prompt, type Sam } from "./samLocal";
 
 /** What a tap can outline: the takeoff items that are areas. */
 export const TAP_ITEMS = PAVING_ITEMS.filter((i) => i.geometry === "area");
@@ -77,8 +78,10 @@ export interface TapOutline {
   resize: { smaller: boolean; bigger: boolean } | null;
   /** Why the model is running on the processor, when it is (the banner says so). */
   slow: Sam["slow"] | null;
-  start(item: string): void;
+  start(item: string, mode?: Mode): void;
   stop(): void;
+  /** Done: stops, and the page goes over to editing the shapes (MeasurePage). */
+  done(): void;
   setItem(item: string): void;
   setMode(mode: Mode): void;
   newOutline(): void;
@@ -131,6 +134,7 @@ export function useTapOutline({
   imagery,
   pictureImagery,
   onFound,
+  onDone,
 }: {
   map: RefObject<MeasureMapHandle | null>;
   imagery: ImageryId | null;
@@ -138,10 +142,12 @@ export function useTapOutline({
   pictureImagery: () => Promise<ImageryId>;
   /** New areas, as their item; `osm` when OpenStreetMap's buildings shaped them (they carry its credit). */
   onFound: (ids: string[], item: string, osm: boolean) => void;
+  /** Done was pressed (or Esc): the page switches to editing. */
+  onDone: () => void;
 }): TapOutline {
   const [item, setItemState] = useState<string | null>(null);
   const [mode, setModeState] = useState<Mode>("add");
-  const [status, setStatus] = useState<Status>("loading");
+  const [status, setStatus] = useState<Status>("ready");
   const [progress, setProgress] = useState<TapOutline["progress"]>(null);
   const [active, setActive] = useState(false);
   const [resize, setResize] = useState<TapOutline["resize"]>(null);
@@ -154,8 +160,30 @@ export function useTapOutline({
   const last = useRef<Step | null>(null);
   const busy = useRef(false);
   const run = useRef(0); // bumped when stopped, so a download finishing late doesn't turn it back on
-  const live = useRef({ item, mode, imagery, pictureImagery, onFound });
-  live.current = { item, mode, imagery, pictureImagery, onFound };
+  const preparing = useRef<Promise<Sam> | null>(null);
+  const live = useRef({ item, mode, imagery, pictureImagery, onFound, onDone });
+  live.current = { item, mode, imagery, pictureImagery, onFound, onDone };
+
+  /** The model, fetched the first time something needs it (the banner shows the download). */
+  const prepare = (): Promise<Sam> => {
+    if (preparing.current) return preparing.current;
+    const mine = run.current;
+    setStatus("loading");
+    setProgress(null);
+    preparing.current = loadSam((loaded, total) => mine === run.current && setProgress({ loaded, total })).then(
+      (sam) => {
+        setSlow(sam.slow ?? null);
+        return sam;
+      },
+      (error) => {
+        preparing.current = null; // try again next time
+        throw error;
+      },
+    );
+    return preparing.current;
+  };
+  const prepareRef = useRef(prepare);
+  prepareRef.current = prepare;
 
   const viewKey = () => {
     const box = map.current?.viewBox();
@@ -169,7 +197,7 @@ export function useTapOutline({
    */
   const read = (fresh = false) => {
     const next = reading.current.catch(() => null).then(async (): Promise<Picture> => {
-      const sam = await loadSam();
+      const sam = await prepare();
       const key = viewKey();
       if (!fresh && picture.current?.key === key) return picture.current;
       const handle = map.current;
@@ -188,19 +216,28 @@ export function useTapOutline({
     reading.current = next;
     return next;
   };
-  /** A close-up picture of part of the view (a box around a lot), read after any picture before it. */
-  const crop = (bounds: Box, base: Picture) => {
+  /**
+   * A close-up picture of part of the view (a box around a lot), read after any picture before it.
+   * OpenStreetMap's buildings come from the view's picture when there is one, else are asked for here.
+   */
+  const crop = (bounds: Box, base: Picture | null) => {
     const next = reading.current.catch(() => null).then(async (): Promise<Picture> => {
-      const sam = await loadSam();
+      const sam = await prepare();
       const handle = map.current;
       if (!handle) throw new Error("The map isn't ready yet.");
       setStatus("reading");
+      let osm = base?.osm ?? (picture.current?.key === viewKey() ? picture.current.osm : null);
+      if (!osm) {
+        const ask: OsmAsk = { answer: lotsAndBuildingsIn(bounds).catch(() => null), waited: false, tiles: handle.buildings() ?? [] };
+        void ask.answer.then((got) => (ask.got = got));
+        osm = ask;
+      }
       const { imagery: shown, pictureImagery: free } = live.current;
       const view = await handle.viewImage(SAM_SIZE, { bounds, ...(shown === "google" ? { imagery: await free() } : {}) });
       if (!view) throw new Error("Couldn't take a picture of the map. Try again.");
       const embedding = await embed(sam, view.canvas);
       setStatus("working");
-      return { key: "crop", view, embedding, osm: base.osm };
+      return { key: "crop", view, embedding, osm };
     });
     reading.current = next;
     return next;
@@ -220,7 +257,7 @@ export function useTapOutline({
     const { view, embedding } = p;
     const { width, height } = view.canvas;
     const [gx, gy] = [SAM_GRID / width, SAM_GRID / height];
-    const answers = await decode(await loadSam(), embedding, prompt);
+    const answers = await decode(await prepare(), embedding, prompt);
     if (!answers.found) return { guesses: [], index: -1 };
     const { buildings } = await osmFor(p);
     const box = prompt.box ? ([prompt.box[0] * gx, prompt.box[1] * gy, prompt.box[2] * gx, prompt.box[3] * gy] as Box) : null;
@@ -279,16 +316,13 @@ export function useTapOutline({
     return true;
   };
 
-  /** Runs a tap or a box: reads the view if need be, asks the model, and adds or takes out. */
-  const ask = async (work: (p: Picture) => Promise<void>) => {
+  /** Runs a tap or a box (one at a time): it reads what it needs, asks the model, and adds or takes out. */
+  const ask = async (work: () => Promise<void>) => {
     if (busy.current || !live.current.item) return;
     busy.current = true;
     const mine = run.current;
     try {
-      const p = await read();
-      if (mine !== run.current) return;
-      setStatus("working");
-      await work(p);
+      await work();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't outline that. Try again.");
     } finally {
@@ -303,8 +337,9 @@ export function useTapOutline({
     const kind = alt || now === "out" ? "out" : "add";
     const base = current();
     if (kind === "out" && !base) return void toast.info("Outline something first, then tap what to leave out of it.");
-    void ask(async (first) => {
-      let p = first;
+    void ask(async () => {
+      let p = await read();
+      setStatus("working");
       let [x, y] = p.view.px(at);
       // Off the picture (the map got bigger): read the view as it is now.
       if (x < 0 || y < 0 || x >= p.view.canvas.width || y >= p.view.canvas.height) {
@@ -336,9 +371,9 @@ export function useTapOutline({
   const outlineIn = (a: LngLat, b: LngLat) => {
     const as = live.current.item;
     if (!as) return;
-    void ask(async (whole) => {
+    void ask(async () => {
       // Read close up: the box and a margin round it, so the model sees where the lot ends.
-      const p = await crop(padBounds([Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])], 0.12), whole);
+      const p = await crop(padBounds([Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])], 0.12), null);
       const box = padBox([p.view.px(a), p.view.px(b)], p.view.canvas.width, p.view.canvas.height, 0);
       const { guesses, index } = await guessesFor(p, { points: [], box }, { seed: null, prefer: "biggest", lot: LOT_ITEMS.has(as) });
       if (index < 0) return void toast.info("Nothing to outline in that box. Drag it around the pavement, a little bigger than the lot.");
@@ -348,7 +383,20 @@ export function useTapOutline({
       setModeState("add");
     });
   };
-  const onBoxChange = useCallback((next: [LngLat, LngLat]) => setBox(next), []);
+  // A finished box: the model starts downloading (the first time) while the corners are fitted.
+  const onBoxChange = useCallback((next: [LngLat, LngLat]) => {
+    setBox(next);
+    if (preparing.current) return;
+    void prepareRef.current().then(
+      () => !busy.current && setStatus("ready"),
+      (error) => {
+        setStatus("ready");
+        toast.error(error instanceof Error ? error.message : "Couldn't get the paving model ready. Try again.");
+      },
+    );
+  }, []);
+  const outlineNow = useRef(() => {});
+  outlineNow.current = () => box && outlineIn(box[0], box[1]);
 
   const step = (by: -1 | 1) => {
     const s = last.current;
@@ -369,11 +417,14 @@ export function useTapOutline({
     if (item) map.current?.pickSpots(onTap);
     else map.current?.pickSpots(null, onTap);
   }, [map, item, onTap]);
+  // In Box, two clicks put a box round a lot, and Outline floats under it once it's finished.
+  const pct = progress?.total ? ` ${Math.round((progress.loaded / progress.total) * 100)}%` : "";
+  const label = status === "loading" ? `Getting the model${pct}…` : status === "ready" ? "Outline" : "Outlining…";
   useEffect(() => {
     const boxing = Boolean(item) && mode === "box";
-    map.current?.editBox(boxing ? onBoxChange : null);
+    map.current?.editBox(boxing ? onBoxChange : null, boxing ? { label, busy: status !== "ready", onClick: () => outlineNow.current() } : null);
     if (!boxing) setBox(null);
-  }, [map, item, mode, onBoxChange]);
+  }, [map, item, mode, onBoxChange, label, status]);
   useEffect(
     () => () => {
       map.current?.pickSpots(null, onTap);
@@ -383,36 +434,30 @@ export function useTapOutline({
   );
   const clearBox = () => {
     map.current?.editBox(null);
-    map.current?.editBox(onBoxChange);
+    map.current?.editBox(onBoxChange, { label, busy: status !== "ready", onClick: () => outlineNow.current() });
     setBox(null);
   };
 
-  const start = (next: string) => {
+  // It starts with a box (the way that works best); the model waits for the first box or tap.
+  const start = (next: string, first: Mode = "box") => {
     const mine = ++run.current;
+    // No WebGPU: said straight away, not once the model's downloading.
+    void hasWebGpu().then((ok) => !ok && mine === run.current && setSlow((was) => was ?? "no-webgpu"));
     setItemState(next);
-    // A lot starts with a box round it, the way that works best; other things with a tap.
-    setModeState(LOT_ITEMS.has(next) ? "box" : "add");
-    setStatus("loading");
-    setProgress(null);
+    setModeState(first);
+    setStatus("ready");
     newOutline();
-    loadSam((loaded, total) => mine === run.current && setProgress({ loaded, total }))
-      // Read the view straight away, so the first tap is quick.
-      .then(async (sam) => {
-        setSlow(sam.slow ?? null);
-        if (mine === run.current) await read();
-        if (mine === run.current) setStatus("ready");
-      })
-      .catch((error) => {
-        if (mine !== run.current) return;
-        toast.error(error instanceof Error ? error.message : "Couldn't get the paving model ready. Try again.");
-        run.current++;
-        setItemState(null);
-      });
   };
   const stop = () => {
     run.current++;
+    busy.current = false;
     setItemState(null);
+    setStatus("ready");
     newOutline();
+  };
+  const done = () => {
+    stop();
+    live.current.onDone();
   };
   // Another item is another outline.
   const setItem = (next: string) => {
@@ -420,7 +465,7 @@ export function useTapOutline({
     setItemState(next);
   };
 
-  return { item, mode, status, progress, active, box: Boolean(box), outlineBox: () => box && outlineIn(box[0], box[1]), clearBox, resize, slow, start, stop, setItem, setMode: setModeState, newOutline, smaller: () => step(-1), bigger: () => step(1) };
+  return { item, mode, status, progress, active, box: Boolean(box), outlineBox: () => box && status === "ready" && outlineIn(box[0], box[1]), clearBox, resize, slow, start, stop, done, setItem, setMode: setModeState, newOutline, smaller: () => step(-1), bigger: () => step(1) };
 }
 
 /** A [west, south, east, north] box made bigger by a share of its longer side. */
@@ -438,7 +483,7 @@ export function padBox(points: Array<[number, number] | number[]>, width: number
 }
 
 /** What to say when the browser has no WebGPU, here and in the Find paving dialog. */
-export const SLOW_NO_WEBGPU = "This browser can't run the model on the graphics card (it doesn't offer WebGPU), so it runs on the processor: each new view or box takes about 10 seconds instead of under one. Chrome, Edge and Safari 26 are fast.";
+const SLOW_NO_WEBGPU = "This browser can't run the model on the graphics card (it doesn't offer WebGPU), so it runs on the processor: each new view or box takes about 10 seconds instead of under one. Chrome, Edge and Safari 26 are fast.";
 
 /** Over the map while tap to outline is on: what it's doing, what taps do, and Done. */
 export function TapBanner({ tap }: { tap: TapOutline }) {
@@ -458,7 +503,7 @@ export function TapBanner({ tap }: { tap: TapOutline }) {
             : status === "working"
               ? "Outlining…"
               : boxed
-                ? <><strong>Drag the corners</strong> to fit the lot, then press <strong>Outline</strong>. It outlines as</>
+                ? <><strong>Drag the corners</strong> to fit the lot, then press <strong>Outline</strong>.</>
                 : mode === "box"
                   ? <><strong>Click two corners</strong> of a box around the lot to outline it as</>
                   : mode === "out"
@@ -477,12 +522,7 @@ export function TapBanner({ tap }: { tap: TapOutline }) {
         <button type="button" aria-pressed={mode === "out"} onClick={() => tap.setMode("out")} disabled={!active} title="Tap to take something out of the outline (or Alt-tap)">Take out</button>
         <button type="button" aria-pressed={mode === "box"} onClick={() => tap.setMode("box")} title="Put a box round a lot, then press Outline">Box</button>
       </div>
-      {boxed && (
-        <>
-          <Button size="sm" variant="primary" icon="sparkle" onClick={tap.outlineBox} disabled={!ready} title="Outline the lot in the box (Enter)">Outline</Button>
-          <Button size="sm" onClick={tap.clearBox} disabled={!ready} title="Take the box away to put another">Clear box</Button>
-        </>
-      )}
+      {boxed && <Button size="sm" onClick={tap.clearBox} disabled={!ready} title="Take the box away to put another">Clear box</Button>}
       {tap.resize && mode !== "box" && (
         <>
           <Button size="sm" onClick={tap.smaller} disabled={!tap.resize.smaller || !ready} title="Use less around the last tap">Smaller</Button>
@@ -490,7 +530,7 @@ export function TapBanner({ tap }: { tap: TapOutline }) {
         </>
       )}
       {active && <Button size="sm" onClick={tap.newOutline} disabled={!ready} title="Finish this outline; the next tap starts another">New outline</Button>}
-      <Button size="sm" variant={boxed ? undefined : "primary"} onClick={tap.stop}>Done</Button>
+      <Button size="sm" variant="primary" onClick={tap.done} title="Finish, and edit the shapes (Esc)">Done</Button>
       {tap.slow && (
         <span className="measure-tap-slow" role="note">
           <Icon name="alert" size={14} />
