@@ -75,7 +75,8 @@ async function modelFiles(name: string, progress: Progress, done: { loaded: numb
 
 /** A graph and its weights as a session on the given device. */
 function session(ort: Ort, { name, graph, weights }: Awaited<ReturnType<typeof modelFiles>>, device: "webgpu" | "wasm") {
-  return ort.InferenceSession.create(graph, { executionProviders: [device], graphOptimizationLevel: "all", externalData: [{ path: `${name}.onnx_data`, data: weights }] });
+  // Errors only: not its notes on which steps it keeps on the processor.
+  return ort.InferenceSession.create(graph, { executionProviders: [device], graphOptimizationLevel: "all", logSeverityLevel: 3, externalData: [{ path: `${name}.onnx_data`, data: weights }] });
 }
 
 /** Whether the browser offers WebGPU, so the model can run on the graphics card. */
@@ -95,7 +96,7 @@ async function load(device: "gpu" | "cpu", progress: Progress): Promise<Sam> {
       ? await Promise.all([import("onnxruntime-web/webgpu"), import("onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url")])
       : await Promise.all([import("onnxruntime-web/wasm"), import("onnxruntime-web/ort-wasm-simd-threaded.wasm?url")]);
   ort.env.wasm.wasmPaths = { wasm: wasm.default };
-  ort.env.logLevel = "error"; // not its notes on which steps it keeps on the processor
+  ort.env.logLevel = "error";
   // Several threads need the page to be cross-origin isolated, which an instance isn't.
   ort.env.wasm.numThreads = 1;
   const done = { loaded: 0, total: 0 };

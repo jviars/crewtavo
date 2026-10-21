@@ -8,6 +8,8 @@
  * - A box (dragged, or the mapped lot's) is read close up, at the screen's full detail rather than
  *   the whole view shrunk: parked cars are then big enough to read as part of the lot, not holes.
  * - OpenStreetMap's buildings come out of every outline: a grey roof reads as pavement.
+ * - For a lot, as with TruTec: two clicks put a box round it, its corners drag to fit, and Outline
+ *   makes the outline follow the lot inside it. A lot item starts in Box; other items start on taps.
  * - More taps add to the same outline; Take out (or Alt-tap) takes out what's under the tap, like an
  *   island or parked cars; New outline starts the next one. Smaller and Bigger swap the last tap's
  *   piece for the model's other guesses.
@@ -69,6 +71,8 @@ export interface TapOutline {
   progress: { loaded: number; total: number } | null;
   /** There's an outline that taps add to. */
   active: boolean;
+  /** A box has been put round a lot, waiting for Outline. */
+  box: boolean;
   /** Whether the last tap has a smaller or bigger guess to swap to. */
   resize: { smaller: boolean; bigger: boolean } | null;
   /** Why the model is running on the processor, when it is (the banner says so). */
@@ -78,6 +82,10 @@ export interface TapOutline {
   setItem(item: string): void;
   setMode(mode: Mode): void;
   newOutline(): void;
+  /** Outlines the lot in the box. */
+  outlineBox(): void;
+  /** Takes the box away, to put another one. */
+  clearBox(): void;
   smaller(): void;
   bigger(): void;
 }
@@ -138,6 +146,7 @@ export function useTapOutline({
   const [active, setActive] = useState(false);
   const [resize, setResize] = useState<TapOutline["resize"]>(null);
   const [slow, setSlow] = useState<TapOutline["slow"]>(null);
+  const [box, setBox] = useState<[LngLat, LngLat] | null>(null);
   // The view the model has read, so taps on it don't read it again.
   const picture = useRef<Picture | null>(null);
   const reading = useRef<Promise<unknown>>(Promise.resolve());
@@ -323,7 +332,8 @@ export function useTapOutline({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onBox = useCallback((a: LngLat, b: LngLat) => {
+  /** Outlines the lot in a box: read close up, then the model's biggest fairly sure guess inside it. */
+  const outlineIn = (a: LngLat, b: LngLat) => {
     const as = live.current.item;
     if (!as) return;
     void ask(async (whole) => {
@@ -337,8 +347,8 @@ export function useTapOutline({
       // Next, taps add to it or take out of it.
       setModeState("add");
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
+  const onBoxChange = useCallback((next: [LngLat, LngLat]) => setBox(next), []);
 
   const step = (by: -1 | 1) => {
     const s = last.current;
@@ -354,26 +364,34 @@ export function useTapOutline({
     showPins([]);
   };
 
-  // Taps pick spots instead of drawing while it's on; in Box, dragging draws a box.
+  // Taps pick spots instead of drawing while it's on; in Box, two clicks put a box round a lot.
   useEffect(() => {
     if (item) map.current?.pickSpots(onTap);
     else map.current?.pickSpots(null, onTap);
   }, [map, item, onTap]);
   useEffect(() => {
-    map.current?.pickBox(item && mode === "box" ? onBox : null);
-  }, [map, item, mode, onBox]);
+    const boxing = Boolean(item) && mode === "box";
+    map.current?.editBox(boxing ? onBoxChange : null);
+    if (!boxing) setBox(null);
+  }, [map, item, mode, onBoxChange]);
   useEffect(
     () => () => {
       map.current?.pickSpots(null, onTap);
-      map.current?.pickBox(null);
+      map.current?.editBox(null);
     },
     [map, onTap],
   );
+  const clearBox = () => {
+    map.current?.editBox(null);
+    map.current?.editBox(onBoxChange);
+    setBox(null);
+  };
 
   const start = (next: string) => {
     const mine = ++run.current;
     setItemState(next);
-    setModeState("add");
+    // A lot starts with a box round it, the way that works best; other things with a tap.
+    setModeState(LOT_ITEMS.has(next) ? "box" : "add");
     setStatus("loading");
     setProgress(null);
     newOutline();
@@ -402,7 +420,7 @@ export function useTapOutline({
     setItemState(next);
   };
 
-  return { item, mode, status, progress, active, resize, slow, start, stop, setItem, setMode: setModeState, newOutline, smaller: () => step(-1), bigger: () => step(1) };
+  return { item, mode, status, progress, active, box: Boolean(box), outlineBox: () => box && outlineIn(box[0], box[1]), clearBox, resize, slow, start, stop, setItem, setMode: setModeState, newOutline, smaller: () => step(-1), bigger: () => step(1) };
 }
 
 /** A [west, south, east, north] box made bigger by a share of its longer side. */
@@ -428,6 +446,7 @@ export function TapBanner({ tap }: { tap: TapOutline }) {
   const mb = (bytes: number) => (bytes / 1_000_000).toFixed(1);
   const { status, progress, mode, active } = tap;
   const ready = status === "ready";
+  const boxed = mode === "box" && tap.box;
   return (
     <div className="measure-banner measure-banner-good" role="status" aria-live="polite">
       {ready ? <Icon name="sparkle" size={16} /> : <span className="spinner" style={{ width: 16, height: 16 }} />}
@@ -438,13 +457,15 @@ export function TapBanner({ tap }: { tap: TapOutline }) {
             ? "Reading the aerial in view…"
             : status === "working"
               ? "Outlining…"
-              : mode === "box"
-                ? <><strong>Drag a box</strong> around the lot to outline it as</>
-                : mode === "out"
-                  ? <><strong>Tap what to leave out</strong> of this outline: an island, a building, parked cars</>
-                  : active
-                    ? <><strong>Tap more</strong> to add to this outline, as</>
-                    : <><strong>Tap the pavement</strong> to outline it as</>}
+              : boxed
+                ? <><strong>Drag the corners</strong> to fit the lot, then press <strong>Outline</strong>. It outlines as</>
+                : mode === "box"
+                  ? <><strong>Click two corners</strong> of a box around the lot to outline it as</>
+                  : mode === "out"
+                    ? <><strong>Tap what to leave out</strong> of this outline: an island, a building, parked cars</>
+                    : active
+                      ? <><strong>Tap more</strong> to add to this outline, as</>
+                      : <><strong>Tap the pavement</strong> to outline it as</>}
       </span>
       {mode !== "out" && (
         <select className="select measure-edge" value={tap.item} onChange={(e) => tap.setItem(e.target.value)} aria-label="Outline as">
@@ -454,16 +475,22 @@ export function TapBanner({ tap }: { tap: TapOutline }) {
       <div className="segmented measure-tap-modes" role="group" aria-label="What taps do">
         <button type="button" aria-pressed={mode === "add"} onClick={() => tap.setMode("add")} title="Tap to outline, or to add to the outline">Add</button>
         <button type="button" aria-pressed={mode === "out"} onClick={() => tap.setMode("out")} disabled={!active} title="Tap to take something out of the outline (or Alt-tap)">Take out</button>
-        <button type="button" aria-pressed={mode === "box"} onClick={() => tap.setMode("box")} title="Drag a box around a lot">Box</button>
+        <button type="button" aria-pressed={mode === "box"} onClick={() => tap.setMode("box")} title="Put a box round a lot, then press Outline">Box</button>
       </div>
-      {tap.resize && (
+      {boxed && (
+        <>
+          <Button size="sm" variant="primary" icon="sparkle" onClick={tap.outlineBox} disabled={!ready} title="Outline the lot in the box (Enter)">Outline</Button>
+          <Button size="sm" onClick={tap.clearBox} disabled={!ready} title="Take the box away to put another">Clear box</Button>
+        </>
+      )}
+      {tap.resize && mode !== "box" && (
         <>
           <Button size="sm" onClick={tap.smaller} disabled={!tap.resize.smaller || !ready} title="Use less around the last tap">Smaller</Button>
           <Button size="sm" onClick={tap.bigger} disabled={!tap.resize.bigger || !ready} title="Use more around the last tap">Bigger</Button>
         </>
       )}
       {active && <Button size="sm" onClick={tap.newOutline} disabled={!ready} title="Finish this outline; the next tap starts another">New outline</Button>}
-      <Button size="sm" variant="primary" onClick={tap.stop}>Done</Button>
+      <Button size="sm" variant={boxed ? undefined : "primary"} onClick={tap.stop}>Done</Button>
       {tap.slow && (
         <span className="measure-tap-slow" role="note">
           <Icon name="alert" size={14} />

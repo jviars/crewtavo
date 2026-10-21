@@ -100,8 +100,11 @@ export interface MeasureMapHandle {
    * whether Alt (Option) was held. Null with `owner` stops them only if they still go to `owner`.
    */
   pickSpots(onPick: SpotPicker | null, owner?: SpotPicker): void;
-  /** While set, dragging on the map draws a box (its two corners go here) instead of moving the map. */
-  pickBox(onBox: ((a: LngLat, b: LngLat) => void) | null): void;
+  /**
+   * While set, two clicks on the map put a box on it (the map still moves as usual), and its corners
+   * can be dragged to fit; the box goes here each time it's finished or changed. Null takes it away.
+   */
+  editBox(onChange: ((box: [LngLat, LngLat]) => void) | null): void;
   /** Pins for the spots picked so far: green on the map, blue on a plan, red for left out. */
   setPins(pins: Array<{ at: LngLat; label: string; tone: "plan" | "map" | "out" }>): void;
   /** Whether a shape is still on the map (Undo can take one away). */
@@ -303,7 +306,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   const planRef = useRef<{ url: string; corners: Corners; opacity: number } | null>(null);
   const planUrl = useRef<string | null>(null);
   const pickRef = useRef<SpotPicker | null>(null);
-  const boxRef = useRef<(() => void) | null>(null); // stops drawing a box
+  // A box being put round a lot (tap to outline): its corners so far, and their handles once it's done.
+  const boxRef = useRef<{ onChange: (box: [LngLat, LngLat]) => void; a: LngLat | null; b: LngLat | null; handles: Marker[] } | null>(null);
   const pins = useRef<Marker[]>([]);
   // Callbacks change every render; the map's listeners read the latest through this.
   const live = useRef(props);
@@ -344,6 +348,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
           ...(streets?.sources ?? {}),
           "measure-labels": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "measure-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "measure-box": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
         },
         layers: [
           { id: "background", type: "background", paint: { "background-color": "#d9ded9" } },
@@ -454,6 +459,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
           },
           paint: { "text-color": "#ffffff", "text-halo-color": "rgba(15, 42, 53, 0.92)", "text-halo-width": 1.8 },
         });
+        map!.addLayer({ id: "measure-box-fill", type: "fill", source: "measure-box", paint: { "fill-color": "#22c55e", "fill-opacity": 0.12 } });
+        map!.addLayer({ id: "measure-box-line", type: "line", source: "measure-box", paint: { "line-color": "#22c55e", "line-width": 2.5, "line-dasharray": [2, 1.5] } });
         let frame = 0;
         draw.on("change", () => {
           cancelAnimationFrame(frame);
@@ -462,8 +469,17 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         draw.on("select", (id) => live.current.onSelect(String(id)));
         draw.on("deselect", () => live.current.onSelect(null));
         draw.on("history", () => live.current.onHistory?.(draw.canUndo(), draw.canRedo()));
-        // Lining up a plan: taps pick spots instead of drawing.
-        map!.on("click", (e) => pickRef.current?.([e.lngLat.lng, e.lngLat.lat], { alt: e.originalEvent.altKey }));
+        // Lining up a plan or tap to outline: taps pick spots instead of drawing. Putting a box round a
+        // lot: two clicks make the box, and the second corner follows the pointer till then.
+        map!.on("click", (e) => {
+          const at: LngLat = [e.lngLat.lng, e.lngLat.lat];
+          if (boxRef.current) return void boxClick(at);
+          pickRef.current?.(at, { alt: e.originalEvent.altKey });
+        });
+        map!.on("mousemove", (e) => {
+          const box = boxRef.current;
+          if (box?.a && !box.b) showBox(box.a, [e.lngLat.lng, e.lngLat.lat]);
+        });
         trouble.current = { errors: 0, loaded: 0, since: Date.now() };
         applyOverlays(live.current.overlays);
         applyPlan();
@@ -487,6 +503,64 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     // The map is made once; later changes go through the effects below and the handle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Draws the box between two corners (null clears it). */
+  const showBox = (a: LngLat | null, b: LngLat | null) => {
+    const source = mapRef.current?.getSource("measure-box") as GeoJSONSource | undefined;
+    if (!source) return;
+    if (!a || !b) return void source.setData({ type: "FeatureCollection", features: [] });
+    const [w, e, s, n] = [Math.min(a[0], b[0]), Math.max(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+    source.setData({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[[w, n], [e, n], [e, s], [w, s], [w, n]]] } });
+  };
+  /** The box's corners clockwise from the top left. */
+  const boxCorners = (a: LngLat, b: LngLat): LngLat[] => {
+    const [w, e, s, n] = [Math.min(a[0], b[0]), Math.max(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+    return [[w, n], [e, n], [e, s], [w, s]];
+  };
+  /** A click while a box is being put round a lot: the first corner, then the second, then nothing. */
+  const boxClick = (at: LngLat) => {
+    const box = boxRef.current;
+    const map = mapRef.current;
+    if (!box || !map || box.b) return;
+    if (!box.a) {
+      box.a = at;
+      showBox(at, at);
+      return;
+    }
+    box.b = at;
+    showBox(box.a, at);
+    // Handles on the corners: dragging one moves it, with the opposite corner staying put.
+    box.handles = boxCorners(box.a, at).map((corner, i) => {
+      const handle = document.createElement("div");
+      handle.setAttribute("aria-label", "Corner of the box: drag to fit");
+      Object.assign(handle.style, {
+        width: "16px", height: "16px", borderRadius: "4px", border: "2.5px solid #16a34a", background: "#fff",
+        boxShadow: "0 1px 4px rgba(0, 0, 0, 0.45)", cursor: i % 2 ? "nesw-resize" : "nwse-resize", touchAction: "none",
+      });
+      const marker = new maplibregl.Marker({ element: handle, draggable: true }).setLngLat(corner).addTo(map);
+      const moved = () => {
+        const current = boxRef.current;
+        if (!current) return;
+        const p = marker.getLngLat();
+        const opposite = current.handles[(i + 2) % 4].getLngLat();
+        [current.a, current.b] = [[p.lng, p.lat], [opposite.lng, opposite.lat]];
+        showBox(current.a, current.b);
+        boxCorners(current.a, current.b).forEach((c, k) => k !== i && current.handles[k].setLngLat(c));
+        return current;
+      };
+      marker.on("drag", moved);
+      marker.on("dragend", () => {
+        const current = moved();
+        // Settled: the handles go back on the box's own corners (a corner dragged past another flips it).
+        if (current?.a && current.b) {
+          boxCorners(current.a, current.b).forEach((c, k) => current.handles[k].setLngLat(c));
+          current.onChange([current.a, current.b]);
+        }
+      });
+      return marker;
+    });
+    box.onChange([box.a, at]);
+  };
 
   /** Tell the page what's drawn, and redraw the size labels. */
   function report() {
@@ -880,62 +954,14 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       draw.setMode(onPick ? "static" : toolRef.current);
       map.getCanvas().style.cursor = onPick ? "crosshair" : "";
     },
-    pickBox(onBox) {
-      boxRef.current?.();
-      boxRef.current = null;
-      const map = mapRef.current;
-      const container = el.current;
-      if (!onBox || !map || !container) return;
-      const target = map.getCanvasContainer();
-      const rect = document.createElement("div");
-      rect.className = "measure-box";
-      let start: { x: number; y: number; id: number } | null = null;
-      const local = (e: PointerEvent) => {
-        const r = container.getBoundingClientRect();
-        return { x: e.clientX - r.left, y: e.clientY - r.top };
-      };
-      const down = (e: PointerEvent) => {
-        if (e.button !== 0 || !e.isPrimary) return;
-        start = { ...local(e), id: e.pointerId };
-        target.setPointerCapture(e.pointerId);
-      };
-      const move = (e: PointerEvent) => {
-        if (!start || e.pointerId !== start.id) return;
-        const p = local(e);
-        Object.assign(rect.style, { left: `${Math.min(p.x, start.x)}px`, top: `${Math.min(p.y, start.y)}px`, width: `${Math.abs(p.x - start.x)}px`, height: `${Math.abs(p.y - start.y)}px` });
-        if (!rect.isConnected) container.append(rect);
-      };
-      const up = (e: PointerEvent) => {
-        if (!start || e.pointerId !== start.id) return;
-        const [a, b] = [start, local(e)];
-        start = null;
-        rect.remove();
-        // Barely moved: a tap, not a box.
-        if (Math.abs(b.x - a.x) < 12 || Math.abs(b.y - a.y) < 12) return;
-        const [p, q] = [map.unproject([a.x, a.y]), map.unproject([b.x, b.y])];
-        onBox([p.lng, p.lat], [q.lng, q.lat]);
-      };
-      const cancel = () => {
-        start = null;
-        rect.remove();
-      };
-      // One finger or the mouse draws; two fingers still zoom.
-      map.dragPan.disable();
-      const touchAction = target.style.touchAction;
-      target.style.touchAction = "none";
-      target.addEventListener("pointerdown", down);
-      target.addEventListener("pointermove", move);
-      target.addEventListener("pointerup", up);
-      target.addEventListener("pointercancel", cancel);
-      boxRef.current = () => {
-        target.removeEventListener("pointerdown", down);
-        target.removeEventListener("pointermove", move);
-        target.removeEventListener("pointerup", up);
-        target.removeEventListener("pointercancel", cancel);
-        target.style.touchAction = touchAction;
-        rect.remove();
-        map.dragPan.enable();
-      };
+    editBox(onChange) {
+      if (onChange && boxRef.current) {
+        boxRef.current.onChange = onChange;
+        return;
+      }
+      for (const h of boxRef.current?.handles ?? []) h.remove();
+      boxRef.current = onChange ? { onChange, a: null, b: null, handles: [] } : null;
+      showBox(null, null);
     },
     has(id) {
       return Boolean(drawRef.current?.hasFeature(id));
