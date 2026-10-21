@@ -18,7 +18,7 @@ for (const who of Object.keys(PEOPLE) as Person[]) {
     const terms = page.getByRole("heading", { level: 1, name: "Before you continue" });
     await expect(home.or(terms)).toBeVisible({ timeout: 20_000 });
     if (await terms.isVisible()) {
-      await page.getByRole("checkbox", { name: /agree to the Crewtavo License/ }).check();
+      await page.getByRole("checkbox", { name: /agree to the Crewtavo Terms/ }).check();
       await page.getByRole("button", { name: "Agree and continue" }).click();
     }
     await expect(home).toBeVisible({ timeout: 20_000 });

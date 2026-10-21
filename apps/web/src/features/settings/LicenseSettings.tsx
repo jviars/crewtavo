@@ -1,9 +1,9 @@
-/** Settings → License: the Crewtavo License for everyone, and for owners and admins, who agreed and when. */
+/** Settings → Terms and license: the Crewtavo Terms and license for everyone, and for owners and admins, who agreed and when. */
 import { ROLE_LABELS, type Role } from "@crewtavo/core/roles";
 import { useQuery } from "@tanstack/react-query";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { LicenseSummary, LicenseText, TERMS_VERSION } from "@/features/legal/License";
+import { LicenseNotice, TermsSummary, TermsText, TERMS_VERSION } from "@/features/legal/License";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
@@ -16,11 +16,15 @@ export function LicenseSettings() {
     <div className="stack">
       <div className="card card-pad stack-sm" style={{ gap: 12 }}>
         <div className="stack-sm" style={{ gap: 2 }}>
-          <strong>Crewtavo License</strong>
-          <span className="muted small">Version {TERMS_VERSION}. The BSD 3-Clause license, plus a branding clause and no liability for your data or what you do with Crewtavo.</span>
+          <strong>Crewtavo Terms</strong>
+          <span className="muted small">Version {TERMS_VERSION}. What the business agreed to when it set up Crewtavo: it runs Crewtavo itself and is responsible for its data and its customers.</span>
         </div>
-        <LicenseSummary />
-        <LicenseText />
+        <TermsSummary />
+        <TermsText />
+      </div>
+      <div className="card card-pad stack-sm" style={{ gap: 12 }}>
+        <strong>License</strong>
+        <LicenseNotice />
       </div>
       {hasRole(session, "admin") && <Agreements />}
     </div>
@@ -35,7 +39,7 @@ function Agreements() {
   return (
     <div className="stack-sm">
       <strong>Who agreed</strong>
-      <span className="muted small">Agreements are kept as they were made and can't be changed. When the license changes, an owner or admin is asked to agree again.</span>
+      <span className="muted small">Agreements are kept as they were made and can't be changed. When the terms change, an owner or admin is asked to agree again.</span>
       <div className="card">
         <table className="table table-stack">
           <thead><tr><th>Person</th><th>Version</th><th>Agreed</th></tr></thead>

@@ -1,5 +1,5 @@
 name: Something isn't working
-description: Report a bug in Crewtavo
+description: Report a bug in Crewtavo. Reports are read, but there is no promise of support or a reply.
 labels: [bug]
 body:
   - type: textarea

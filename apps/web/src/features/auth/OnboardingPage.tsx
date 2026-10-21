@@ -1,6 +1,6 @@
 /**
  * First run: name the business, pick the trade preset that sets up services, forms and SOP categories,
- * and agree to the Crewtavo License (features/legal/License.tsx).
+ * and agree to the Crewtavo Terms (features/legal/License.tsx).
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";

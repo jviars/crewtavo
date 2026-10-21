@@ -20,7 +20,7 @@ WORKDIR /app
 ARG CREWTAVO_VERSION=dev
 ENV NODE_ENV=production PORT=8080 CREWTAVO_VERSION=$CREWTAVO_VERSION
 COPY --from=build --chown=node:node /src/dist/server ./
-COPY --from=build --chown=node:node /src/LICENSE ./
+COPY --from=build --chown=node:node /src/LICENSE /src/NOTICE /src/TERMS ./
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s CMD wget -qO- "http://127.0.0.1:${PORT}/api/health" >/dev/null || exit 1

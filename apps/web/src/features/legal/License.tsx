@@ -1,7 +1,8 @@
 /**
- * The Crewtavo License (LICENSE at the repository root, bundled as text so every deployment shows
- * the version it runs). Whoever sets up a business agrees to it in OnboardingPage; an owner or admin
- * of a business that hasn't agreed to this version sees TermsPage once (lib/session.tsx).
+ * The Crewtavo Terms (TERMS at the repository root) and the license (LICENSE, the GNU AGPL-3.0, with
+ * the additional terms in NOTICE), bundled as text so every deployment shows the versions it runs.
+ * Whoever sets up a business agrees to the terms in OnboardingPage; an owner or admin of a business
+ * that hasn't agreed to this version sees TermsPage once (lib/session.tsx).
  */
 import { TERMS_VERSION } from "@crewtavo/core/terms";
 import { useMutation } from "@tanstack/react-query";
@@ -13,21 +14,43 @@ import { AuthLayout } from "@/features/auth/LoginPage";
 import authStyles from "@/features/auth/auth.module.css";
 import { api } from "@/lib/api";
 import LICENSE_TEXT from "../../../../../LICENSE?raw";
+import NOTICE_TEXT from "../../../../../NOTICE?raw";
+import TERMS_TEXT from "../../../../../TERMS?raw";
 import styles from "./legal.module.css";
 
-export { LICENSE_TEXT, TERMS_VERSION };
+export { LICENSE_TEXT, NOTICE_TEXT, TERMS_TEXT, TERMS_VERSION };
+
+/**
+ * Where this version's source code is. The AGPL asks anyone running a modified Crewtavo for others to
+ * offer them its source (section 13): a modified version points this at its own.
+ */
+export const SOURCE_URL = "https://github.com/jviars/crewtavo";
+
+/**
+ * TERMS and NOTICE are wrapped at 100 characters for reading as files. Joins each paragraph's
+ * lines (a long line followed by more text) so it flows to the width of the box instead.
+ */
+function flow(text: string) {
+  const lines: string[] = [];
+  for (const line of text.split("\n")) {
+    const previous = lines[lines.length - 1];
+    if (previous !== undefined && previous.length >= 70 && line.trim()) lines[lines.length - 1] = `${previous} ${line.trim()}`;
+    else lines.push(line);
+  }
+  return lines.join("\n");
+}
 
 const POINTS: Array<{ icon: IconName; text: string }> = [
-  { icon: "info", text: "Crewtavo is provided as is, with no warranty of any kind." },
+  { icon: "info", text: "Crewtavo is free and open source, provided as is, with no warranty of any kind." },
   { icon: "lock", text: "You run it on accounts you own, so you're responsible for your data, your backups and keeping it secure." },
-  { icon: "alert", text: "The people who make Crewtavo aren't liable for lost or exposed data, for mistakes, or for anything done with it." },
+  { icon: "users", text: "Your customers deal with your business. You handle their questions, complaints, refunds and claims." },
+  { icon: "alert", text: "The people who make Crewtavo aren't liable for lost or exposed data, for mistakes, or for anything done with it, and you cover them if a claim about your Crewtavo is made against them." },
   { icon: "check", text: "Check quotes, invoices, payments, pay and taxes before you rely on them. AI answers and map measurements can be wrong." },
   { icon: "book", text: "You follow the laws that apply to your business, such as privacy, texting, tax and labor laws." },
-  { icon: "star", text: "Keep the Crewtavo name and logo, including \"Powered by Crewtavo\". Your own logo and colors are always fine." },
 ];
 
-/** The license in plain language: what someone is agreeing to, before the full text. */
-export function LicenseSummary() {
+/** The terms in plain language: what someone is agreeing to, before the full text. */
+export function TermsSummary() {
   return (
     <ul className={styles.points}>
       {POINTS.map((p) => <li key={p.text}><Icon name={p.icon} size={15} />{p.text}</li>)}
@@ -35,13 +58,35 @@ export function LicenseSummary() {
   );
 }
 
-/** The full license, folded away until someone opens it. */
-export function LicenseText({ open = false }: { open?: boolean }) {
+/** The full terms, folded away until someone opens them. */
+export function TermsText({ open = false }: { open?: boolean }) {
   return (
     <details className="more-options" open={open || undefined}>
-      <summary>Read the full license</summary>
-      <pre className={styles.text} tabIndex={0} aria-label="Crewtavo License">{LICENSE_TEXT}</pre>
+      <summary>Read the full terms</summary>
+      <pre className={styles.text} tabIndex={0} aria-label="Crewtavo Terms">{flow(TERMS_TEXT)}</pre>
     </details>
+  );
+}
+
+/**
+ * The license's notices (copyright, AGPL, no warranty, where the source is) and its full text: the
+ * "Appropriate Legal Notices" the AGPL asks the app to show.
+ */
+export function LicenseNotice() {
+  return (
+    <div className="stack-sm" style={{ gap: 10 }}>
+      <span className="muted small">
+        Copyright (C) 2026 Joshua Viars. Crewtavo is free software under the GNU Affero General Public License, version 3, with the additional terms in its notice, and comes with no warranty. <a href={SOURCE_URL} target="_blank" rel="noopener noreferrer">Source code</a>
+      </span>
+      <details className="more-options">
+        <summary>Read the notice and additional terms</summary>
+        <pre className={styles.text} tabIndex={0} aria-label="Crewtavo notice">{flow(NOTICE_TEXT)}</pre>
+      </details>
+      <details className="more-options">
+        <summary>Read the full license</summary>
+        <pre className={styles.text} tabIndex={0} aria-label="GNU Affero General Public License">{LICENSE_TEXT}</pre>
+      </details>
+    </div>
   );
 }
 
@@ -49,22 +94,22 @@ export function LicenseText({ open = false }: { open?: boolean }) {
 export function TermsAgreement({ agreed, onChange, error }: { agreed: boolean; onChange: (agreed: boolean) => void; error?: string | null }) {
   return (
     <section className={styles.terms} aria-labelledby="terms-title">
-      <h2 id="terms-title">The Crewtavo License</h2>
-      <LicenseSummary />
-      <LicenseText />
+      <h2 id="terms-title">The Crewtavo Terms</h2>
+      <TermsSummary />
+      <TermsText />
       <label className={`checkbox ${styles.agree}`}>
         <input type="checkbox" checked={agreed} onChange={(e) => onChange(e.target.checked)} aria-invalid={error ? true : undefined} aria-describedby={error ? "terms-error" : undefined} />
-        <span>I have read and agree to the Crewtavo License, for myself and on behalf of my business.</span>
+        <span>I have read and agree to the Crewtavo Terms, for myself and on behalf of my business.</span>
       </label>
       {error && <span id="terms-error" className={styles.error} role="alert">{error}</span>}
     </section>
   );
 }
 
-export const TERMS_REQUIRED = "Agree to the Crewtavo License to continue.";
+export const TERMS_REQUIRED = "Agree to the Crewtavo Terms to continue.";
 
 /**
- * An owner or admin of a business that hasn't agreed to this version of the license: agree once to
+ * An owner or admin of a business that hasn't agreed to this version of the terms: agree once to
  * go on. `onSignOut` is the session's, which leaves nothing of theirs on the phone.
  */
 export function TermsPage({ companyName, onAccepted, onSignOut }: { companyName: string; onAccepted: () => void; onSignOut: () => void }) {
@@ -88,7 +133,7 @@ export function TermsPage({ companyName, onAccepted, onSignOut }: { companyName:
         <div style={{ display: "grid", gap: 6 }}>
           <h1 className={authStyles.title}>Before you continue</h1>
           <p className="muted" style={{ margin: 0 }}>
-            An owner or admin needs to agree to the current Crewtavo License for <strong style={{ color: "var(--ink)" }}>{companyName}</strong>. You only do this once.
+            An owner or admin needs to agree to the current Crewtavo Terms for <strong style={{ color: "var(--ink)" }}>{companyName}</strong>. You only do this once.
           </p>
         </div>
         <TermsAgreement agreed={agreed} onChange={setAgreed} error={touched && !agreed ? TERMS_REQUIRED : null} />

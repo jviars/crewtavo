@@ -356,8 +356,19 @@ QuickBooks and Zoho sync are written but not yet tested against live accounts.
 
 ## License
 
-Free to use, change and share under the [Crewtavo License](LICENSE): BSD 3-Clause plus a branding
-clause. Keep the Crewtavo name and logo, including "Powered by Crewtavo" in the Client Hub; your
-own business name, logo and colors are always fine. Instances with 50 or fewer people signing in
-may remove the Crewtavo branding too. Crewtavo comes with no warranty; see [LICENSE](LICENSE) for
-the full terms.
+Crewtavo is free and open source under the [GNU Affero General Public License, version 3](LICENSE)
+(AGPL-3.0-only), with the additional terms in [NOTICE](NOTICE): no warranty, no responsibility for
+your data or for what you do with Crewtavo, and no rights to the Crewtavo name or logo for modified
+versions. If you run a modified Crewtavo for other people, the AGPL asks you to offer them its
+source code.
+
+Whoever sets up a business in Crewtavo agrees to the [Crewtavo Terms](TERMS) during setup: the
+business runs Crewtavo on its own accounts and is responsible for its data and its customers.
+
+Copyright (C) 2026 Joshua Viars. Commercial licenses are available on request.
+
+## Contributing
+
+Crewtavo doesn't accept contributions: pull requests are closed without review. Bug reports are
+welcome as [issues](https://github.com/jviars/crewtavo/issues), with no promise of support. See
+[CONTRIBUTING.md](CONTRIBUTING.md).

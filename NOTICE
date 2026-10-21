@@ -1,0 +1,72 @@
+Crewtavo
+Copyright (C) 2026 Joshua Viars
+
+Crewtavo is free software: you can redistribute it and/or modify it under the terms of the GNU
+Affero General Public License as published by the Free Software Foundation, version 3 of the
+License only (AGPL-3.0-only), with the additional terms below. The full text of the license is in
+the LICENSE file.
+
+Crewtavo is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
+General Public License for more details.
+
+Source code: https://github.com/jviars/crewtavo
+
+Whoever sets up a business in Crewtavo also agrees to the Crewtavo Terms (the TERMS file), which the
+app shows during setup.
+
+
+ADDITIONAL TERMS UNDER SECTION 7 OF THE GNU AFFERO GENERAL PUBLIC LICENSE
+
+The copyright holder adds these terms to all of Crewtavo, as section 7 of the license allows. They
+apply to every copy and every modified version.
+
+1. No responsibility for your data or for what you do with the software (section 7(a)). These
+   terms disclaim warranty and limit liability further than sections 15 and 16 of the license, to
+   the fullest extent permitted by applicable law.
+
+   Crewtavo is software you install and run yourself, on hosting, database and other accounts that
+   you own and control. The copyright holder and contributors do not host, operate, monitor or back
+   up your deployment and have no access to anything stored in it.
+
+   (a) Your data. You alone are responsible for your deployment and for all data stored in it or
+       passing through it, including information about your business, your staff and your
+       customers. The copyright holder and contributors are not liable for any loss, corruption,
+       theft, exposure, unauthorized access to or disclosure of any data, however it happens,
+       including through defects, security vulnerabilities, misconfiguration, updates, migrations,
+       or failed or missing backups.
+
+   (b) Your use. You alone are responsible for everything done with the software and for its
+       results, including quotes, estimates, measurements, prices, invoices, payments, refunds,
+       taxes, timesheets, pay figures, job costing, reports, schedules, routes, automations, and
+       emails or text messages sent from it. Check every figure, document and message before you
+       rely on it or send it.
+
+   (c) Generated and measured results. Output from AI features, map and satellite measurements,
+       formulas, and data received from connected services may be wrong or incomplete. You rely on
+       them at your own risk.
+
+   (d) Other people's services. The software connects to services run by others, such as hosting
+       and database providers, payment processors, email and texting providers, accounting
+       software and AI providers. Your use of them is governed by your agreements with them. The
+       copyright holder and contributors are not responsible for those services, their
+       availability, their charges or how they handle your data.
+
+   (e) Laws that apply to you. The copyright holder and contributors are not responsible for
+       whether your use of the software follows the laws that apply to you and your business,
+       including laws on privacy and data protection, consumer protection, marketing emails and
+       text messages, employment and wages, taxes, payments and record keeping. Nothing in the
+       software or its documentation is legal, tax, accounting, financial or other professional
+       advice.
+
+2. Modified versions (section 7(c)). A modified version must be marked in reasonable ways as
+   different from the original, and must not be presented as an official Crewtavo release.
+
+3. Names and logos (section 7(e)). The license grants no rights under trademark law to the name
+   "Crewtavo", the Crewtavo logo or any other Crewtavo mark. Unmodified copies of Crewtavo, as
+   published by the copyright holder, may keep and show them. Anyone who distributes a modified
+   version, or offers one to others as a service, must not use them to name, promote or sell it,
+   except to say truthfully that it is based on Crewtavo.
+
+If any of these terms is held unenforceable, the rest stay in effect, and that term applies to the
+fullest extent the law allows.

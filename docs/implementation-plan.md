@@ -495,22 +495,27 @@ Used as checklists, not dependencies:
 
 ## 20. Licensing
 
-Decided: the [Crewtavo License](../LICENSE), modeled on Open WebUI's. It is BSD 3-Clause plus:
+Decided (October 2026): the [GNU AGPL-3.0](../LICENSE), with additional terms under its section 7
+in [NOTICE](../NOTICE), plus the [Crewtavo Terms](../TERMS) that a business agrees to in the app.
+It replaced the earlier Crewtavo License (BSD 3-Clause plus a branding clause, modeled on Open
+WebUI's), which wasn't open source by the Open Source Initiative's definition.
 
-- **Branding clause.** The Crewtavo name, logo and "Powered by Crewtavo" stay, unless 50 or fewer
-  people sign in during any rolling 30 days, the copyright holder gives written permission, or the
-  licensee has a commercial license. A business's own name, logo and colors are always allowed.
-- **Contributions** come with the right to relicense them, so commercial licenses stay possible.
-- **No responsibility for data or use.** Each business runs its own deployment, so it alone is
-  responsible for its data, backups, figures, messages, connected services and legal compliance,
-  and indemnifies the copyright holder and contributors.
-- **Agreed in the app.** Setting up a business requires agreeing to the license
+- **Additional terms (NOTICE).** No responsibility for data or use (7(a)), modified versions
+  marked as different (7(c)), and no trademark rights to the Crewtavo name or logo (7(e)).
+- **Sole copyright holder.** Crewtavo takes no outside contributions, so its copyright holder can
+  sell commercial licenses and add permissions later, such as an exception for paid apps.
+- **The Crewtavo Terms.** Each business runs its own deployment, so it alone is responsible for
+  its data, backups, customers, figures, messages, connected services and legal compliance, and
+  indemnifies the people who make Crewtavo. The AGPL itself can't carry the indemnity, so it's
+  in the terms.
+- **Agreed in the app.** Setting up a business requires agreeing to the terms
   (`POST /companies` with `terms_version`). Each agreement is a row in `terms_acceptances` (who,
   role, version, when) that nobody can edit. Owners and admins of a business that hasn't agreed to
-  `TERMS_VERSION` see a one-time "Before you continue" screen. Settings → License shows the text
-  and the history.
+  `TERMS_VERSION` see a one-time "Before you continue" screen. Settings → Terms and license shows
+  the terms, the history and the license.
 
-No dependency (nothing GPL) constrains this choice.
+Every dependency is under a permissive license (MIT, BSD, Apache, ISC), so all of it can ship
+under the AGPL.
 
 ---
 
