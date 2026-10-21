@@ -3,7 +3,8 @@
  * to move it (mouse or finger), drag its bottom edge to change its length, click an open spot to
  * book it, and drag visits in and out of the unscheduled list. Every change can be undone.
  * Click a visit to see it all (Edit changes it). Drops snap to the time step in Settings → Schedule.
- * Also: rain-day shifts, a visit for many jobs at once, and Organize route for each crew's day.
+ * Also: rain-day shifts, a visit for many jobs at once, and Organize route for each crew's day, which
+ * opens in Apple Maps or Google Maps from the crew's lane.
  * Events from other calendars (added on the Apps page) show alongside, and can be hidden.
  * Each visit shows the initials of the people on it, and the board can show one person's visits.
  */
@@ -15,6 +16,8 @@ import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
+import { RouteMapsLink } from "@/components/ui/MapsLink";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
@@ -25,6 +28,7 @@ import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
+import { dayRoute } from "./dayRoute";
 import { RouteDialog } from "./RouteDialog";
 import { clock, lengthOf, minutesOf, TimeGrid, useGridScale, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
@@ -46,7 +50,7 @@ interface Visit {
   crew_id: string | null;
   notes: string | null;
   job: { id: string; number: number; title: string; client: { id: string; display_name: string } | null } | null;
-  property: { id: string; line1: string; city: string | null; lat: number | null; lng: number | null } | null;
+  property: { id: string; line1: string; line2?: string | null; city: string | null; region?: string | null; postal_code?: string | null; lat: number | null; lng: number | null } | null;
   assignees: Array<{ user_id: string }>;
   series_day: number | null;
   series_total: number | null;
@@ -403,12 +407,19 @@ export function SchedulePage() {
   const dayColumns: GridColumn[] = lanes.map((col) => {
     const lane = laneVisits(col);
     const stops = lane.filter((v) => v.status === "scheduled");
+    const route = dayRoute(lane, session.company);
     return {
       ...col,
       today: anchor === today,
       past: anchor < today,
       headerExtra: (
         <span className="row" style={{ gap: 4 }}>
+          {route.stops.length > 1 && anchor >= today && (
+            <RouteMapsLink className="btn btn-ghost btn-sm btn-icon" route={route}>
+              <Icon name="map" size={14} />
+              <span className="sr-only">Open route in maps</span>
+            </RouteMapsLink>
+          )}
           {canDispatch && stops.length > 0 && anchor >= today && rights.canChange(col.crew || null) && (
             <Button size="sm" variant="ghost" icon="navigation" title="Organize this crew's route by distance" onClick={() => setRouting({ crew: col.crew ?? "", name: typeof col.label === "string" ? col.label : "Crew" })}>Route</Button>
           )}

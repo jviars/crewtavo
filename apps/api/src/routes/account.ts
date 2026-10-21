@@ -65,7 +65,7 @@ account.get("/me", requireUser, async (c) => {
     db.from("profiles").select("user_id, email, full_name, phone, avatar_url, color").eq("user_id", userId).maybeSingle(),
     db
       .from("memberships")
-      .select("role, role_id, company:companies(id, name, slug, trade_preset, timezone, currency, settings)")
+      .select("role, role_id, company:companies(id, name, slug, trade_preset, timezone, currency, address, settings)")
       .eq("user_id", userId)
       .eq("active", true),
   ]);

@@ -29,7 +29,7 @@ export async function companyZone(s: Scope): Promise<{ tz: string; settings: Rec
 }
 
 export const VISIT_FIELDS =
-  "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, hold_reason, crew_id, notes, series_id, series_day, series_total, job:jobs(id, number, title, client:clients(id, display_name)), property:properties(id, line1, city, lat, lng), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment_id)";
+  "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, hold_reason, crew_id, notes, series_id, series_day, series_total, job:jobs(id, number, title, client:clients(id, display_name)), property:properties(id, line1, line2, city, region, postal_code, lat, lng), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment_id)";
 
 export const isWeekend = (date: string) => [0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay());
 
