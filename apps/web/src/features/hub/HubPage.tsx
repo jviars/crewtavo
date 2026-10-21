@@ -6,9 +6,9 @@
  *   invoice - view and pay (with an optional tip)
  * Add ?print=1 to print or save a PDF.
  */
-import { lineTotal, quoteTotals } from "@crewtavo/core/money";
+import { lineTotal, optionLabels, quoteTotals } from "@crewtavo/core/money";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
@@ -30,6 +30,8 @@ interface HubLine {
   taxable?: boolean;
   optional?: boolean;
   selected?: boolean;
+  /** Optional lines that share a group are one choice (Good, Better, Best): the client picks one. */
+  option_group?: string | null;
 }
 interface Company { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null; logo?: string | null }
 /** A map drawing the office chose to show the client, with the sizes measured on it. */
@@ -257,6 +259,15 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
   const requestChanges = useMutation({ mutationFn: () => hubFetch(`${token}/request-changes`, { message: changes.trim() }), onSuccess: onChanged });
 
   const included = (l: HubLine) => !l.optional || chosen.includes(l.id!);
+  const groupOf = (l: HubLine) => (l.optional && l.option_group ? l.option_group : null);
+  const tiers = optionLabels(q.lines);
+  // Picking one choice in a group drops the others in it.
+  const choose = (l: HubLine, on: boolean) => {
+    const group = groupOf(l);
+    if (group) setChosen([...chosen.filter((id) => groupOf(q.lines.find((x) => x.id === id) ?? l) !== group), l.id!]);
+    else setChosen(on ? [...chosen, l.id!] : chosen.filter((x) => x !== l.id));
+  };
+  const firstOf = (l: HubLine, i: number) => groupOf(l) !== null && !q.lines.slice(0, i).some((x) => groupOf(x) === groupOf(l));
   // The database's own math (to the cent), so the total the client approves is the one saved. A
   // percent code follows the options the client picks, as it does on the saved quote.
   const { subtotal, discount, tax, total } = quoteTotals(q.lines.map((l) => ({ ...l, selected: included(l) })), { taxRate: q.tax_rate, discountAmount: q.discount_amount, promo: q.promo });
@@ -273,19 +284,22 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
       <HubDrawings token={token} drawings={data.drawings} />
 
       <section className="card">
-        {q.lines.map((l) => (
-          <div key={l.id} className="card-row" style={{ alignItems: "flex-start", opacity: included(l) ? 1 : 0.6, transition: "opacity 200ms" }}>
+        {q.lines.map((l, i) => (
+          <Fragment key={l.id}>
+          {firstOf(l, i) && <div className="card-row hub-choice-head"><strong>{l.option_group}</strong><span className="muted small">{open ? "Pick one" : "One of these"}</span></div>}
+          <div className="card-row" style={{ alignItems: "flex-start", opacity: included(l) ? 1 : 0.6, transition: "opacity 200ms" }}>
             {l.optional && (
-              <input type="checkbox" aria-label={`Add ${l.name}`} checked={chosen.includes(l.id!)} disabled={!open} onChange={(e) => setChosen(e.target.checked ? [...chosen, l.id!] : chosen.filter((x) => x !== l.id))} style={{ marginTop: 4, width: 18, height: 18 }} />
+              <input type={groupOf(l) ? "radio" : "checkbox"} name={groupOf(l) ? `choice-${groupOf(l)}` : undefined} aria-label={groupOf(l) ? `Choose ${l.name}` : `Add ${l.name}`} checked={chosen.includes(l.id!)} disabled={!open} onChange={(e) => choose(l, e.target.checked)} style={{ marginTop: 4, width: 18, height: 18 }} />
             )}
             <div className="grow">
               <strong>{l.name}</strong>
-              {l.optional && <span className="chip chip-blue" style={{ marginLeft: 6 }}>Optional</span>}
+              {l.optional && <span className="chip chip-blue" style={{ marginLeft: 6 }}>{groupOf(l) ? tiers.get(l.id!) ?? "Choice" : "Optional"}</span>}
               {l.description && <div className="muted text-sm pre-wrap">{l.description}</div>}
               <div className="muted small">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</div>
             </div>
             <strong className="tabular">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</strong>
           </div>
+          </Fragment>
         ))}
         <div className="card-pad totals" style={{ borderTop: "1px solid var(--divider)" }}>
           <div className="line"><span>Subtotal</span><span>{formatMoneyCents(subtotal)}</span></div>

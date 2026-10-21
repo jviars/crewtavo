@@ -1,11 +1,13 @@
 /**
  * The paving flow's records: a paving project is a quote with a takeoff (a measurement whose shapes
  * are paving items). Where a project stands comes from them and the job and invoices that follow:
- * takeoff, estimate, proposal, schedule, invoice, like a paving app's job record.
+ * takeoff, estimate, proposal, schedule, invoice, like a paving app's job record. Roofing projects
+ * (features/roofing) are the same records with a roof for the takeoff, so they share these.
  */
 import { evaluateFormula, formulaVariables, type FormulaVariable } from "@crewtavo/core/formulas";
 import { drawingPitchFactor, edgeLengths, type Section } from "@crewtavo/core/geo";
 import { isPavingTakeoff, pavingQuantities } from "@crewtavo/core/paving";
+import { savedRoofingQuantities } from "@crewtavo/core/roofing";
 import type { IconName } from "@/components/ui/Icon";
 
 export const STEPS: Array<{ id: StepId; label: string; icon: IconName; text: string }> = [
@@ -26,11 +28,12 @@ export interface TakeoffRow {
   total_length_ft: number;
   roof_pitch: string | null;
   waste_pct: number;
+  roofing_squares: number | null;
   snapshot_path: string | null;
   show_on_quote: boolean;
   updated_at: string;
 }
-export const TAKEOFF_FIELDS = "id, title, sections, total_area_sqft, total_area_sqyd, total_length_ft, roof_pitch, waste_pct, snapshot_path, show_on_quote, updated_at";
+export const TAKEOFF_FIELDS = "id, title, sections, total_area_sqft, total_area_sqyd, total_length_ft, roof_pitch, waste_pct, roofing_squares, snapshot_path, show_on_quote, updated_at";
 
 export const sectionsOf = (m: Pick<TakeoffRow, "sections"> | null | undefined): Section[] => (Array.isArray(m?.sections) ? (m!.sections as Section[]) : []);
 export const isPaving = (m: Pick<TakeoffRow, "sections"> | null | undefined) => isPavingTakeoff(sectionsOf(m));
@@ -60,6 +63,7 @@ export function takeoffVariables(m: TakeoffRow, depthIn: number | null): Record<
     hip_ft: edges.hip,
     valley_ft: edges.valley,
     ...pavingQuantities(sections),
+    ...savedRoofingQuantities(sections, m.roof_pitch, Number(m.waste_pct)),
   };
 }
 

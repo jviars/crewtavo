@@ -23,6 +23,7 @@ export const NAV_GROUPS: NavItem[][] = [
   [
     { to: "/", label: "Home", icon: "home", keywords: "dashboard today overview" },
     { to: "/paving", label: "Paving", icon: "paving", roles: ["admin", "office", "estimator"], perm: "sales", trade: "paving", keywords: "takeoff asphalt sealcoat striping stalls parking lot estimate proposal find paving" },
+    { to: "/roofing", label: "Roofing", icon: "roofing", roles: ["admin", "office", "estimator"], perm: "sales", trade: "roofing_exteriors", keywords: "roof estimate squares pitch shingles metal tear-off measure good better best proposal" },
     { to: "/field", label: "My day", icon: "clock", only: ["crew_lead", "field_crew"], keywords: "today my visits route" },
     { to: "/schedule", label: "Schedule", icon: "calendar", keywords: "calendar visits appointments dispatch route crews tasks" },
     { to: "/chat", label: "Team chat", icon: "chat", feature: "team_chat", keywords: "chat channels messages talk team crew announcements" },

@@ -12,6 +12,7 @@
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { drawingSquares, edgeLengths, isPitch, isRoofEdge, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type Position, type RoofEdge } from "@crewtavo/core/geo";
 import { itemFits, PAVING_ITEMS, pavingItem, stallsAlong, type PavingItem } from "@crewtavo/core/paving";
+import { ROOF_EDGE_COLORS } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useSearchParams } from "react-router-dom";
@@ -39,6 +40,7 @@ import { isSavedPlan, LineUpBanner, PlanCard, usePlanOnMap } from "./PlanOnMap";
 import { FindPaving } from "./FindPaving";
 import { formatItemTotal, ItemSelect, PavingItemsCard } from "./PavingItems";
 import { MeasurePitch, PitchPicker, pitchLabel, riseOf, STEEP_FROM } from "./RoofPitch";
+import { EDGE_HINTS, RoofSteps } from "./RoofSteps";
 import type { SheetInfo } from "./takeoffSheet";
 import { TAP_ITEMS, TapBanner, useTapOutline } from "./TapOutline";
 
@@ -169,6 +171,9 @@ export function MeasurePage() {
   // Paving takeoff items (PavingItems.tsx): what each shape is, and what new shapes become.
   const [items, setItems] = useState<Record<string, string>>({});
   const [activeItem, setActiveItem] = useState<PavingItem | null>(null);
+  // A roof edge picked to draw (RoofSteps.tsx): new lines become that edge.
+  const [activeEdge, setActiveEdge] = useState<RoofEdge | null>(null);
+  const [roofPitchOpen, setRoofPitchOpen] = useState(false);
   const knownIds = useRef(new Set<string>());
   const [fromOsm, setFromOsm] = useState<string[]>([]);
   const [pitchFor, setPitchFor] = useState<string | null>(null);
@@ -285,8 +290,8 @@ export function MeasurePage() {
   }, [start, choice, ctx, keys, opening]);
 
   useEffect(() => {
-    // A new drawing is named after the property until someone names it (a paving takeoff, after its project).
-    const street = params.has("paving") && ctx?.quote?.title ? ctx.quote.title : ctx?.property?.line1;
+    // A new drawing is named after the property until someone names it (a paving or roofing project's, after the project).
+    const street = (params.has("paving") || params.has("roofing")) && ctx?.quote?.title ? ctx.quote.title : ctx?.property?.line1;
     if (!ctx?.measurement && street) setTitle((t) => (t === "Measurement" ? street : t));
     if (ctx?.measurement) {
       setTitle(ctx.measurement.title);
@@ -337,12 +342,21 @@ export function MeasurePage() {
   const cubicYards = depthIn ? (summary.total_area_sqft * (depthIn / 12)) / 27 : 0;
   const asphaltTons = depthIn ? (summary.total_area_sqyd * depthIn * 110) / 2000 : 0;
   // Roofing shows the roof tools on every row; anyone else gets them once they set a pitch or an edge.
-  const roofing = company.trade_preset === "roofing_exteriors" || roofOpen || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
+  const roofing = company.trade_preset === "roofing_exteriors" || params.has("roofing") || roofOpen || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
+  // The roof, step by step (RoofSteps.tsx), for roofers and a roof opened from Roofing.
+  const roofSteps = company.trade_preset === "roofing_exteriors" || params.has("roofing");
   const mapNames = useMemo(() => Object.fromEntries(shapes.map((s) => [s.id, labels[s.id]?.trim() || names[s.id]])), [shapes, labels, names]);
   const mapValues = useMemo(() => Object.fromEntries(summary.sections.map((s) => [s.feature_id, s.value])), [summary]);
   // Paving: the items panel shows for paving businesses, a takeoff opened from Paving, or a drawing with items.
   const paving = company.trade_preset === "paving" || params.has("paving") || Object.keys(items).length > 0;
-  const mapColors = useMemo(() => Object.fromEntries(Object.entries(items).flatMap(([id, item]) => (pavingItem(item) ? [[id, pavingItem(item)!.color]] : []))), [items]);
+  // Paving items and roof edges show in their own colors, the ones the legend and the sheet use.
+  const mapColors = useMemo(
+    () => ({
+      ...Object.fromEntries(Object.entries(edges).map(([id, edge]) => [id, ROOF_EDGE_COLORS[edge]])),
+      ...Object.fromEntries(Object.entries(items).flatMap(([id, item]) => (pavingItem(item) ? [[id, pavingItem(item)!.color]] : []))),
+    }),
+    [items, edges],
+  );
   const mapNotes = useMemo(
     () => Object.fromEntries(summary.sections.flatMap((s) => (s.item === "stall_row" ? [[s.feature_id, `${stallsAlong(s.value)} stalls`]] : []))),
     [summary],
@@ -585,6 +599,7 @@ export function MeasurePage() {
     if (next !== "select") setSelected(null);
     // A plain tool draws plain shapes; cutting out an island keeps the item picked.
     if (next !== "cutout") setActiveItem(null);
+    setActiveEdge(null);
   };
   const removeSelected = () => {
     if (!selected) return;
@@ -615,6 +630,7 @@ export function MeasurePage() {
   /** Draw a paving item: its tool, and new shapes become it. Null goes back to plain shapes. */
   const pickItem = (item: PavingItem | null) => {
     tap.stop();
+    setActiveEdge(null);
     setActiveItem(item);
     if (!item) return;
     const next: Tool = item.geometry === "area" ? "polygon" : item.geometry === "line" ? "linestring" : "point";
@@ -622,13 +638,27 @@ export function MeasurePage() {
     mapRef.current?.setTool(next);
     setSelected(null);
   };
-  /** Shapes just finished while an item was picked become that item. */
+  /** Draw a roof edge: lines drawn now become it. Null goes back to plain lines. */
+  const pickEdge = (edge: RoofEdge | null) => {
+    tap.stop();
+    setActiveItem(null);
+    setActiveEdge(edge);
+    if (!edge) return;
+    setTool("linestring");
+    mapRef.current?.setTool("linestring");
+    setSelected(null);
+  };
+  /** Shapes just finished while an item or a roof edge was picked become that item or edge. */
   const onShapes = (next: Shape[], inProgress: Shape | null) => {
     const fresh = next.filter((s) => !knownIds.current.has(s.id));
     fresh.forEach((s) => knownIds.current.add(s.id));
     if (activeItem) {
       const mine = fresh.filter((s) => itemFits(activeItem.id, s.kind));
       if (mine.length) setItems((list) => ({ ...list, ...Object.fromEntries(mine.map((s) => [s.id, activeItem.id])) }));
+    }
+    if (activeEdge) {
+      const lines = fresh.filter((s) => s.kind === "Length");
+      if (lines.length) setEdges((list) => ({ ...list, ...Object.fromEntries(lines.map((s) => [s.id, activeEdge])) }));
     }
     setShapes(next);
     setDrawing(inProgress);
@@ -663,23 +693,24 @@ export function MeasurePage() {
       setFinding(null);
     }
   };
-  const outlineBuilding = async () => {
+  /** The building in the middle of the map as a roof section. Quiet when it's tried on its own, as a new roof opens. */
+  const outlineBuilding = async (quiet = false) => {
     const view = mapRef.current?.view();
     if (!view) return;
-    if (view.zoom < 16) return void toast.info("Zoom in until the building fills most of the map, then try again.");
+    if (view.zoom < 16) return void (quiet || toast.info("Zoom in until the building fills most of the map, then try again."));
     const [lng, lat] = view.center;
     const d = 0.0007;
     setFinding("outline");
     try {
       const loaded = mapRef.current?.buildings();
       const building = (loaded && buildingAt(loaded, [lng, lat])) || buildingAt(await buildingsIn([lng - d, lat - d, lng + d, lat + d]), [lng, lat]);
-      if (!building) return void toast.info("OpenStreetMap has no outline for the building in the middle of the map. Draw the roof with Area.");
+      if (!building) return void (quiet || toast.info("OpenStreetMap has no outline for the building in the middle of the map. Draw the roof with Area."));
       const ids = mapRef.current?.add([building], "Area") ?? [];
       if (!ids.length) return void toast.error("That building's outline couldn't be added. Draw the roof with Area.");
       setFromOsm((list) => [...list, ...ids]);
       toast.success("Added the building's outline. It follows the walls, so drag the corners out to the eaves (often 1 to 2 ft).");
     } catch (error) {
-      toast.error(error instanceof BuildingsError ? error.message : "Couldn't look up the building. Try again.");
+      if (!quiet) toast.error(error instanceof BuildingsError ? error.message : "Couldn't look up the building. Try again.");
     } finally {
       setFinding(null);
     }
@@ -737,10 +768,12 @@ export function MeasurePage() {
     return () => window.removeEventListener("beforeunload", onUnload);
   }, [dirty]);
 
-  // A takeoff opened from Paving goes back to its project there, and on to the estimate.
+  // A takeoff opened from Paving (or a roof from Roofing) goes back to its project there, and on to the estimate.
   const pavingProject = params.has("paving") && ctx?.quote ? ctx.quote : null;
-  const back = pavingProject
-    ? { to: `/paving/${pavingProject.id}`, label: pavingProject.title || `Quote #${pavingProject.number}` }
+  const roofingProject = params.has("roofing") && ctx?.quote ? ctx.quote : null;
+  const project = pavingProject ? { ...pavingProject, path: `/paving/${pavingProject.id}` } : roofingProject ? { ...roofingProject, path: `/roofing/${roofingProject.id}` } : null;
+  const back = project
+    ? { to: project.path, label: project.title || `Quote #${project.number}` }
     : ctx?.invoice
     ? { to: `/invoices/${ctx.invoice.id}`, label: `Invoice #${ctx.invoice.number}` }
     : ctx?.quote
@@ -787,6 +820,18 @@ export function MeasurePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapState, context.data, paving, aligning, hasSaved]);
 
+  // A new roof opens on the building at the address, outlined from the map's buildings where they have it.
+  const openedOnRoof = useRef(false);
+  useEffect(() => {
+    if (openedOnRoof.current || mapState !== "ready" || !context.data || !roofingProject || aligning) return;
+    openedOnRoof.current = true;
+    if (hasSaved || shapes.length) return;
+    // A moment for the street tiles (and their buildings) to load under the map.
+    const timer = setTimeout(() => void outlineBuilding(true), 1200);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapState, context.data, roofingProject, aligning, hasSaved]);
+
   /** What the takeoff sheet under the saved picture says (takeoffSheet.ts). */
   const sheetInfo = (pictureOn: ImageryId): SheetInfo => {
     const place = ctx?.property ? addressLine(ctx.property) : picked?.label ?? null;
@@ -796,7 +841,19 @@ export function MeasurePage() {
     const itemRows = PAVING_ITEMS.filter((item) => summary.sections.some((s) => s.item === item.id)).map((item) => ({ color: item.color, label: item.name, value: formatItemTotal(summary.sections, item), shape: item.geometry }));
     let legend;
     if (itemRows.length) legend = [...itemRows, ...cutRow];
-    else {
+    else if (squares !== null) {
+      // A roof: its squares, each section at its pitch, and the edges in their colors.
+      const areas = summary.sections.filter((s) => s.kind === "Area");
+      const atPitch = (s: (typeof areas)[number]) => s.value * pitchFactor(tidyPitch(s.pitch ?? "") || tidyPitch(pitch));
+      legend = [
+        { color: "#111827", label: `Roofing squares, ${waste || 0}% waste`, value: formatNumber(squares, 1), shape: "area" as const },
+        ...(areas.length <= 6
+          ? areas.map((s) => ({ color: shapes.find((sh) => sh.id === s.feature_id)?.color ?? "#999", label: `${nameOf(s.feature_id)} · ${pitchLabel(tidyPitch(s.pitch ?? "") || tidyPitch(pitch) || "0/12")}`, value: `${formatNumber(atPitch(s))} sq ft`, shape: "area" as const }))
+          : [{ color: "#22c55e", label: "Roof", value: `${formatNumber(areas.reduce((t, s) => t + atPitch(s), 0))} sq ft`, shape: "area" as const }]),
+        ...ROOF_EDGES.filter((e) => roofEdges[e] > 0).map((e) => ({ color: ROOF_EDGE_COLORS[e], label: EDGE_PLURALS[e], value: `${formatNumber(roofEdges[e])} ft`, shape: "line" as const })),
+        ...cutRow,
+      ];
+    } else {
       const drawn = summary.sections.filter((s) => s.kind === "Area" || s.kind === "Length");
       const counts = summary.sections.filter((s) => s.kind === "Count").length;
       legend = drawn.length <= 10
@@ -823,6 +880,7 @@ export function MeasurePage() {
       if (drawing) throw new Error("Finish or cancel the shape you're drawing first.");
       if (aligning) throw new Error("Finish lining up the plan first, or cancel it.");
       if (pitchError) throw new Error(pitchError);
+      if (roofingProject && squares === null) throw new Error("Set the roof's pitch first (Flat counts), so the estimate has its squares.");
       // A picture of the drawing for the quote, invoice and PDF. Saving goes ahead without one.
       let snapshot: string | undefined;
       let pictureProblem = false;
@@ -911,7 +969,7 @@ export function MeasurePage() {
   const roofOutlines = shapes.filter((s) => s.kind === "Area" && s.geometry?.type === "Polygon").map((s) => ({ id: s.id, name: nameOf(s.id), ring: (s.geometry!.coordinates as Position[][])[0] }));
   const hasEdges = ROOF_EDGES.some((e) => roofEdges[e] > 0);
   const roofCard = (
-    <details key="roof" className="card measure-extra" open={roofing} onToggle={(e) => setRoofOpen(e.currentTarget.open)}>
+    <details key="roof" className="card measure-extra" open={roofSteps ? roofOpen : roofing} onToggle={(e) => setRoofOpen(e.currentTarget.open)}>
       <summary className="card-pad"><strong>Roof pitch and edges</strong><span className="muted small">For roofing squares, drip edge and ridge cap</span></summary>
       <div className="card-pad stack" style={{ paddingTop: 0 }}>
         <PitchPicker value={pitch} onChange={setPitch} />
@@ -945,7 +1003,7 @@ export function MeasurePage() {
           </span>
         )}
         <div className="stack-sm">
-          <Button size="sm" icon="home" loading={finding === "outline"} disabled={Boolean(finding) || mapState !== "ready"} onClick={outlineBuilding} style={{ justifySelf: "start" }}>Outline the building in the middle</Button>
+          <Button size="sm" icon="home" loading={finding === "outline"} disabled={Boolean(finding) || mapState !== "ready"} onClick={() => outlineBuilding()} style={{ justifySelf: "start" }}>Outline the building in the middle</Button>
           <span className="muted small">Starts the roof from OpenStreetMap's outline of the building in the middle of the map, where it has one.</span>
         </div>
       </div>
@@ -969,8 +1027,8 @@ export function MeasurePage() {
           actions={
             <>
               <Button variant="ghost" icon="info" onClick={() => setHelp(true)}>How it works</Button>
-              {!dirty && saved && pavingProject ? (
-                <Link to={`/paving/${pavingProject.id}#estimate`} className="btn btn-primary">Next: Estimate <Icon name="arrowRight" size={15} /></Link>
+              {!dirty && saved && project ? (
+                <Link to={`${project.path}#estimate`} className="btn btn-primary">Next: Estimate <Icon name="arrowRight" size={15} /></Link>
               ) : (
                 !dirty && saved && back && <Link to={back.to} className="btn">Back to {back.label}</Link>
               )}
@@ -1097,7 +1155,7 @@ export function MeasurePage() {
                     {SLOPE_CLASSES.map((c) => <span key={c.label}><i style={{ background: c.color }} />{c.label}<span className="muted"> · {c.note}</span></span>)}
                   </div>
                 )}
-                {!aligning && !tap.item && <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>}
+                {!aligning && !tap.item && <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : activeEdge && !drawing && tool === "linestring" ? `${EDGE_NAMES[activeEdge]}: draw along ${EDGE_HINTS[activeEdge]}. ${touch ? "Double-tap" : "Double-click"} to finish each one.` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>}
                 {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
                 {center && center.zoom < 12 && !shapes.length && !banner && !aligning && (
                   <div className="measure-zoom-note">Search an address or zoom in to the property to start measuring.</div>
@@ -1143,6 +1201,33 @@ export function MeasurePage() {
                     onFound={addFound}
                     onStart={startFind}
                   />
+                }
+              />
+            )}
+
+            {roofSteps && (
+              <RoofSteps
+                areas={roofSections.length}
+                pitch={roofPitches.length > 1 ? "Mixed pitches" : roofPitches[0] ? pitchLabel(roofPitches[0]) : ""}
+                squares={squares}
+                waste={waste}
+                edges={roofEdges}
+                activeEdge={activeEdge}
+                outlining={finding === "outline"}
+                ready={mapState === "ready" && !aligning}
+                onOutline={() => outlineBuilding()}
+                onDraw={() => pickTool("polygon")}
+                onPitch={() => setRoofPitchOpen(true)}
+                onEdge={pickEdge}
+                onWaste={setWaste}
+                finish={
+                  !dirty && saved && project ? (
+                    <Link to={`${project.path}#estimate`} className="btn btn-primary btn-sm" style={{ justifySelf: "start" }}>Next: Estimate <Icon name="arrowRight" size={15} /></Link>
+                  ) : (
+                    <Button size="sm" variant="primary" icon={!dirty && saved ? "check" : undefined} loading={save.isPending} disabled={!shapes.length || aligning || (!dirty && Boolean(saved))} onClick={() => save.mutate()} style={{ justifySelf: "start" }}>
+                      {!dirty && saved ? "Saved" : project ? "Save the roof" : saved ? "Save changes" : "Save measurement"}
+                    </Button>
+                  )
                 }
               />
             )}
@@ -1254,6 +1339,15 @@ export function MeasurePage() {
       </div>
 
       <MeasureHelp open={help} touch={touch} onClose={() => { markHelpSeen(); setHelp(false); }} />
+      {roofPitchOpen && (
+        <Dialog open onClose={() => setRoofPitchOpen(false)} title="Roof pitch" description="The main roof's pitch. A porch or dormer at another pitch can have its own: tap its pitch in Shapes." size="md">
+          <div className="dialog-body stack">
+            <PitchPicker value={pitch} onChange={setPitch} />
+            <MeasurePitch near={near} onPick={setPitch} roofs={roofOutlines} onPickSection={setShapePitch} />
+            <div className="form-actions"><Button variant="primary" onClick={() => setRoofPitchOpen(false)}>Done</Button></div>
+          </div>
+        </Dialog>
+      )}
       {pitchFor && shapes.some((s) => s.id === pitchFor) && (
         <Dialog open onClose={() => setPitchFor(null)} title={`Pitch for ${nameOf(pitchFor)}`} description="For a porch, dormer or addition that isn't at the main roof's pitch." size="md">
           <div className="dialog-body stack">

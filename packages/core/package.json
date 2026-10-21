@@ -10,6 +10,7 @@
     "./paving": "./src/paving.ts",
     "./presets": "./src/presets.ts",
     "./roofPlanes": "./src/roofPlanes.ts",
+    "./roofing": "./src/roofing.ts",
     "./imagery": "./src/imagery.ts",
     "./money": "./src/money.ts",
     "./formulas": "./src/formulas.ts",

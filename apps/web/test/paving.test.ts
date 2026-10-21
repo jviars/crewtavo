@@ -236,7 +236,7 @@ describe("takeoff sheet", () => {
 const section = (item: string, kind: Section["kind"], value: number): Section => ({ feature_id: item, label: item, kind, value, unit: kind === "Area" ? "sq ft" : kind === "Length" ? "ft" : "ea", manual_override: false, item });
 const takeoff = (sections: Section[]): TakeoffRow => ({
   id: "m1", title: "Lot", sections, total_area_sqft: sections.filter((s) => s.kind === "Area").reduce((t, s) => t + s.value, 0), total_area_sqyd: 0,
-  total_length_ft: 0, roof_pitch: null, waste_pct: 0, snapshot_path: null, show_on_quote: false, updated_at: "2026-10-20T12:00:00Z",
+  total_length_ft: 0, roof_pitch: null, waste_pct: 0, roofing_squares: null, snapshot_path: null, show_on_quote: false, updated_at: "2026-10-20T12:00:00Z",
 });
 
 describe("the paving flow", () => {

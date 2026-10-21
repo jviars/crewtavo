@@ -605,4 +605,29 @@ describe("quote approval", () => {
     expect(res.status).toBe(409);
     expect(writes(calls)).toEqual([]);
   });
+
+  it("takes exactly one of the choices in an option group (Good, Better and Best roofs)", async () => {
+    const [good, better, best, gutters] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const pick = async (selected: string[]) => {
+      const calls = serve((call) => {
+        if (call.method === "GET" && call.path === "quotes") return [{ id: "quote-1", status: "sent" }];
+        if (call.method === "GET" && call.path === "quote_line_items") return [good, better, best].map((id) => ({ id, option_group: "Roof" }));
+        if (call.path === "rpc/approve_hub_quote") return true;
+        return [];
+      });
+      const quote = (await clientLink(env, "https://ops.example.com", { c: "co-1", t: "quote", id: "quote-1" })).split("/hub/")[1];
+      const res = await app.request(`/api/hub/${quote}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Ana Smith", selected_line_ids: selected }) }, connectedFrom("203.0.113.9"));
+      return { res, calls };
+    };
+    for (const wrong of [[], [good, best], [gutters]]) {
+      const { res, calls } = await pick(wrong);
+      expect(res.status, JSON.stringify(wrong)).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe("Pick one of the choices for Roof.");
+      expect(calls.some((c) => c.path === "rpc/approve_hub_quote")).toBe(false);
+    }
+    const { res, calls } = await pick([better, gutters]);
+    expect(res.status).toBe(200);
+    expect(calls.find((c) => c.path === "quote_line_items")?.url.searchParams.get("company_id")).toBe("eq.co-1");
+    expect(calls.find((c) => c.path === "rpc/approve_hub_quote")?.body.p_selected).toEqual([better, gutters]);
+  });
 });

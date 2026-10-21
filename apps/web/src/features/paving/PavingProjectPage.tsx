@@ -1,49 +1,42 @@
 /**
- * One paving project, start to finish, on one page: the takeoff from the map, the estimate priced
- * from the price list (services whose formulas read the takeoff's items), the proposal the client
- * signs online, the job and its schedule, and the invoices. Each step uses the records the rest of
- * Crewtavo uses (quote, job, invoices), so nothing is typed twice.
+ * One paving project, start to finish, on one page (ProjectFlow): the takeoff from the map, the
+ * estimate priced from the price list (services whose formulas read the takeoff's items), the
+ * proposal the client signs online, the job and its schedule, and the invoices.
  */
 import { PAVING_ITEMS } from "@crewtavo/core/paving";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { DetailSkeleton } from "@/components/ui/Skeleton";
-import { EmptyState, ErrorState } from "@/components/ui/States";
-import { EntityStatus, StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { addressLine, formatDate, formatMoney, formatMoneyCents, formatNumber, timeAgo } from "@/lib/format";
-import { hasRole, useSession } from "@/lib/session";
+import { formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { usePictures } from "../measure/drawings";
 import { formatItemTotal, ItemSwatch } from "../measure/PavingItems";
-import { SendDialog } from "../quotes/SendDialog";
-import { currentStep, formulaValue, sectionsOf, serviceKind, STEPS, TAKEOFF_FIELDS, takeoffVariables, usesDepth, type StepId, type TakeoffRow } from "./data";
+import { formulaValue, sectionsOf, serviceKind, STEPS, takeoffVariables, usesDepth } from "./data";
+import { EstimateLines, ProjectFlow, SERVICE_FIELDS, type EstimateProps, type FlowTrade, type Service, type TakeoffProps } from "./ProjectFlow";
 
-interface Line { id: string; name: string; quantity: number; unit: string; unit_price: number; unit_cost: number | null; formula: string | null; service_id: string | null; optional: boolean; selected: boolean; sort: number }
-interface Quote {
-  id: string;
-  number: number | null;
-  title: string;
-  status: string;
-  subtotal: number;
-  discount_amount: number;
-  tax_amount: number;
-  total: number;
-  sent_at: string | null;
-  approved_at: string | null;
-  approval: { name?: string; signature?: string | null } | null;
-  client: { id: string; display_name: string; email: string | null; phone: string | null } | null;
-  property: { id: string; line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
-  lines: Line[];
-  jobs: Array<{ id: string; number: number | null; status: string }>;
-}
-interface Service { id: string; name: string; unit: string; unit_price: number; unit_cost: number | null; taxable: boolean; formula: string | null; formula_target: string; category: string | null }
+const PAVING: FlowTrade = {
+  id: "paving",
+  name: "Paving",
+  path: "/paving",
+  steps: STEPS,
+  notFound: "That paving project wasn't found. It may have been deleted.",
+  takeoff: {
+    empty: "Measure the lot",
+    text: "Outline the asphalt, mark the striping, stalls and cracks on the aerial, or let Find paving outline it for you.",
+    start: "Start the takeoff",
+    after: "After the takeoff",
+    first: "Measure the lot first; the estimate prices from the takeoff.",
+  },
+  sheet: {
+    name: "takeoff sheet",
+    text: "The site plan with its scale, legend and quantities, so the client sees exactly what you're bidding.",
+    missing: "Save the takeoff on the map first to make the sheet.",
+  },
+};
 
-const EDITABLE = ["draft", "sent", "changes_requested"];
 const ASPHALT_WORK = [
   { id: "seal", label: "Sealcoat it" },
   { id: "pave", label: "Pave it" },
@@ -52,167 +45,10 @@ const ASPHALT_WORK = [
 type AsphaltWork = (typeof ASPHALT_WORK)[number]["id"];
 
 export function PavingProjectPage() {
-  const { id = "" } = useParams();
-  const session = useSession();
-  const { company } = session;
-  const queryClient = useQueryClient();
-  const location = useLocation();
-  const canSell = hasRole(session, "admin", "office", "estimator");
-  const seesInvoices = hasRole(session, "admin", "office");
-
-  const project = useQuery({
-    queryKey: ["paving-project", id],
-    queryFn: async () => {
-      const db = supabase();
-      const [quote, takeoff] = await Promise.all([
-        db
-          .from("quotes")
-          .select("id, number, title, status, subtotal, discount_amount, tax_amount, total, sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(id, name, quantity, unit, unit_price, unit_cost, formula, service_id, optional, selected, sort), jobs!jobs_company_id_quote_id_fkey(id, number, status)")
-          .eq("id", id)
-          .maybeSingle(),
-        db.from("measurements").select(TAKEOFF_FIELDS).eq("quote_id", id).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
-      ]);
-      const q = unwrap(quote) as unknown as Quote | null;
-      if (!q) throw new Error("That paving project wasn't found. It may have been deleted.");
-      q.lines.sort((a, b) => a.sort - b.sort);
-      return { quote: q, takeoff: (unwrap(takeoff) ?? null) as TakeoffRow | null };
-    },
-  });
-  const services = useQuery({
-    queryKey: ["services", company.id, "with-formulas"],
-    queryFn: async () => unwrap(await supabase().from("services").select("id, name, unit, unit_price, unit_cost, taxable, formula, formula_target, category").eq("company_id", company.id).eq("active", true).not("formula", "is", null).order("sort").order("name")) as Service[],
-  });
-  const job = project.data?.quote.jobs[0] ?? null;
-  const invoices = useQuery({
-    queryKey: ["job", job?.id, "invoices"],
-    enabled: Boolean(job && seesInvoices),
-    queryFn: async () => unwrap(await supabase().from("invoices").select("id, number, kind, status, total, balance_due").eq("job_id", job!.id).order("number")),
-  });
-  const pictures = usePictures([project.data?.takeoff?.snapshot_path]);
-
-  // Opened at a step (#estimate from the map): scroll to it once it's on the page, not again on every refresh.
-  const scrolledTo = useRef<string | null>(null);
-  useEffect(() => {
-    if (!project.data || !location.hash || scrolledTo.current === location.hash) return;
-    scrolledTo.current = location.hash;
-    document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [project.data, location.hash]);
-
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["paving-project", id] });
-    queryClient.invalidateQueries({ queryKey: ["paving-projects", company.id] });
-    queryClient.invalidateQueries({ queryKey: ["quote", id] });
-  };
-
-  if (project.isPending) return <DetailSkeleton />;
-  if (project.error || !project.data) {
-    return (
-      <>
-        <BackLink to="/paving">Paving</BackLink>
-        <ErrorState error={project.error} onRetry={() => project.refetch()} />
-      </>
-    );
-  }
-  const { quote: q, takeoff } = project.data;
-  const step = currentStep(q, takeoff, invoices.data ?? []);
-  const reached = (s: StepId) => step === "done" || STEPS.findIndex((x) => x.id === s) <= STEPS.findIndex((x) => x.id === step);
-  const measureLink = takeoff ? `/measure?measurement=${takeoff.id}&paving=1` : `/measure?${new URLSearchParams({ quote: q.id, paving: "1", ...(q.property ? { property: q.property.id } : {}) })}`;
-
-  return (
-    <>
-      <BackLink to="/paving">Paving</BackLink>
-      <PageHeader title={q.title} actions={<Link className="btn" to={`/quotes/${q.id}`}>Open the quote</Link>} />
-      <p className="page-subtitle">{[q.client?.display_name, q.property ? addressLine(q.property) : null, q.number ? `Quote #${q.number}` : null].filter(Boolean).join(" · ")}</p>
-
-      <ol className="paving-progress" aria-label="Where this project is">
-        {STEPS.map((s, i) => {
-          const done = step === "done" || STEPS.findIndex((x) => x.id === step) > i;
-          return (
-            <li key={s.id} data-state={done ? "done" : s.id === step ? "current" : "todo"}>
-              <a href={`#${s.id}`} onClick={(e) => { e.preventDefault(); document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
-                <span className="paving-progress-dot">{done ? <Icon name="check" size={14} strokeWidth={3} /> : i + 1}</span>
-                <span>{s.label}</span>
-              </a>
-            </li>
-          );
-        })}
-      </ol>
-      {q.status === "lost" && <div className="callout callout-danger" role="status"><Icon name="alert" size={18} /><span className="grow">This proposal was marked lost.</span></div>}
-
-      <div className="stack" style={{ gap: 16 }}>
-        <StepCard id="takeoff" n={1} title="Takeoff" status={takeoff ? `Updated ${timeAgo(takeoff.updated_at)}` : "Not measured yet"} done={Boolean(takeoff)}>
-          {!takeoff ? (
-            <EmptyState compact icon="area" title="Measure the lot" action={canSell && <Link className="btn btn-primary" to={measureLink}><Icon name="area" size={16} /> Start the takeoff</Link>}>
-              Outline the asphalt, mark the striping, stalls and cracks on the aerial, or let Find paving outline it for you.
-            </EmptyState>
-          ) : (
-            <TakeoffSummary takeoff={takeoff} picture={takeoff.snapshot_path ? pictures.data?.[takeoff.snapshot_path] : undefined} editLink={canSell ? measureLink : null} />
-          )}
-        </StepCard>
-
-        <StepCard id="estimate" n={2} title="Estimate" status={q.lines.length ? `${q.lines.length} ${q.lines.length === 1 ? "line" : "lines"} · ${formatMoney(q.subtotal)}` : reached("estimate") ? "Not priced yet" : "After the takeoff"} done={q.lines.length > 0}>
-          {!takeoff ? (
-            <span className="muted small">Measure the lot first; the estimate prices from the takeoff.</span>
-          ) : (
-            <Estimate quote={q} takeoff={takeoff} services={services.data ?? []} loadingServices={services.isPending} editable={canSell && EDITABLE.includes(q.status)} onChanged={refresh} />
-          )}
-        </StepCard>
-
-        <StepCard id="proposal" n={3} title="Proposal" status={proposalStatus(q)} done={["approved", "converted"].includes(q.status)}>
-          {!q.lines.length ? <span className="muted small">Price the estimate first; the proposal shows its lines.</span> : <Proposal quote={q} takeoff={takeoff} canSell={canSell} onChanged={refresh} />}
-        </StepCard>
-
-        <StepCard id="schedule" n={4} title="Schedule" status={job ? `Job #${job.number}` : q.status === "approved" ? "Ready to schedule" : "After it's signed"} done={Boolean(job)}>
-          <Schedule quote={q} job={job} canSell={canSell} onChanged={refresh} />
-        </StepCard>
-
-        <StepCard id="invoice" n={5} title="Invoice" status={invoices.data?.length ? `${invoices.data.length} ${invoices.data.length === 1 ? "invoice" : "invoices"}` : job ? "Not billed yet" : "After the job"} done={step === "done"}>
-          {!job ? (
-            <span className="muted small">Bill the deposit and the rest once there's a job.</span>
-          ) : !seesInvoices ? (
-            <span className="muted small">The office bills this job.</span>
-          ) : (
-            <div className="stack-sm">
-              {(invoices.data ?? []).map((inv) => (
-                <Link key={inv.id} to={`/invoices/${inv.id}`} className="card-row paving-row">
-                  <Icon name="invoice" size={16} />
-                  <span className="grow">Invoice #{inv.number}{inv.kind !== "standard" ? ` · ${inv.kind}` : ""}</span>
-                  <span className="num">{formatMoney(inv.total)}</span>
-                  <EntityStatus kind="invoice" status={inv.status} />
-                </Link>
-              ))}
-              <Link className="btn" style={{ justifySelf: "start" }} to={`/jobs/${job.id}?invoice=1`}><Icon name="invoice" size={16} /> {invoices.data?.length ? "Create another invoice" : "Create an invoice"}</Link>
-              <span className="muted small">Deposit, progress or final: clients pay online from their link.</span>
-            </div>
-          )}
-        </StepCard>
-      </div>
-    </>
-  );
+  return <ProjectFlow trade={PAVING} takeoffView={(props) => <TakeoffSummary {...props} />} estimateView={(props) => <Estimate {...props} />} />;
 }
 
-function proposalStatus(q: Quote): string {
-  if (q.status === "approved" || q.status === "converted") return `Signed${q.approved_at ? ` ${formatDate(q.approved_at)}` : ""}${q.approval?.name ? ` by ${q.approval.name}` : ""}`;
-  if (q.status === "changes_requested") return "Changes requested";
-  if (q.status === "sent") return `Sent${q.sent_at ? ` ${formatDate(q.sent_at)}` : ""}, waiting on the client`;
-  if (q.status === "lost") return "Lost";
-  return q.lines.length ? "Ready to send" : "After the estimate";
-}
-
-function StepCard({ id, n, title, status, done, children }: { id: StepId; n: number; title: string; status: string; done: boolean; children: ReactNode }) {
-  return (
-    <section id={id} className="card paving-step-card" aria-labelledby={`${id}-title`} style={{ scrollMarginTop: 16 }}>
-      <div className="card-head">
-        <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={14} strokeWidth={3} /> : n}</span>
-        <h2 id={`${id}-title`}>{title}</h2>
-        <span className="muted small">{status}</span>
-      </div>
-      <div className="card-pad">{children}</div>
-    </section>
-  );
-}
-
-function TakeoffSummary({ takeoff, picture, editLink }: { takeoff: TakeoffRow; picture?: string; editLink: string | null }) {
+function TakeoffSummary({ takeoff, picture, editLink }: TakeoffProps) {
   const sections = sectionsOf(takeoff);
   const items = PAVING_ITEMS.filter((item) => sections.some((s) => s.item === item.id));
   return (
@@ -242,16 +78,20 @@ function TakeoffSummary({ takeoff, picture, editLink }: { takeoff: TakeoffRow; p
   );
 }
 
-function Estimate({ quote, takeoff, services, loadingServices, editable, onChanged }: { quote: Quote; takeoff: TakeoffRow; services: Service[]; loadingServices: boolean; editable: boolean; onChanged: () => void }) {
+function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
   const { company } = useSession();
+  const servicesQuery = useQuery({
+    queryKey: ["services", company.id, "with-formulas"],
+    queryFn: async () => unwrap(await supabase().from("services").select(SERVICE_FIELDS).eq("company_id", company.id).eq("active", true).not("formula", "is", null).order("sort").order("name")) as Service[],
+  });
+  const services = servicesQuery.data ?? [];
+  const loadingServices = servicesQuery.isPending;
   const [depth, setDepth] = useState("2");
   const onEstimate = new Set(quote.lines.map((l) => l.service_id).filter(Boolean));
   const kinds = useMemo(() => new Map(services.map((s) => [s.id, serviceKind(s.formula, s.name)])), [services]);
-  // What the asphalt gets decides which area services are suggested; it starts from what's on the estimate.
-  const [work, setWork] = useState<AsphaltWork>(() => {
-    if (quote.lines.some((l) => l.service_id && kinds.get(l.service_id) === "pave")) return "pave";
-    return "seal";
-  });
+  // What the asphalt gets decides which area services are suggested; until someone picks, it follows what's on the estimate.
+  const [picked, setWork] = useState<AsphaltWork | null>(null);
+  const work: AsphaltWork = picked ?? (quote.lines.some((l) => l.service_id && kinds.get(l.service_id) === "pave") ? "pave" : "seal");
   const depthIn = Number(depth) > 0 ? Number(depth) : null;
   const vars = useMemo(() => takeoffVariables(takeoff, depthIn), [takeoff, depthIn]);
   const rows = services
@@ -303,10 +143,6 @@ function Estimate({ quote, takeoff, services, loadingServices, editable, onChang
   const notYet = rows.filter((r) => !onEstimate.has(r.service.id));
   const busy = add.isPending || remove.isPending || reprice.isPending;
 
-  const cost = quote.lines.reduce((t, l) => t + (l.unit_cost != null && (!l.optional || l.selected) ? Number(l.unit_cost) * Number(l.quantity) : 0), 0);
-  const costKnown = quote.lines.every((l) => l.unit_cost != null);
-  const price = Number(quote.subtotal);
-  const profit = price - cost;
   const anyPaveOrSeal = services.some((s) => kinds.get(s.id) !== "other");
 
   return (
@@ -361,111 +197,7 @@ function Estimate({ quote, takeoff, services, loadingServices, editable, onChang
         </div>
       )}
 
-      {quote.lines.length > 0 && (
-        <div className="stack-sm">
-          <table className="table paving-estimate">
-            <thead><tr><th>On the estimate</th><th className="num">Qty</th><th className="num">Price</th><th className="num">Cost</th><th className="num">Total</th><th className="num">Margin</th></tr></thead>
-            <tbody>
-              {quote.lines.map((l) => {
-                const total = Number(l.quantity) * Number(l.unit_price);
-                const lineCost = l.unit_cost != null ? Number(l.quantity) * Number(l.unit_cost) : null;
-                return (
-                  <tr key={l.id} data-optional={l.optional || undefined}>
-                    <td>{l.name}{l.optional && <span className="muted small"> · optional</span>}</td>
-                    <td className="num nowrap">{formatNumber(Number(l.quantity), Number(l.quantity) < 100 ? 2 : 0)} {l.unit}</td>
-                    <td className="num">{formatMoneyCents(l.unit_price)}</td>
-                    <td className="num">{lineCost === null ? <span className="muted">—</span> : formatMoney(lineCost)}</td>
-                    <td className="num strong">{formatMoney(total)}</td>
-                    <td className="num">{lineCost === null || !total ? <span className="muted">—</span> : `${Math.round(((total - lineCost) / total) * 100)}%`}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <dl className="paving-totals">
-            <div><dt>Cost</dt><dd>{costKnown ? formatMoney(cost) : `${formatMoney(cost)}+`}</dd></div>
-            <div><dt>Price</dt><dd>{formatMoney(price)}</dd></div>
-            <div><dt>Profit</dt><dd data-good={profit > 0 || undefined}>{costKnown ? formatMoney(profit) : "—"}</dd></div>
-            <div><dt>Margin</dt><dd>{costKnown && price ? `${Math.round((profit / price) * 100)}%` : "—"}</dd></div>
-            <div><dt>Total with tax</dt><dd>{formatMoney(quote.total)}</dd></div>
-          </dl>
-          {!costKnown && <span className="muted small">Add costs to your services in the price list to see the profit on every line.</span>}
-          <div className="row wrap" style={{ gap: 8 }}>
-            <Link className="btn" to={`/quotes/${quote.id}`}>Adjust on the quote</Link>
-            <a className="btn btn-primary" href="#proposal" onClick={(e) => { e.preventDefault(); document.getElementById("proposal")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>Next: Proposal <Icon name="arrowRight" size={15} /></a>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Proposal({ quote, takeoff, canSell, onChanged }: { quote: Quote; takeoff: TakeoffRow | null; canSell: boolean; onChanged: () => void }) {
-  const [sending, setSending] = useState(false);
-  const preview = useMutation({
-    mutationFn: () => api.get<{ link: string }>(`/quotes/${quote.id}/link`),
-    onSuccess: ({ link }) => window.open(link, "_blank", "noopener"),
-  });
-  const showSheet = useMutation({
-    meta: { success: (_: unknown, on: boolean) => (on ? "The client will see the takeoff sheet on the proposal" : "Takeoff sheet hidden from the client") },
-    mutationFn: async (on: boolean) => unwrap(await supabase().from("measurements").update({ show_on_quote: on, quote_id: quote.id }).eq("id", takeoff!.id)),
-    onSuccess: onChanged,
-  });
-  const signed = quote.status === "approved" || quote.status === "converted";
-  return (
-    <div className="stack-sm" style={{ gap: 12 }}>
-      {takeoff && (
-        <label className="switch-row">
-          <input type="checkbox" className="switch" checked={takeoff.show_on_quote} disabled={!canSell || showSheet.isPending || !takeoff.snapshot_path} onChange={(e) => showSheet.mutate(e.target.checked)} />
-          <span className="grow" style={{ display: "grid", gap: 1 }}>
-            <strong>Show the takeoff sheet on the proposal</strong>
-            <span className="muted small">{takeoff.snapshot_path ? "The site plan with its scale, legend and quantities, so the client sees exactly what you're bidding." : "Save the takeoff on the map first to make the sheet."}</span>
-          </span>
-        </label>
-      )}
-      {signed && quote.approval?.signature && <img src={quote.approval.signature} alt={`Signature of ${quote.approval.name ?? "the client"}`} className="paving-signature" />}
-      <div className="row wrap" style={{ gap: 8 }}>
-        <Button icon="eye" loading={preview.isPending} onClick={() => preview.mutate()}>Preview what the client sees</Button>
-        {canSell && !signed && quote.status !== "lost" && <Button variant="primary" icon="send" onClick={() => setSending(true)}>{quote.status === "draft" ? "Send the proposal" : "Send it again"}</Button>}
-      </div>
-      <span className="muted small">{signed ? "Signed online: schedule the job next." : "The client opens it on any phone or computer, picks any optional items and signs. No account needed."}</span>
-      {sending && <SendDialog kind="quote" id={quote.id} number={quote.number} email={quote.client?.email ?? null} phone={quote.client?.phone ?? null} onClose={() => setSending(false)} onSent={() => { setSending(false); onChanged(); }} />}
-    </div>
-  );
-}
-
-function Schedule({ quote, job, canSell, onChanged }: { quote: Quote; job: Quote["jobs"][number] | null; canSell: boolean; onChanged: () => void }) {
-  const navigate = useNavigate();
-  const convert = useMutation({
-    meta: { success: "Job created. Schedule the work next." },
-    mutationFn: () => api.post<{ job_id: string }>(`/quotes/${quote.id}/convert`),
-    onSuccess: (res) => {
-      onChanged();
-      navigate(`/jobs/${res.job_id}`);
-    },
-  });
-  if (job) {
-    return (
-      <div className="stack-sm">
-        <Link to={`/jobs/${job.id}`} className="card-row paving-row">
-          <Icon name="job" size={16} />
-          <span className="grow">Job #{job.number}</span>
-          <EntityStatus kind="job" status={job.status} />
-        </Link>
-        <Link className="btn" style={{ justifySelf: "start" }} to={`/jobs/${job.id}`}><Icon name="calendar" size={16} /> Schedule the visits</Link>
-        <span className="muted small">Put it on a crew's day; the crew app shows them the scope, checklist and photos.</span>
-      </div>
-    );
-  }
-  if (!canSell) return <span className="muted small">The office turns it into a job once it's signed.</span>;
-  const signed = quote.status === "approved";
-  return (
-    <div className="stack-sm">
-      <Button variant={signed ? "primary" : undefined} icon="job" loading={convert.isPending} disabled={!quote.lines.length || quote.status === "lost"} onClick={() => convert.mutate()} style={{ justifySelf: "start" }}>
-        {signed ? "Create the job" : "Create the job now"}
-      </Button>
-      <span className="muted small">{signed ? "The estimate's lines become the job's scope." : "Usually once the client signs. You can start it now if they said yes another way."}</span>
-      {quote.status === "approved" && <StatusPill label="Signed" tone="good" />}
+      {quote.lines.length > 0 && <EstimateLines quote={quote} />}
     </div>
   );
 }

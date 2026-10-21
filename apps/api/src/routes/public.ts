@@ -160,6 +160,12 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   const admin = adminClient(c.env);
   const quote = must(await admin.from("quotes").select("id, status").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
   if (!["sent", "changes_requested"].includes(quote.status)) throw new HttpError(409, "This quote can't be approved anymore.");
+  // Lines that share an option group ("Good", "Better" and "Best" roofs) are one choice: exactly one of them.
+  const grouped = must(await admin.from("quote_line_items").select("id, option_group").eq("company_id", l.c).eq("quote_id", l.id).eq("optional", true).not("option_group", "is", null));
+  for (const group of new Set(grouped.map((g) => g.option_group!))) {
+    const picked = grouped.filter((g) => g.option_group === group && body.selected_line_ids.includes(g.id)).length;
+    if (picked !== 1) throw new HttpError(400, `Pick one of the choices for ${group}.`);
+  }
 
   // One step in the database (20261018000830_hub_approval.sql): it claims the quote while it's still
   // waiting for an answer, then sets the optional lines to the client's choices and records the

@@ -5,77 +5,126 @@
   "services": [
     {
       "name": "Architectural shingle roof",
+      "category": "Roof",
       "unit": "square",
       "unit_price": 560,
+      "unit_cost": 330,
       "formula_name": "Roofing squares"
     },
     {
       "name": "Designer shingle roof",
+      "category": "Roof",
       "unit": "square",
       "unit_price": 735,
+      "unit_cost": 450,
       "formula_name": "Roofing squares"
     },
     {
       "name": "Standing-seam metal roof",
+      "category": "Roof",
       "unit": "square",
       "unit_price": 1285,
+      "unit_cost": 800,
       "formula_name": "Roofing squares"
     },
     {
       "name": "Tear-off and disposal",
+      "category": "Tear-off",
       "unit": "square",
       "unit_price": 85,
+      "unit_cost": 45,
       "formula_name": "Roof squares without waste"
     },
     {
       "name": "Drip edge",
+      "category": "Edges and flashing",
       "unit": "ft",
       "unit_price": 3.5,
+      "unit_cost": 1.6,
       "formula_name": "Drip edge"
     },
     {
       "name": "Ridge cap",
+      "category": "Edges and flashing",
       "unit": "ft",
       "unit_price": 9,
+      "unit_cost": 4.5,
       "formula_name": "Ridge cap"
     },
     {
+      "name": "Valley flashing",
+      "category": "Edges and flashing",
+      "unit": "ft",
+      "unit_price": 8,
+      "unit_cost": 3.5,
+      "formula_name": "Valley flashing"
+    },
+    {
+      "name": "Steep roof charge",
+      "category": "Roof",
+      "unit": "square",
+      "unit_price": 65,
+      "unit_cost": 40,
+      "formula_name": "Steep squares"
+    },
+    {
+      "name": "Pipe boot",
+      "category": "Edges and flashing",
+      "unit": "ea",
+      "unit_price": 45,
+      "unit_cost": 15
+    },
+    {
       "name": "Seamless gutters",
+      "category": "Gutters",
       "unit": "ft",
       "unit_price": 12,
+      "unit_cost": 6,
       "formula_name": "Gutter length"
     },
     {
       "name": "Gutter guards",
+      "category": "Gutters",
       "unit": "ft",
       "unit_price": 7,
+      "unit_cost": 3.5,
       "formula_name": "Gutter length"
     },
     {
       "name": "Vinyl siding",
+      "category": "Siding, windows and decks",
       "unit": "sq ft",
       "unit_price": 9,
+      "unit_cost": 5,
       "formula_name": "Siding area"
     },
     {
       "name": "Replacement window",
+      "category": "Siding, windows and decks",
       "unit": "ea",
-      "unit_price": 850
+      "unit_price": 850,
+      "unit_cost": 520
     },
     {
       "name": "Composite deck",
+      "category": "Siding, windows and decks",
       "unit": "sq ft",
-      "unit_price": 60
+      "unit_price": 60,
+      "unit_cost": 35
     },
     {
       "name": "Roof repair",
+      "category": "Roof",
       "unit": "lump sum",
-      "unit_price": 650
+      "unit_price": 650,
+      "unit_cost": 300
     },
     {
       "name": "Dumpster",
+      "category": "Tear-off",
       "unit": "ea",
-      "unit_price": 450
+      "unit_price": 450,
+      "unit_cost": 325
     }
   ],
   "job_types": [
@@ -90,7 +139,7 @@
   "formulas": [
     {
       "name": "Roofing squares",
-      "formula": "area_sqft * pitch_factor * (1 + waste) / 100"
+      "formula": "squares"
     },
     {
       "name": "Gutter length",
@@ -102,7 +151,7 @@
     },
     {
       "name": "Roof squares without waste",
-      "formula": "area_sqft * pitch_factor / 100"
+      "formula": "roof_squares"
     },
     {
       "name": "Drip edge",
@@ -115,6 +164,10 @@
     {
       "name": "Valley flashing",
       "formula": "valley_ft"
+    },
+    {
+      "name": "Steep squares",
+      "formula": "steep_squares"
     }
   ],
   "checklists": [

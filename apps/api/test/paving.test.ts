@@ -154,3 +154,17 @@ describe("paving price book", () => {
     expect(crack).toMatchObject({ formula: "crack_ft", unit: "ft", unit_cost: 0.85, category: "Sealcoat and repair" });
   });
 });
+
+describe("roofing price book", () => {
+  it("adds the standard roofing services a price list doesn't have, pricing the roof from its squares", async () => {
+    await paver();
+    const res = await send("/roofing/services", {});
+    expect(res.status).toBe(200);
+    const { added } = (await res.json()) as { added: string[] };
+    expect(added).toEqual(getPreset("roofing_exteriors").services.map((s) => s.name));
+    expect(state.tables.services.find((s) => s.name === "Architectural shingle roof")).toMatchObject({ formula: "squares", unit: "square", category: "Roof" });
+    expect(state.tables.services.find((s) => s.name === "Tear-off and disposal")).toMatchObject({ formula: "roof_squares" });
+    expect(state.tables.services.find((s) => s.name === "Steep roof charge")).toMatchObject({ formula: "steep_squares" });
+    expect(state.tables.services.find((s) => s.name === "Pipe boot")).toMatchObject({ formula: null, unit: "ea" });
+  });
+});

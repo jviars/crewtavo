@@ -102,6 +102,23 @@ export function taxRateFromPercent(percent: Amount): number {
   return Number(toUnits(percent, TAX_RATE_DECIMALS - 2)) / 10 ** TAX_RATE_DECIMALS;
 }
 
+const TIERS = ["Good", "Better", "Best"];
+
+/**
+ * "Good", "Better" and "Best" for the optional lines of each option group (lines that share one are
+ * a single choice: the client picks one of them), cheapest first, when a group has two or three.
+ */
+export function optionLabels(lines: ReadonlyArray<{ id?: string; optional?: boolean; option_group?: string | null; quantity: Amount; unit_price: Amount }>): Map<string, string> {
+  const labels = new Map<string, string>();
+  const groups = new Map<string, Array<(typeof lines)[number]>>();
+  for (const l of lines) if (l.id && l.optional && l.option_group) groups.set(l.option_group, [...(groups.get(l.option_group) ?? []), l]);
+  for (const group of groups.values()) {
+    if (group.length < 2 || group.length > 3) continue;
+    [...group].sort((a, b) => lineTotal(a.quantity, a.unit_price) - lineTotal(b.quantity, b.unit_price)).forEach((l, i) => labels.set(l.id!, TIERS[i]));
+  }
+  return labels;
+}
+
 /**
  * A quote's totals, step for step as private.quote_totals() works them out: each line rounded to
  * the cent; a promo code's discount figured on the charges (lines with a positive price); the

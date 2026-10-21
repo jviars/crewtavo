@@ -6,7 +6,7 @@ import {
   List, ListChecks, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, MessageSquareWarning, MessagesSquare, Minus, Monitor, Moon, MousePointer2, Navigation,
   Pause, Pencil, Percent, Phone, Pin, PinOff, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Reply, Ruler, Scissors, Search, Send, SeparatorHorizontal,
   Settings, Share, Smartphone, SmilePlus, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Table, Tag, ThumbsUp, Trash, TriangleAlert, TriangleRight, Truck, Underline, Undo2, Upload,
-  User, Users, Video, WifiOff, Wrench, X, Zap, type LucideIcon,
+  User, Users, Video, Warehouse, WifiOff, Wrench, X, Zap, type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
@@ -128,6 +128,7 @@ const ICONS = {
   pitch: TriangleRight,
   ruler: Ruler,
   paving: Construction,
+  roofing: Warehouse,
   checklist: ListChecks,
   callout: MessageSquareWarning,
   table: Table,
