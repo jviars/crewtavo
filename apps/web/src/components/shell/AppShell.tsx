@@ -250,7 +250,8 @@ function Screen() {
   const [crossFaded] = useState(transitioning);
   // Team chat fills the screen edge to edge, like a messaging app (its settings are a normal page),
   // and so does the website's editor.
-  const flush = (/^\/chat(\/|$)/.test(location.pathname) && !location.pathname.startsWith("/chat/settings")) || /^\/website\/?$/.test(location.pathname);
+  // Screens that fill the space under the top bar themselves: team chat, the website, and Measure's map.
+  const flush = (/^\/chat(\/|$)/.test(location.pathname) && !location.pathname.startsWith("/chat/settings")) || /^\/(website|measure)\/?$/.test(location.pathname);
   return (
     <main className={flush ? "content content-flush" : "content"} data-crossfade={crossFaded || undefined}>
       <Outlet />

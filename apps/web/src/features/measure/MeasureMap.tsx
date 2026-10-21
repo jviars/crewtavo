@@ -51,6 +51,8 @@ export interface ViewImage {
 }
 
 export type SpotPicker = (at: LngLat, how: { alt: boolean }) => void;
+/** The button under a finished box. */
+export interface BoxAction { label: string; busy: boolean; onClick: () => void }
 
 export interface MeasureMapHandle {
   setTool(tool: Tool): void;
@@ -102,9 +104,10 @@ export interface MeasureMapHandle {
   pickSpots(onPick: SpotPicker | null, owner?: SpotPicker): void;
   /**
    * While set, two clicks on the map put a box on it (the map still moves as usual), and its corners
-   * can be dragged to fit; the box goes here each time it's finished or changed. Null takes it away.
+   * can be dragged to fit; the box goes here each time it's finished or changed. With `action`, a
+   * button floats just under the finished box (tap to outline's Outline). Null takes it all away.
    */
-  editBox(onChange: ((box: [LngLat, LngLat]) => void) | null): void;
+  editBox(onChange: ((box: [LngLat, LngLat]) => void) | null, action?: BoxAction | null): void;
   /** Pins for the spots picked so far: green on the map, blue on a plan, red for left out. */
   setPins(pins: Array<{ at: LngLat; label: string; tone: "plan" | "map" | "out" }>): void;
   /** Whether a shape is still on the map (Undo can take one away). */
@@ -141,6 +144,8 @@ export interface MeasureMapProps {
   onImageryTrouble: (id: ImageryId, message: string) => void;
   onHistory?: (canUndo: boolean, canRedo: boolean) => void;
   onStreetMap?: (available: boolean) => void;
+  /** Room taken by things floating over the map (a side panel), so centering and fitting leave it out. */
+  padding?: { top: number; right: number; bottom: number; left: number };
 }
 
 // Bright enough to see on grass, roofs and asphalt alike.
@@ -148,6 +153,8 @@ const PALETTE = ["#22c55e", "#f59e0b", "#38bdf8", "#f472b6", "#a78bfa", "#facc15
 const OPENFREEMAP = "https://tiles.openfreemap.org/styles/liberty";
 const GLYPHS = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
 const LABEL_FONT = ["Noto Sans Bold"];
+/** The sparkle icon (lucide's, as the Icon component draws it) for the button under a box. */
+const SPARKLE = '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
 const CUT_COLOR = "#ef4444";
 
 const kindOf = (mode: string, type: string): Shape["kind"] => (mode === "cutout" ? "Cutout" : type === "Polygon" ? "Area" : type === "LineString" ? "Length" : "Count");
@@ -307,7 +314,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   const planUrl = useRef<string | null>(null);
   const pickRef = useRef<SpotPicker | null>(null);
   // A box being put round a lot (tap to outline): its corners so far, and their handles once it's done.
-  const boxRef = useRef<{ onChange: (box: [LngLat, LngLat]) => void; a: LngLat | null; b: LngLat | null; handles: Marker[] } | null>(null);
+  const boxRef = useRef<{ onChange: (box: [LngLat, LngLat]) => void; a: LngLat | null; b: LngLat | null; handles: Marker[]; action: BoxAction | null; button: Marker | null } | null>(null);
   const pins = useRef<Marker[]>([]);
   // Callbacks change every render; the map's listeners read the latest through this.
   const live = useRef(props);
@@ -476,11 +483,13 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
           if (boxRef.current) return void boxClick(at);
           pickRef.current?.(at, { alt: e.originalEvent.altKey });
         });
+        map!.on("moveend", () => showBoxAction());
         map!.on("mousemove", (e) => {
           const box = boxRef.current;
           if (box?.a && !box.b) showBox(box.a, [e.lngLat.lng, e.lngLat.lat]);
         });
         trouble.current = { errors: 0, loaded: 0, since: Date.now() };
+        if (live.current.padding) map!.setPadding(live.current.padding);
         applyOverlays(live.current.overlays);
         applyPlan();
         live.current.onReady();
@@ -517,6 +526,37 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     const [w, e, s, n] = [Math.min(a[0], b[0]), Math.max(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[1], b[1])];
     return [[w, n], [e, n], [e, s], [w, s]];
   };
+  /** The button under the finished box: made, moved and kept up to date with its action. */
+  const showBoxAction = () => {
+    const box = boxRef.current;
+    const map = mapRef.current;
+    if (!box || !map) return;
+    if (!box.action || !box.a || !box.b) {
+      box.button?.remove();
+      box.button = null;
+      return;
+    }
+    const under: LngLat = [(box.a[0] + box.b[0]) / 2, Math.min(box.a[1], box.b[1])];
+    if (!box.button) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-primary measure-box-go";
+      // Its own click, not the map's.
+      for (const type of ["mousedown", "pointerdown", "touchstart", "dblclick"]) button.addEventListener(type, (e) => e.stopPropagation());
+      button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!boxRef.current?.action?.busy) boxRef.current?.action?.onClick();
+      });
+      box.button = new maplibregl.Marker({ element: button }).setLngLat(under).addTo(map);
+    }
+    // Just under the box, or just inside its bottom edge when the box runs to the bottom of the map.
+    const room = map.getContainer().clientHeight - map.project(under).y;
+    box.button.setLngLat(under).setOffset([0, room > 72 ? 32 : -32]);
+    const el = box.button.getElement() as HTMLButtonElement;
+    el.disabled = box.action.busy;
+    el.innerHTML = `${box.action.busy ? '<span class="spinner" style="width:14px;height:14px"></span>' : SPARKLE}<span>${box.action.label}</span>`;
+  };
+
   /** A click while a box is being put round a lot: the first corner, then the second, then nothing. */
   const boxClick = (at: LngLat) => {
     const box = boxRef.current;
@@ -546,6 +586,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         [current.a, current.b] = [[p.lng, p.lat], [opposite.lng, opposite.lat]];
         showBox(current.a, current.b);
         boxCorners(current.a, current.b).forEach((c, k) => k !== i && current.handles[k].setLngLat(c));
+        showBoxAction();
         return current;
       };
       marker.on("drag", moved);
@@ -559,6 +600,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       });
       return marker;
     });
+    showBoxAction();
     box.onChange([box.a, at]);
   };
 
@@ -700,6 +742,13 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   }, [props.showHouseNumbers]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => applyOverlays(props.overlays), [props.overlays.join()]);
+  // Room for a side panel: the map's middle moves over to the part that shows.
+  const padding = props.padding ?? { top: 0, right: 0, bottom: 0, left: 0 };
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map?.getLayer("measure-labels")) map.easeTo({ padding, duration: 250 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [padding.top, padding.right, padding.bottom, padding.left]);
   useEffect(paintLabels, [props.labels, props.values, props.notes]);
   // A shape given an item (or a new one) is redrawn in its color, and its fill follows.
   useEffect(() => {
@@ -851,8 +900,11 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       const before = { center: map.getCenter(), zoom: map.getZoom() };
       const mode = draw.getMode();
       const swap = options.imagery && options.imagery !== live.current.imagery ? options.imagery : null;
-      // No handles or half-drawn shapes in the picture.
+      // No handles or half-drawn shapes in the picture, and the drawing in the middle of it (not off
+      // to one side of a panel's room).
       draw.setMode("static");
+      const room = map.getPadding();
+      map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
       if (swap) await applyImagery(swap);
       map.fitBounds(b, { padding: 60, maxZoom: 20, animate: false });
       await new Promise<void>((resolve) => {
@@ -875,6 +927,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         }
       });
       map.jumpTo(before);
+      map.setPadding(room);
       if (swap) await applyImagery(live.current.imagery);
       draw.setMode(pickRef.current ? "static" : mode === "static" ? toolRef.current : mode);
       return blob;
@@ -954,13 +1007,16 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       draw.setMode(onPick ? "static" : toolRef.current);
       map.getCanvas().style.cursor = onPick ? "crosshair" : "";
     },
-    editBox(onChange) {
+    editBox(onChange, action = null) {
       if (onChange && boxRef.current) {
         boxRef.current.onChange = onChange;
+        boxRef.current.action = action;
+        showBoxAction();
         return;
       }
       for (const h of boxRef.current?.handles ?? []) h.remove();
-      boxRef.current = onChange ? { onChange, a: null, b: null, handles: [] } : null;
+      boxRef.current?.button?.remove();
+      boxRef.current = onChange ? { onChange, a: null, b: null, handles: [], action, button: null } : null;
       showBox(null, null);
     },
     has(id) {
