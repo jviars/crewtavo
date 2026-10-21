@@ -1,0 +1,172 @@
+/**
+ * Roofing: a roof estimate from one place, for businesses set up for roofing. Start from an address,
+ * then each project walks through measuring the roof, the estimate, the proposal, the schedule and
+ * the invoice (RoofingProjectPage). The price book card adds the standard roofing services to a
+ * price list that doesn't have them yet.
+ */
+import { getPreset } from "@crewtavo/core/presets";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/Icon";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { TableSkeleton } from "@/components/ui/Skeleton";
+import { EmptyState, ErrorState } from "@/components/ui/States";
+import { StatusPill } from "@/components/ui/StatusPill";
+import { api, supabase, unwrap } from "@/lib/api";
+import { addressLine, formatMoney, formatNumber, timeAgo } from "@/lib/format";
+import { hasRole, useSession } from "@/lib/session";
+import { stageLabel, TAKEOFF_FIELDS, type TakeoffRow } from "../paving/data";
+import { NewTakeoffDialog } from "../paving/NewTakeoffDialog";
+import { isRoof, ROOF_STEPS, roofSummary } from "./data";
+
+interface ProjectRow extends TakeoffRow {
+  quote: {
+    id: string;
+    number: number | null;
+    title: string;
+    status: string;
+    total: number;
+    client: { display_name: string } | null;
+    property: { line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
+    lines: Array<{ id: string }>;
+    jobs: Array<{ id: string; status: string }>;
+  } | null;
+}
+
+export function RoofingPage() {
+  const session = useSession();
+  const { company } = session;
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [showAll, setShowAll] = useState(false);
+  const canSell = hasRole(session, "admin", "office", "estimator");
+
+  const projects = useQuery({
+    queryKey: ["roofing-projects", company.id],
+    queryFn: async () => {
+      const rows = unwrap(
+        await supabase()
+          .from("measurements")
+          .select(`${TAKEOFF_FIELDS}, quote:quotes(id, number, title, status, total, client:clients(display_name), property:properties(line1, city, region, postal_code), lines:quote_line_items(id), jobs!jobs_company_id_quote_id_fkey(id, status))`)
+          .not("quote_id", "is", null)
+          .order("updated_at", { ascending: false })
+          .limit(200),
+      ) as unknown as ProjectRow[];
+      // One row per project: its newest measurement, and only measurements of roofs.
+      const seen = new Set<string>();
+      return rows.filter((r) => r.quote && isRoof(r) && !seen.has(r.quote.id) && seen.add(r.quote.id));
+    },
+  });
+  const open = (projects.data ?? []).filter((r) => !["lost", "archived"].includes(r.quote!.status) && !(r.quote!.jobs[0]?.status === "completed"));
+  const rows = showAll ? projects.data ?? [] : open;
+
+  return (
+    <>
+      <PageHeader title="Roofing" actions={canSell && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>New roof estimate</Button>} />
+      <p className="page-subtitle">From address to signed: outline the roof on the aerial, set its pitch, price it from your price book with Good, Better and Best choices, and send the proposal.</p>
+
+      <ol className="paving-steps" aria-label="How a roofing job goes">
+        {ROOF_STEPS.map((step, i) => (
+          <li key={step.id}>
+            <span className="paving-step-icon"><Icon name={step.icon} size={18} /></span>
+            <span className="paving-step-text">
+              <strong>{i + 1}. {step.label}</strong>
+              <span className="muted small">{step.text}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      <section className="stack-sm" aria-labelledby="roofing-projects" style={{ gap: 12 }}>
+        <div className="row" style={{ gap: 10 }}>
+          <h2 id="roofing-projects" className="section-title grow">Projects</h2>
+          {(projects.data?.length ?? 0) > open.length && (
+            <div className="segmented" role="group" aria-label="Which projects">
+              <button type="button" aria-pressed={!showAll} onClick={() => setShowAll(false)}>Open</button>
+              <button type="button" aria-pressed={showAll} onClick={() => setShowAll(true)}>All</button>
+            </div>
+          )}
+        </div>
+        {projects.isPending ? (
+          <div className="card"><TableSkeleton rows={4} /></div>
+        ) : projects.error ? (
+          <ErrorState error={projects.error} onRetry={() => projects.refetch()} />
+        ) : !rows.length ? (
+          <div className="card">
+            <EmptyState icon="roofing" title="No roof estimates yet" action={canSell && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>Start a roof estimate</Button>}>
+              Pick a client and an address, outline the roof on the aerial and set its pitch, and the squares, edges and tear-off price themselves into a proposal.
+            </EmptyState>
+          </div>
+        ) : (
+          <div className="card">
+            <table className="table table-stack">
+              <thead><tr><th>Project</th><th>Measured</th><th className="num">Price</th><th>Stage</th></tr></thead>
+              <tbody>
+                {rows.map((r) => {
+                  const q = r.quote!;
+                  const stage = stageLabel(q, true);
+                  return (
+                    <tr key={q.id} className="row-link" onClick={() => navigate(`/roofing/${q.id}`)}>
+                      <td>
+                        <Link className="cell-link" to={`/roofing/${q.id}`} onClick={(e) => e.stopPropagation()}>{q.title}</Link>
+                        <div className="muted small">{[q.client?.display_name, q.property ? addressLine(q.property) : null].filter(Boolean).join(" · ")}</div>
+                      </td>
+                      <td>
+                        <span className="small">{roofSummary(r, formatNumber)}</span>
+                        <div className="muted small">{timeAgo(r.updated_at)}</div>
+                      </td>
+                      <td className="num">{q.lines.length ? formatMoney(q.total) : <span className="muted">Not priced</span>}</td>
+                      <td><StatusPill label={stage.label} tone={stage.tone} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {hasRole(session, "admin") && <PriceBook />}
+
+      <NewTakeoffDialog trade="roofing" open={params.get("new") === "1"} onClose={() => setParams({}, { replace: true })} />
+    </>
+  );
+}
+
+/** The roofing services in the price list, and adding the standard ones it's missing. */
+function PriceBook() {
+  const { company } = useSession();
+  const queryClient = useQueryClient();
+  const standard = getPreset("roofing_exteriors").services;
+  const services = useQuery({
+    queryKey: ["services", company.id, "names"],
+    queryFn: async () => unwrap(await supabase().from("services").select("name").eq("company_id", company.id)).map((s) => s.name.trim().toLowerCase()),
+  });
+  const missing = standard.filter((s) => services.data && !services.data.includes(s.name.toLowerCase()));
+  const add = useMutation({
+    meta: { success: (r: { added: string[] }) => (r.added.length ? `Added ${r.added.length} roofing ${r.added.length === 1 ? "service" : "services"} to your price list` : "Your price list already has them") },
+    mutationFn: () => api.post<{ added: string[] }>("/roofing/services"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["services"] }),
+  });
+  if (!services.data) return null;
+  return (
+    <section className="card card-pad stack-sm" aria-labelledby="roofing-price-book" style={{ gap: 10 }}>
+      <h2 id="roofing-price-book" className="section-title" style={{ fontSize: 17 }}>Price book</h2>
+      <span className="muted small">
+        The estimate prices each service from the roof with its formula, like shingles from <code>squares</code> (with waste), tear-off from <code>roof_squares</code> or drip edge from <code>eave_ft + rake_ft</code>.
+        Set your own prices and costs there, and the margin shows on every estimate.
+      </span>
+      {missing.length > 0 ? (
+        <div className="row wrap" style={{ gap: 10 }}>
+          <Button variant="primary" icon="plus" loading={add.isPending} onClick={() => add.mutate()}>Add {missing.length} standard roofing {missing.length === 1 ? "service" : "services"}</Button>
+          <span className="muted small">{missing.slice(0, 4).map((s) => s.name).join(", ")}{missing.length > 4 ? ` and ${missing.length - 4} more` : ""}</span>
+        </div>
+      ) : (
+        <span className="small row" style={{ gap: 6 }}><Icon name="check" size={15} /> Your price list has every standard roofing service.</span>
+      )}
+      <Link to="/settings?tab=prices" className="link-btn small" style={{ justifySelf: "start" }}>Open the price list</Link>
+    </section>
+  );
+}

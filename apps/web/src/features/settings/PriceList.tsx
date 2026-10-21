@@ -1,5 +1,6 @@
 /** Products and services: prices and costs that fill quotes, with optional measurement formulas. */
 import { PAVING_SAMPLE, PAVING_VARIABLE_NAMES, PAVING_VARIABLES } from "@crewtavo/core/paving";
+import { ROOFING_SAMPLE, ROOFING_VARIABLE_NAMES, ROOFING_VARIABLES } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -15,7 +16,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { ImportPriceListDialog } from "./ImportPriceList";
 
-const SAMPLE = { area_sqft: 1000, area_sqyd: 111.1, length_ft: 100, count: 4, depth_in: 2, pitch_factor: 1.12, waste: 0.1, waste_pct: 10, eave_ft: 120, rake_ft: 80, ridge_ft: 40, hip_ft: 0, valley_ft: 20, ...PAVING_SAMPLE };
+const SAMPLE = { area_sqft: 1000, area_sqyd: 111.1, length_ft: 100, count: 4, depth_in: 2, pitch_factor: 1.12, waste: 0.1, waste_pct: 10, eave_ft: 120, rake_ft: 80, ridge_ft: 40, hip_ft: 0, valley_ft: 20, ...ROOFING_SAMPLE, ...PAVING_SAMPLE };
 
 export function PriceList() {
   const session = useSession();
@@ -87,6 +88,10 @@ export function PriceList() {
       <details className="muted small">
         <summary style={{ cursor: "pointer", fontWeight: 600 }}>Using formulas</summary>
         <p style={{ margin: "6px 0 0" }}>A formula fills in the quantity from a map measurement, for example <code>area_sqft * 1.1</code>. You can use area_sqft (square feet), area_sqyd (square yards), length_ft (feet), count, depth_in (inches), pitch_factor and waste, and for roofs eave_ft, rake_ft, ridge_ft, hip_ft and valley_ft (feet of lines marked as those edges on the map).</p>
+        <p style={{ margin: "6px 0 0" }}>Roofs add their surface and squares, each section at its own pitch:</p>
+        <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+          {ROOFING_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {ROOFING_VARIABLES[name]}</li>)}
+        </ul>
         <p style={{ margin: "6px 0 0" }}>Paving takeoffs add a value for each item drawn on the map:</p>
         <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
           {PAVING_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {PAVING_VARIABLES[name]}</li>)}

@@ -14,6 +14,7 @@ import {
   pavingQuantities,
   pitchProblem,
   SALES,
+  savedRoofingQuantities,
   summarizeFeatureCollection,
   validateFormula,
   type FeatureCollection,
@@ -93,6 +94,8 @@ sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "
     valley_ft: edges.valley,
     // A paving takeoff's items: asphalt, striping, stalls and the rest.
     ...pavingQuantities(sections),
+    // A roof's surface and squares, with and without waste.
+    ...savedRoofingQuantities(sections, m.roof_pitch, Number(m.waste_pct)),
   };
 
   const lines = must(await db.from("quote_line_items").select("id, name, formula, service:services(formula_target)").eq("quote_id", id));

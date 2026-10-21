@@ -640,6 +640,22 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .paving-swatch[data-geometry="count"] { width: 12px; height: 12px; margin: 0 2px; border-radius: 50%; }
 .paving-more { display: flex; align-items: center; gap: 4px; padding: 8px 16px 12px; }
 
+/* Measuring a roof, step by step, beside the map (measure/RoofSteps.tsx) */
+.roof-steps .card-head { padding: 12px 16px; }
+.roof-step-list { display: grid; gap: 0; margin: 0; padding: 4px 0; list-style: none; }
+.roof-step-list > li { display: flex; align-items: flex-start; gap: 12px; padding: 10px 16px; }
+.roof-step-list > li + li { border-top: 1px solid var(--row-divider); }
+.roof-step-list .paving-progress-dot { background: var(--fill-2); }
+.roof-step-list .paving-progress-dot[data-done] { background: var(--green-solid); color: #fff; }
+.roof-edge-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.roof-edge-pick { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.roof-edge-pick .paving-swatch { width: 14px; }
+.roof-edge-pick:hover { border-color: var(--border-strong); }
+.roof-edge-pick:focus-visible { outline: none; box-shadow: var(--ring); }
+.roof-edge-pick[aria-pressed="true"] { border-color: var(--green-solid); background: var(--green-tint); box-shadow: inset 0 0 0 1px var(--green-solid); }
+.roof-edge-pick:disabled { opacity: 0.55; cursor: default; }
+.roof-waste { align-items: center; }
+
 /* Paving: the flow's steps, and a project's progress and step cards (features/paving) */
 .paving-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0 0 24px; padding: 0; list-style: none; }
 .paving-steps li { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
@@ -681,6 +697,10 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .paving-totals dd[data-good] { color: var(--green-dark); }
 .paving-row { padding: 10px 12px; border: 1px solid var(--border); border-top: 1px solid var(--border); border-radius: 10px; }
 .paving-signature { height: 64px; max-width: 260px; object-fit: contain; padding: 4px; border-radius: 8px; background: #fff; }
+.paving-quantities > .roof-squares { font-size: 16px; }
+.paving-quantities > .roof-squares strong { font-size: 20px; font-weight: 800; }
+.estimate-choice { margin-right: 8px; vertical-align: 1px; }
+.roof-add-other .select { flex: 1 1 240px; min-width: 0; max-width: 420px; }
 
 /* Roof pitch: the picker and the phone and photo gauges (measure/RoofPitch.tsx) */
 .pitch-picker { display: grid; gap: 8px; }
@@ -884,6 +904,7 @@ body.is-dragging-visit, body.is-dragging-visit * { cursor: grabbing !important; 
 
 /* ---- Customer portal (Client Hub) ---------------------------------------------------------- */
 .public-page.hub { padding: 0 0 48px; }
+.hub-choice-head { justify-content: space-between; padding-top: 12px; padding-bottom: 8px; background: var(--fill); }
 .hub-wrap { max-width: 640px; padding: 20px 16px 0; gap: 18px; }
 .hub-header { background: #fff; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
 .hub-header-inner { max-width: 640px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 8px; }
