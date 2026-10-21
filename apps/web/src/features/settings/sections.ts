@@ -50,7 +50,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
         isOffice && can(session, "automations") && { to: "/automations", label: "Automations", icon: "bolt", keywords: "rules reminders follow ups workflows" },
       ],
     },
-    { title: "About", items: [{ tab: "license", label: "License", icon: "file", keywords: "terms version updates about" }] },
+    { title: "About", items: [{ tab: "license", label: "Terms and license", icon: "file", keywords: "terms license agpl open source source code version updates about" }] },
   ];
   return groups.map((g) => ({ title: g.title, items: g.items.filter((i): i is SettingsItem => Boolean(i)) })).filter((g) => g.items.length);
 }

@@ -32,7 +32,7 @@ account.get("/config", (c) =>
       singleCompany: c.env.CREWTAVO_SINGLE_COMPANY === "1",
       // Where the instance runs (railway, compose or server), for setup steps that depend on it.
       platform: platformOf(c.env),
-      // The Crewtavo License version that setting up a business agrees to (packages/core/src/terms.ts).
+      // The Crewtavo Terms version that setting up a business agrees to (packages/core/src/terms.ts).
       termsVersion: TERMS_VERSION,
       mapsBrowserKey: c.env.GOOGLE_MAPS_BROWSER_KEY ?? null,
       turnstileSiteKey: c.env.TURNSTILE_SITE_KEY ?? null,
@@ -160,11 +160,11 @@ account.post("/companies", requireUser, async (c) => {
 
 /** The version the person read must be the one in force: an old page may show older terms. */
 function checkTermsVersion(version: string | undefined) {
-  if (!version) throw new HttpError(400, "Agree to the Crewtavo License to continue.");
-  if (version !== TERMS_VERSION) throw new HttpError(409, "The Crewtavo License changed since this page opened. Reload the page, read it and agree again.");
+  if (!version) throw new HttpError(400, "Agree to the Crewtavo Terms to continue.");
+  if (version !== TERMS_VERSION) throw new HttpError(409, "The Crewtavo Terms changed since this page opened. Reload the page, read them and agree again.");
 }
 
-/** Agreements to the license for this business, newest first (Settings → License). */
+/** Agreements to the terms for this business, newest first (Settings → Terms and license). */
 account.get("/terms", requireUser, requireCompany(ADMINS), async (c) => {
   const rows = must(
     await c.var.db

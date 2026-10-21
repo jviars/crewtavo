@@ -66,7 +66,7 @@ if (existing.length) {
 }
 
 // --- Company via the real onboarding endpoint (applies the Paving preset) -------------------
-// Setting up a business agrees to the Crewtavo License, as the onboarding screen does.
+// Setting up a business agrees to the Crewtavo Terms, as the onboarding screen does.
 const { termsVersion } = await (await fetch(`${API}/api/config`)).json();
 const res = await fetch(`${API}/api/companies`, {
   method: "POST",

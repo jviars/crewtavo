@@ -10,6 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Crewtavo takes no outside contributions (CONTRIBUTING.md): every commit is its owner's, with no
+      # co-authors. Merges made on GitHub keep the owner as author and GitHub as committer.
+      - name: Authorship
+        if: github.event_name == 'push'
+        run: |
+          others=$(git log --format='%an <%ae>%n%cn <%ce>' | grep -viE 'jviars|noreply@github\.com' | sort -u)
+          if [ -n "$others" ] || git log --format='%B' | grep -qi '^co-authored-by:'; then
+            echo "Every commit must be the owner's, with no co-authors. Others found: $others" >&2
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22

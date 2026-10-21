@@ -2,7 +2,7 @@
   "name": "crewtavo",
   "private": true,
   "description": "Open-source operations software for service businesses.",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "AGPL-3.0-only",
   "workspaces": [
     "apps/*",
     "packages/*"
