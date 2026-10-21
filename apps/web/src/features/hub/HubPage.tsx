@@ -31,7 +31,7 @@ interface HubLine {
   optional?: boolean;
   selected?: boolean;
 }
-interface Company { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null }
+interface Company { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null; logo?: string | null }
 /** A map drawing the office chose to show the client, with the sizes measured on it. */
 interface HubDrawing {
   id: string;
@@ -87,6 +87,13 @@ async function hubFetch<T>(path: string, body?: unknown, method?: "DELETE"): Pro
 /** "Acme Paving" -> "AP". */
 const monogram = (name: string) => (name.split(/\s+/).filter((w) => /^[A-Za-z0-9]/.test(w)).slice(0, 2).map((w) => w[0]).join("") || name.slice(0, 2)).toUpperCase();
 
+/** The company's logo, or its initials on its color when it has none (or the logo won't load). */
+function CompanyMark({ company }: { company: Company }) {
+  const [broken, setBroken] = useState(false);
+  if (company.logo && !broken) return <img className="hub-logo" src={company.logo} alt="" onError={() => setBroken(true)} />;
+  return <span className="tile" aria-hidden="true">{monogram(company.name)}</span>;
+}
+
 /** Text color that reads on the company's color. */
 function inkOn(hex: string | undefined) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? "");
@@ -124,12 +131,12 @@ export function HubPage() {
           <div className="hub-header-inner">
             {home ? (
               <a className="hub-company" href={home} aria-label={`${d.company.name}: your account`}>
-                <span className="tile" aria-hidden="true">{monogram(d.company.name)}</span>
+                <CompanyMark company={d.company} />
                 <span className="stack-xs"><strong>{d.company.name}</strong><span className="hub-meta">Your account</span></span>
               </a>
             ) : (
               <div className="hub-company">
-                <span className="tile" aria-hidden="true">{monogram(d.company.name)}</span>
+                <CompanyMark company={d.company} />
                 <span className="stack-xs"><strong>{d.company.name}</strong><span className="hub-meta">{d.kind === "client" ? "Your account" : d.kind === "quote" ? `Quote #${d.quote.number}` : `Invoice #${d.invoice.number}`}</span></span>
               </div>
             )}

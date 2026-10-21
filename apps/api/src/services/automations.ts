@@ -24,6 +24,7 @@ import { firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink } from "../lib/links";
 import { sendEmail, sendSms } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
+import { logoImage } from "./logo";
 import { sendReviewRequest } from "./reviews";
 
 export interface ActionResult {
@@ -264,7 +265,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       if (!isEmail(client.email)) throw new Error(`${client.display_name} has no email address.`);
       const subject = render(action.subject, ctx);
       const text = render(action.body, ctx);
-      const email = renderEmail({ companyName: ctx.company.name, text, footer: companyFooter(ctx.company) });
+      const email = renderEmail({ companyName: ctx.company.name, logo: baseUrl ? logoImage(baseUrl, ctx.company.id, ctx.company.settings) : null, text, footer: companyFooter(ctx.company) });
       const result = await sendEmail(env, { to: client.email!.trim(), subject, text: email.text, html: email.html, replyTo: ctx.company.email ?? undefined, fromName: ctx.company.name }, ctx.company.id);
       if (!result.sent) throw new Error(result.reason ?? "The email wasn't sent.");
       await admin.from("messages").insert({

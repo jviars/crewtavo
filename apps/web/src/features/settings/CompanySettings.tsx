@@ -8,6 +8,7 @@ import { CardSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { CompanyLogo } from "./CompanyLogo";
 
 const ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "America/Puerto_Rico", "America/Toronto", "America/Vancouver", "Europe/London", "Australia/Sydney"];
 const BRAND_COLORS = ["#0f2a35", "#3b7d23", "#1d4ed8", "#b45309", "#be123c", "#6d28d9", "#0f766e", "#1f2937"];
@@ -96,6 +97,10 @@ export function CompanySettings() {
               {Object.values(PRESETS).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
+        </div>
+        <div className="field">
+          <span>Logo <span className="optional">(quotes, invoices, Client Hub and emails)</span></span>
+          <CompanyLogo path={((details.data?.settings ?? {}) as Record<string, any>).branding?.logo ?? null} />
         </div>
         <div className="field">
           <span>Brand color <span className="optional">(Client Hub and emails)</span></span>

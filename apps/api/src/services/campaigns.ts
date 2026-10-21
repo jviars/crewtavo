@@ -10,6 +10,7 @@ import { clientLink } from "../lib/links";
 import { emailReady, sendEmail } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 import { companyAddress } from "./automations";
+import { logoImage } from "./logo";
 
 const BATCH = 25;
 const SPACING_MS = 550; // stays under typical provider rate limits (about 2 per second)
@@ -45,7 +46,7 @@ export async function processCampaigns(env: Env, options: { campaignId?: string;
   if (options.campaignId) start = start.eq("id", options.campaignId);
   await start;
 
-  let query = admin.from("campaigns").select("id, company_id, subject, body, company:companies(name, email, phone, address)").eq("status", "sending").limit(5);
+  let query = admin.from("campaigns").select("id, company_id, subject, body, company:companies(name, email, phone, address, settings)").eq("status", "sending").limit(5);
   if (options.campaignId) query = query.eq("id", options.campaignId);
   const { data: campaigns, error } = await query;
   if (error) throw new Error(error.message);
@@ -55,7 +56,7 @@ export async function processCampaigns(env: Env, options: { campaignId?: string;
   let skipped = 0;
   let lost = 0;
   for (const campaign of campaigns ?? []) {
-    const company = campaign.company as unknown as { name: string; email: string | null; phone: string | null; address: Record<string, string> };
+    const company = campaign.company as unknown as { name: string; email: string | null; phone: string | null; address: Record<string, string>; settings: unknown };
     // Runs overlap (Send, the every-minute task, other servers), so each claims its batch: a
     // recipient one run has claimed isn't emailed by another.
     const { data: recipients, error: claimError } = await admin.rpc("claim_campaign_recipients", { p_campaign: campaign.id, p_limit: BATCH });
@@ -99,6 +100,7 @@ export async function processCampaigns(env: Env, options: { campaignId?: string;
         const unsubscribe = await clientLink(env, baseUrl, { c: campaign.company_id, t: "unsub", id: r.client_id });
         const email = renderEmail({
           companyName: company.name,
+          logo: logoImage(baseUrl, campaign.company_id, company.settings),
           text: renderTemplate(campaign.body, vars),
           footer: [company.name, companyAddress(company.address)].filter(Boolean).join(" · "),
           unsubscribeUrl: unsubscribe,

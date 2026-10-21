@@ -12,10 +12,11 @@ import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { encryptJson } from "../lib/crypto";
 import { renderEmail } from "../lib/email";
-import { dbError, HttpError, must, readJson } from "../lib/http";
+import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
 import { emailConfigured, forgetMailbox, loadMailbox, sendEmail, sendWithMailbox, type MailboxSecret, type MailboxSettings } from "../lib/notify";
 import { smtpSend, SmtpError } from "../lib/smtp";
 import { adminClient } from "../lib/supabase";
+import { logoImage } from "../services/logo";
 
 export const email = new Hono<AppEnv>();
 
@@ -67,7 +68,7 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
   const body = await readJson(c, connectSchema);
   const preset = mailPreset(body.preset)!;
   const saved = await loadMailbox(c.env, c.var.companyId).catch(() => null);
-  const company = must(await c.var.db.from("companies").select("name, email").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await c.var.db.from("companies").select("name, email, settings").eq("id", c.var.companyId).maybeSingle());
   const me = must(await c.var.db.from("profiles").select("email").eq("user_id", c.var.userId).maybeSingle());
 
   let settings: MailboxSettings;
@@ -104,7 +105,7 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
     const result = await sendWithMailbox(settings, secret, {
       to,
       subject: `Email is connected for ${company.name}`,
-      ...renderEmail({ companyName: company.name, text: `This is a test from Crewtavo.\n\nQuotes, invoices, reminders and team notifications for ${company.name} will now be sent from ${settings.from_email}. Replies go to ${company.email || settings.from_email}.` }),
+      ...renderEmail({ companyName: company.name, logo: logoImage(appUrl(c), c.var.companyId, company.settings), text: `This is a test from Crewtavo.\n\nQuotes, invoices, reminders and team notifications for ${company.name} will now be sent from ${settings.from_email}. Replies go to ${company.email || settings.from_email}.` }),
       replyTo: company.email ?? undefined,
       fromName: company.name,
     });
@@ -134,13 +135,13 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
 email.post("/email/test", ...requireEmailAdmin, async (c) => {
   const body = await readJson(c, z.object({ to: z.email().optional() }));
   const me = must(await c.var.db.from("profiles").select("email").eq("user_id", c.var.userId).maybeSingle());
-  const company = must(await c.var.db.from("companies").select("name, email").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await c.var.db.from("companies").select("name, email, settings").eq("id", c.var.companyId).maybeSingle());
   const to = body.to ?? me.email;
   if (!to) throw new HttpError(400, "Add an address to send the test to.");
   forgetMailbox(c.var.companyId);
   const result = await sendEmail(
     c.env,
-    { to, subject: `Test email from ${company.name}`, ...renderEmail({ companyName: company.name, text: "This is a test from Crewtavo. If you can read it, email is working." }), replyTo: company.email ?? undefined, fromName: company.name },
+    { to, subject: `Test email from ${company.name}`, ...renderEmail({ companyName: company.name, logo: logoImage(appUrl(c), c.var.companyId, company.settings), text: "This is a test from Crewtavo. If you can read it, email is working." }), replyTo: company.email ?? undefined, fromName: company.name },
     c.var.companyId,
   );
   if (!result.sent) throw new HttpError(400, result.reason ?? "The test email wasn't sent.");

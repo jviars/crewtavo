@@ -1,7 +1,7 @@
 import { greetingName } from "@crewtavo/core";
 /**
  * Plain-text messages rendered as a simple, readable HTML email: paragraphs, clickable links,
- * the company name, and (for marketing) the address and an unsubscribe link.
+ * the company's logo or name, and (for marketing) the address and an unsubscribe link.
  */
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -29,19 +29,21 @@ function paragraph(p: string): string {
 
 export interface EmailParts {
   companyName: string;
+  /** The company's logo (services/logo.ts logoImage), shown in place of its name. */
+  logo?: { src: string; width: number; height: number } | null;
   text: string;
   /** Shown under the message, e.g. the company's postal address (required for marketing email). */
   footer?: string | null;
   unsubscribeUrl?: string | null;
 }
 
-export function renderEmail({ companyName, text, footer, unsubscribeUrl }: EmailParts): { html: string; text: string } {
+export function renderEmail({ companyName, logo, text, footer, unsubscribeUrl }: EmailParts): { html: string; text: string } {
   const paragraphs = text.trim().split(/\n{2,}/).map(paragraph).join("");
   const foot = [footer ? escape(footer) : null, unsubscribeUrl ? `<a href="${escape(unsubscribeUrl)}" style="color:#5f6f76">Unsubscribe</a>` : null].filter(Boolean).join(" · ");
   const html = `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f6f5f1;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f2a35">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;border:1px solid #e3e2dd">
-<tr><td style="padding:20px 24px 0;font-weight:800;font-size:17px">${escape(companyName)}</td></tr>
+<tr><td style="padding:20px 24px 0;font-weight:800;font-size:17px">${logo ? `<img src="${escape(logo.src)}" width="${logo.width}" height="${logo.height}" alt="${escape(companyName)}" style="display:block;border:0;width:${logo.width}px;height:${logo.height}px">` : escape(companyName)}</td></tr>
 <tr><td style="padding:16px 24px 8px;font-size:15px;line-height:1.6">${paragraphs}</td></tr>
 </table>
 ${foot ? `<p style="max-width:560px;margin:12px auto 0;font-size:12px;color:#5f6f76;text-align:center">${foot}</p>` : ""}

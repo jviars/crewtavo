@@ -9,6 +9,7 @@ import type { AppEnv } from "../env";
 import { handleStripeEvent, hubPayment, stripeAccess, stripeCheckout, type WebhookRoute } from "../integrations/stripe";
 import { kickAutomations, runInBackground } from "../lib/background";
 import { geocodeAddress } from "../services/external";
+import { isPng, logoImage, logoOf } from "../services/logo";
 import { firstName } from "../lib/email";
 import { signToken, verifyToken } from "../lib/crypto";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
@@ -63,6 +64,9 @@ async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | 
 
 const BRANDING = "name, phone, email, website, timezone, settings->branding, settings->hub_tips";
 
+/** The company as its clients see it, with where its logo loads from (null without one). */
+const withLogo = <T extends { branding?: unknown }>(companyId: string, company: T) => ({ ...company, logo: logoImage("", companyId, { branding: company.branding })?.src ?? null });
+
 /**
  * Map drawings the office chose to show on this quote or invoice: the sizes, and whether there's a
  * picture (served by /hub/:token/drawings/:id, never as a storage link).
@@ -92,7 +96,7 @@ async function hubDrawings(admin: ReturnType<typeof adminClient>, companyId: str
 publicRoutes.get("/hub/:token", async (c) => {
   const l = await link(c);
   const admin = adminClient(c.env);
-  const company = must(await admin.from("companies").select(BRANDING).eq("id", l.c).maybeSingle());
+  const company = withLogo(l.c, must(await admin.from("companies").select(BRANDING).eq("id", l.c).maybeSingle()));
   if (l.t === "client") return c.json(await clientHome(c, admin, l.c, l.id, company));
   if (l.t === "quote") {
     const quote = must(
@@ -535,6 +539,24 @@ publicRoutes.get("/hub/:token/drawings/:file", async (c) => {
   return c.body(await data.arrayBuffer(), 200, { "Content-Type": data.type || "image/jpeg", "Cache-Control": "private, max-age=3600" });
 });
 
+// The company's logo (services/logo.ts), on the Client Hub and in emails. A logo's file name is
+// never reused, so the current one is kept for good; an older one (in an email sent before the logo
+// changed) gets the current logo.
+publicRoutes.get("/public/logo/:company/:file", async (c) => {
+  const companyId = c.req.param("company");
+  const file = (c.req.param("file") ?? "").replace(/\.png$/i, "");
+  if (!z.uuid().safeParse(companyId).success || !z.uuid().safeParse(file).success) throw new HttpError(404, "Logo not found.");
+  const admin = adminClient(c.env);
+  const { data: company } = await admin.from("companies").select("settings").eq("id", companyId).maybeSingle();
+  const path = company ? logoOf(company.settings, companyId) : null;
+  if (!path) throw new HttpError(404, "Logo not found.");
+  const { data, error } = await admin.storage.from("files").download(path);
+  const bytes = data && !error ? new Uint8Array(await data.arrayBuffer()) : null;
+  if (!bytes || !isPng(bytes)) throw new HttpError(404, "Logo not found.");
+  const current = path === `${companyId}/logo/${file}.png`;
+  return c.body(bytes, 200, { "Content-Type": "image/png", "Cache-Control": current ? "public, max-age=31536000, immutable" : "public, max-age=3600" });
+});
+
 // "Add to calendar" for one of the client's visits.
 publicRoutes.get("/hub/:token/visits/:file", async (c) => {
   const l = await link(c, ["client"]);
@@ -647,7 +669,7 @@ publicRoutes.get("/public/refer/:token", async (c) => {
   if (!company.data || !client.data) throw new HttpError(404, "This referral link isn't valid anymore.");
   const settings = (company.data.settings ?? {}) as { referral_offer?: string };
   return c.json({
-    company: { name: company.data.name, phone: company.data.phone, website: company.data.website },
+    company: { name: company.data.name, phone: company.data.phone, website: company.data.website, logo: logoImage("", l.c, company.data.settings)?.src ?? null },
     referrer: firstName(client.data.display_name),
     offer: settings.referral_offer ?? null,
   });

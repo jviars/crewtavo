@@ -7,17 +7,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { Button } from "@/components/ui/Button";
 import { api } from "@/lib/api";
-import { squarePhoto } from "@/lib/files";
+import { base64Of, squarePhoto } from "@/lib/files";
 import { useSession } from "@/lib/session";
-
-function base64Of(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
 
 export function PhotoButtons({ userId, photo }: { userId: string; photo: string | null | undefined }) {
   const session = useSession();
