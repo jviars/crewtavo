@@ -1,11 +1,11 @@
 /**
  * An address or a Directions button that opens the person's maps app: the one they chose to always
  * use on this device, or else a sheet to pick one (Apple Maps, Google Maps, Waze, and on Android any
- * installed app). See lib/maps.ts.
+ * installed app). A route button does the same for a whole day's stops. See lib/maps.ts.
  */
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { copyText } from "@/lib/clipboard";
-import { MAPS_LABELS, mapsApps, mapsUrl, placeText, rememberApp, rememberedApp, type MapsApp, type Place } from "@/lib/maps";
+import { MAPS_LABELS, mapsApps, mapsUrl, placeText, rememberApp, rememberedApp, routeApp, routeApps, routeLegs, type MapsApp, type Place, type Route, type RouteApp } from "@/lib/maps";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
 
@@ -58,6 +58,77 @@ export function MapsChooser({ place, onClose }: { place: Place; onClose: () => v
           <span>Always use this app on this device</span>
         </label>
         <span className="muted small">An app that isn't installed opens its website instead. Change this in Settings → Profile.</span>
+      </div>
+    </Dialog>
+  );
+}
+
+/**
+ * Opens a whole route in Apple Maps or Google Maps: straight away when this device remembers the app
+ * and the route fits one link, or else a sheet to pick the app and, for a long day, the part.
+ */
+export function RouteMapsLink({ route, className, title, children }: { route: Route; className?: string; title?: string; children: ReactNode }) {
+  const [choosing, setChoosing] = useState(false);
+  const app = routeApp();
+  const legs = app ? routeLegs(app, route) : [];
+  if (app && legs.length === 1) {
+    return (
+      <a className={className} href={legs[0]!.url} target="_blank" rel="noreferrer" title={title ?? `Open the route in ${MAPS_LABELS[app]}`}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <>
+      <button type="button" className={className} title={title ?? "Open the route in a maps app"} onClick={() => setChoosing(true)}>
+        {children}
+      </button>
+      {choosing && <RouteChooser route={route} apps={app ? [app] : routeApps()} onClose={() => setChoosing(false)} />}
+    </>
+  );
+}
+
+function RouteChooser({ route, apps, onClose }: { route: Route; apps: RouteApp[]; onClose: () => void }) {
+  const [always, setAlways] = useState(false);
+  const pick = (app: RouteApp) => {
+    if (always) rememberApp(app);
+    onClose();
+  };
+  const choices = apps.map((app) => ({ app, legs: routeLegs(app, route) }));
+  const count = route.stops.length;
+  const stops = `${count} ${count === 1 ? "stop" : "stops"}`;
+  const description = route.start ? `${stops}, from the shop${route.end ? " and back" : ""}` : `${stops} from where you are${route.end ? ", then back to the shop" : ""}`;
+  const link = (app: RouteApp, url: string, label: string) => (
+    <a key={url} className="btn big-action" href={url} target="_blank" rel="noreferrer" onClick={() => pick(app)}>
+      <Icon name="navigation" size={18} />
+      {label}
+    </a>
+  );
+  return (
+    <Dialog open onClose={onClose} title="Open route in" description={description} size="sm">
+      <div className="dialog-body">
+        <div className="maps-choices">
+          {choices.map(({ app, legs }) =>
+            legs.length === 1 ? (
+              link(app, legs[0]!.url, MAPS_LABELS[app])
+            ) : (
+              <Fragment key={app}>
+                <strong className="small">{MAPS_LABELS[app]}</strong>
+                {legs.map((leg, i) => link(app, leg.url, `Part ${i + 1} · ${leg.last - leg.first + 1} ${leg.last === leg.first ? "stop" : "stops"}${leg.back ? ", then the shop" : ""}`))}
+              </Fragment>
+            ),
+          )}
+        </div>
+        {apps.length > 1 && (
+          <label className="checkbox">
+            <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />
+            <span>Always use this app on this device</span>
+          </label>
+        )}
+        <span className="muted small">
+          {choices.some((c) => c.legs.length > 1) && "Maps apps take only so many stops at once, so a long day opens in parts. Open the next part when you finish one. "}
+          An app that isn't installed opens its website instead.
+        </span>
       </div>
     </Dialog>
   );

@@ -1,10 +1,13 @@
-/** The crew's day on a phone: the running clock, my visits today in order, one-tap status changes. */
+/**
+ * The crew's day on a phone: the running clock, my visits today in order, one-tap status changes,
+ * and the whole route in a maps app.
+ */
 import { onlineManager, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { MapsLink } from "@/components/ui/MapsLink";
+import { MapsLink, RouteMapsLink } from "@/components/ui/MapsLink";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -13,6 +16,7 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
+import { dayRoute } from "../schedule/dayRoute";
 import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
@@ -34,7 +38,7 @@ interface Visit {
   hold_reason: string | null;
   crew_id: string | null;
   job: { id: string; number: number; title: string; client: { display_name: string } | null } | null;
-  property: { id: string; line1: string; city: string | null; lat: number | null; lng: number | null } | null;
+  property: { id: string; line1: string; line2?: string | null; city: string | null; region?: string | null; postal_code?: string | null; lat: number | null; lng: number | null } | null;
   assignees: Array<{ user_id: string }>;
   series_day: number | null;
   series_total: number | null;
@@ -111,6 +115,7 @@ export function FieldTodayPage() {
   const visits = [...(data.data?.today ?? [])].sort(order);
   const open = visits.filter((v) => v.status !== "completed");
   const done = visits.filter((v) => v.status === "completed");
+  const route = dayRoute(visits, session.company);
 
   return (
     <>
@@ -135,6 +140,13 @@ export function FieldTodayPage() {
       )}
       {data.data && visits.length > 0 && (
         <div className="progress" role="progressbar" aria-label="Visits done" aria-valuemin={0} aria-valuemax={visits.length} aria-valuenow={done.length} aria-valuetext={`${done.length} of ${visits.length} visits done`}><span style={{ width: `${(done.length / visits.length) * 100}%` }} /></div>
+      )}
+
+      {route.stops.length > 1 && (
+        <RouteMapsLink className="btn big-action btn-block" route={route}>
+          <Icon name="map" size={18} />
+          Open route in maps
+        </RouteMapsLink>
       )}
 
       <div className="stack">

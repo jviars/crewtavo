@@ -30,6 +30,8 @@ export interface Company {
   trade_preset: string;
   timezone: string;
   currency: string;
+  /** The shop's address (Settings → Company). */
+  address?: { line1?: string; city?: string; region?: string; postal_code?: string } | null;
   settings: Record<string, unknown>;
 }
 

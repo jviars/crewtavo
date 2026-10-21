@@ -783,7 +783,7 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .tg { --gutter: 58px; min-width: calc(var(--gutter) + var(--cols) * var(--min-col)); }
 .tg-row { display: grid; grid-template-columns: var(--gutter) repeat(var(--cols), minmax(0, 1fr)); }
 .tg-head { position: sticky; top: var(--topbar-height); z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: var(--radius-card) var(--radius-card) 0 0; }
-.tg-colhead { padding: 9px 8px 8px; font-size: 13px; font-weight: 700; color: var(--text-2); border-left: 1px solid var(--row-divider); display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; box-shadow: inset 0 3px 0 var(--lane, transparent); }
+.tg-colhead { padding: 9px 8px 8px; font-size: 13px; font-weight: 700; color: var(--text-2); border-left: 1px solid var(--row-divider); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 6px; min-width: 0; box-shadow: inset 0 3px 0 var(--lane, transparent); }
 .tg-colhead .link-btn { color: inherit; font-weight: 700; text-align: left; }
 .tg-colhead[data-today] { color: var(--green-dark); }
 .tg-colhead[data-today] .link-btn { color: var(--green-dark); }
