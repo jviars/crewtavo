@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>Open-source operations software for service businesses.</strong><br>
+  <strong>Free, open-source field service software for service businesses.</strong><br>
   Requests, quotes, scheduling, crews in the field, invoicing and a client portal, in one app you own.
 </p>
 
@@ -15,6 +15,8 @@
 </p>
 
 <p align="center">
+  <a href="https://crewtavo.com">Website</a> ·
+  <a href="https://crewtavo.com/docs/">Docs</a> ·
   <a href="#deploy-on-railway">Deploy on Railway</a> ·
   <a href="#self-host">Self-host</a> ·
   <a href="#whats-inside">What's inside</a> ·
@@ -34,6 +36,10 @@ from), and connections to QuickBooks, Zoho, Claude and ChatGPT.
 
 Every business runs **its own instance**: the app, its own database and its own files, in an
 account the business owns. Nobody else holds its data, and there's no per-seat subscription.
+
+The website, [crewtavo.com](https://crewtavo.com), has a 24-second tour, comparisons with
+[Jobber](https://crewtavo.com/jobber-alternative/) and other apps, and the [docs](https://crewtavo.com/docs/)
+for business owners.
 
 ## Deploy on Railway
 
