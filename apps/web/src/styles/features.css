@@ -656,7 +656,8 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .roof-edge-pick:disabled { opacity: 0.55; cursor: default; }
 .roof-waste { align-items: center; }
 
-/* Paving: the flow's steps, and a project's progress and step cards (features/paving) */
+/* Paving and roofing: the flow's steps, and a project's progress and step cards (features/paving,
+   features/roofing; the roof estimate's own pieces are in roofing/flow/flow.module.css) */
 .paving-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0 0 24px; padding: 0; list-style: none; }
 .paving-steps li { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
 .paving-step-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 10px; background: var(--green-tint); color: var(--green-dark); }
@@ -675,6 +676,13 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .paving-step-card .card-head h2 { flex: 1; font-size: 16px; font-weight: 700; }
 .paving-step-card .card-head .paving-progress-dot { background: var(--fill-2); }
 .paving-step-card .card-head .paving-progress-dot[data-done] { background: var(--green-solid); color: #fff; }
+/* The step a roofing project is at (paving doesn't mark one): an ink edge and a filled number. */
+.paving-step-card[data-current] { border-color: var(--ink); box-shadow: 0 0 0 0.5px var(--ink), var(--shadow-xs); }
+.paving-step-card[data-current] .card-head .paving-progress-dot:not([data-done]) { background: var(--solid); color: var(--on-solid); }
+@media (max-width: 600px) {
+  .paving-step-card .card-head { flex-wrap: wrap; row-gap: 2px; padding: 12px 16px; }
+  .paving-step-card .card-head > .muted { flex-basis: 100%; padding-left: 32px; }
+}
 .paving-takeoff { display: grid; grid-template-columns: minmax(0, 3fr) minmax(220px, 2fr); gap: 16px; align-items: start; }
 @media (max-width: 720px) { .paving-takeoff { grid-template-columns: 1fr; } }
 .paving-takeoff-picture { display: block; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--fill-2); }
@@ -697,10 +705,7 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .paving-totals dd[data-good] { color: var(--green-dark); }
 .paving-row { padding: 10px 12px; border: 1px solid var(--border); border-top: 1px solid var(--border); border-radius: 10px; }
 .paving-signature { height: 64px; max-width: 260px; object-fit: contain; padding: 4px; border-radius: 8px; background: #fff; }
-.paving-quantities > .roof-squares { font-size: 16px; }
-.paving-quantities > .roof-squares strong { font-size: 20px; font-weight: 800; }
 .estimate-choice { margin-right: 8px; vertical-align: 1px; }
-.roof-add-other .select { flex: 1 1 240px; min-width: 0; max-width: 420px; }
 
 /* Materials from the business's ABC Supply account (roofing/RoofMaterials.tsx, materials/) */
 .material-summary { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--green-tint); }
@@ -1027,3 +1032,11 @@ a.hub-list-row:hover { background: var(--fill); color: var(--ink); }
 @media print { .hub-header { position: static; border: 0; } .hub-foot .hub-powered { display: none; } }
 .hub-drawing { overflow: hidden; break-inside: avoid; }
 .hub-drawing img { display: block; width: 100%; height: auto; background: var(--fill-2); border-bottom: 1px solid var(--divider); }
+
+/* A price range on the client's account page (ClientPortal). The range's own page is hub/range.module.css. */
+.hub-range-line { font-size: 14px; font-weight: 700; color: var(--brand-text, var(--ink)); font-variant-numeric: tabular-nums; }
+
+/* A signed estimate: the paper at its full width where the screen has room, else as wide as the page.
+   The Hub's column stays the page's width (minmax), so the wider paper doesn't widen everything else. */
+.hub-wrap { grid-template-columns: minmax(0, 1fr); }
+.hub-document { --doc-w: min(848px, calc(100vw - 32px)); width: var(--doc-w); margin-inline: calc((100% - var(--doc-w)) / 2); }

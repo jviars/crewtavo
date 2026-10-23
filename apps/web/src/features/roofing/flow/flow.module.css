@@ -1,0 +1,133 @@
+/*
+ * The roofing project page (RoofingProjectPage): the measured roof, the estimate with the range
+ * beside it, the range and site visit steps, and the signed estimate. Colors are the app's tokens,
+ * so dark mode follows; only the page thumbnail is paper, white in both themes.
+ */
+
+/* ---------- The measured roof ---------- */
+.roof { display: grid; grid-template-columns: minmax(0, 240px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.roofPicture { display: block; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--fill-2); }
+.roofPicture img { display: block; width: 100%; height: auto; }
+.roofPicture:focus-visible { outline: none; box-shadow: var(--ring); }
+.roofEmpty { display: grid; place-items: center; min-height: 150px; padding: 14px; text-align: center; font-size: 13px; color: var(--text-3); }
+.roofInfo { display: grid; gap: 10px; min-width: 0; }
+.roofHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
+.roofTitle { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 17px; font-weight: 700; }
+.roofCheck { display: grid; place-items: center; width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--green-solid); color: #fff; }
+.roofWarn { display: grid; place-items: center; width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--warning-tint); color: var(--warning); }
+.edges { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; list-style: none; }
+.edge { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--text-2); }
+.edge i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: var(--edge); box-shadow: 0 0 0 1px rgba(15, 42, 53, 0.15); }
+.roofNote { margin: 0; font-size: 13px; color: var(--text-3); }
+@media (max-width: 640px) {
+  .roof { grid-template-columns: 1fr; }
+}
+
+/* ---------- The estimate step: the list, with the range and the numbers beside it ---------- */
+.estimate { container-type: inline-size; }
+.estimateGrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+@container (min-width: 820px) {
+  .estimateGrid { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 28px; }
+}
+.main { display: grid; gap: 18px; min-width: 0; }
+.aside { display: grid; gap: 14px; min-width: 0; }
+.estimateHead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+.estimateHead h3 { margin: 0; font-size: 17px; font-weight: 700; }
+.lead { margin: 3px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--text-2); }
+.packageTag { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13.5px; color: var(--text-2); }
+.packageTag strong { color: var(--ink); font-weight: 600; }
+.linkBtn { min-height: 32px; padding: 4px 6px; border: 0; border-radius: 6px; background: none; color: var(--info); font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.linkBtn:hover:not(:disabled) { text-decoration: underline; }
+.linkBtn:focus-visible { outline: none; box-shadow: var(--ring); }
+.linkBtn:disabled { color: var(--text-4); cursor: default; }
+.pricing { display: grid; gap: 10px; }
+.pricingStatus { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; color: var(--text-2); }
+.note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-3); }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.pick { display: grid; gap: 14px; }
+.pickActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+
+/* Materials for this roof, folded away until it's wanted. */
+.materials { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.materials > summary { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 14px; border-radius: var(--radius-card); font-weight: 700; cursor: pointer; list-style: none; }
+.materials > summary::-webkit-details-marker { display: none; }
+.materials > summary:focus-visible { outline: none; box-shadow: var(--ring); }
+.materials > summary small { margin-left: auto; font-size: 13px; font-weight: 500; color: var(--text-3); }
+.materials > summary svg { flex: none; color: var(--text-3); transition: transform var(--dur-fast); }
+.materials[open] > summary svg { transform: rotate(180deg); }
+.materialsBody { padding: 0 14px 14px; }
+
+.notesSection { padding-top: 18px; border-top: 1px solid var(--divider); }
+
+/* ---------- The range the homeowner will see ---------- */
+.rangeCard { display: grid; gap: 16px; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-md); scroll-margin-top: 16px; }
+.eyebrow { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-3); }
+.rangeCard[data-state="accepted"] .eyebrow { color: var(--green-dark); }
+.rangeBig { margin: 4px 0 0; font-size: 32px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.rangeTo { font-size: 22px; font-weight: 500; color: var(--text-4); }
+.when { margin: 4px 0 0; font-size: 13px; color: var(--text-2); }
+.split { display: flex; gap: 2px; height: 12px; overflow: hidden; border-radius: var(--radius-pill); }
+.splitEstimate { background: var(--green-solid); }
+.splitRoom { background: repeating-linear-gradient(135deg, var(--green-tint-2) 0 5px, var(--green-tint) 5px 10px); }
+.splitLabels { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.cardActions { display: grid; gap: 8px; }
+.cardActions :global(.btn) { width: 100%; }
+.bigButton { min-height: 48px; font-size: 15px; }
+.smallPrint { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
+.select { width: 100%; }
+.fieldLabel { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.quiet { justify-self: start; }
+.changedNote { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--req-tint); color: var(--req-text); font-size: 13px; line-height: 1.45; }
+.changedNote svg { flex: none; margin-top: 1px; }
+
+/* A yes the homeowner gave on the phone or in person, marked by the office. */
+.agreedRange { margin: 0; font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.agreedRange strong { color: var(--ink); font-weight: 700; }
+.agreedNote { min-height: 76px; line-height: 1.5; }
+
+/* ---------- The range and site visit steps ---------- */
+.stepBody { display: grid; gap: 14px; }
+.stepLead { margin: 0; font-size: 14.5px; line-height: 1.5; }
+.stepLead strong { font-weight: 700; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.yes { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--radius-card); background: var(--green-tint); color: var(--green-dark); }
+.yes p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--ink); }
+.yes strong { color: var(--green-dark); }
+.yesIcon { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--green-solid); color: #fff; }
+@media (max-width: 600px) {
+  .actions :global(.btn) { flex: 1 1 100%; }
+}
+
+/* ---------- Signed ---------- */
+.signed { display: grid; gap: 16px; }
+.banner { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; border: 1px solid var(--green-tint-2); border-radius: var(--radius-card); background: var(--green-tint); }
+.bannerIcon { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 50%; background: var(--green-solid); color: #fff; }
+.bannerText { display: grid; gap: 4px; min-width: 0; }
+.bannerText strong { font-size: 16px; color: var(--ink); }
+.bannerText p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--text-2); }
+.bannerActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+
+.panel { display: grid; gap: 12px; padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.panel h3 { margin: 0; font-size: 17px; font-weight: 700; }
+@media (max-width: 600px) {
+  .panel { padding: 16px; }
+}
+.compare { display: grid; }
+.compareRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: 14px; }
+.compareRow > :last-child { font-variant-numeric: tabular-nums; text-align: right; }
+.compareMuted { color: var(--text-2); }
+.compareTotal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 0 2px; font-size: 15px; }
+.compareTotal > span:first-child { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.compareTotal > strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.changes { padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.marginLine { display: flex; align-items: center; gap: 8px; margin: 0; padding-top: 6px; font-size: 12.5px; color: var(--text-2); }
+.marginLine[data-low] strong { color: var(--warning); }
+
+.doc { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
+.thumb { flex: none; width: 164px; height: 212px; overflow: hidden; border-radius: 4px; background: #fff; box-shadow: 0 1px 3px rgba(15, 42, 53, 0.12), 0 6px 14px -6px rgba(15, 42, 53, 0.24); cursor: zoom-in; }
+.docText { display: grid; gap: 10px; flex: 1 1 240px; min-width: 0; }
+.docText p { margin: 3px 0 0; font-size: 14px; color: var(--text-2); }
+.docSheet { max-width: 816px; margin: 0 auto; }
+
+/* ---------- Sending it ---------- */
+.message { min-height: 120px; line-height: 1.5; }

@@ -125,6 +125,115 @@
       "unit": "ea",
       "unit_price": 450,
       "unit_cost": 325
+    },
+    {
+      "name": "Ridge vent",
+      "category": "Ventilation",
+      "unit": "ft",
+      "unit_price": 9,
+      "unit_cost": 5.1,
+      "formula_name": "Ridge vent"
+    },
+    {
+      "name": "Box vent",
+      "category": "Ventilation",
+      "unit": "ea",
+      "unit_price": 65,
+      "unit_cost": 38
+    },
+    {
+      "name": "Power vent",
+      "category": "Ventilation",
+      "unit": "ea",
+      "unit_price": 425,
+      "unit_cost": 260
+    },
+    {
+      "name": "Ice and water shield",
+      "category": "Roof extras",
+      "unit": "ft",
+      "unit_price": 4,
+      "unit_cost": 2.2,
+      "formula_name": "Ice and water shield"
+    },
+    {
+      "name": "Rotten decking",
+      "category": "Roof extras",
+      "unit": "sheet",
+      "unit_price": 95,
+      "unit_cost": 53.4
+    },
+    {
+      "name": "Chimney flashing",
+      "category": "Edges and flashing",
+      "unit": "ea",
+      "unit_price": 650,
+      "unit_cost": 336
+    },
+    {
+      "name": "Chimney cricket",
+      "category": "Edges and flashing",
+      "unit": "ea",
+      "unit_price": 450,
+      "unit_cost": 260
+    },
+    {
+      "name": "Reflash a skylight",
+      "category": "Edges and flashing",
+      "unit": "ea",
+      "unit_price": 275,
+      "unit_cost": 120
+    },
+    {
+      "name": "New skylight",
+      "category": "Edges and flashing",
+      "unit": "ea",
+      "unit_price": 1150,
+      "unit_cost": 700
+    },
+    {
+      "name": "Two stories or higher",
+      "category": "Roof extras",
+      "unit": "square",
+      "unit_price": 40,
+      "unit_cost": 22,
+      "formula_name": "Roof squares without waste"
+    },
+    {
+      "name": "Low-slope section",
+      "category": "Roof extras",
+      "unit": "square",
+      "unit_price": 650,
+      "unit_cost": 380
+    },
+    {
+      "name": "Gutters off and back on",
+      "category": "Gutters",
+      "unit": "ft",
+      "unit_price": 3,
+      "unit_cost": 1.4,
+      "formula_name": "Eaves"
+    },
+    {
+      "name": "Satellite dish off and back",
+      "category": "Roof extras",
+      "unit": "ea",
+      "unit_price": 150,
+      "unit_cost": 60
+    },
+    {
+      "name": "Solar panels off and back",
+      "category": "Roof extras",
+      "unit": "panel",
+      "unit_price": 250,
+      "unit_cost": 120
+    },
+    {
+      "name": "Building permit",
+      "category": "Permits and fees",
+      "unit": "ea",
+      "unit_price": 250,
+      "unit_cost": 250
     }
   ],
   "job_types": [
@@ -168,6 +277,159 @@
     {
       "name": "Steep squares",
       "formula": "steep_squares"
+    },
+    {
+      "name": "Ridge vent",
+      "formula": "ridge_ft"
+    },
+    {
+      "name": "Ice and water shield",
+      "formula": "eave_ft + valley_ft"
+    },
+    {
+      "name": "Eaves",
+      "formula": "eave_ft"
+    }
+  ],
+  "packages": [
+    {
+      "name": "Architectural shingle",
+      "style": "shingle",
+      "roof": "Architectural shingle roof",
+      "default": true,
+      "included": [
+        {
+          "service": "Tear-off and disposal"
+        },
+        {
+          "service": "Drip edge"
+        },
+        {
+          "service": "Ridge cap"
+        },
+        {
+          "service": "Valley flashing"
+        },
+        {
+          "service": "Steep roof charge"
+        },
+        {
+          "service": "Pipe boot",
+          "quantity": 3
+        },
+        {
+          "service": "Dumpster",
+          "quantity": 1
+        }
+      ],
+      "quick": [
+        "Ridge vent",
+        "Ice and water shield",
+        "Chimney flashing",
+        "Rotten decking",
+        "Reflash a skylight",
+        "Chimney cricket",
+        "Box vent",
+        "Gutters off and back on",
+        "Satellite dish off and back",
+        "Two stories or higher",
+        "Low-slope section",
+        "Building permit",
+        "New skylight",
+        "Power vent",
+        "Solar panels off and back"
+      ]
+    },
+    {
+      "name": "Designer shingle",
+      "style": "designer",
+      "roof": "Designer shingle roof",
+      "included": [
+        {
+          "service": "Tear-off and disposal"
+        },
+        {
+          "service": "Drip edge"
+        },
+        {
+          "service": "Ridge cap"
+        },
+        {
+          "service": "Valley flashing"
+        },
+        {
+          "service": "Steep roof charge"
+        },
+        {
+          "service": "Pipe boot",
+          "quantity": 3
+        },
+        {
+          "service": "Dumpster",
+          "quantity": 1
+        }
+      ],
+      "quick": [
+        "Ridge vent",
+        "Ice and water shield",
+        "Chimney flashing",
+        "Rotten decking",
+        "Reflash a skylight",
+        "Chimney cricket",
+        "Box vent",
+        "Gutters off and back on",
+        "Satellite dish off and back",
+        "Two stories or higher",
+        "Low-slope section",
+        "Building permit",
+        "New skylight",
+        "Power vent",
+        "Solar panels off and back"
+      ]
+    },
+    {
+      "name": "Standing-seam metal",
+      "style": "metal",
+      "roof": "Standing-seam metal roof",
+      "included": [
+        {
+          "service": "Tear-off and disposal"
+        },
+        {
+          "service": "Drip edge"
+        },
+        {
+          "service": "Ridge cap"
+        },
+        {
+          "service": "Valley flashing"
+        },
+        {
+          "service": "Steep roof charge"
+        },
+        {
+          "service": "Pipe boot",
+          "quantity": 3
+        },
+        {
+          "service": "Dumpster",
+          "quantity": 1
+        }
+      ],
+      "quick": [
+        "Ice and water shield",
+        "Chimney flashing",
+        "Rotten decking",
+        "Reflash a skylight",
+        "Chimney cricket",
+        "Gutters off and back on",
+        "Satellite dish off and back",
+        "Two stories or higher",
+        "Low-slope section",
+        "Building permit",
+        "New skylight",
+        "Solar panels off and back"
+      ]
     }
   ],
   "checklists": [

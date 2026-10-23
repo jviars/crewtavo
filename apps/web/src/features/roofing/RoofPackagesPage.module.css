@@ -1,0 +1,171 @@
+/* Roofing → Packages: the list, the price range and ABC cards beside it, and one package's editor.
+   Also the package cards a new roof estimate starts from (PackagePicker). */
+
+.tabs { margin-top: -10px; }
+
+.layout { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.side { flex: 1 1 260px; max-width: 340px; min-width: 0; display: grid; gap: 16px; }
+.sideCards { display: grid; gap: 16px; min-width: 0; }
+.main { flex: 999 1 520px; min-width: 0; }
+/* One column on a phone or a tablet held upright: the packages, the one picked, then the settings. */
+@media (max-width: 900px) {
+  .layout { flex-direction: column; align-items: stretch; gap: 20px; }
+  .side { display: contents; }
+  .main { order: 1; flex: none; }
+  .sideCards { order: 2; }
+}
+
+/* The package list */
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pkg {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 68px; padding: 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.pkg:hover { border-color: var(--border-strong); }
+.pkg[aria-current="true"] { border-color: var(--green); box-shadow: var(--ring); }
+.pkgText { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.pkgText strong { font-size: 15px; overflow-wrap: anywhere; }
+.pkgText span { font-size: 13px; color: var(--text-2); }
+.addPkg {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; padding: 12px;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-card); background: transparent; color: var(--text-2);
+  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.addPkg:hover { color: var(--ink); background: var(--fill); }
+
+.art { flex: none; display: block; border-radius: 8px; }
+.banner { display: block; }
+
+/* The cards under the list */
+.sideCard { display: grid; gap: 12px; }
+.sideHead { display: grid; gap: 4px; }
+.sideCard h2 { margin: 0; font-size: 15px; font-weight: 800; }
+.sideHead p, .sideText { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.rangeFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.rangeFields :global(.field) { min-width: 0; }
+.ink { color: var(--ink); }
+.abc {
+  display: inline-block; flex: none; margin-right: 6px; padding: 2px 5px;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink);
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em; line-height: 1.2;
+}
+
+/* One package */
+.editor { display: flex; flex-direction: column; }
+.part { display: grid; gap: 14px; padding: 20px 22px; min-width: 0; }
+.part + .part { border-top: 1px solid var(--divider); }
+@media (max-width: 600px) {
+  .part { padding: 16px; }
+}
+.partHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.partHead h2 { margin: 0; font-size: 17px; font-weight: 800; }
+.partHead p { margin: 3px 0 0; font-size: 13px; color: var(--text-2); }
+.title { margin: 0; font-size: 20px; font-weight: 800; }
+.note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+
+.head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
+.nameField { flex: 1 1 260px; }
+.nameField :global(.input) { height: 42px; font-size: 16px; font-weight: 700; }
+.headActions { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.styleRow { display: flex; flex-wrap: wrap; gap: 8px; }
+.styleBtn {
+  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 7px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.styleBtn .art { border-radius: 6px; }
+.styleBtn:hover { color: var(--ink); }
+.styleBtn[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); color: var(--ink); }
+
+/* Price a square */
+.priceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+.bigMoney :global(.input) { height: 44px; font-size: 18px; font-weight: 800; }
+.bigMoney :global(.addon) { font-size: 16px; }
+.bigPrice { font-size: 20px; font-weight: 800; }
+.costLine { display: grid; gap: 2px; font-size: 13.5px; color: var(--text-2); }
+.costLine strong { color: var(--ink); }
+.sum { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 14px; }
+.term { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--divider); border-radius: 10px; background: var(--fill); }
+.term > span:first-child { display: flex; align-items: center; font-size: 12px; color: var(--text-3); }
+.term strong { font-variant-numeric: tabular-nums; }
+.op { color: var(--text-4); font-weight: 800; }
+.total { border-color: var(--green); background: var(--green-tint); }
+.total > span:first-child { color: var(--green-dark); font-weight: 700; }
+.total strong { font-size: 18px; }
+
+/* Always on this roof */
+.addSelect { width: auto; max-width: 100%; }
+.rows { container-type: inline-size; border: 1px solid var(--divider); border-radius: 10px; overflow: hidden; }
+.rowList { list-style: none; margin: 0; padding: 0; }
+.row {
+  display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 100px minmax(0, 1.1fr) 56px 36px;
+  grid-template-areas: "name how price cost margin remove";
+  gap: 12px; align-items: center; min-height: 52px; padding: 8px 14px; border-top: 1px solid var(--row-divider); font-size: 14px;
+}
+.rowList > .row:first-child { border-top: 0; }
+.rowHead { min-height: 0; padding: 9px 14px; border-top: 0; border-bottom: 1px solid var(--row-divider); background: var(--fill); font-size: 12px; font-weight: 700; color: var(--text-3); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sub { display: block; margin-top: 1px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.cellName { grid-area: name; min-width: 0; overflow-wrap: anywhere; }
+.cellName strong { font-weight: 600; }
+.cellHow { grid-area: how; min-width: 0; font-size: 13px; color: var(--text-2); }
+.cellPrice { grid-area: price; }
+.cellCost { grid-area: cost; min-width: 0; font-variant-numeric: tabular-nums; }
+.cellMargin { grid-area: margin; font-weight: 700; }
+.cellRemove { grid-area: remove; display: flex; justify-content: flex-end; }
+.count { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.count :global(.input) { width: 72px; }
+@container (max-width: 640px) {
+  .rowHead { display: none; }
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "name name remove" "how how how" "price margin margin" "cost cost cost";
+    gap: 4px 12px; padding: 12px 14px;
+  }
+  .cellPrice, .cellMargin { text-align: left; }
+  .cellPrice::before, .cellCost::before, .cellMargin::before { content: attr(data-label) ": "; font-weight: 500; color: var(--text-3); }
+  .cellCost { font-size: 13px; }
+}
+
+/* Quick adds */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px 0 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+button.quick:hover { color: var(--ink); border-color: var(--border-strong); }
+.quick :global(svg) { color: var(--text-4); }
+.quick small { font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+.quick[aria-pressed="true"], .quick[data-on] { border-color: var(--green); background: var(--green-tint); color: var(--ink); }
+.quick[aria-pressed="true"] :global(svg), .quick[data-on] :global(svg) { color: var(--green); }
+span.quick { cursor: default; }
+
+/* The new roof estimate's package cards */
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 12px; }
+.pick {
+  position: relative; display: flex; flex-direction: column; padding: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink);
+  font: inherit; font-weight: 400; text-align: left; cursor: pointer;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.pick:hover { border-color: var(--border-strong); }
+.pick[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); }
+.pickText { display: grid; gap: 4px; padding: 12px 14px 14px; }
+.pickText strong { font-size: 15px; }
+.pickText span { font-size: 13.5px; color: var(--text-2); }
+.pickText small { font-size: 12.5px; color: var(--text-3); }
+.pickCheck {
+  position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 50%; background: var(--green-solid, var(--green)); color: #fff; box-shadow: 0 0 0 3px var(--surface);
+}
+/* On a phone the cards stack, so the picture moves to the side. */
+@media (max-width: 600px) {
+  .pick { flex-direction: row; align-items: stretch; }
+  .pick .banner { flex: none; width: 72px; height: auto; }
+  .pickText { padding: 12px 44px 12px 14px; }
+}

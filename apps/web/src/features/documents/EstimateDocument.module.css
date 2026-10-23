@@ -1,0 +1,142 @@
+/*
+ * The estimate or invoice as a letter-size sheet of paper (816 × 1056 px is 8.5 × 11 in at 96 dpi).
+ * It's paper in every theme and in print, so its colors are literal: white page, ink text, and the
+ * template's color (--doc-color) for the rules, the name and the totals.
+ */
+.page {
+  --doc-ink: #0f2a35;
+  --doc-text-2: #4e6169;
+  --doc-text-3: #5f6f76;
+  --doc-rule: #ecebe6;
+  --doc-row: #f1f0ec;
+  --doc-strip: #f6f5f1;
+  --doc-pad: 44px;
+  box-sizing: border-box;
+  width: 816px;
+  min-height: 1056px;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: var(--doc-ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+  overflow-wrap: anywhere;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.page *,
+.page *::before,
+.page *::after { box-sizing: border-box; }
+
+/* ---- Letterhead -------------------------------------------------------------------------- */
+.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.name { font-size: 22px; font-weight: 700; line-height: 1.15; color: var(--doc-text-color); overflow-wrap: break-word; }
+.tagline { margin-top: 2px; font-size: 12px; color: var(--doc-text-2); }
+.details { flex: none; max-width: 46%; text-align: right; font-size: 11.5px; line-height: 1.65; color: var(--doc-text-2); }
+.license { color: var(--doc-ink); font-weight: 600; }
+.logo { display: block; width: auto; height: auto; max-height: 56px; max-width: 200px; object-fit: contain; }
+.monogram {
+  flex: none; display: grid; place-items: center; width: 50px; height: 50px; border-radius: 10px;
+  background: var(--doc-color); color: var(--doc-on-color); font-size: 18px; font-weight: 700; letter-spacing: 0.02em;
+}
+
+.classic { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 34px var(--doc-pad) 22px; border-bottom: 3px solid var(--doc-color); }
+
+.centered { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 32px var(--doc-pad) 18px; text-align: center; border-bottom: 1px solid #e3e2dd; }
+.centered .name { font-size: 24px; letter-spacing: 0.01em; }
+.centered .tagline { text-transform: uppercase; letter-spacing: 0.14em; }
+.centered .logo { max-height: 60px; max-width: 240px; }
+.detailsLine { padding-top: 4px; font-size: 11.5px; color: var(--doc-text-2); }
+.bar { width: 64px; height: 3px; margin-top: 8px; border-radius: 2px; background: var(--doc-color); }
+
+.banner { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 26px var(--doc-pad); background: var(--doc-color); color: var(--doc-on-color); }
+.banner .name,
+.banner .details,
+.banner .license { color: inherit; }
+.banner .tagline { color: inherit; opacity: 0.85; }
+.banner .details > div { opacity: 0.9; }
+.banner .details > .license { opacity: 1; font-weight: 700; }
+.tile { flex: none; display: grid; place-items: center; min-width: 56px; height: 56px; padding: 6px 10px; border-radius: 12px; background: #fff; }
+.tile .logo { max-height: 44px; max-width: 170px; }
+.tileInitials { font-size: 18px; font-weight: 700; color: var(--doc-text-color); }
+
+/* ---- Body -------------------------------------------------------------------------------- */
+.body { flex: 1; display: flex; flex-direction: column; gap: 20px; padding: 26px var(--doc-pad) 20px; }
+.parties { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+.eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--doc-text-3); }
+.clientName { margin-top: 5px; font-size: 14px; font-weight: 600; }
+.clientLines { font-size: 12.5px; line-height: 1.55; color: var(--doc-text-2); }
+.heading { flex: none; text-align: right; }
+.kind { font-size: 22px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--doc-text-color); }
+.meta { font-size: 12.5px; line-height: 1.6; color: var(--doc-text-2); }
+
+.strip { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 10px 14px; border-radius: 6px; background: var(--doc-strip); font-size: 12.5px; color: var(--doc-text-2); }
+.strip strong { color: var(--doc-ink); }
+
+.lines { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.lines thead { display: table-header-group; }
+.lines th {
+  padding: 0 0 8px; border-bottom: 1.5px solid var(--doc-ink); text-align: left;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--doc-text-2);
+}
+.lines td { padding: 8px 0; border-bottom: 1px solid var(--doc-row); vertical-align: baseline; }
+.lines th + th,
+.lines td + td { padding-left: 10px; }
+.lines tr { break-inside: avoid; }
+.colQty { width: 84px; }
+.colPrice { width: 92px; }
+.colAmount { width: 100px; }
+.num { text-align: right !important; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.muted { color: var(--doc-text-2); }
+.amount { font-weight: 600; }
+.lineDescription { display: block; margin-top: 1px; font-size: 11.5px; color: var(--doc-text-3); }
+.empty { padding: 14px 0; color: var(--doc-text-3); }
+
+.totals { display: grid; grid-template-columns: auto minmax(110px, auto); justify-content: end; gap: 6px 24px; margin: 0; font-size: 13px; text-align: right; break-inside: avoid; }
+.totals dt { color: var(--doc-text-2); }
+.totals dd { margin: 0; font-variant-numeric: tabular-nums; }
+.totals .grand { font-size: 15px; font-weight: 700; color: var(--doc-text-color); }
+
+.notes { font-size: 12px; line-height: 1.6; white-space: pre-line; break-inside: avoid; }
+.notes .eyebrow { margin-bottom: 4px; }
+.terms { padding-top: 14px; border-top: 1px solid var(--doc-rule); font-size: 11px; line-height: 1.6; white-space: pre-line; color: var(--doc-text-2); break-inside: avoid; }
+
+/* ---- Signatures -------------------------------------------------------------------------- */
+.signatures { display: flex; gap: 36px; margin-top: auto; padding-top: 18px; break-inside: avoid; }
+.sign { flex: 1; min-width: 0; }
+.signLine { position: relative; height: 56px; border-bottom: 1px solid var(--doc-ink); }
+/* The signature sits on the line, the way ink does on paper. */
+.signImage { position: absolute; left: 0; bottom: -10px; height: 64px; width: auto; max-width: 80%; object-fit: contain; object-position: left bottom; }
+.signDate { position: absolute; right: 0; bottom: 5px; font-size: 12px; }
+.signUnder { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--doc-text-2); }
+.printed { margin-top: 2px; font-size: 12px; font-weight: 600; }
+
+.footer { display: flex; justify-content: space-between; gap: 16px; margin: 0 var(--doc-pad); padding: 12px 0 20px; border-top: 2px solid var(--doc-color); font-size: 10.5px; color: var(--doc-text-3); }
+.footer span:last-child:not(:first-child) { flex: none; }
+
+/* ---- On screen: the sheet, scaled down to fit ------------------------------------------- */
+.sheet { width: 100%; min-width: 0; display: flex; justify-content: center; }
+.frame { flex: none; }
+.paper {
+  width: 816px; background: #fff; border-radius: 4px; overflow: hidden; transform-origin: top left;
+  box-shadow: 0 1px 3px rgba(15, 42, 53, 0.08), 0 16px 40px -16px rgba(15, 42, 53, 0.3);
+}
+
+/* ---- In print: the document alone on letter paper (PrintableDocument) ------------------- */
+.printRoot .page { width: 100%; min-height: 0; }
+@media screen {
+  /* Laid out at the printed width (8.5 in less the margins) to count its pages, but never seen. */
+  .printRoot { position: fixed; top: 0; left: -10000px; width: 7.7in; visibility: hidden; pointer-events: none; }
+}
+@media print {
+  .printRoot { position: static; width: auto; visibility: visible; }
+  /*
+   * The page fills the printed page (11 in less the 0.4 in margins), so a one-page estimate has its
+   * signatures and footer at the bottom, like the sheet on screen. A hair short, and never taller
+   * than the page the browser actually prints on, so it can't spill onto a blank second page.
+   */
+  .printRoot .page { min-height: min(calc(10.2in - 4px), calc(100vh - 4px)); }
+  /* The footer and page numbers print in the page margins instead, on every page. */
+  .printRoot[data-page-footer] .footer { display: none; }
+}

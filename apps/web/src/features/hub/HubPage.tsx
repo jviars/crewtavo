@@ -2,74 +2,58 @@
  * Client Hub (the customer portal): what a client sees from a link. No account needed; the link
  * is signed and expires.
  *   client  - their account: what's waiting on them, the next visit, history, request work
- *   quote   - choose optional items, approve with their name, or ask for changes
+ *   quote   - choose optional items, approve with their name, or ask for changes; a roof estimate
+ *             sent as a price range asks "Yes, send someone out" instead; a signed one shows the
+ *             signed estimate itself
  *   invoice - view and pay (with an optional tip)
- * Add ?print=1 to print or save a PDF.
+ * Quotes and invoices print as the business's estimate template. Add ?print=1 to print or save a PDF.
  */
+import { greetingName } from "@crewtavo/core/automations";
 import { lineTotal, optionLabels, quoteTotals } from "@crewtavo/core/money";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { BrandMark } from "@/components/shell/BrandMark";
+import { licenseLine, websiteLabel } from "@/features/documents/build";
+import { DocumentSheet, PrintableDocument } from "@/features/documents/EstimateDocument";
 import { ApiError } from "@/lib/api";
-import { dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { dateIn, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
+import {
+  credentialLine,
+  hubAccent,
+  hubLetterhead,
+  hubTemplate,
+  invoiceDocument,
+  maybePrice,
+  measuredLine,
+  measuredRoof,
+  packageLabel,
+  phoneHref,
+  propertyLine,
+  quoteDocument,
+  rangeDates,
+  roofTiles,
+  trustBadges,
+  websiteHref,
+  type HubCompany,
+  type HubDrawing,
+  type HubLine,
+  type HubPromoInfo,
+  type InvoiceView,
+  type MeasuredRoof,
+  type QuoteView,
+  type TrustBadge,
+} from "./document";
+import styles from "./range.module.css";
 import { SignaturePad } from "../field/SignaturePad";
 
-interface HubLine {
-  id?: string;
-  name: string;
-  description: string | null;
-  quantity: number;
-  unit: string;
-  unit_price: number;
-  taxable?: boolean;
-  optional?: boolean;
-  selected?: boolean;
-  /** Optional lines that share a group are one choice (Good, Better, Best): the client picks one. */
-  option_group?: string | null;
-}
-interface Company { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null; logo?: string | null }
-/** A map drawing the office chose to show the client, with the sizes measured on it. */
-interface HubDrawing {
-  id: string;
-  title: string;
-  has_picture: boolean;
-  sections: Array<{ label: string; kind: string; value: number; unit: string; pitch?: string }>;
-  total_area_sqft: number;
-  total_length_ft: number;
-  roofing_squares: number | null;
-  roof_pitch: string | null;
-  imagery: string | null;
-}
-interface QuoteView {
-  kind: "quote";
-  drawings?: HubDrawing[];
-  preview?: boolean;
-  home: string | null;
-  company: Company;
-  quote: { id: string; number: number; status: string; title: string; message: string | null; change_order_for?: string | null; discount_amount: number; promo: HubPromoInfo; tax_rate: number; deposit_amount: number; valid_until: string | null; approved_at: string | null; client: { display_name: string } | null; property: { line1: string; city: string | null } | null; lines: HubLine[] };
-}
-interface InvoiceView {
-  kind: "invoice";
-  drawings?: HubDrawing[];
-  preview?: boolean;
-  home: string | null;
-  company: Company;
-  can_pay: boolean;
-  /** A bank payment through Stripe is on its way; asking again would charge twice. */
-  processing?: boolean;
-  /** Made in Stripe, so it's paid exactly as billed there (no promo codes). */
-  from_stripe?: boolean;
-  tips: boolean;
-  invoice: { id: string; number: number; status: string; subject: string | null; notes: string | null; issued_on: string; due_on: string | null; subtotal: number; discount_amount: number; tax_amount: number; total: number; retainage_amount: number; amount_paid: number; balance_due: number; promo: HubPromoInfo; client: { display_name: string } | null; lines: HubLine[]; payments: Array<{ amount: number; tip_amount: number; received_at: string }> };
-}
 type View = QuoteView | InvoiceView | ClientView;
-type HubPromoInfo = { code: string; kind: string; value: number; description: string | null } | null;
 
 async function hubFetch<T>(path: string, body?: unknown, method?: "DELETE"): Promise<T> {
   let res: Response;
@@ -86,14 +70,57 @@ async function hubFetch<T>(path: string, body?: unknown, method?: "DELETE"): Pro
   return json as T;
 }
 
+/**
+ * Printing a quote or invoice prints the business's template (PrintableDocument), which is only put
+ * on the page once someone prints: from the print button, ?print=1, or the browser's own Print (put
+ * in place before the browser lays the page out). It stays after, since some browsers say printing
+ * is over before they've made the copy.
+ */
+function usePrintMode() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    // The browser lays the page out for printing right after this, so the document goes in now.
+    const before = () => flushSync(() => setOn(true));
+    window.addEventListener("beforeprint", before);
+    return () => window.removeEventListener("beforeprint", before);
+  }, []);
+  const print = useCallback(() => {
+    setOn(true);
+    void printWhenReady();
+  }, []);
+  return { on, print };
+}
+
+/**
+ * Print once the page is ready to: the document on it, the fonts loaded and every picture (the
+ * logo, signatures, the roof drawing) loaded or given up on, so the PDF isn't missing any. Waits 5
+ * seconds at most.
+ */
+async function printWhenReady() {
+  // Two frames: the document that printing puts on the page is drawn by then.
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const pictures = Array.from(document.images).filter((img) => !img.complete);
+  await Promise.race([
+    Promise.all([
+      document.fonts?.ready.catch(() => undefined),
+      ...pictures.map((img) => new Promise((resolve) => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+      })),
+    ]),
+    new Promise((resolve) => setTimeout(resolve, 5000)),
+  ]);
+  window.print();
+}
+
 /** "Acme Paving" -> "AP". */
 const monogram = (name: string) => (name.split(/\s+/).filter((w) => /^[A-Za-z0-9]/.test(w)).slice(0, 2).map((w) => w[0]).join("") || name.slice(0, 2)).toUpperCase();
 
 /** The company's logo, or its initials on its color when it has none (or the logo won't load). */
-function CompanyMark({ company }: { company: Company }) {
+function CompanyMark({ company, logoClass = "hub-logo", tileClass = "tile" }: { company: Pick<HubCompany, "name" | "logo">; logoClass?: string; tileClass?: string }) {
   const [broken, setBroken] = useState(false);
-  if (company.logo && !broken) return <img className="hub-logo" src={company.logo} alt="" onError={() => setBroken(true)} />;
-  return <span className="tile" aria-hidden="true">{monogram(company.name)}</span>;
+  if (company.logo && !broken) return <img className={logoClass} src={company.logo} alt="" onError={() => setBroken(true)} />;
+  return <span className={tileClass} aria-hidden="true">{monogram(company.name)}</span>;
 }
 
 /** Text color that reads on the company's color. */
@@ -114,20 +141,42 @@ export function HubPage() {
   const printing = params.get("print") === "1";
   const view = useQuery({ queryKey: ["hub", token], queryFn: () => hubFetch<View>(token), retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 2 });
   const [messaging, setMessaging] = useState<{ visit?: PortalVisit } | null>(null);
+  const { on: printable, print } = usePrintMode();
+  const printed = useRef(false);
 
   useEffect(() => {
-    if (view.data) document.title = `${view.data.kind === "quote" ? `Quote #${view.data.quote.number}` : view.data.kind === "invoice" ? `Invoice #${view.data.invoice.number}` : "Your account"} · ${view.data.company.name}`;
-    if (view.data && printing) setTimeout(() => window.print(), 500);
-  }, [view.data, printing]);
+    if (view.data) document.title = `${view.data.kind === "quote" ? `${view.data.quote.range ? "Roof estimate" : "Quote"} #${view.data.quote.number}` : view.data.kind === "invoice" ? `Invoice #${view.data.invoice.number}` : "Your account"} · ${view.data.company.name}`;
+    // Once: a refresh of the page's data (after paying, say) doesn't print it again.
+    if (view.data && printing && !printed.current) {
+      printed.current = true;
+      print();
+    }
+  }, [view.data, printing, print]);
 
   const d = view.data;
   const brand = d?.company.branding?.color || "#3b7d23";
+  const onBrand = inkOn(brand);
   const preview = Boolean(d && "preview" in d && d.preview);
   const home = d && d.kind !== "client" ? d.home : null;
   const clientName = d ? (d.kind === "client" ? d.client.name : d.kind === "quote" ? d.quote.client?.display_name : d.invoice.client?.display_name) : null;
 
+  // A roof estimate out as a price range is a page of its own, on the business's letterhead.
+  if (d?.kind === "quote" && d.quote.range) {
+    return (
+      <>
+        <RangeHub token={token} data={d} onChanged={() => view.refetch()} onAsk={() => setMessaging({})} onPrint={print} />
+        {messaging && <MessageDialog token={token} company={d.company.name} hubFetch={hubFetch} onClose={() => setMessaging(null)} />}
+      </>
+    );
+  }
+
   return (
-    <div className="public-page hub" data-printing={printing || undefined} style={{ ["--brand" as string]: brand, ["--on-brand" as string]: inkOn(brand) }}>
+    <div
+      className="public-page hub"
+      data-printing={printing || undefined}
+      // --brand-text: the brand color as text on white, or ink when it's too light to read there.
+      style={{ ["--brand" as string]: brand, ["--on-brand" as string]: onBrand, ["--brand-text" as string]: onBrand === "#fff" ? brand : "var(--ink)" }}
+    >
       {d && (
         <header className="hub-header">
           <div className="hub-header-inner">
@@ -144,7 +193,7 @@ export function HubPage() {
             )}
             {d.company.phone && <a className="hub-icon-btn no-print" href={`tel:${d.company.phone}`} aria-label={`Call ${d.company.name}`}><Icon name="phone" size={19} /></a>}
             {!preview && <button type="button" className="hub-icon-btn no-print" onClick={() => setMessaging({})} aria-label={`Message ${d.company.name}`}><Icon name="messages" size={19} /></button>}
-            {d.kind !== "client" && <button type="button" className="hub-icon-btn no-print" onClick={() => window.print()} aria-label="Print or save as PDF"><Icon name="printer" size={19} /></button>}
+            {d.kind !== "client" && <button type="button" className="hub-icon-btn no-print" onClick={print} aria-label="Print or save as PDF"><Icon name="printer" size={19} /></button>}
           </div>
         </header>
       )}
@@ -164,8 +213,8 @@ export function HubPage() {
           <>
             {preview && <div className="callout callout-info no-print"><Icon name="eye" size={18} /><div className="grow">Preview: this is what your client sees.</div></div>}
             {home && <a className="hub-back no-print" href={home}><Icon name="chevronLeft" size={16} />Your account</a>}
-            {d.kind === "quote" && <QuoteHub token={token} data={d} onChanged={() => view.refetch()} />}
-            {d.kind === "invoice" && <InvoiceHub token={token} data={d} onChanged={() => view.refetch()} />}
+            {d.kind === "quote" && <QuoteHub token={token} data={d} onChanged={() => view.refetch()} printing={printable} onPrint={print} />}
+            {d.kind === "invoice" && <InvoiceHub token={token} data={d} onChanged={() => view.refetch()} printing={printable} />}
             {d.kind === "client" && <ClientPortal token={token} data={d} hubFetch={hubFetch} onMessage={(visit) => setMessaging({ visit })} />}
             <footer className="public-foot hub-foot">
               <span><Icon name="lock" size={12} /> Private link{clientName ? ` for ${clientName}` : ""}. Please don't share it.</span>
@@ -233,17 +282,320 @@ function HubSkeleton() {
   );
 }
 
-function Done({ title, children }: { title: string; children?: ReactNode }) {
+function Done({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }}>
       <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
       <h2 style={{ fontSize: 20, fontWeight: 800 }}>{title}</h2>
       {children && <p className="muted" style={{ margin: 0, maxWidth: 440 }}>{children}</p>}
+      {action && <div className="no-print" style={{ marginTop: 6 }}>{action}</div>}
     </div>
   );
 }
 
-function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; onChanged: () => void }) {
+/** A quote: signed, or waiting for the client's answer. One out as a price range is RangeHub, its own page. */
+function QuoteHub({ token, data, onChanged, printing, onPrint }: { token: string; data: QuoteView; onChanged: () => void; printing: boolean; onPrint: () => void }) {
+  if (data.quote.status === "approved" || data.quote.status === "converted") return <SignedQuote token={token} data={data} printing={printing} onPrint={onPrint} />;
+  // A price range that was turned down (marked lost or archived) keeps its exact price off the page.
+  if (data.quote.total == null) {
+    return (
+      <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 800 }}>This estimate isn't open anymore</h2>
+        <p className="muted" style={{ margin: 0, maxWidth: 440 }}>Still thinking about it? Send {data.company.name} a message with the button at the top, and they'll get back to you.</p>
+      </div>
+    );
+  }
+  return <OpenQuote token={token} data={data} onChanged={onChanged} printing={printing} />;
+}
+
+/**
+ * A roof estimate sent as a price range: the business's letterhead, the range, the roof as measured,
+ * what's in it and what could change it, and "Yes, send someone out", which tells the office to book
+ * the visit. Drawn in the estimate template's color, so it matches the paper they sign later. On a
+ * computer the details are on the left and the price and buttons on the right; on a phone it's one
+ * column (range.module.css). The exact price never reaches this page.
+ */
+function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; data: QuoteView; onChanged: () => void; onAsk: () => void; onPrint: () => void }) {
+  const q = data.quote;
+  const range = q.range!;
+  const company = data.company;
+  const tz = hubZone(company);
+  const today = todayIn(tz);
+  const template = hubTemplate(data);
+  const accent = hubAccent(data);
+  const clientName = q.client?.display_name.trim() ?? "";
+  const first = clientName ? greetingName(clientName) : null;
+  const place = propertyLine(q.property);
+  const dates = rangeDates(data, today);
+  const roof = measuredRoof(data.drawings);
+  const badges = trustBadges(template);
+  const credits = credentialLine(template);
+  const tagline = template.tagline.trim();
+  const license = template.show_license && template.license.trim() ? licenseLine(template.license) : null;
+  const phone = company.phone?.trim() || null;
+  const email = company.email?.trim() || null;
+  const website = company.website?.trim() || null;
+  const address = (company.address ?? []).join(", ");
+  const roofType = packageLabel(q.package?.name);
+  const [previewNote, setPreviewNote] = useState(false);
+  const thanks = useRef<HTMLDivElement>(null);
+  const accept = useMutation({
+    mutationFn: () => hubFetch<{ accepted_at: string }>(`${token}/accept-range`, {}),
+    onSuccess: onChanged,
+    // Answered already (the office may have marked it after a phone call), or priced on site since
+    // the page loaded: show where it is now.
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) onChanged();
+    },
+  });
+  const accepted = Boolean(range.accepted_at) || accept.isSuccess;
+  const yes = () => (data.preview ? setPreviewNote(true) : accept.mutate());
+  const ask = () => (data.preview ? setPreviewNote(true) : onAsk());
+  // The button they pressed is gone, so their place on the page moves to the thanks.
+  useEffect(() => {
+    if (accept.isSuccess) thanks.current?.focus();
+  }, [accept.isSuccess]);
+
+  return (
+    <div
+      // "hub" for the Hub's shared parts (its buttons take --brand); the page itself is range.module.css.
+      className={cx("hub", styles.page)}
+      style={{ ["--brand" as string]: accent.color, ["--on-brand" as string]: accent.on, ["--brand-text" as string]: accent.text }}
+    >
+      <header className={styles.letterhead}>
+        <div className={styles.letterheadInner}>
+          <CompanyMark company={company} logoClass={styles.logo} tileClass={styles.tile} />
+          <div className={styles.who}>
+            <strong>{company.name}</strong>
+            {(tagline || license) && (
+              <span className={styles.tagline}>
+                {tagline}
+                {license && <span className={styles.wideOnly}>{tagline ? " · " : ""}{license}</span>}
+              </span>
+            )}
+          </div>
+          <div className={cx(styles.headActions, "no-print")}>
+            {phone && (
+              <a className={styles.headBtn} href={phoneHref(phone)}>
+                <Icon name="phone" size={17} />
+                <span className={styles.btnText}><span className="sr-only">Call </span>{phone}</span>
+              </a>
+            )}
+            <button type="button" className={styles.headBtn} onClick={onPrint}>
+              <Icon name="printer" size={17} />
+              <span className={styles.btnText}>Print<span className="sr-only"> or save as PDF</span></span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className={styles.main}>
+        {data.preview && <div className="callout callout-info no-print"><Icon name="eye" size={18} /><div className="grow">Preview: this is what your client sees.</div></div>}
+        {data.home && <a className="hub-back no-print" href={data.home}><Icon name="chevronLeft" size={16} />Your account</a>}
+
+        <section className={styles.intro}>
+          <div className={styles.title}>
+            <span className={styles.eyebrow}>Roof estimate · No. {q.number}</span>
+            <h1>{first ? `Your new roof, ${first}` : "Your new roof"}</h1>
+          </div>
+          {(clientName || place || dates.sent || dates.goodUntil) && (
+            <div className={styles.meta}>
+              {(clientName || place) && (
+                <div>
+                  <span className={styles.metaLabel}>Prepared for</span>
+                  {clientName && <strong>{clientName}</strong>}
+                  {place && <span>{place}</span>}
+                </div>
+              )}
+              {(dates.sent || dates.goodUntil) && (
+                <div>
+                  <span className={styles.metaLabel}>{dates.sent ? "Sent" : "Good until"}</span>
+                  <strong>{dates.sent ?? dates.goodUntil}</strong>
+                  {dates.sent && dates.goodUntil && <span>{dates.expired ? "Was good until" : "Good until"} {dates.goodUntil}</span>}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <div className={styles.layout}>
+          <div className={styles.details}>
+            {roof && <RoofMeasured token={token} roof={roof} included={range.included} timeZone={tz} today={today} />}
+            {(range.included.length > 0 || range.maybe.length > 0) && (
+              <div className={styles.lists}>
+                {range.included.length > 0 && (
+                  <section className={cx(styles.card, styles.included)}>
+                    <h2>What's included</h2>
+                    <ul className={styles.checks}>
+                      {range.included.map((item) => (
+                        <li key={item}><span className={styles.tick}><Icon name="check" size={13} strokeWidth={3.5} /></span><span>{item}</span></li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+                {range.maybe.length > 0 && (
+                  <section className={cx(styles.card, styles.maybe)}>
+                    <h2>If we find something on the roof</h2>
+                    <p className={styles.sub}>Only if we find it, and only with your OK.</p>
+                    <ul className={styles.rows}>
+                      {range.maybe.map((m) => <li key={m.name}><span>{m.name}</span><strong>{maybePrice(m)}</strong></li>)}
+                    </ul>
+                  </section>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className={styles.side}>
+            <section className={styles.priceCard} aria-label="Price">
+              <div className={cx(styles.card, styles.priceTop)}>
+                <div className={styles.bar} />
+                <div className={styles.priceBody}>
+                  <div className={styles.priceHead}>
+                    <span className={styles.eyebrow}>Estimated price</span>
+                    <p className={styles.amount}>
+                      {formatMoney(range.low)} <span className={styles.dash} aria-hidden="true">–</span><span className="sr-only">to</span> {formatMoney(range.high)}
+                    </p>
+                    {roofType && <span className={styles.package}>{roofType}</span>}
+                  </div>
+                  <p className={styles.why}>The exact price is set when we look at your roof in person. It only moves toward the top if we find something hidden, like soft wood under the shingles.</p>
+                </div>
+              </div>
+
+              <div className={cx(styles.card, styles.next, !accepted && "no-print")} data-done={accepted || undefined}>
+                {accepted ? (
+                  <div ref={thanks} tabIndex={-1} className={styles.thanks}>
+                    <span className={styles.thanksMark}><Icon name="check" size={22} strokeWidth={3} /></span>
+                    <strong>{first ? `Thanks, ${first}. We'll call you soon.` : "Thanks. We'll call you soon."}</strong>
+                    <p>We'll set up a time to look at your roof, usually within one business day.</p>
+                    {!data.preview && <button type="button" className={cx(styles.noteBtn, "no-print")} onClick={onAsk}>Send {company.name} a note</button>}
+                  </div>
+                ) : (
+                  <>
+                    <h2 className={styles.nextTitle}>Ready for the next step?</h2>
+                    <p className={styles.nextText}>Say yes and we'll call to set up a time to look at your roof. You'll see the exact price and sign only if you're happy with it.</p>
+                    {dates.expired && dates.goodUntil && (
+                      <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">This range was good until {dates.goodUntil}. You can still say yes, and we'll confirm the price.</div></div>
+                    )}
+                    <Button variant="primary" size="lg" block className={styles.yes} loading={accept.isPending} onClick={yes}>Yes, send someone out</Button>
+                    <Button size="lg" block className={styles.ask} onClick={ask}>I have a question</Button>
+                    {previewNote && <div className="callout callout-info" role="status"><Icon name="eye" size={18} /><div className="grow">This is a preview, so nothing was sent. Your client's own link sends it.</div></div>}
+                    <FormError error={accept.error} />
+                    <span className={styles.fine}>Saying yes doesn't commit you to anything.</span>
+                  </>
+                )}
+              </div>
+            </section>
+
+            {(badges.length > 0 || phone || email) && (
+              <div className={styles.trust}>
+                {badges.length > 0 && (
+                  <ul className={styles.badges}>
+                    {badges.map((b) => (
+                      <li key={b.kind} className={styles.badge}>
+                        <BadgeIcon kind={b.kind} />
+                        <span className={styles.badgeText}><strong>{b.title}</strong> <span className={styles.badgeDetail}>{b.detail}</span></span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {(phone || email) && (
+                  <div className={styles.contact}>
+                    <p>
+                      <strong>Questions?</strong>{" "}
+                      {phone && <>Call <a href={phoneHref(phone)}>{phone}</a></>}
+                      {email && <>{phone ? " or email " : "Email "}<a href={`mailto:${email}`}>{email}</a></>}.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      <footer className={styles.footer}>
+        <div className={styles.footerInner}>
+          <div className={styles.footerWho}>
+            <strong>{company.name}</strong>
+            {(address || website) && (
+              <span>
+                {address}
+                {address && website ? " · " : ""}
+                {website && <a href={websiteHref(website)} target="_blank" rel="noreferrer">{websiteLabel(website)}</a>}
+              </span>
+            )}
+            {credits && <span>{credits}</span>}
+          </div>
+          <span className={styles.private}>A private link{clientName ? ` for ${clientName}` : ""}. Powered by Crewtavo.</span>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+/** "Your roof, measured": the picture from the drawing, the roof's size, area and pitch as tiles, and when it was measured. */
+function RoofMeasured({ token, roof, included, timeZone, today }: { token: string; roof: MeasuredRoof; included: string[]; timeZone: string; today: string }) {
+  const [broken, setBroken] = useState<string[]>([]);
+  const pictures = roof.drawings.filter((d) => d.has_picture && !broken.includes(d.id));
+  // The imagery's credit, which the photo's provider asks for wherever it's shown.
+  const credits = [...new Set(roof.drawings.map((d) => d.imagery).filter((c): c is string => Boolean(c)))];
+  return (
+    <section className={cx(styles.card, styles.roof)}>
+      {pictures.length > 0 && (
+        <div className={styles.roofPictures}>
+          {pictures.map((d) => (
+            <img key={d.id} src={`/api/hub/${token}/drawings/${d.id}.jpg`} alt="Your roof from above, with the measured parts outlined" onError={() => setBroken((b) => [...b, d.id])} />
+          ))}
+        </div>
+      )}
+      <div className={styles.roofBody}>
+        <h2>Your roof, measured</h2>
+        <dl className={styles.stats}>
+          {roofTiles(roof, included).map((t) => <div key={t.label} className={styles.stat}><dt>{t.label}</dt><dd>{t.value}</dd></div>)}
+        </dl>
+        <p className={styles.roofNote}>{measuredLine(roof, timeZone, today)}</p>
+        {credits.length > 0 && <p className={styles.credit}>{credits.join(" · ")}</p>}
+      </div>
+    </section>
+  );
+}
+
+/** A shield (licensed) or a house (insured), each with a check. */
+function BadgeIcon({ kind }: { kind: TrustBadge["kind"] }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {kind === "license" ? <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /> : <><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></>}
+      <path d={kind === "license" ? "m9 12 2 2 4-4" : "m9 15 2 2 4-4"} />
+    </svg>
+  );
+}
+
+/** A signed (or approved) quote: the signed estimate itself, on the business's template, to keep or print. */
+function SignedQuote({ token, data, printing, onPrint }: { token: string; data: QuoteView; printing: boolean; onPrint: () => void }) {
+  const q = data.quote;
+  const tz = hubZone(data.company);
+  const doc = { template: hubTemplate(data), company: hubLetterhead(data.company), data: quoteDocument(data) };
+  const when = q.approval?.signed_at ?? q.approved_at;
+  const signed = Boolean(q.approval?.signature) && q.approval?.method !== "manual";
+  return (
+    <>
+      <Done
+        title={`${signed ? "Signed" : "Approved"}${when ? ` on ${formatDate(dateIn(when, tz))}` : ""}`}
+        action={<Button icon="printer" onClick={onPrint}>Print or save PDF</Button>}
+      >
+        Thank you! {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}
+      </Done>
+      <section className="hub-document" aria-label={`${signed ? "Signed estimate" : "Estimate"} #${q.number}`}>
+        <DocumentSheet {...doc} />
+      </section>
+      <HubDrawings token={token} drawings={data.drawings} />
+      {printing && <PrintableDocument {...doc} />}
+    </>
+  );
+}
+
+function OpenQuote({ token, data, onChanged, printing }: { token: string; data: QuoteView; onChanged: () => void; printing: boolean }) {
   const q = data.quote;
   const tz = hubZone(data.company);
   // Valid through the end of that day where the company is, not in UTC.
@@ -270,7 +622,8 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
   const firstOf = (l: HubLine, i: number) => groupOf(l) !== null && !q.lines.slice(0, i).some((x) => groupOf(x) === groupOf(l));
   // The database's own math (to the cent), so the total the client approves is the one saved. A
   // percent code follows the options the client picks, as it does on the saved quote.
-  const { subtotal, discount, tax, total } = quoteTotals(q.lines.map((l) => ({ ...l, selected: included(l) })), { taxRate: q.tax_rate, discountAmount: q.discount_amount, promo: q.promo });
+  const { subtotal, discount, tax, total } = quoteTotals(q.lines.map((l) => ({ ...l, selected: included(l) })), { taxRate: q.tax_rate, discountAmount: q.discount_amount ?? 0, promo: q.promo });
+  const deposit = Number(q.deposit_amount ?? 0);
 
   return (
     <>
@@ -306,14 +659,12 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
           <HubDiscount token={token} promo={q.promo} discount={discount} canChange={open && !data.preview} onChanged={onChanged} />
           {tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(tax)}</span></div>}
           <div className="line grand" style={{ fontSize: 22 }}><span>Total</span><span>{formatMoneyCents(total)}</span></div>
-          {Number(q.deposit_amount) > 0 && <div className="line"><span>Deposit to book</span><span>{formatMoneyCents(q.deposit_amount)}</span></div>}
+          {deposit > 0 && <div className="line"><span>Deposit to book</span><span>{formatMoneyCents(deposit)}</span></div>}
           {q.valid_until && <div className="line"><span>Valid until</span><span className={expired ? "text-danger" : undefined}>{formatDate(q.valid_until)}</span></div>}
         </div>
       </section>
 
-      {q.status === "approved" || q.status === "converted" ? (
-        <Done title={`Approved${q.approved_at ? ` on ${formatDate(dateIn(q.approved_at, tz))}` : ""}`}>Thank you! {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}</Done>
-      ) : requestChanges.isSuccess ? (
+      {requestChanges.isSuccess ? (
         <Done title="Request sent">{data.company.name} will review your notes and follow up with an updated quote.</Done>
       ) : open ? (
         <section className="card card-pad stack no-print">
@@ -348,11 +699,14 @@ function QuoteHub({ token, data, onChanged }: { token: string; data: QuoteView; 
       ) : !data.preview ? (
         <div className="card card-pad muted">This quote is no longer open. Contact {data.company.name} if you have questions.</div>
       ) : null}
+
+      {/* What prints: the estimate on the business's template, with the options the client has picked. */}
+      {printing && <PrintableDocument template={hubTemplate(data)} company={hubLetterhead(data.company)} data={quoteDocument(data, chosen)} />}
     </>
   );
 }
 
-function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceView; onChanged: () => void }) {
+function InvoiceHub({ token, data, onChanged, printing }: { token: string; data: InvoiceView; onChanged: () => void; printing: boolean }) {
   const inv = data.invoice;
   const [params] = useSearchParams();
   const balance = Number(inv.balance_due);
@@ -436,6 +790,8 @@ function InvoiceHub({ token, data, onChanged }: { token: string; data: InvoiceVi
         )
       )}
       <FormError error={pay.error} />
+      {/* What prints: the invoice on the business's template. */}
+      {printing && <PrintableDocument template={hubTemplate(data)} company={hubLetterhead(data.company)} data={invoiceDocument(data)} />}
     </>
   );
 }

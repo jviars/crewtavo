@@ -6,19 +6,22 @@ import { Face } from "@/components/ui/Avatar";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { MapsAppSetting } from "@/components/ui/MapsLink";
 import { api, supabase } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { can, hasRole, useSession } from "@/lib/session";
 import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
 import { toast } from "@/lib/toast";
 import { MeasureMapSetting } from "../measure/ImageryPicker";
 import { CalendarFeedCard } from "./CalendarFeedCard";
 import { NotificationSettings } from "./NotificationSettings";
 import { PhotoButtons } from "./ProfilePhoto";
+import { SignatureCard } from "./SignatureCard";
 import { SpareKeysCard } from "./SpareKeysCard";
 
 const COLORS = ["#0f2a35", "#3b7d23", "#3474d4", "#c9852a", "#d2445c", "#8b5cf6", "#0e7490", "#57534e"];
 
 export function ProfileSettings() {
   const session = useSession();
+  // People who sign estimates for the business keep their signature here.
+  const signs = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
   const [name, setName] = useState(session.profile.full_name);
   const [phone, setPhone] = useState(session.profile.phone ?? "");
   const [color, setColor] = useState(session.profile.color ?? COLORS[0]);
@@ -76,6 +79,7 @@ export function ProfileSettings() {
         <div className="form-actions"><Button type="submit" variant="primary" loading={save.isPending} disabled={!name.trim()}>Save profile</Button></div>
       </form>
       <div className="narrow stack">
+      {signs && <SignatureCard />}
       <NotificationSettings phone={session.profile.phone} />
       <Appearance />
       <MapsAppSetting />

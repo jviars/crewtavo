@@ -21,6 +21,7 @@ import { RolesSettings } from "./RolesSettings";
 import { ScheduleSettings } from "./ScheduleSettings";
 import { settingsGroups, type SettingsTab } from "./sections";
 import { TeamSettings } from "./TeamSettings";
+import { TemplateSettings } from "./TemplateSettings";
 import { WebAddressSettings } from "./WebAddressSettings";
 
 export function SettingsPage() {
@@ -68,6 +69,7 @@ export function SettingsPage() {
           {tab === "roles" && <RolesSettings />}
           {tab === "crews" && <CrewSettings />}
           {tab === "prices" && <PriceList />}
+          {tab === "templates" && <TemplateSettings />}
           {tab === "checklists" && <ChecklistSettings />}
           {tab === "email" && <EmailSettings />}
           {tab === "calendars" && <CalendarSettings />}

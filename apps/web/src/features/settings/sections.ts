@@ -6,7 +6,7 @@
 import type { IconName } from "@/components/ui/Icon";
 import { can, hasRole, type Session } from "@/lib/session";
 
-export type SettingsTab = "profile" | "company" | "schedule" | "address" | "hosting" | "team" | "roles" | "crews" | "prices" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "license";
+export type SettingsTab = "profile" | "company" | "schedule" | "address" | "hosting" | "team" | "roles" | "crews" | "prices" | "templates" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "license";
 export type SettingsItem = { label: string; icon: IconName; keywords: string } & ({ tab: SettingsTab } | { to: string });
 
 export function settingsGroups(session: Session): Array<{ title: string; items: SettingsItem[] }> {
@@ -28,6 +28,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
         isAdmin && session.config.singleCompany && { tab: "address", label: "Web address", icon: "globe", keywords: "domain url custom domain cloudflare railway link" },
         isAdmin && session.config.singleCompany && session.config.platform === "railway" && { tab: "hosting", label: "Hosting", icon: "cloud", keywords: "railway cost costs bill billing usage plan hobby pro trial credit card limit upgrade memory cpu disk storage server" },
         canSell && { tab: "prices", label: "Price list", icon: "list", keywords: "services products prices rates costs catalog formulas materials import" },
+        managesSettings && { tab: "templates", label: "Estimate template", icon: "palette", keywords: "estimate quote proposal invoice template letterhead logo color font lettering terms warranty signature signatures license insurance insurer footer print pdf paper look" },
         isAdmin && { tab: "maps", label: "Maps", icon: "map", keywords: "imagery satellite aerial google esri measure key api cloud default map" },
         managesSettings && { to: "/booking", label: "Online booking", icon: "globe", keywords: "booking form request form website embed intake" },
       ],

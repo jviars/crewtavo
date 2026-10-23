@@ -4,93 +4,39 @@
  * bundles, rolls and pieces) and what that comes to, with the labor and the rest beside it.
  *
  * Materials belong to the price list's services, so picking them once prices every roof after.
- * The estimate is priced again by itself whenever its lines, quantities or materials change, and
- * keeps the prices it was priced with (quote_line_items.materials) until then.
+ * The estimate is priced again by itself whenever its lines, quantities or materials change
+ * (useMaterialReprice), and keeps the prices it was priced with (quote_line_items.materials) until then.
  */
-import { describePerUnit, lineUnitCost, orderQuantity, type PricedMaterial } from "@crewtavo/core/materials";
+import { describePerUnit, orderQuantity, type PricedMaterial } from "@crewtavo/core/materials";
 import { lineTotal, optionLabels, toCents } from "@crewtavo/core/money";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
-import { api, supabase, unwrap } from "@/lib/api";
+import { api } from "@/lib/api";
 import { formatMoney, formatMoneyCents, formatNumber, timeAgo } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
-import { useServiceMaterials, useSupplier, uomName, type ServiceMaterial } from "../materials/data";
+import { uomName, type ServiceMaterial } from "../materials/data";
 import { HowMany, MaterialPicker } from "../materials/MaterialPicker";
-import type { Line, Quote } from "../paving/ProjectFlow";
-
-interface ServiceCost { id: string; name: string; unit: string; labor_cost: number | null }
+import { useMaterialReprice, type PricedLine, type PricedQuote } from "./estimate/useMaterialReprice";
 
 /** A material on a line as shown: what to order, at the price the estimate has (or the last one). */
 interface Row extends PricedMaterial { link: ServiceMaterial | null }
 
-const sameItems = (line: Line, links: ServiceMaterial[]) => {
-  const items = line.materials?.items ?? [];
-  return items.length === links.length && items.every((item, i) => item.item_number === links[i]!.item_number && item.uom === links[i]!.uom && Number(item.per_unit) === Number(links[i]!.per_unit) && Number(item.length_ft ?? 0) === Number(links[i]!.length_ft ?? 0));
-};
-
-export function RoofMaterials({ quote, editable, onChanged }: { quote: Quote; editable: boolean; onChanged: () => void }) {
+export function RoofMaterials({ quote, editable, onChanged }: { quote: PricedQuote; editable: boolean; onChanged: () => void }) {
   const session = useSession();
-  const { company } = session;
-  const queryClient = useQueryClient();
   const canSetUp = hasRole(session, "admin") && can(session, "apps");
   const canEdit = editable && hasRole(session, "admin", "office", "estimator") && can(session, "settings");
-  const supplier = useSupplier();
   const lines = quote.lines.filter((l) => l.service_id);
-  const serviceIds = lines.map((l) => l.service_id!);
-  const links = useServiceMaterials(serviceIds);
-  const services = useQuery({
-    queryKey: ["service-costs", company.id, [...new Set(serviceIds)].sort()],
-    enabled: serviceIds.length > 0,
-    queryFn: async () => unwrap(await supabase().from("services").select("id, name, unit, labor_cost").in("id", [...new Set(serviceIds)])) as ServiceCost[],
-  });
-  const linksOf = useMemo(() => {
-    const map = new Map<string, ServiceMaterial[]>();
-    for (const link of links.data ?? []) map.set(link.service_id, [...(map.get(link.service_id) ?? []), link]);
-    return (serviceId: string | null) => (serviceId ? (map.get(serviceId) ?? []) : []);
-  }, [links.data]);
-  const serviceOf = (id: string | null) => services.data?.find((s) => s.id === id);
+  // Prices the lines again by itself whenever they change, and onChanged refreshes the page (not
+  // while − and + are still saving: the estimate's editor refreshes it once they have).
+  const { supplier, connected, linksOf, serviceOf, refreshMaterials, price } = useMaterialReprice(quote, editable, onChanged);
 
-  const refreshMaterials = () => {
-    queryClient.invalidateQueries({ queryKey: ["service-materials", company.id] });
-    queryClient.invalidateQueries({ queryKey: ["service-costs", company.id] });
-    queryClient.invalidateQueries({ queryKey: ["services", company.id] });
-  };
-  const price = useMutation({
-    meta: { inline: true },
-    mutationFn: () => api.post<{ priced_at: string | null }>(`/quotes/${quote.id}/material-prices`),
-    onSuccess: () => {
-      refreshMaterials();
-      onChanged();
-    },
-  });
-
-  // Lines whose materials, quantity or labor changed since they were priced get priced again, once
-  // for each change, so a failure (ABC down) doesn't keep asking.
-  const connected = supplier.data?.status === "connected";
-  const ready = connected && editable && links.isSuccess && services.isSuccess;
-  const stale = ready
-    ? lines.filter((l) => {
-        const own = linksOf(l.service_id);
-        if (!own.length) return Boolean(l.materials);
-        if (!l.materials || l.materials.line_quantity !== Number(l.quantity) || !sameItems(l, own)) return true;
-        return l.unit_cost === null || Number(l.unit_cost) !== lineUnitCost(Number(l.material_cost ?? 0), serviceOf(l.service_id)?.labor_cost ?? null, l.quantity);
-      })
-    : [];
-  const signature = stale.map((l) => `${l.id}:${l.quantity}:${linksOf(l.service_id).map((m) => `${m.id}/${m.per_unit}`).join(",")}:${serviceOf(l.service_id)?.labor_cost}`).join("|");
-  const tried = useRef("");
-  useEffect(() => {
-    if (!signature || signature === tried.current || price.isPending) return;
-    tried.current = signature;
-    price.mutate();
-  }, [signature, price]);
-
-  const [picking, setPicking] = useState<Line | null>(null);
+  const [picking, setPicking] = useState<PricedLine | null>(null);
   const [editing, setEditing] = useState<{ link: ServiceMaterial; unit: string } | null>(null);
   const remove = useMutation({
     meta: { success: (_: unknown, link: ServiceMaterial) => `${link.name} taken out` },
@@ -122,7 +68,7 @@ export function RoofMaterials({ quote, editable, onChanged }: { quote: Quote; ed
 
   const choices = optionLabels(quote.lines);
   /** What's on a line: from its materials as they are now while it can change, or as it was priced once it can't. */
-  const rowsOf = (line: Line): Row[] => {
+  const rowsOf = (line: PricedLine): Row[] => {
     const priced = line.materials?.items ?? [];
     if (!editable) return priced.map((item) => ({ ...item, link: null }));
     return linksOf(line.service_id).map((link) => {
@@ -144,7 +90,7 @@ export function RoofMaterials({ quote, editable, onChanged }: { quote: Quote; ed
       };
     });
   };
-  const counts = (l: Line) => !l.optional || l.selected;
+  const counts = (l: PricedLine) => !l.optional || l.selected;
   const lineCost = (rows: Row[]) => rows.reduce((t, r) => t + toCents(r.total ?? 0), 0) / 100;
   const shown = lines.map((line) => ({ line, rows: rowsOf(line) }));
   const total = shown.reduce((t, s) => t + (counts(s.line) ? toCents(lineCost(s.rows)) : 0), 0) / 100;

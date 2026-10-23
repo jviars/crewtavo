@@ -1,9 +1,13 @@
 /**
  * A trade project's page, start to finish: the takeoff from the map, the estimate priced from the
  * price list, the proposal the client signs online, the job and its schedule, and the invoices.
- * Paving (PavingProjectPage) and roofing (features/roofing) differ only in the takeoff and the
- * estimate's choices, which they pass in. Each step uses the records the rest of Crewtavo uses
- * (quote, job, invoices), so nothing is typed twice.
+ * Paving (PavingProjectPage) passes its takeoff and estimate in. Each step uses the records the rest
+ * of Crewtavo uses (quote, job, invoices), so nothing is typed twice.
+ *
+ * Each trade has its own steps and works out its own current step (FlowTrade). Roofing has six
+ * (measure, estimate, range, site visit, schedule, invoice) and builds its page from the pieces
+ * exported here (the progress pills, the step cards, the invoices), with the roof estimate's own
+ * data (features/roofing/RoofingProjectPage.tsx).
  */
 import type { LineMaterials } from "@crewtavo/core/materials";
 import { optionLabels, toCents } from "@crewtavo/core/money";
@@ -11,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { Icon } from "@/components/ui/Icon";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -21,7 +25,7 @@ import { addressLine, formatDate, formatMoney, formatMoneyCents, formatNumber, t
 import { hasRole, useSession } from "@/lib/session";
 import { usePictures } from "../measure/drawings";
 import { SendDialog } from "../quotes/SendDialog";
-import { currentStep, TAKEOFF_FIELDS, type StepId, type TakeoffRow } from "./data";
+import { currentStep, TAKEOFF_FIELDS, type FlowStep, type StepId, type TakeoffRow } from "./data";
 
 export interface Line { id: string; name: string; quantity: number; unit: string; unit_price: number; unit_cost: number | null; formula: string | null; service_id: string | null; optional: boolean; selected: boolean; option_group: string | null; sort: number; materials: LineMaterials | null; material_cost: number | null }
 export interface Quote {
@@ -47,13 +51,22 @@ export const SERVICE_FIELDS = "id, name, unit, unit_price, unit_cost, taxable, f
 /** Quotes whose lines can still change. */
 export const EDITABLE = ["draft", "sent", "changes_requested"];
 
+/** A project's quote as far as its step goes. */
+export interface FlowQuote {
+  status: string;
+  lines: readonly unknown[];
+  jobs: ReadonlyArray<{ id: string; status: string }>;
+}
+
 /** What a trade's project page says and where it links. */
-export interface FlowTrade {
+export interface FlowTrade<Id extends string = StepId> {
   /** Query keys and the Measure link's flag (`/measure?paving=1`). */
   id: "paving" | "roofing";
   name: string;
   path: string;
-  steps: Array<{ id: StepId; label: string; icon: IconName; text: string }>;
+  steps: Array<FlowStep<Id>>;
+  /** Where a project is: the first step not done yet. Paving's is currentStep. */
+  current?: (q: FlowQuote, takeoff: TakeoffRow | null, invoices: Array<{ status: string }>) => Id | "done";
   notFound: string;
   takeoff: { empty: string; text: string; start: string; after: string; first: string };
   /** The picture of the takeoff on the proposal: "takeoff sheet", "roof report". */
@@ -65,12 +78,40 @@ export interface EstimateProps { quote: Quote; takeoff: TakeoffRow; editable: bo
 
 export const scrollToStep = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
+/** Where the map opens for a project: its roof or lot, else a new drawing at the property. */
+export function measureLinkFor(trade: Pick<FlowTrade<string>, "id">, quote: { id: string; property: { id: string } | null }, takeoff: { id: string } | null): string {
+  return takeoff
+    ? `/measure?measurement=${takeoff.id}&${trade.id}=1`
+    : `/measure?${new URLSearchParams({ quote: quote.id, [trade.id]: "1", ...(quote.property ? { property: quote.property.id } : {}) })}`;
+}
+
+/** Opened at a step (#estimate from the map): scroll to it once the page is there, not again on every refresh. */
+export function useScrollToHash(ready: boolean) {
+  const location = useLocation();
+  const scrolledTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ready || !location.hash || scrolledTo.current === location.hash) return;
+    scrolledTo.current = location.hash;
+    scrollToStep(location.hash.slice(1));
+  }, [ready, location.hash]);
+}
+
+export interface FlowInvoice { id: string; number: number | null; kind: string; status: string; total: number; balance_due: number }
+
+/** A project's job's invoices (for the people who see invoices). */
+export function useJobInvoices(job: { id: string } | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["job", job?.id, "invoices"],
+    enabled: Boolean(job && enabled),
+    queryFn: async () => unwrap(await supabase().from("invoices").select("id, number, kind, status, total, balance_due").eq("job_id", job!.id).order("number")) as FlowInvoice[],
+  });
+}
+
 export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowTrade; takeoffView: (props: TakeoffProps) => ReactNode; estimateView: (props: EstimateProps) => ReactNode }) {
   const { id = "" } = useParams();
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
-  const location = useLocation();
   const canSell = hasRole(session, "admin", "office", "estimator");
   const seesInvoices = hasRole(session, "admin", "office");
 
@@ -93,20 +134,9 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
     },
   });
   const job = project.data?.quote.jobs[0] ?? null;
-  const invoices = useQuery({
-    queryKey: ["job", job?.id, "invoices"],
-    enabled: Boolean(job && seesInvoices),
-    queryFn: async () => unwrap(await supabase().from("invoices").select("id, number, kind, status, total, balance_due").eq("job_id", job!.id).order("number")),
-  });
+  const invoices = useJobInvoices(job, seesInvoices);
   const pictures = usePictures([project.data?.takeoff?.snapshot_path]);
-
-  // Opened at a step (#estimate from the map): scroll to it once it's on the page, not again on every refresh.
-  const scrolledTo = useRef<string | null>(null);
-  useEffect(() => {
-    if (!project.data || !location.hash || scrolledTo.current === location.hash) return;
-    scrolledTo.current = location.hash;
-    scrollToStep(location.hash.slice(1));
-  }, [project.data, location.hash]);
+  useScrollToHash(Boolean(project.data));
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: [`${trade.id}-project`, id] });
@@ -125,9 +155,9 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
   }
   const { quote: q, takeoff } = project.data;
   const steps = trade.steps;
-  const step = currentStep(q, takeoff, invoices.data ?? []);
+  const step = (trade.current ?? currentStep)(q, takeoff, invoices.data ?? []);
   const reached = (s: StepId) => step === "done" || steps.findIndex((x) => x.id === s) <= steps.findIndex((x) => x.id === step);
-  const measureLink = takeoff ? `/measure?measurement=${takeoff.id}&${trade.id}=1` : `/measure?${new URLSearchParams({ quote: q.id, [trade.id]: "1", ...(q.property ? { property: q.property.id } : {}) })}`;
+  const measureLink = measureLinkFor(trade, q, takeoff);
   const label = (s: StepId) => steps.find((x) => x.id === s)!.label;
 
   return (
@@ -136,27 +166,13 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
       <PageHeader title={q.title} actions={<Link className="btn" to={`/quotes/${q.id}`}>Open the quote</Link>} />
       <p className="page-subtitle">{[q.client?.display_name, q.property ? addressLine(q.property) : null, q.number ? `Quote #${q.number}` : null].filter(Boolean).join(" · ")}</p>
 
-      <ol className="paving-progress" aria-label="Where this project is">
-        {steps.map((s, i) => {
-          const done = step === "done" || steps.findIndex((x) => x.id === step) > i;
-          return (
-            <li key={s.id} data-state={done ? "done" : s.id === step ? "current" : "todo"}>
-              <a href={`#${s.id}`} onClick={(e) => { e.preventDefault(); scrollToStep(s.id); }}>
-                <span className="paving-progress-dot">{done ? <Icon name="check" size={14} strokeWidth={3} /> : i + 1}</span>
-                <span>{s.label}</span>
-              </a>
-            </li>
-          );
-        })}
-      </ol>
+      <FlowProgress steps={steps} step={step} />
       {q.status === "lost" && <div className="callout callout-danger" role="status"><Icon name="alert" size={18} /><span className="grow">This proposal was marked lost.</span></div>}
 
       <div className="stack" style={{ gap: 16 }}>
         <StepCard id="takeoff" n={1} title={label("takeoff")} status={takeoff ? `Updated ${timeAgo(takeoff.updated_at)}` : "Not measured yet"} done={Boolean(takeoff)}>
           {!takeoff ? (
-            <EmptyState compact icon="area" title={trade.takeoff.empty} action={canSell && <Link className="btn btn-primary" to={measureLink}><Icon name="area" size={16} /> {trade.takeoff.start}</Link>}>
-              {trade.takeoff.text}
-            </EmptyState>
+            <TakeoffEmpty trade={trade} measureLink={canSell ? measureLink : null} />
           ) : (
             takeoffView({ takeoff, picture: takeoff.snapshot_path ? pictures.data?.[takeoff.snapshot_path] : undefined, editLink: canSell ? measureLink : null })
           )}
@@ -178,28 +194,63 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
           <Schedule quote={q} job={job} canSell={canSell} onChanged={refresh} />
         </StepCard>
 
-        <StepCard id="invoice" n={5} title={label("invoice")} status={invoices.data?.length ? `${invoices.data.length} ${invoices.data.length === 1 ? "invoice" : "invoices"}` : job ? "Not billed yet" : "After the job"} done={step === "done"}>
-          {!job ? (
-            <span className="muted small">Bill the deposit and the rest once there's a job.</span>
-          ) : !seesInvoices ? (
-            <span className="muted small">The office bills this job.</span>
-          ) : (
-            <div className="stack-sm">
-              {(invoices.data ?? []).map((inv) => (
-                <Link key={inv.id} to={`/invoices/${inv.id}`} className="card-row paving-row">
-                  <Icon name="invoice" size={16} />
-                  <span className="grow">Invoice #{inv.number}{inv.kind !== "standard" ? ` · ${inv.kind}` : ""}</span>
-                  <span className="num">{formatMoney(inv.total)}</span>
-                  <EntityStatus kind="invoice" status={inv.status} />
-                </Link>
-              ))}
-              <Link className="btn" style={{ justifySelf: "start" }} to={`/jobs/${job.id}?invoice=1`}><Icon name="invoice" size={16} /> {invoices.data?.length ? "Create another invoice" : "Create an invoice"}</Link>
-              <span className="muted small">Deposit, progress or final: clients pay online from their link.</span>
-            </div>
-          )}
+        <StepCard id="invoice" n={5} title={label("invoice")} status={invoiceStatus(job, invoices.data)} done={step === "done"}>
+          <InvoiceStepBody job={job} seesInvoices={seesInvoices} invoices={invoices.data} />
         </StepCard>
       </div>
     </>
+  );
+}
+
+/** The pills along the top: done steps checked, the current one filled. Each scrolls to its card. */
+export function FlowProgress<Id extends string>({ steps, step }: { steps: ReadonlyArray<FlowStep<Id>>; step: Id | "done" }) {
+  return (
+    <ol className="paving-progress" aria-label="Where this project is">
+      {steps.map((s, i) => {
+        const done = step === "done" || steps.findIndex((x) => x.id === step) > i;
+        return (
+          <li key={s.id} data-state={done ? "done" : s.id === step ? "current" : "todo"}>
+            <a href={`#${s.id}`} aria-current={s.id === step ? "step" : undefined} onClick={(e) => { e.preventDefault(); scrollToStep(s.id); }}>
+              <span className="paving-progress-dot">{done ? <Icon name="check" size={14} strokeWidth={3} /> : i + 1}</span>
+              <span>{s.label}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The first step before anything's measured: what to do, and the way to the map. */
+export function TakeoffEmpty({ trade, measureLink }: { trade: Pick<FlowTrade<string>, "takeoff">; measureLink: string | null }) {
+  return (
+    <EmptyState compact icon="area" title={trade.takeoff.empty} action={measureLink && <Link className="btn btn-primary" to={measureLink}><Icon name="area" size={16} /> {trade.takeoff.start}</Link>}>
+      {trade.takeoff.text}
+    </EmptyState>
+  );
+}
+
+/** "2 invoices", "Not billed yet", "After the job". */
+export const invoiceStatus = (job: unknown, invoices: readonly unknown[] | undefined) =>
+  invoices?.length ? `${invoices.length} ${invoices.length === 1 ? "invoice" : "invoices"}` : job ? "Not billed yet" : "After the job";
+
+/** The last step: the job's invoices, and making the next one. */
+export function InvoiceStepBody({ job, seesInvoices, invoices }: { job: { id: string } | null; seesInvoices: boolean; invoices: FlowInvoice[] | undefined }) {
+  if (!job) return <span className="muted small">Bill the deposit and the rest once there's a job.</span>;
+  if (!seesInvoices) return <span className="muted small">The office bills this job.</span>;
+  return (
+    <div className="stack-sm">
+      {(invoices ?? []).map((inv) => (
+        <Link key={inv.id} to={`/invoices/${inv.id}`} className="card-row paving-row">
+          <Icon name="invoice" size={16} />
+          <span className="grow">Invoice #{inv.number}{inv.kind !== "standard" ? ` · ${inv.kind}` : ""}</span>
+          <span className="num">{formatMoney(inv.total)}</span>
+          <EntityStatus kind="invoice" status={inv.status} />
+        </Link>
+      ))}
+      <Link className="btn" style={{ justifySelf: "start" }} to={`/jobs/${job.id}?invoice=1`}><Icon name="invoice" size={16} /> {invoices?.length ? "Create another invoice" : "Create an invoice"}</Link>
+      <span className="muted small">Deposit, progress or final: clients pay online from their link.</span>
+    </div>
   );
 }
 
@@ -211,9 +262,10 @@ function proposalStatus(q: Quote): string {
   return q.lines.length ? "Ready to send" : "After the estimate";
 }
 
-function StepCard({ id, n, title, status, done, children }: { id: StepId; n: number; title: string; status: string; done: boolean; children: ReactNode }) {
+/** One step's card: its number (a check once done), its name and where it stands, then its body. */
+export function StepCard({ id, n, title, status, done, current, children }: { id: string; n: number; title: string; status: string; done: boolean; current?: boolean; children: ReactNode }) {
   return (
-    <section id={id} className="card paving-step-card" aria-labelledby={`${id}-title`} style={{ scrollMarginTop: 16 }}>
+    <section id={id} className="card paving-step-card" data-current={current || undefined} aria-labelledby={`${id}-title`} style={{ scrollMarginTop: 16 }}>
       <div className="card-head">
         <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={14} strokeWidth={3} /> : n}</span>
         <h2 id={`${id}-title`}>{title}</h2>

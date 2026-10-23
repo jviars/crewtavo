@@ -1,11 +1,12 @@
 /**
  * Sign with a finger, stylus or mouse. Gives back a PNG data URL (small: a signature is a few
- * kilobytes) when a stroke ends, or null once cleared.
+ * kilobytes) when a stroke ends, or null once cleared. 140 px tall and up to 420 px wide unless
+ * `height` and `maxWidth` say otherwise (bigger on the iPad, where the homeowner signs).
  */
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { Button } from "@/components/ui/Button";
 
-export function SignaturePad({ value, onChange, label = "Sign here", disabled = false }: { value: string | null; onChange: (dataUrl: string | null) => void; label?: string; disabled?: boolean }) {
+export function SignaturePad({ value, onChange, label = "Sign here", disabled = false, height = 140, maxWidth = 420 }: { value: string | null; onChange: (dataUrl: string | null) => void; label?: string; disabled?: boolean; height?: number; maxWidth?: number | string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const last = useRef<{ x: number; y: number } | null>(null);
@@ -73,14 +74,14 @@ export function SignaturePad({ value, onChange, label = "Sign here", disabled = 
   if (value && !redo) {
     return (
       <div className="stack-sm">
-        <img src={value} alt="Signature" style={{ width: "100%", maxWidth: 420, height: 140, objectFit: "contain", background: "#fff", border: "1px solid var(--border)", borderRadius: 10 }} />
+        <img src={value} alt="Signature" style={{ width: "100%", maxWidth, height, objectFit: "contain", background: "#fff", border: "1px solid var(--border)", borderRadius: 10 }} />
         {!disabled && <Button size="sm" variant="ghost" icon="undo" style={{ justifySelf: "start" }} onClick={clear}>Sign again</Button>}
       </div>
     );
   }
   return (
     <div className="stack-sm">
-      <div style={{ position: "relative", maxWidth: 420 }}>
+      <div style={{ position: "relative", maxWidth }}>
         <canvas
           ref={canvas}
           aria-label={label}
@@ -89,7 +90,7 @@ export function SignaturePad({ value, onChange, label = "Sign here", disabled = 
           onPointerMove={move}
           onPointerUp={up}
           onPointerCancel={up}
-          style={{ display: "block", width: "100%", height: 140, background: "#fff", border: "1px solid var(--border)", borderRadius: 10, touchAction: "none", cursor: disabled ? "not-allowed" : "crosshair" }}
+          style={{ display: "block", width: "100%", height, background: "#fff", border: "1px solid var(--border)", borderRadius: 10, touchAction: "none", cursor: disabled ? "not-allowed" : "crosshair" }}
         />
         {empty && <span aria-hidden="true" style={{ position: "absolute", left: 14, bottom: 12, right: 14, borderTop: "1px solid #c9c7c0", paddingTop: 4, color: "#8a8780", fontSize: 12, pointerEvents: "none" }}>{label}</span>}
       </div>

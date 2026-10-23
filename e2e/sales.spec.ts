@@ -73,7 +73,7 @@ test("new client → request → quote → approved in the portal → job", asyn
   await portal.mouse.up();
   await portal.getByRole("checkbox", { name: /I approve this quote/ }).check();
   await portal.getByRole("button", { name: "Approve quote" }).click();
-  await expect(portal.getByText(/^Approved/)).toBeVisible();
+  await expect(portal.getByText(/^Signed on/)).toBeVisible();
   await portal.context().close();
 
   // Back in the office the quote shows as approved and becomes a job.
