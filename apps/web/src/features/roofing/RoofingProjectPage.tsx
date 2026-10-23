@@ -19,6 +19,7 @@ import { toast } from "@/lib/toast";
 import { formulaValue, sectionsOf, takeoffVariables } from "../paving/data";
 import { EstimateLines, ProjectFlow, SERVICE_FIELDS, type EstimateProps, type FlowTrade, type Line, type Service, type TakeoffProps } from "../paving/ProjectFlow";
 import { firstChoice, layersFormula, layersName, layersOf, ROOF_CHOICE, ROOF_STEPS, roofServiceKind } from "./data";
+import { RoofMaterials } from "./RoofMaterials";
 
 const ROOFING: FlowTrade = {
   id: "roofing",
@@ -210,7 +211,15 @@ function RoofEstimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
   const noEdges = !ROOF_EDGES.some((e) => (vars[`${e}_ft`] ?? 0) > 0);
   const choices = optionLabels(quote.lines);
 
-  if (!editable) return quote.lines.length ? <EstimateLines quote={quote} /> : <span className="muted small">This proposal can't be changed anymore.</span>;
+  if (!editable) {
+    if (!quote.lines.length) return <span className="muted small">This proposal can't be changed anymore.</span>;
+    return (
+      <div className="stack" style={{ gap: 20 }}>
+        {quote.lines.some((l) => l.materials) && <RoofMaterials quote={quote} editable={false} onChanged={onChanged} />}
+        <EstimateLines quote={quote} />
+      </div>
+    );
+  }
   if (services.isPending) return <span className="muted small">Loading your price list…</span>;
   return (
     <div className="stack" style={{ gap: 20 }}>
@@ -306,6 +315,7 @@ function RoofEstimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
       </section>
 
       {quote.lines.some((l) => l.formula) && <Button icon="refresh" loading={reprice.isPending} disabled={busy} onClick={() => reprice.mutate()} style={{ justifySelf: "start" }}>Update quantities from the roof</Button>}
+      {quote.lines.length > 0 && <RoofMaterials quote={quote} editable onChanged={onChanged} />}
       {quote.lines.length > 0 && <EstimateLines quote={quote} />}
     </div>
   );

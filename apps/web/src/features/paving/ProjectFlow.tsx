@@ -5,7 +5,8 @@
  * estimate's choices, which they pass in. Each step uses the records the rest of Crewtavo uses
  * (quote, job, invoices), so nothing is typed twice.
  */
-import { optionLabels } from "@crewtavo/core/money";
+import type { LineMaterials } from "@crewtavo/core/materials";
+import { optionLabels, toCents } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -22,7 +23,7 @@ import { usePictures } from "../measure/drawings";
 import { SendDialog } from "../quotes/SendDialog";
 import { currentStep, TAKEOFF_FIELDS, type StepId, type TakeoffRow } from "./data";
 
-export interface Line { id: string; name: string; quantity: number; unit: string; unit_price: number; unit_cost: number | null; formula: string | null; service_id: string | null; optional: boolean; selected: boolean; option_group: string | null; sort: number }
+export interface Line { id: string; name: string; quantity: number; unit: string; unit_price: number; unit_cost: number | null; formula: string | null; service_id: string | null; optional: boolean; selected: boolean; option_group: string | null; sort: number; materials: LineMaterials | null; material_cost: number | null }
 export interface Quote {
   id: string;
   number: number | null;
@@ -80,7 +81,7 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
       const [quote, takeoff] = await Promise.all([
         db
           .from("quotes")
-          .select("id, number, title, status, subtotal, discount_amount, tax_amount, total, sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(id, name, quantity, unit, unit_price, unit_cost, formula, service_id, optional, selected, option_group, sort), jobs!jobs_company_id_quote_id_fkey(id, number, status)")
+          .select("id, number, title, status, subtotal, discount_amount, tax_amount, total, sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(id, name, quantity, unit, unit_price, unit_cost, formula, service_id, optional, selected, option_group, sort, materials, material_cost), jobs!jobs_company_id_quote_id_fkey(id, number, status)")
           .eq("id", id)
           .maybeSingle(),
         db.from("measurements").select(TAKEOFF_FIELDS).eq("quote_id", id).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
@@ -229,6 +230,11 @@ export function EstimateLines({ quote }: { quote: Quote }) {
   const costKnown = quote.lines.every((l) => l.unit_cost != null);
   const price = Number(quote.subtotal);
   const profit = price - cost;
+  // Materials priced at the supplier (Roofing → Materials), for the lines that count.
+  const priced = quote.lines.filter((l) => l.material_cost != null);
+  const materials = priced.reduce((t, l) => t + (!l.optional || l.selected ? toCents(l.material_cost) : 0), 0) / 100;
+  // Something the branch hasn't priced: the materials cost at least this much.
+  const unpriced = priced.some((l) => (!l.optional || l.selected) && l.materials?.items.some((i) => i.total === null && i.quantity > 0));
   const choices = optionLabels(quote.lines);
   const signed = quote.status === "approved" || quote.status === "converted";
   const choiceNote = (selected: boolean) => (signed ? (selected ? "the client's pick" : "not picked") : selected ? "shown first" : "the client can pick it");
@@ -259,6 +265,7 @@ export function EstimateLines({ quote }: { quote: Quote }) {
         </tbody>
       </table>
       <dl className="paving-totals">
+        {priced.length > 0 && <div><dt>Materials</dt><dd>{formatMoney(materials)}{unpriced ? "+" : ""}</dd></div>}
         <div><dt>Cost</dt><dd>{costKnown ? formatMoney(cost) : `${formatMoney(cost)}+`}</dd></div>
         <div><dt>Price</dt><dd>{formatMoney(price)}</dd></div>
         <div><dt>Profit</dt><dd data-good={profit > 0 || undefined}>{costKnown ? formatMoney(profit) : "—"}</dd></div>

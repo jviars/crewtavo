@@ -12,6 +12,7 @@ import { appUrl, dbError, HttpError, isoDate, must, readJson } from "../lib/http
 import { adminClient } from "../lib/supabase";
 import { companyAnthropicKey, complete } from "../services/ai";
 import { analyticsSettings } from "../services/analytics";
+import { AbcProblem, chooseAbcAccount, connectAbc, settingsOf as abcSettingsOf } from "../integrations/abcSupply";
 import { describeAccount } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { checkFalKey } from "../integrations/fal";
@@ -47,6 +48,8 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const calendarRows = must(calendars);
   const ownKey = Boolean(stripeKey.count);
   const stripeSettings = (integrations.find((r) => r.provider === "stripe")?.settings ?? {}) as { webhook?: boolean; livemode?: boolean; import?: ImportState };
+  // ABC Supply: the account and branch prices come from, and the others there are to pick.
+  const abc = abcSettingsOf(integrations.find((r) => r.provider === "abc_supply" && r.status !== "disconnected")?.settings);
   // The deployment's own Stripe account, for companies that haven't added theirs.
   const serverStripe = !ownKey && Boolean(c.env.STRIPE_SECRET_KEY);
   if (serverStripe) byProvider.set("stripe", { provider: "stripe", status: "connected", account_label: "Set up for this server", connected_at: null, last_sync_at: null, last_error: null });
@@ -75,6 +78,7 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
         ...linked,
         ...(entry.auth === "site" ? { website } : {}),
         ...(entry.id === "stripe" && stripe ? { stripe } : {}),
+        ...(entry.id === "abc_supply" && abc ? { supplier: abc } : {}),
         ...(takesKeys ? { takes_app_keys: true, app_keys: ownKeys } : {}),
       };
     }),
@@ -262,11 +266,44 @@ apps.delete("/apps/:provider/app-keys", requireUser, requireCompany(ADMINS, "app
   return c.json({ provider, status: "disconnected" });
 });
 
+/** An ABC Supply problem as the answer: the keys or the account turned down say why. */
+const abcAnswer = (error: unknown) => (error instanceof AbcProblem ? new HttpError(error.status === 401 ? 502 : error.status, error.message) : error);
+
+/**
+ * ABC Supply: the Client ID and secret of the business's own app in ABC's developer portal. They're
+ * checked with ABC, which says which accounts and branches they price for; the first account's home
+ * branch is where prices come from until someone picks another.
+ */
+apps.put("/apps/abc_supply/keys", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const body = await readJson(c, z.object({ client_id: appKey, client_secret: appKey, sandbox: z.boolean().default(false) }));
+  try {
+    const supplier = await connectAbc(c.env, adminClient(c.env), {
+      companyId: c.var.companyId,
+      userId: c.var.userId,
+      keys: { client_id: body.client_id, client_secret: body.client_secret, environment: body.sandbox ? "sandbox" : "production" },
+    });
+    return c.json({ provider: "abc_supply", status: "connected", supplier });
+  } catch (error) {
+    throw abcAnswer(error);
+  }
+});
+
+/** ABC Supply: the account and branch prices come from. */
+apps.put("/apps/abc_supply/account", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const body = await readJson(c, z.object({ ship_to: z.string().trim().min(1).max(40), branch: z.string().trim().min(1).max(40) }));
+  try {
+    return c.json({ supplier: await chooseAbcAccount(c.env, adminClient(c.env), c.var.companyId, body) });
+  } catch (error) {
+    throw abcAnswer(error);
+  }
+});
+
 /** API-key apps (a company's own Anthropic key, for example). The key is encrypted and never returned. */
 apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const provider = c.req.param("provider") as Provider;
   const entry = catalogEntry(provider);
   if (!entry || entry.auth !== "api_key") throw new HttpError(400, "That app doesn't use a key.");
+  if (provider === "abc_supply") throw new HttpError(400, "ABC Supply takes your app's Client ID and secret.");
   const body = await readJson(c, z.object({ api_key: z.string().trim().min(10).max(500) }));
   const admin = adminClient(c.env);
   if (provider === "stripe") {

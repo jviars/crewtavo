@@ -1388,14 +1388,14 @@ isOneToOne: false
                   ]
                 },"quote_line_items": {
                   Row: {
-                    "company_id": string,"description": string | null,"formula": string | null,"id": string,"name": string,"option_group": string | null,"optional": boolean,"quantity": number,"quote_id": string,"selected": boolean,"service_id": string | null,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number
+                    "company_id": string,"description": string | null,"formula": string | null,"id": string,"material_cost": number | null,"materials": Json | null,"name": string,"option_group": string | null,"optional": boolean,"quantity": number,"quote_id": string,"selected": boolean,"service_id": string | null,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"description"?: string | null,"formula"?: string | null,"id"?: string,"name": string,"option_group"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id": string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
+                    "company_id": string,"description"?: string | null,"formula"?: string | null,"id"?: string,"material_cost"?: number | null,"materials"?: Json | null,"name": string,"option_group"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id": string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
                   }
                   Update: {
-                    "company_id"?: string,"description"?: string | null,"formula"?: string | null,"id"?: string,"name"?: string,"option_group"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id"?: string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
+                    "company_id"?: string,"description"?: string | null,"formula"?: string | null,"id"?: string,"material_cost"?: number | null,"materials"?: Json | null,"name"?: string,"option_group"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id"?: string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
                   }
                   Relationships: [
                     {
@@ -1616,16 +1616,42 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
-                },"services": {
+                },"service_materials": {
                   Row: {
-                    "active": boolean,"category": string | null,"company_id": string,"created_at": string,"description": string | null,"formula": string | null,"formula_target": string,"id": string,"name": string,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number,"updated_at": string
+                    "company_id": string,"created_at": string,"id": string,"item_number": string,"length_ft": number | null,"name": string,"per_unit": number,"price_note": string | null,"priced_at": string | null,"service_id": string,"sort": number,"supplier": string,"unit_price": number | null,"uom": string,"uom_name": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "active"?: boolean,"category"?: string | null,"company_id": string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"name": string,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
+                    "company_id": string,"created_at"?: string,"id"?: string,"item_number": string,"length_ft"?: number | null,"name": string,"per_unit": number,"price_note"?: string | null,"priced_at"?: string | null,"service_id": string,"sort"?: number,"supplier"?: string,"unit_price"?: number | null,"uom": string,"uom_name"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "active"?: boolean,"category"?: string | null,"company_id"?: string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"name"?: string,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
+                    "company_id"?: string,"created_at"?: string,"id"?: string,"item_number"?: string,"length_ft"?: number | null,"name"?: string,"per_unit"?: number,"price_note"?: string | null,"priced_at"?: string | null,"service_id"?: string,"sort"?: number,"supplier"?: string,"unit_price"?: number | null,"uom"?: string,"uom_name"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "service_materials_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "service_materials_company_id_service_id_fkey"
+      columns: ["company_id","service_id"]
+isOneToOne: false
+      referencedRelation: "services"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"services": {
+                  Row: {
+                    "active": boolean,"category": string | null,"company_id": string,"created_at": string,"description": string | null,"formula": string | null,"formula_target": string,"id": string,"labor_cost": number | null,"name": string,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "active"?: boolean,"category"?: string | null,"company_id": string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"labor_cost"?: number | null,"name": string,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
+                  }
+                  Update: {
+                    "active"?: boolean,"category"?: string | null,"company_id"?: string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"labor_cost"?: number | null,"name"?: string,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
                   }
                   Relationships: [
                     {

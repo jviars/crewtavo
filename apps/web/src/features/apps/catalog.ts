@@ -12,7 +12,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 export interface AppRow {
   id: string;
   name: string;
-  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging" | "Website";
+  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Pricing" | "Messaging" | "Website";
   description: string;
   /** builtin: part of Crewtavo, turned on or off here (team chat). site: the website's editor, by its address (Sveltia CMS). */
   auth: "oauth" | "api_key" | "link" | "connector" | "builtin" | "site";
@@ -34,6 +34,17 @@ export interface AppRow {
   app_keys?: { client_id: string; sandbox: boolean; accounts_server: string | null } | null;
   /** Sveltia CMS: the website's editor, once its address is added. */
   website?: WebsiteSite | null;
+  /** ABC Supply, once it's connected: the account and branch prices come from, and the others to pick. */
+  supplier?: SupplierSettings | null;
+}
+
+export interface SupplierSettings {
+  environment: "production" | "sandbox";
+  ship_to: string;
+  ship_to_name: string;
+  branch: string;
+  branch_name: string;
+  accounts: Array<{ number: string; name: string; city: string | null; state: string | null; branches: Array<{ number: string; name: string; home: boolean }> }>;
 }
 
 export interface StripeImport {
@@ -73,6 +84,7 @@ export const CATEGORY_LABELS: Record<AppRow["category"], string> = {
   AI: "AI",
   Accounting: "Accounting",
   Payments: "Payments",
+  Pricing: "Material prices",
   Messaging: "Messaging",
   Website: "Your website",
 };
@@ -87,6 +99,7 @@ export const MORE_LABELS: Record<AppRow["category"], string> = {
   AI: "More AI apps",
   Accounting: "More accounting apps",
   Payments: "More payment apps",
+  Pricing: "More material prices",
   Messaging: "More messaging apps",
   Website: "More website apps",
 };
@@ -339,6 +352,26 @@ export const APP_INFO: Record<string, AppInfo> = {
     connectsWith: "Key from Stripe",
     website: "https://stripe.com/",
     open: "https://dashboard.stripe.com/",
+  },
+  abc_supply: {
+    developer: "ABC Supply",
+    tagline: "Your own material prices in every roofing estimate",
+    about:
+      "Connect your ABC Supply account and your estimates price their materials at your branch, at your prices: the shingles, underlayment, drip edge and everything else, in whole bundles, rolls and pieces. Pick each material from ABC's catalog once on the estimate and say how many go into a square or a foot; after that every roof you measure comes out with exactly what to order and what it costs, next to the labor and your margin. It uses an app you make in ABC's developer portal for your own company, so your prices stay between you and ABC.",
+    highlights: [
+      { icon: "search", title: "ABC's catalog", text: "Search ABC's items at your branch with your price on each, and pick the exact color and size." },
+      { icon: "roofing", title: "Priced from the roof", text: "Squares and edges from the measurement become bundles, rolls and pieces, rounded up, at today's prices." },
+      { icon: "dollar", title: "Costs you can see", text: "Each material, what it comes to, and the materials total sit next to the labor and the margin." },
+    ],
+    access: [
+      "Read your ABC account and branch, and ABC's catalog",
+      "Ask ABC for your prices on the materials your estimates use",
+      "Nothing else: it can't place orders or see your invoices",
+      "Prices are kept with your price list and estimates, never shown next to another supplier's",
+    ],
+    connectsWith: "Keys from ABC Supply",
+    website: "https://www.abcsupply.com/",
+    open: "/roofing",
   },
   twilio: {
     developer: "Twilio",

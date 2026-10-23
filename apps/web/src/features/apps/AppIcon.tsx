@@ -1,6 +1,7 @@
 /** App icons: each app's own logo on a white tile, like a phone's home screen (see assets/apps/README.md). */
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
+import abcSupplyLogo from "@/assets/apps/abc-supply.svg";
 import chatgptLogo from "@/assets/apps/chatgpt.svg";
 import claudeLogo from "@/assets/apps/claude.svg";
 import crewtavoLogo from "@/assets/apps/crewtavo.svg";
@@ -23,6 +24,7 @@ const LOGOS: Record<string, string> = {
   quickbooks: quickbooksLogo,
   zoho_books: zohoLogo,
   stripe: stripeLogo,
+  abc_supply: abcSupplyLogo,
   twilio: twilioLogo,
   anthropic: claudeLogo,
   fal: falLogo,
@@ -30,7 +32,7 @@ const LOGOS: Record<string, string> = {
   sveltia: sveltiaLogo,
 };
 /** Wordmark-shaped logos get more width. */
-const WIDE = new Set(["zoho_calendar", "zoho_books"]);
+const WIDE = new Set(["zoho_calendar", "zoho_books", "abc_supply"]);
 /** Logos that are already a whole app icon fill the tile. */
 const FULL = new Set(["sveltia"]);
 

@@ -702,6 +702,33 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .estimate-choice { margin-right: 8px; vertical-align: 1px; }
 .roof-add-other .select { flex: 1 1 240px; min-width: 0; max-width: 420px; }
 
+/* Materials from the business's ABC Supply account (roofing/RoofMaterials.tsx, materials/) */
+.material-summary { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--green-tint); }
+.material-summary .grow { display: grid; gap: 2px; min-width: 0; }
+.material-total { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+.material-lines { display: grid; gap: 8px; }
+.material-line { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.material-line[data-optional] { color: var(--text-2); }
+.material-line-head { display: flex; align-items: baseline; gap: 12px; }
+.material-line-head .grow { min-width: 0; }
+.material-items { list-style: none; margin: 0; padding: 0; display: grid; }
+.material-items li { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid var(--divider); font-size: 14px; }
+.material-items li > .grow { display: grid; gap: 1px; min-width: 0; }
+.material-actions { display: inline-flex; gap: 2px; margin-right: -6px; }
+.material-line-foot { gap: 8px 16px; justify-content: space-between; }
+.material-results { display: grid; gap: 6px; max-height: min(52vh, 460px); overflow-y: auto; }
+.material-result { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: inherit; font: inherit; text-align: left; }
+button.material-result { cursor: pointer; }
+button.material-result:hover { border-color: var(--border-strong); }
+button.material-result:focus-visible { outline: none; box-shadow: var(--ring); }
+.material-result .grow { display: grid; gap: 1px; min-width: 0; }
+.material-price { white-space: nowrap; }
+.material-picked { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--fill); }
+@media (max-width: 600px) {
+  .material-items li { flex-wrap: wrap; row-gap: 2px; }
+  .material-items li > .grow { flex-basis: 100%; }
+}
+
 /* Roof pitch: the picker and the phone and photo gauges (measure/RoofPitch.tsx) */
 .pitch-picker { display: grid; gap: 8px; }
 .pitch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 6px; }
