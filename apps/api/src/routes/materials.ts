@@ -1,0 +1,268 @@
+/**
+ * Material prices: the materials in a price list's services, from the business's own ABC Supply
+ * account (integrations/abcSupply.ts), and an estimate's materials priced at its branch today
+ * (Roofing → Estimate → Materials). Each material is a supplier item and how many of it go into one
+ * unit of the service; the service's cost is its materials plus the rest (labor_cost).
+ */
+import { SALES } from "@crewtavo/core";
+import { lineUnitCost, priceMaterials, serviceUnitCost, type LineMaterials, type MaterialLink } from "@crewtavo/core/materials";
+import { Hono, type Context } from "hono";
+import { z } from "zod";
+import type { AppEnv } from "../env";
+import { abcConnection, AbcProblem, settingsOf } from "../integrations/abcSupply";
+import { requireCompany, requireUser } from "../lib/auth";
+import { asJson, dbError, HttpError, must, param, readJson } from "../lib/http";
+import { allow } from "../lib/limit";
+import { adminClient, type Db } from "../lib/supabase";
+
+export const materials = new Hono<AppEnv>();
+
+/** Quotes whose lines can still change (and so be priced again). */
+const EDITABLE = ["draft", "sent", "changes_requested"];
+
+const LINK_FIELDS = "id, service_id, item_number, name, uom, uom_name, length_ft, per_unit, unit_price, priced_at, price_note, sort";
+type LinkRow = MaterialLink & { id: string; service_id: string; priced_at: string | null; sort: number };
+
+/** An ABC Supply problem as the answer, in its own words. A token ABC turned down twice is an outage here. */
+const supplierAnswer = (error: unknown) => (error instanceof AbcProblem ? new HttpError(error.status === 401 ? 502 : error.status, error.message) : error);
+
+async function connection(c: Context<AppEnv>) {
+  try {
+    return await abcConnection(c.env, adminClient(c.env), c.var.companyId);
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+}
+
+/** Where material prices come from, for everyone who prices estimates (Apps itself is for admins). */
+materials.get("/materials/supplier", requireUser, requireCompany(SALES), async (c) => {
+  const { data } = await adminClient(c.env).from("integrations").select("status, settings, last_error").match({ company_id: c.var.companyId, provider: "abc_supply" }).maybeSingle();
+  const settings = data && data.status !== "disconnected" ? settingsOf(data.settings) : null;
+  return c.json({
+    supplier: settings
+      ? { id: "abc_supply", name: "ABC Supply", status: data!.status, last_error: data!.last_error, environment: settings.environment, ship_to_name: settings.ship_to_name, branch: settings.branch, branch_name: settings.branch_name }
+      : null,
+  });
+});
+
+/** ABC Supply's catalog at the company's branch, each item with the account's price for one. */
+materials.get("/materials/search", requireUser, requireCompany(SALES), async (c) => {
+  const query = (c.req.query("q") ?? "").trim().slice(0, 80);
+  if (query.length < 2) throw new HttpError(400, "Type at least two letters to search.");
+  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, 120, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
+  const { client, settings } = await connection(c);
+  try {
+    const items = await client.searchItems(query, settings.branch);
+    // Items cut to length can't be priced until a length is picked.
+    const prices = await client.prices(
+      settings.ship_to,
+      settings.branch,
+      items.filter((i) => !i.dimensional).map((i) => ({ id: i.item_number, item_number: i.item_number, quantity: 1, uom: i.stocking_uom })),
+      "estimating",
+    );
+    return c.json({
+      branch_name: settings.branch_name,
+      items: items.map((i) => ({ ...i, uom: i.stocking_uom, unit_price: prices.get(i.item_number)?.unit_price ?? null, note: i.dimensional ? "Pick a length to see its price." : (prices.get(i.item_number)?.note ?? null) })),
+    });
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+});
+
+/** One item: its units, and the lengths it's cut to. A price for the unit asked for (and length). */
+materials.get("/materials/items/:number", requireUser, requireCompany(SALES), async (c) => {
+  const number = c.req.param("number") ?? "";
+  if (!/^[A-Za-z0-9._-]{1,40}$/.test(number)) throw new HttpError(400, "That isn't an ABC item number.");
+  const { client, settings } = await connection(c);
+  try {
+    const item = await client.item(number);
+    const uom = (c.req.query("uom") ?? item.stocking_uom).toUpperCase();
+    const length = Number(c.req.query("length_ft")) || (item.dimensional ? (item.lengths[0] ?? null) : null);
+    const price = item.dimensional && !length ? null : (await client.prices(settings.ship_to, settings.branch, [{ id: "1", item_number: item.item_number, quantity: 1, uom, length_ft: length }], "estimating")).get("1")!;
+    return c.json({ item, uom, length_ft: length, unit_price: price?.unit_price ?? null, note: price?.note ?? null });
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+});
+
+/** A service's materials, in order. */
+const linksOf = async (db: Db, serviceId: string) => must(await db.from("service_materials").select(LINK_FIELDS).eq("service_id", serviceId).order("sort").order("created_at")) as unknown as LinkRow[];
+
+/**
+ * The service's cost from its materials and the rest. With no materials left, the rest is its
+ * whole cost again, and labor_cost goes back to empty.
+ */
+async function updateServiceCost(db: Db, companyId: string, serviceId: string, links: LinkRow[], laborCost: number | null) {
+  const change = links.length ? { labor_cost: laborCost ?? 0, unit_cost: serviceUnitCost(links, laborCost) } : { labor_cost: null, unit_cost: laborCost };
+  const { error } = await db.from("services").update(change).eq("id", serviceId).eq("company_id", companyId);
+  if (error) throw dbError(error);
+  return change;
+}
+
+const serviceOf = async (db: Db, companyId: string, id: string) =>
+  must(await db.from("services").select("id, name, unit, unit_cost, labor_cost").eq("id", id).eq("company_id", companyId).maybeSingle(), "That service wasn't found. It may have been deleted.");
+
+const perUnit = z.number().positive("How many has to be more than 0.").max(100000);
+
+/**
+ * A material in a service: checked with ABC (its name and units come from there), priced, and the
+ * service's cost worked out again. The first one splits the service's cost: what its materials
+ * don't explain is the labor and the rest, until someone changes it.
+ */
+materials.post("/services/:id/materials", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  const id = param(c, "id");
+  const body = await readJson(c, z.object({ item_number: z.string().trim().min(1).max(40), uom: z.string().trim().min(1).max(12).optional(), per_unit: perUnit, length_ft: z.number().positive().max(1000).nullable().optional() }));
+  const { db, companyId } = c.var;
+  const service = await serviceOf(db, companyId, id);
+  const { client, settings } = await connection(c);
+  const { item, uom, price } = await (async () => {
+    try {
+      const found = await client.item(body.item_number);
+      const unit = (body.uom ?? found.stocking_uom).toUpperCase();
+      if (found.uoms.length && !found.uoms.some((u) => u.code === unit)) throw new HttpError(400, `ABC Supply doesn't sell ${found.name} by ${unit}.`);
+      if (found.dimensional && !body.length_ft) throw new HttpError(400, "Pick the length it's cut to.");
+      const answer = (await client.prices(settings.ship_to, settings.branch, [{ id: "1", item_number: found.item_number, quantity: 1, uom: unit, length_ft: body.length_ft }], "estimating")).get("1")!;
+      return { item: found, uom: { code: unit, name: found.uoms.find((u) => u.code === unit)?.name ?? unit }, price: answer };
+    } catch (error) {
+      throw supplierAnswer(error);
+    }
+  })();
+  const before = await linksOf(db, id);
+  const { error } = await db.from("service_materials").insert({
+    company_id: companyId,
+    service_id: id,
+    supplier: "abc_supply",
+    item_number: item.item_number,
+    name: item.name.slice(0, 300),
+    uom: uom.code,
+    uom_name: uom.name.slice(0, 60),
+    length_ft: item.dimensional ? body.length_ft : null,
+    per_unit: body.per_unit,
+    unit_price: price.unit_price,
+    priced_at: new Date().toISOString(),
+    price_note: price.note,
+    sort: before.reduce((m, l) => Math.max(m, l.sort), 0) + 1,
+  });
+  if (error) throw dbError(error);
+  const links = await linksOf(db, id);
+  const labor = service.labor_cost !== null ? Number(service.labor_cost) : Math.max(0, Math.round((Number(service.unit_cost ?? 0) - serviceUnitCost(links, 0)) * 100) / 100);
+  const cost = await updateServiceCost(db, companyId, id, links, labor);
+  return c.json({ materials: links, ...cost }, 201);
+});
+
+/** How many go into a unit, changed. */
+materials.patch("/services/:id/materials/:material", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  const id = param(c, "id");
+  const body = await readJson(c, z.object({ per_unit: perUnit }));
+  const { db, companyId } = c.var;
+  const service = await serviceOf(db, companyId, id);
+  const { error } = await db.from("service_materials").update({ per_unit: body.per_unit }).eq("id", param(c, "material")).eq("service_id", id);
+  if (error) throw dbError(error);
+  const links = await linksOf(db, id);
+  return c.json({ materials: links, ...(await updateServiceCost(db, companyId, id, links, service.labor_cost === null ? null : Number(service.labor_cost))) });
+});
+
+/** A material out of a service. */
+materials.delete("/services/:id/materials/:material", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  const id = param(c, "id");
+  const { db, companyId } = c.var;
+  const service = await serviceOf(db, companyId, id);
+  const { error } = await db.from("service_materials").delete().eq("id", param(c, "material")).eq("service_id", id);
+  if (error) throw dbError(error);
+  const links = await linksOf(db, id);
+  return c.json({ materials: links, ...(await updateServiceCost(db, companyId, id, links, service.labor_cost === null ? null : Number(service.labor_cost))) });
+});
+
+/** What a service with materials costs besides them, per unit. */
+materials.put("/services/:id/labor", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  const id = param(c, "id");
+  const body = await readJson(c, z.object({ labor_cost: z.number().min(0).max(10_000_000) }));
+  const { db, companyId } = c.var;
+  await serviceOf(db, companyId, id);
+  const links = await linksOf(db, id);
+  if (!links.length) throw new HttpError(400, "Add a material first. Without materials, the price list's cost is the whole cost.");
+  return c.json({ materials: links, ...(await updateServiceCost(db, companyId, id, links, Math.round(body.labor_cost * 100) / 100)) });
+});
+
+/**
+ * A quote's materials, priced at ABC Supply today: for each line from a service with materials,
+ * whole bundles, rolls and pieces at the account's prices at its branch. Each line keeps what its
+ * materials came to (materials, material_cost) and its cost per unit with the rest (unit_cost); the
+ * price list keeps the newest prices, so its costs stay current too.
+ */
+materials.post("/quotes/:id/material-prices", requireUser, requireCompany(SALES, "sales"), async (c) => {
+  const id = param(c, "id");
+  const { db, companyId } = c.var;
+  const quote = must(await db.from("quotes").select("id, status").eq("id", id).eq("company_id", companyId).maybeSingle(), "That quote wasn't found.");
+  if (!EDITABLE.includes(quote.status)) throw new HttpError(409, "This quote was approved, so its materials keep the prices it was approved with.");
+  const lines = must(await db.from("quote_line_items").select("id, service_id, quantity, materials").eq("quote_id", id)) as Array<{ id: string; service_id: string | null; quantity: number; materials: unknown }>;
+  const serviceIds = [...new Set(lines.map((l) => l.service_id).filter((s): s is string => Boolean(s)))];
+  const [links, services] = serviceIds.length
+    ? await Promise.all([
+        db.from("service_materials").select(LINK_FIELDS).in("service_id", serviceIds).order("sort").order("created_at"),
+        db.from("services").select("id, labor_cost").in("id", serviceIds),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }];
+  const byService = new Map<string, LinkRow[]>();
+  for (const link of must(links) as unknown as LinkRow[]) byService.set(link.service_id, [...(byService.get(link.service_id) ?? []), link]);
+  const labor = new Map((must(services) as Array<{ id: string; labor_cost: number | null }>).map((s) => [s.id, s.labor_cost]));
+
+  // Lines whose service no longer has materials go back to being priced from the price list.
+  const plain = lines.filter((l) => l.materials && !(l.service_id && byService.has(l.service_id))).map((l) => l.id);
+  if (plain.length) {
+    const { error } = await db.from("quote_line_items").update({ materials: null, material_cost: null }).in("id", plain);
+    if (error) throw dbError(error);
+  }
+  const priced = lines.filter((l) => l.service_id && byService.has(l.service_id));
+  if (!priced.length) return c.json({ priced_at: null, lines: [] });
+  if (!(await allow(c.env, `material-prices:${companyId}`, 60, 10 * 60))) throw new HttpError(429, "Those prices were just updated. Wait a minute and try again.");
+
+  const { client, settings } = await connection(c);
+  const asks = priced.flatMap((line) =>
+    priceMaterials(line.quantity, byService.get(line.service_id!)!).items.map((item, i) => {
+      const link = byService.get(line.service_id!)![i]!;
+      return { id: `${line.id}:${link.id}`, item_number: link.item_number, quantity: Math.max(1, item.quantity), uom: link.uom, length_ft: link.length_ft === null || link.length_ft === undefined ? null : Number(link.length_ft) };
+    }),
+  );
+  let prices;
+  try {
+    prices = await client.prices(settings.ship_to, settings.branch, asks, "quoting");
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+  const pricedAt = new Date().toISOString();
+  const admin = adminClient(c.env);
+
+  // The price list keeps each material's newest price, and its services' costs follow.
+  const fresh = new Map<string, { unit_price: number | null; price_note: string | null }>();
+  for (const line of priced) {
+    for (const link of byService.get(line.service_id!)!) {
+      const answer = prices.get(`${line.id}:${link.id}`);
+      if (answer && !fresh.has(link.id)) fresh.set(link.id, { unit_price: answer.unit_price, price_note: answer.note });
+    }
+  }
+  for (const [linkId, price] of fresh) {
+    const { error } = await admin.from("service_materials").update({ ...price, priced_at: pricedAt }).eq("id", linkId).eq("company_id", companyId);
+    if (error) throw dbError(error);
+  }
+  for (const serviceId of new Set(priced.map((l) => l.service_id!))) {
+    const updated = byService.get(serviceId)!.map((link) => ({ ...link, ...(fresh.get(link.id) ?? {}) }));
+    byService.set(serviceId, updated);
+    const { error } = await admin.from("services").update({ unit_cost: serviceUnitCost(updated, labor.get(serviceId) ?? null) }).eq("id", serviceId).eq("company_id", companyId);
+    if (error) throw dbError(error);
+  }
+
+  const results = [];
+  for (const line of priced) {
+    const links = byService.get(line.service_id!)!.map((link) => ({ ...link, unit_price: prices.get(`${line.id}:${link.id}`)?.unit_price ?? null, price_note: prices.get(`${line.id}:${link.id}`)?.note ?? null }));
+    const { items, total, unpriced } = priceMaterials(line.quantity, links);
+    const snapshot: LineMaterials = { supplier: "abc_supply", branch: settings.branch, branch_name: settings.branch_name, priced_at: pricedAt, line_quantity: Number(line.quantity), items };
+    const { error } = await db
+      .from("quote_line_items")
+      .update({ materials: asJson(snapshot), material_cost: total, unit_cost: lineUnitCost(total, labor.get(line.service_id!) ?? null, line.quantity) })
+      .eq("id", line.id);
+    if (error) throw dbError(error);
+    results.push({ id: line.id, material_cost: total, unpriced });
+  }
+  return c.json({ priced_at: pricedAt, branch_name: settings.branch_name, lines: results });
+});

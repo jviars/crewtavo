@@ -7,11 +7,12 @@
  *   builtin   - part of Crewtavo, turned on or off for the company (team chat: companies.settings.team_chat;
  *               website analytics: companies.settings.website_analytics, routes/analytics.ts)
  *   site      - the company's website editor, by its address (Sveltia CMS: companies.settings.website, integrations/website.ts)
+ * ABC Supply is an api_key app with two keys: its own app's Client ID and secret (integrations/abcSupply.ts).
  */
 import type { Env } from "../env";
 
 /** Apps with a row in integrations (and maybe integration_secrets). */
-export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic" | "fal" | "railway";
+export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic" | "fal" | "railway" | "abc_supply";
 /** Apps whose calendars are added by link. They're also the calendar_sources.app values (with google_calendar). */
 export type LinkApp = "zoho_calendar" | "outlook_calendar" | "apple_calendar" | "ics_calendar";
 export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "website_analytics" | "sveltia";
@@ -21,7 +22,7 @@ export const CALENDAR_APPS: readonly CalendarApp[] = ["google_calendar", "zoho_c
 export interface CatalogEntry {
   id: AppId;
   name: string;
-  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Messaging" | "Website";
+  category: "Team" | "Calendar" | "AI" | "Accounting" | "Payments" | "Pricing" | "Messaging" | "Website";
   description: string;
   auth: "oauth" | "api_key" | "link" | "connector" | "builtin" | "site";
   docs: string;
@@ -153,6 +154,16 @@ export const CATALOG: CatalogEntry[] = [
     auth: "api_key",
     docs: "https://docs.stripe.com/keys",
     // A company adds its own key; a deployment can also set one for everyone.
+    available: () => true,
+  },
+  {
+    id: "abc_supply",
+    name: "ABC Supply",
+    category: "Pricing",
+    description: "Your own ABC Supply prices on your estimates: every bundle, roll and piece priced at your branch, so material costs are exact.",
+    auth: "api_key",
+    docs: "https://crewtavo.com/docs/connections/abc-supply/",
+    // Each business uses its own app at ABC (its Client ID and secret), so nothing to set up on the server.
     available: () => true,
   },
   {

@@ -13,6 +13,7 @@
     "./roofing": "./src/roofing.ts",
     "./imagery": "./src/imagery.ts",
     "./money": "./src/money.ts",
+    "./materials": "./src/materials.ts",
     "./formulas": "./src/formulas.ts",
     "./roles": "./src/roles.ts",
     "./chat": "./src/chat.ts",

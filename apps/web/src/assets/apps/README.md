@@ -10,6 +10,10 @@ file: AppIcon.tsx draws today's date and a calendar glyph instead.
 fal.svg is fal.ai's mark from @lobehub/icons-static-svg 1.95.1 (MIT), in fal's red, for the fal.ai app
 (Find paving).
 
+abc-supply.svg is ABC Supply's logo as its own website shows it (abcsupply.com, wp-content/uploads/
+2026/03/ABC-US-Exteriors-Logo.svg, downloaded 2026-10-22), in ABC's red and blue, for the ABC Supply
+app (material prices). It's a wordmark, so AppIcon.tsx gives it more width.
+
 Settings → AI assistants shows each connected assistant's logo (assistantConnections.ts): claude.svg
 for Claude and Claude Code, chatgpt.svg for ChatGPT, and codex.svg for Codex, OpenAI's Codex mark
 from svgl.app (MIT) in the blue-violet gradient of Codex's app icon (from @lobehub/icons 1.95.1).

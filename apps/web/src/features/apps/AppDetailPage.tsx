@@ -20,6 +20,7 @@ import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { CalendarFeedCard } from "../settings/CalendarFeedCard";
+import { AbcSupplyPanel } from "./AbcSupplyPanel";
 import { AnalyticsPanel, useAnalyticsSwitch } from "./AnalyticsPanel";
 import { AppIcon, AppTile } from "./AppIcon";
 import { AppKeysCard } from "./AppKeysCard";
@@ -302,6 +303,8 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
             <LinkCalendarsPanel app={app.id} appName={app.name} steps={info.steps} />
           ) : app.auth === "site" ? (
             <WebsitePanel app={app} onSaved={refresh} />
+          ) : app.id === "abc_supply" ? (
+            <AbcSupplyPanel app={app} onChanged={refresh} />
           ) : app.auth === "connector" || app.id === "anthropic" ? (
             <>
               <ConnectorCard app={app} mcpUrl={mcpUrl} setup />
@@ -324,7 +327,8 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           {app.auth === "link" && <LinkCalendarsPanel app={app.id} appName={app.name} steps={info.steps} />}
           {(app.auth === "connector" || app.id === "anthropic") && <ConnectorCard app={app} mcpUrl={mcpUrl} />}
           {app.id === "stripe" && app.stripe && <StripePanel app={app} onChanged={refresh} />}
-          {app.auth === "api_key" && <KeyCard app={app} onSaved={refresh} />}
+          {app.auth === "api_key" && app.id !== "abc_supply" && <KeyCard app={app} onSaved={refresh} />}
+          {app.id === "abc_supply" && <AbcSupplyPanel app={app} onChanged={refresh} />}
           {app.id === "website_analytics" && <AnalyticsPanel />}
           {app.id === "team_chat" && <TeamChatPanel />}
           {app.auth === "site" && <WebsitePanel app={app} onSaved={refresh} />}
@@ -403,6 +407,7 @@ function uninstallBody(app: AppRow, counts: { assistants: number; calendars: num
     const keys = app.app_keys ? ` Your ${app.id === "quickbooks" ? "Intuit" : "Zoho"} app's keys stay, so installing it again is one sign-in.` : "";
     return `Syncing stops right away. Nothing already synced is deleted.${keys} ${again}`;
   }
+  if (app.id === "abc_supply") return `Estimates stop getting prices from ABC, and your ABC app's keys are removed from Crewtavo. The materials in your price list and the prices already on estimates stay. ${again}`;
   if (app.id === "fal") return `Find paving stops working, and your fal.ai key is removed from Crewtavo. Shapes it already found stay on your drawings. ${again}`;
   if (app.category === "AI") {
     const parts = [];
