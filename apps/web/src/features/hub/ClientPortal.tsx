@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { dateIn, formatDate, formatMoneyCents, formatTime } from "@/lib/format";
+import { dateIn, formatDate, formatMoney, formatMoneyCents, formatTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 export interface PortalVisit {
@@ -28,7 +28,8 @@ export interface ClientView {
   kind: "client";
   company: { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null };
   client: { name: string; first_name: string; properties: Array<{ id: string; line1: string; city: string | null }> };
-  quotes: Array<{ id: string; number: number; title: string; status: string; total: number; valid_until: string | null; approved_at: string | null; link: string }>;
+  /** A quote out as a price range has its range and no total: the client hasn't seen the exact price. */
+  quotes: Array<{ id: string; number: number; title: string; status: string; total: number | null; range?: { low: number; high: number; accepted_at: string | null } | null; valid_until: string | null; approved_at: string | null; link: string }>;
   invoices: Array<{ id: string; number: number; subject: string | null; status: string; total: number; balance_due: number; due_on: string | null; issued_on: string; link: string }>;
   visits: PortalVisit[];
   past_visits: PortalVisit[];
@@ -118,7 +119,8 @@ function VisitCard({ token, visit, tz, onMessage }: { token: string; visit: Port
 }
 
 function Home({ token, data, go, onMessage }: { token: string; data: ClientView; go: (v: "visits" | "request") => void; onMessage: (visit?: PortalVisit) => void }) {
-  const waitingQuotes = data.quotes.filter((q) => q.status === "sent" || q.status === "changes_requested");
+  // A range they've said yes to waits on the business (to book the visit), not on them.
+  const waitingQuotes = data.quotes.filter((q) => (q.status === "sent" || q.status === "changes_requested") && !q.range?.accepted_at);
   const owed = data.invoices.filter((i) => Number(i.balance_due) > 0 && i.status !== "paid");
   const next = data.visits[0];
   const tz = hubZone(data.company);
@@ -127,6 +129,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
     ...data.payments.map((p) => ({ at: p.received_at, day: dateIn(p.received_at, tz), icon: "dollar" as IconName, tone: "good", title: p.invoice ? `Payment on invoice #${p.invoice}` : "Payment received", detail: `${formatMoneyCents(p.amount)} by ${METHOD[p.method] ?? "payment"}`, link: p.invoice ? data.invoices.find((i) => i.number === p.invoice)?.link : undefined })),
     ...data.past_visits.map((v) => ({ at: v.completed_at ?? `${v.scheduled_on}T12:00:00Z`, day: doneOn(v, tz), icon: "check" as IconName, tone: "good", title: `${v.title} done`, detail: v.crew.length ? `by ${names(v.crew)}` : "Visit complete", link: undefined })),
     ...data.quotes.filter((q) => q.approved_at).map((q) => ({ at: q.approved_at!, day: dateIn(q.approved_at!, tz), icon: "quote" as IconName, tone: "blue", title: `You approved quote #${q.number}`, detail: q.title, link: q.link })),
+    ...data.quotes.filter((q) => q.range?.accepted_at).map((q) => ({ at: q.range!.accepted_at!, day: dateIn(q.range!.accepted_at!, tz), icon: "calendar" as IconName, tone: "blue", title: "You asked for a visit", detail: q.title, link: q.link })),
     ...data.requests.map((r) => ({ at: r.created_at, day: dateIn(r.created_at, tz), icon: "requests" as IconName, tone: "plain", title: `Request #${r.number} received`, detail: r.title, link: undefined })),
   ]
     .sort((a, b) => b.at.localeCompare(a.at))
@@ -155,19 +158,33 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
         {waitingQuotes.length === 0 && owed.length === 0 && (
           <div className="hub-card hub-calm"><Icon name="check" size={18} />Nothing needs your attention right now.</div>
         )}
-        {waitingQuotes.map((q) => (
-          <article key={q.id} className="hub-card hub-todo">
-            <div className="hub-todo-head">
-              <span className="hub-icon-tile blue"><Icon name="quote" size={20} /></span>
-              <span className="grow stack-xs">
-                <span className="hub-meta">Quote #{q.number}{q.status === "changes_requested" ? " · you asked for changes" : q.valid_until ? ` · valid until ${formatDate(q.valid_until)}` : ""}</span>
-                <strong className="hub-title">{q.title}</strong>
-              </span>
-              <strong className="hub-amount">{formatMoneyCents(q.total)}</strong>
-            </div>
-            <a className="hub-btn hub-btn-brand" href={q.link}>Review and approve</a>
-          </article>
-        ))}
+        {waitingQuotes.map((q) =>
+          q.range ? (
+            <article key={q.id} className="hub-card hub-todo">
+              <div className="hub-todo-head">
+                <span className="hub-icon-tile blue"><Icon name="roofing" size={20} /></span>
+                <span className="grow stack-xs">
+                  <span className="hub-meta">Estimate #{q.number}{q.valid_until ? ` · good until ${formatDate(q.valid_until)}` : ""}</span>
+                  <strong className="hub-title">{q.title}</strong>
+                  <span className="hub-range-line">Between {formatMoney(q.range.low)} and {formatMoney(q.range.high)}</span>
+                </span>
+              </div>
+              <a className="hub-btn hub-btn-brand" href={q.link}>See your estimate</a>
+            </article>
+          ) : (
+            <article key={q.id} className="hub-card hub-todo">
+              <div className="hub-todo-head">
+                <span className="hub-icon-tile blue"><Icon name="quote" size={20} /></span>
+                <span className="grow stack-xs">
+                  <span className="hub-meta">Quote #{q.number}{q.status === "changes_requested" ? " · you asked for changes" : q.valid_until ? ` · valid until ${formatDate(q.valid_until)}` : ""}</span>
+                  <strong className="hub-title">{q.title}</strong>
+                </span>
+                <strong className="hub-amount">{formatMoneyCents(q.total)}</strong>
+              </div>
+              <a className="hub-btn hub-btn-brand" href={q.link}>Review and approve</a>
+            </article>
+          ),
+        )}
         {owed.map((i) => (
           <article key={i.id} className="hub-card hub-todo">
             <div className="hub-todo-head">

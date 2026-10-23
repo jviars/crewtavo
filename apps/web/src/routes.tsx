@@ -1,4 +1,4 @@
-import { Navigate, useLocation, type RouteObject } from "react-router-dom";
+import { Navigate, Outlet, useLocation, type RouteObject } from "react-router-dom";
 import { AppShell } from "@/components/shell/AppShell";
 import { RouteError } from "@/components/shell/RouteError";
 import { OAuthConsentPage } from "@/features/auth/OAuthConsentPage";
@@ -37,6 +37,9 @@ const screens = {
   pavingProject: () => import("@/features/paving/PavingProjectPage"),
   roofing: () => import("@/features/roofing/RoofingPage"),
   roofingProject: () => import("@/features/roofing/RoofingProjectPage"),
+  roofPackages: () => import("@/features/roofing/RoofPackagesPage"),
+  // The salesperson's site visit on an iPad, often opened on a roof with weak signal.
+  roofVisit: () => import("@/features/roofing/visit/RoofVisitPages"),
   quote: () => import("@/features/quotes/QuotePage"),
   jobs: () => import("@/features/jobs/JobsPage"),
   job: () => import("@/features/jobs/JobPage"),
@@ -119,6 +122,7 @@ export const routes: RouteObject[] = [
           { path: "paving", ...page(screens.paving, "PavingPage") },
           { path: "paving/:id", ...page(screens.pavingProject, "PavingProjectPage") },
           { path: "roofing", ...page(screens.roofing, "RoofingPage") },
+          { path: "roofing/packages", ...page(screens.roofPackages, "RoofPackagesPage") },
           { path: "roofing/:id", ...page(screens.roofingProject, "RoofingProjectPage") },
           { path: "quotes", ...page(screens.quotes, "QuotesPage") },
           { path: "quotes/:id", ...page(screens.quote, "QuotePage") },
@@ -136,6 +140,20 @@ export const routes: RouteObject[] = [
           { path: "*", element: <NotFound /> },
         ],
       },
+    ],
+  },
+  // The site visit on an iPad: signed in, but full screen without the app's navigation.
+  {
+    errorElement: <RouteError fullPage />,
+    element: (
+      <SessionProvider>
+        <Outlet />
+      </SessionProvider>
+    ),
+    children: [
+      { path: "roofing/:id/visit", ...page(screens.roofVisit, "RoofVisitPage") },
+      { path: "roofing/:id/sign", ...page(screens.roofVisit, "RoofSignPage") },
+      { path: "roofing/:id/signed", ...page(screens.roofVisit, "RoofSignedPage") },
     ],
   },
   // Claude/ChatGPT connector consent (Supabase OAuth server). Needs sign-in but not a company.

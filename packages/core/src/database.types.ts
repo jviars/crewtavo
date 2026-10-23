@@ -580,6 +580,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"document_templates": {
+                  Row: {
+                    "company_id": string,"created_at": string,"created_by": string | null,"id": string,"is_default": boolean,"name": string,"settings": NonNullable<Json>,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"is_default"?: boolean,"name": string,"settings"?: NonNullable<Json>,"updated_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"is_default"?: boolean,"name"?: string,"settings"?: NonNullable<Json>,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "document_templates_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"equipment": {
                   Row: {
                     "company_id": string,"created_at": string,"crew_id": string | null,"id": string,"kind": string,"make": string | null,"meter": string,"meter_read_on": string | null,"meter_reading": number | null,"model": string | null,"name": string,"notes": string | null,"photo_path": string | null,"plate": string | null,"purchased_on": string | null,"serial": string | null,"status": string,"updated_at": string,"year": number | null
@@ -1414,14 +1434,14 @@ isOneToOne: false
                   ]
                 },"quotes": {
                   Row: {
-                    "approval": Json | null,"approved_at": string | null,"change_order_for": string | null,"client_id": string,"company_id": string,"converted_at": string | null,"created_at": string,"created_by": string | null,"deposit_amount": number,"discount_amount": number,"id": string,"lost_reason": string | null,"message": string | null,"number": number | null,"pipeline_stage": string | null,"promo_code_id": string | null,"property_id": string | null,"request_id": string | null,"salesperson_id": string | null,"sent_at": string | null,"status": string,"subtotal": number,"tax_amount": number,"tax_rate": number,"title": string,"total": number,"updated_at": string,"valid_until": string | null
+                    "approval": Json | null,"approved_at": string | null,"change_order_for": string | null,"client_id": string,"company_id": string,"converted_at": string | null,"created_at": string,"created_by": string | null,"deposit_amount": number,"discount_amount": number,"exact_sent_at": string | null,"id": string,"lost_reason": string | null,"message": string | null,"number": number | null,"pipeline_stage": string | null,"priced_on_site_at": string | null,"promo_code_id": string | null,"property_id": string | null,"range_accepted_at": string | null,"range_high": number | null,"range_lines": Json | null,"range_low": number | null,"range_sent_at": string | null,"request_id": string | null,"roof_package_id": string | null,"salesperson_id": string | null,"sent_at": string | null,"status": string,"subtotal": number,"tax_amount": number,"tax_rate": number,"template_id": string | null,"title": string,"total": number,"updated_at": string,"valid_until": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id": string,"company_id": string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"pipeline_stage"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"request_id"?: string | null,"salesperson_id"?: string | null,"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"title": string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
+                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id": string,"company_id": string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"exact_sent_at"?: string | null,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"pipeline_stage"?: string | null,"priced_on_site_at"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"range_accepted_at"?: string | null,"range_high"?: number | null,"range_lines"?: Json | null,"range_low"?: number | null,"range_sent_at"?: string | null,"request_id"?: string | null,"roof_package_id"?: string | null,"salesperson_id"?: string | null,"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"template_id"?: string | null,"title": string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
                   }
                   Update: {
-                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id"?: string,"company_id"?: string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"pipeline_stage"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"request_id"?: string | null,"salesperson_id"?: string | null,"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"title"?: string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
+                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id"?: string,"company_id"?: string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"exact_sent_at"?: string | null,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"pipeline_stage"?: string | null,"priced_on_site_at"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"range_accepted_at"?: string | null,"range_high"?: number | null,"range_lines"?: Json | null,"range_low"?: number | null,"range_sent_at"?: string | null,"request_id"?: string | null,"roof_package_id"?: string | null,"salesperson_id"?: string | null,"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"template_id"?: string | null,"title"?: string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
                   }
                   Relationships: [
                     {
@@ -1459,6 +1479,18 @@ isOneToOne: false
       columns: ["company_id","promo_code_id"]
 isOneToOne: false
       referencedRelation: "promo_codes"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "quotes_roof_package_fkey"
+      columns: ["company_id","roof_package_id"]
+isOneToOne: false
+      referencedRelation: "roof_packages"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "quotes_template_fkey"
+      columns: ["company_id","template_id"]
+isOneToOne: false
+      referencedRelation: "document_templates"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -1587,6 +1619,64 @@ isOneToOne: false
       columns: ["company_id","job_id"]
 isOneToOne: false
       referencedRelation: "jobs"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"roof_package_items": {
+                  Row: {
+                    "company_id": string,"id": string,"kind": string,"package_id": string,"quantity": number | null,"service_id": string,"sort": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"id"?: string,"kind": string,"package_id": string,"quantity"?: number | null,"service_id": string,"sort"?: number
+                  }
+                  Update: {
+                    "company_id"?: string,"id"?: string,"kind"?: string,"package_id"?: string,"quantity"?: number | null,"service_id"?: string,"sort"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "roof_package_items_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "roof_package_items_company_id_package_id_fkey"
+      columns: ["company_id","package_id"]
+isOneToOne: false
+      referencedRelation: "roof_packages"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "roof_package_items_company_id_service_id_fkey"
+      columns: ["company_id","service_id"]
+isOneToOne: false
+      referencedRelation: "services"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"roof_packages": {
+                  Row: {
+                    "company_id": string,"created_at": string,"id": string,"is_default": boolean,"markup_pct": number,"name": string,"price_mode": string,"roof_service_id": string | null,"sort": number,"style": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"id"?: string,"is_default"?: boolean,"markup_pct"?: number,"name": string,"price_mode"?: string,"roof_service_id"?: string | null,"sort"?: number,"style"?: string,"updated_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"id"?: string,"is_default"?: boolean,"markup_pct"?: number,"name"?: string,"price_mode"?: string,"roof_service_id"?: string | null,"sort"?: number,"style"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "roof_packages_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "roof_packages_company_id_roof_service_id_fkey"
+      columns: ["company_id","roof_service_id"]
+isOneToOne: false
+      referencedRelation: "services"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -1846,6 +1936,26 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"user_signatures": {
+                  Row: {
+                    "company_id": string,"created_at": string,"image": string,"updated_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"image": string,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"image"?: string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "user_signatures_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"visit_assignees": {
                   Row: {
                     "company_id": string,"user_id": string,"visit_id": string
@@ -2022,7 +2132,10 @@ isOneToOne: false
                 }
           }
           Functions: {
-            "accept_terms":
+            "accept_hub_range":
+{ Args: { "p_company": string,"p_quote": string }; Returns: string
+                           },
+"accept_terms":
 { Args: { "p_company": string,"p_version": string }; Returns: string
                            },
 "apply_promo_code":

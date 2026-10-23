@@ -4,6 +4,7 @@
  * (routes/sales.ts) and AI assistants' tools (assistant-tools/quotes.ts, invoices.ts) both use
  * these, with the person's own client.
  */
+import { inRangeMode } from "@crewtavo/core/estimates";
 import { z } from "zod";
 import type { Env } from "../env";
 import { syncStripeInvoice } from "../integrations/stripe";
@@ -33,20 +34,41 @@ export type SendBody = z.infer<typeof sendSchema>;
 
 type Deliverable = { id: string; number: number | null; client_id: string; total?: number; balance_due?: number; client: { display_name: string; email: string | null; phone: string | null } | null };
 
+/**
+ * What a send says when the person didn't write their own message or subject: a roof estimate's
+ * price range goes out with its own words (rangeMessage), not the quote's total.
+ */
+export interface DeliverDefaults {
+  intro?: string;
+  subject?: string;
+}
+
+/** The words a price range goes out with when the person didn't write their own, in whole dollars. */
+export function rangeMessage(company: { name: string; currency: string | null }, low: number, high: number): Required<DeliverDefaults> {
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", maximumFractionDigits: 0 });
+  return {
+    intro: `Thanks for having us look at your roof. From our measurements, your new roof will cost between ${money.format(low)} and ${money.format(high)}. You can see what's included and let us know when you'd like us to come out:`,
+    subject: `Your roof estimate from ${company.name}`,
+  };
+}
+
 /** Email or text the client their link to a quote or invoice (or just make the link), and log it on their timeline. */
-export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: Deliverable, body: SendBody) {
+export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: Deliverable, body: SendBody, defaults: DeliverDefaults = {}) {
   const company = must(await s.db.from("companies").select("name, email, phone, address, currency, settings").eq("id", s.companyId).maybeSingle());
   const link = await clientLink(s.env, s.baseUrl, { c: s.companyId, t: kind, id: record.id });
   const label = `${kind === "quote" ? "Quote" : "Invoice"} #${record.number}`;
   const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(kind === "quote" ? record.total ?? 0 : record.balance_due ?? 0));
   const greeting = `Hi ${firstName(record.client?.display_name)},`;
-  const intro = body.message?.trim() || (kind === "quote" ? `Thanks for the opportunity. Here's your quote (${amount}). You can review the details, choose any options and approve it online:` : `Here's your invoice for ${amount}. You can view and pay it online:`);
+  const intro =
+    body.message?.trim() ||
+    defaults.intro ||
+    (kind === "quote" ? `Thanks for the opportunity. Here's your quote (${amount}). You can review the details, choose any options and approve it online:` : `Here's your invoice for ${amount}. You can view and pay it online:`);
   const text = `${greeting}\n\n${intro}\n\n${link}\n\nThanks,\n${company.name}`;
   let result: { sent: boolean; reason?: string; id?: string } = { sent: false, reason: "Link only" };
   if (body.channel === "email") {
     const to = body.to || record.client?.email;
     if (!to || !isEmail(to)) throw new HttpError(400, "Add a valid email address for this client first.");
-    const subject = body.subject || `${label} from ${company.name}`;
+    const subject = body.subject || defaults.subject || `${label} from ${company.name}`;
     const footer = [company.name, companyAddress(company.address as Record<string, string>), company.phone].filter(Boolean).join(" · ");
     result = await sendEmail(s.env, { to, subject, ...renderEmail({ companyName: company.name, logo: logoImage(s.baseUrl, s.companyId, company.settings), text, footer }), replyTo: company.email ?? undefined, fromName: company.name }, s.companyId);
   } else if (body.channel === "sms") {
@@ -59,7 +81,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
       company_id: s.companyId,
       client_id: record.client_id,
       channel: body.channel,
-      subject: body.channel === "email" ? body.subject || label : label,
+      subject: body.channel === "email" ? body.subject || defaults.subject || label : label,
       body: text,
       related_type: kind,
       related_id: record.id,
@@ -88,15 +110,29 @@ export async function quoteFromRequest(s: SalesScope, requestId: string) {
   return quote;
 }
 
-/** Send a quote (or take its link to share): it's then with the client. */
+/**
+ * Send a quote (or take its link to share): it's then with the client. A roof estimate that's out as
+ * a price range goes out with the range's words, so the message never gives away the exact total
+ * its link hides.
+ */
 export async function sendQuote(s: SalesScope, id: string, body: SendBody) {
   const quote = must(
-    await s.db.from("quotes").select("id, number, status, total, client_id, client:clients(display_name, email, phone), lines:quote_line_items(id)").eq("id", id).eq("company_id", s.companyId).maybeSingle(),
+    await s.db
+      .from("quotes")
+      .select("id, number, status, total, client_id, range_low, range_high, priced_on_site_at, exact_sent_at, client:clients(display_name, email, phone), lines:quote_line_items(id)")
+      .eq("id", id)
+      .eq("company_id", s.companyId)
+      .maybeSingle(),
     "Quote not found.",
   );
   if (["converted", "lost", "archived"].includes(quote.status)) throw new HttpError(400, `This quote is ${quote.status}, so it can't be sent.`);
   if (!quote.lines.length) throw new HttpError(400, "Add at least one line item before sending.");
-  const result = await deliver(s, "quote", quote, body);
+  let defaults: DeliverDefaults = {};
+  if (inRangeMode(quote)) {
+    const company = must(await s.db.from("companies").select("name, currency").eq("id", s.companyId).maybeSingle());
+    defaults = rangeMessage(company, Number(quote.range_low), Number(quote.range_high));
+  }
+  const result = await deliver(s, "quote", quote, body, defaults);
   // Sent, or the office took the link to share themselves: the quote is now with the client.
   if (result.sent || body.channel === "link") {
     await s.db.from("quotes").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", id).in("status", ["draft", "changes_requested"]);

@@ -10,7 +10,15 @@ import { isPavingTakeoff, pavingQuantities } from "@crewtavo/core/paving";
 import { savedRoofingQuantities } from "@crewtavo/core/roofing";
 import type { IconName } from "@/components/ui/Icon";
 
-export const STEPS: Array<{ id: StepId; label: string; icon: IconName; text: string }> = [
+/** One step of a trade's project, as its progress pills and the trade's list page show it. */
+export interface FlowStep<Id extends string = string> {
+  id: Id;
+  label: string;
+  icon: IconName;
+  text: string;
+}
+
+export const STEPS: Array<FlowStep<StepId>> = [
   { id: "takeoff", label: "Takeoff", icon: "area", text: "Measure the lot on the aerial" },
   { id: "estimate", label: "Estimate", icon: "dollar", text: "Price it from your price book" },
   { id: "proposal", label: "Proposal", icon: "send", text: "Send it to sign online" },
@@ -18,6 +26,9 @@ export const STEPS: Array<{ id: StepId; label: string; icon: IconName; text: str
   { id: "invoice", label: "Invoice", icon: "invoice", text: "Bill the deposit and the rest" },
 ];
 export type StepId = "takeoff" | "estimate" | "proposal" | "schedule" | "invoice";
+
+/** Whether every invoice is settled: paid, voided or written off. */
+export const invoicesSettled = (invoices: ReadonlyArray<{ status: string }>) => invoices.length > 0 && invoices.every((i) => ["paid", "void", "written_off"].includes(i.status));
 
 export interface TakeoffRow {
   id: string;
@@ -112,7 +123,7 @@ export function currentStep(q: QuoteForFlow | null, takeoff: TakeoffRow | null, 
   if (!q || !q.lines.length) return "estimate";
   if (["draft", "sent", "changes_requested"].includes(q.status)) return "proposal";
   if (q.status === "approved" || !q.jobs.length) return "schedule";
-  if (!invoices.length || invoices.some((i) => !["paid", "void", "written_off"].includes(i.status))) return "invoice";
+  if (!invoicesSettled(invoices)) return "invoice";
   return "done";
 }
 

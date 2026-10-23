@@ -51,6 +51,20 @@ export interface PresetIntakeForm {
   questions: PresetQuestion[];
 }
 
+/**
+ * A roof package to start a roofing business with (roof_packages): the service that prices the roof
+ * by the square, what's always on it and the one-tap quick adds, all by service name.
+ */
+export interface PresetPackage {
+  name: string;
+  style: "shingle" | "designer" | "metal" | "other";
+  roof: string;
+  default?: boolean;
+  /** quantity: how many to start with when the service isn't measured (pipe boots: 3). */
+  included: Array<{ service: string; quantity?: number }>;
+  quick: string[];
+}
+
 export interface TradePreset {
   id: string;
   name: string;
@@ -58,6 +72,7 @@ export interface TradePreset {
   services: PresetService[];
   job_types: string[];
   formulas: PresetFormula[];
+  packages?: PresetPackage[];
   checklists: Array<{ name: string; job_type?: string; items: PresetChecklistItem[] }>;
   intake_forms: PresetIntakeForm[];
   weather_rules: WeatherRule[];

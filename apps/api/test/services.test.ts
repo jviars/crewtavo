@@ -5,6 +5,7 @@
  */
 import type { IncomingMessage } from "node:http";
 import net from "node:net";
+import { DEFAULT_TEMPLATE } from "@crewtavo/core/documents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -584,7 +585,8 @@ describe("quote approval", () => {
       p_company: "co-1",
       p_quote: "quote-1",
       p_selected: [option],
-      p_approval: { name: "Ana Smith", selected_line_ids: [option], signature: null, signed_at: expect.any(String), ip: "203.0.113.9" },
+      // The business has no template saved, so the built-in one is kept with the approval.
+      p_approval: { name: "Ana Smith", selected_line_ids: [option], signature: null, signed_at: expect.any(String), ip: "203.0.113.9", template: DEFAULT_TEMPLATE },
     });
     expect(writes(calls)).toEqual([]);
   });

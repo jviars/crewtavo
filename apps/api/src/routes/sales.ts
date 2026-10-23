@@ -4,23 +4,17 @@
  * the steps with rules, side effects or secrets.
  */
 import {
-  drawingPitchFactor,
   drawingSquares,
-  edgeLengths,
   evaluateFormula,
   FormulaError,
   normalizePitch,
   OFFICE,
-  pavingQuantities,
   pitchProblem,
   SALES,
-  savedRoofingQuantities,
   summarizeFeatureCollection,
   validateFormula,
   type FeatureCollection,
-  type FormulaVariable,
   type MeasurementSummary,
-  type Section,
 } from "@crewtavo/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -30,6 +24,7 @@ import { requireCompany, requireUser } from "../lib/auth";
 import { appUrl, asJson, dbError, HttpError, must, param, readJson, requireEnv, uuid } from "../lib/http";
 import { clientLink } from "../lib/links";
 import { roofSegments } from "../services/external";
+import { applyMeasurement } from "../services/measurements";
 import { invoiceJobs, quoteFromRequest, remindInvoices, sendInvoice, sendQuote, sendSchema, type SalesScope } from "../services/sales";
 
 export const sales = new Hono<AppEnv>();
@@ -47,75 +42,15 @@ sales.post("/requests/:id/quote", requireUser, requireCompany(SALES, "sales"), a
 });
 
 /**
- * A saved measurement's roof slope (weighted by area when its sections have their own pitches), or
- * null when a pitch doesn't read (formulas that use it say so).
- */
-function savedPitchFactor(sections: Section[], pitch: string | null): number | null {
-  try {
-    return drawingPitchFactor({ sections }, pitch);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Fill quote line quantities (or prices) from a measurement using each line's formula.
  * Variables: FORMULA_VARIABLES (area_sqft, length_ft, pitch_factor, the roof edges and so on).
+ * `line_ids` fills only those lines (one just added or changed on a roof estimate); without it,
+ * every line with a formula follows the measurement ("Update from the roof").
  */
 sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "sales"), async (c) => {
   const id = param(c, "id");
-  const body = await readJson(c, z.object({ measurement_id: uuid, depth_in: z.number().positive().max(48).optional() }));
-  const { db, companyId } = c.var;
-  const m = must(
-    await db
-      .from("measurements")
-      .select("total_area_sqft, total_area_sqyd, total_length_ft, sections, roof_pitch, waste_pct")
-      .eq("id", body.measurement_id)
-      .eq("company_id", companyId)
-      .maybeSingle(),
-    "Measurement not found.",
-  );
-  const sections = (m.sections ?? []) as unknown as Section[];
-  const edges = edgeLengths({ sections });
-  // Every value a formula may use (FORMULA_VARIABLES), and nothing else.
-  const vars: Record<FormulaVariable, number | null> = {
-    area_sqft: Number(m.total_area_sqft),
-    area_sqyd: Number(m.total_area_sqyd),
-    length_ft: Number(m.total_length_ft),
-    count: sections.filter((s) => s.kind === "Count").length,
-    depth_in: body.depth_in ?? sections.find((s) => s.depth_in)?.depth_in ?? null,
-    pitch_factor: savedPitchFactor(sections, m.roof_pitch),
-    waste: Number(m.waste_pct) / 100,
-    waste_pct: Number(m.waste_pct),
-    eave_ft: edges.eave,
-    rake_ft: edges.rake,
-    ridge_ft: edges.ridge,
-    hip_ft: edges.hip,
-    valley_ft: edges.valley,
-    // A paving takeoff's items: asphalt, striping, stalls and the rest.
-    ...pavingQuantities(sections),
-    // A roof's surface and squares, with and without waste.
-    ...savedRoofingQuantities(sections, m.roof_pitch, Number(m.waste_pct)),
-  };
-
-  const lines = must(await db.from("quote_line_items").select("id, name, formula, service:services(formula_target)").eq("quote_id", id));
-  const results: Array<{ id: string; name: string; field?: string; value?: number; error?: string }> = [];
-  for (const line of lines as Array<{ id: string; name: string; formula: string | null; service: { formula_target: string } | null }>) {
-    if (!line.formula) continue;
-    try {
-      const value = Math.round(evaluateFormula(line.formula, vars) * 1000) / 1000;
-      const field = line.service?.formula_target === "unit_price" ? "unit_price" : "quantity";
-      const change = field === "unit_price" ? { unit_price: Math.round(value * 100) / 100 } : { quantity: value };
-      const { error } = await db.from("quote_line_items").update(change).eq("id", line.id);
-      if (error) throw dbError(error);
-      results.push({ id: line.id, name: line.name, field, value });
-    } catch (error) {
-      if (!(error instanceof FormulaError)) throw error;
-      results.push({ id: line.id, name: line.name, error: error.message });
-    }
-  }
-  await db.from("measurements").update({ quote_id: id }).eq("id", body.measurement_id);
-  return c.json({ variables: vars, lines: results });
+  const body = await readJson(c, z.object({ measurement_id: uuid, depth_in: z.number().positive().max(48).optional(), line_ids: z.array(uuid).min(1).max(500).optional() }));
+  return c.json(await applyMeasurement(c.var.db, c.var.companyId, id, body.measurement_id, body.depth_in, body.line_ids));
 });
 
 sales.post("/quotes/:id/convert", requireUser, requireCompany(SALES, "sales"), async (c) => {

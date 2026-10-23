@@ -31,6 +31,7 @@ import { sales } from "./routes/sales";
 import { schedule } from "./routes/schedule";
 import { recovery } from "./routes/recovery";
 import { setup } from "./routes/setup";
+import { signing } from "./routes/signing";
 import { runTask, TASKS, type TaskName } from "./tasks";
 
 export const app = new Hono<AppEnv>();
@@ -64,6 +65,7 @@ app.route("/api", pay);
 app.route("/api", paving);
 app.route("/api", roofing);
 app.route("/api", materials);
+app.route("/api", signing);
 app.route("/api", publicRoutes);
 app.route("/api", calendar);
 app.route("/api", chat);

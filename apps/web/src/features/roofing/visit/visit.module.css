@@ -1,0 +1,301 @@
+/*
+ * The site visit on an iPad: full screen, no sidebar. Landscape (1000px and wider) puts the price or
+ * the signatures in a column on the right that stays in view; portrait and phones stack them, with
+ * the price and the way on kept along the bottom. Everything is sized for a finger (44px and up,
+ * 56-58px for the main buttons) and uses the app's tokens, so dark mode follows. The estimate
+ * document itself stays white paper.
+ */
+
+.page {
+  --head: calc(68px + env(safe-area-inset-top));
+  --gutter: 24px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--page);
+  color: var(--ink);
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- Header ---------- */
+.header {
+  position: sticky; top: 0; z-index: 20; flex: none;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr); align-items: center; gap: 16px;
+  min-height: var(--head);
+  padding: env(safe-area-inset-top) max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--divider);
+  background: color-mix(in srgb, var(--page) 92%, transparent);
+  backdrop-filter: saturate(1.6) blur(10px);
+  -webkit-backdrop-filter: saturate(1.6) blur(10px);
+}
+.side { display: flex; align-items: center; min-width: 0; }
+.sideEnd { justify-content: flex-end; }
+.back {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 44px; padding: 0 12px 0 6px; margin-left: -6px;
+  border-radius: 10px; font-size: 15px; font-weight: 600; color: var(--ink); touch-action: manipulation;
+}
+.back:hover { background: var(--fill-2); color: var(--ink); }
+.back:active { background: var(--fill-2); }
+.backText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { display: grid; justify-items: center; min-width: 0; text-align: center; line-height: 1.3; }
+.title strong, .title > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title strong { font-size: 17px; font-weight: 700; }
+.title > span { font-size: 13.5px; color: var(--text-3); }
+.me { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; }
+.meFace { width: 36px; height: 36px; font-size: 13px; }
+.meName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loadingTitle { display: grid; justify-items: center; gap: 6px; }
+
+/* ---------- Shared ---------- */
+.page .touch { min-height: 48px; padding: 0 16px; border-radius: 12px; font-size: 15px; gap: 8px; }
+.page .bigButton { width: 100%; height: 58px; padding: 0 20px; border-radius: 12px; font-size: 17px; font-weight: 700; gap: 10px; }
+.textButton {
+  justify-self: start; min-height: 44px; padding: 8px 6px; margin: -8px -6px; border: 0; border-radius: 8px; background: none;
+  font: inherit; font-size: 14.5px; font-weight: 700; color: var(--info); cursor: pointer; touch-action: manipulation;
+}
+.textButton:hover { text-decoration: underline; }
+.textButton:focus-visible { outline: none; box-shadow: var(--ring); }
+.smallNote { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text-3); }
+.check { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 15px; line-height: 1.4; cursor: pointer; }
+.check input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--green); }
+.breakable { font-weight: 600; overflow-wrap: anywhere; }
+
+.centered { flex: 1; display: grid; place-items: center; padding: 32px var(--gutter) calc(32px + env(safe-area-inset-bottom)); }
+.centeredCard { width: min(520px, 100%); }
+.centeredActions { display: flex; justify-content: center; padding: 0 24px 28px; margin-top: -12px; }
+.loading { flex: 1; display: flex; flex-direction: column; }
+.loading > * { flex: 1; }
+
+/* A signature pad as wide as its column, with its buttons big enough for a finger. */
+.pad { min-width: 0; }
+.pad :global(.btn-sm) { height: 44px; padding: 0 14px; font-size: 14.5px; }
+
+/* ---------- Check the estimate (visit) ---------- */
+.visit {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "top aside" "bottom aside";
+}
+.top { grid-area: top; min-width: 0; display: grid; gap: 16px; align-content: start; padding: 18px var(--gutter) 0; }
+.bottom { grid-area: bottom; min-width: 0; display: grid; align-content: start; padding: 16px var(--gutter) calc(32px + env(safe-area-inset-bottom)); scroll-margin-top: calc(var(--head) + 12px); }
+
+.strip { margin: 0; align-items: center; gap: 10px; font-size: 15px; line-height: 1.45; }
+.strip > svg { margin-top: 0; flex: none; }
+
+.noteFrom { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--note-border); border-radius: 12px; background: var(--note); }
+.noteFace { width: 32px; height: 32px; font-size: 12px; }
+.noteBody { display: grid; gap: 2px; min-width: 0; font-size: 15px; line-height: 1.45; }
+.noteBody strong { font-size: 13.5px; color: var(--warning); }
+.noteBody p { margin: 0; }
+.noteBody .textButton { margin-top: 0; font-size: 14px; }
+
+.estimate { display: grid; gap: 4px; padding: 16px 18px 18px; border-radius: 14px; }
+.estimateHead { display: grid; gap: 3px; padding-bottom: 6px; }
+.estimateHead h2 { font-size: 20px; font-weight: 700; }
+.estimateHead p { margin: 0; font-size: 15px; color: var(--text-2); }
+.inlineProblem { margin: 4px 0 0; font-size: 14px; color: var(--danger); }
+.match {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+  margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--row-divider);
+}
+.matchText { display: grid; gap: 2px; min-width: 0; font-size: 15px; }
+.matchText span { font-size: 13.5px; color: var(--text-3); }
+
+/* The price, on the right in landscape. */
+.aside {
+  grid-area: aside; position: sticky; top: var(--head); align-self: start;
+  height: calc(100vh - var(--head)); height: calc(100dvh - var(--head));
+  display: flex; flex-direction: column; min-width: 0;
+  border-left: 1px solid var(--divider); background: var(--fill);
+}
+.asideScroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 14px; align-content: start; padding: 20px 22px; }
+.asideFoot { flex: none; display: grid; gap: 10px; padding: 12px 22px calc(18px + env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); }
+
+.priceHead { display: grid; gap: 4px; }
+.priceLabel { font-size: 13.5px; font-weight: 600; color: var(--text-3); }
+.price { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.withTax { font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.rangeNote { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 14.5px; font-weight: 600; line-height: 1.4; color: var(--green-dark); }
+.rangeNote > svg { margin-top: 1px; flex: none; }
+.rangeNote[data-where="above"] { color: var(--warning); }
+
+.setPrice { display: grid; gap: 6px; }
+.setPrice label { font-size: 14px; font-weight: 600; }
+.moneyField { position: relative; display: block; }
+.moneyField > span { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 18px; font-weight: 600; color: var(--text-2); pointer-events: none; }
+/* 16px and up keeps iPad Safari from zooming in when it's tapped. */
+.page .moneyInput { width: 100%; height: 52px; padding: 0 14px 0 30px; border-radius: 10px; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.priceHint { font-size: 13px; line-height: 1.4; color: var(--text-3); }
+.priceError { font-size: 13px; line-height: 1.4; font-weight: 600; color: var(--danger); }
+
+.priceChips { display: flex; flex-wrap: wrap; gap: 8px; }
+.priceChip {
+  min-height: 44px; padding: 0 16px; border: 1px solid var(--button-border); border-radius: var(--radius-pill); background: var(--surface);
+  font: inherit; font-size: 14.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; cursor: pointer; touch-action: manipulation;
+  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast);
+}
+.priceChip:active { transform: scale(0.97); }
+.priceChip:focus-visible { outline: none; box-shadow: var(--ring); }
+.priceChip[aria-pressed="true"] { border-color: var(--green); background: var(--green-tint); color: var(--green-dark); }
+
+.margin {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 14px;
+}
+.margin strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.margin[data-low] { border-color: transparent; background: var(--warning-tint); color: var(--warning); }
+.marginLabel { display: inline-flex; align-items: center; gap: 8px; }
+
+.changed { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.changedTitle { font-size: 13.5px; font-weight: 600; color: var(--text-3); }
+
+/* Portrait and phones only: the price and Review and sign along the bottom. */
+.bottomBar { display: none; }
+
+@media (max-width: 999px) {
+  .visit { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "top" "aside" "bottom"; }
+  .aside { position: static; height: auto; padding: 16px var(--gutter) 0; border-left: 0; background: none; }
+  .asideScroll { overflow: visible; padding: 18px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--fill); }
+  .asideFoot { display: none; }
+  .bottomBar {
+    position: sticky; bottom: 0; z-index: 10; display: grid; gap: 8px;
+    padding: 12px max(var(--gutter), env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
+    border-top: 1px solid var(--divider);
+    background: color-mix(in srgb, var(--page) 94%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .bottomRow { display: flex; align-items: center; gap: 16px; }
+  .bottomPrice { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
+  .bottomLabel { font-size: 13px; font-weight: 600; color: var(--text-3); }
+  .bottomPrice strong { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .bottomNote { font-size: 13.5px; font-weight: 600; color: var(--green-dark); }
+  .bottomNote[data-where="above"] { color: var(--warning); }
+  .bottomBar .bigButton { width: auto; height: 56px; flex: none; }
+}
+
+/* ---------- Sign together ---------- */
+.sign { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 44vw, 540px); }
+.docArea { min-width: 0; display: grid; gap: 14px; align-content: start; padding: 20px var(--gutter) calc(32px + env(safe-area-inset-bottom)); background: var(--fill-2); }
+.docHint { display: none; }
+.docSkeleton { width: 100%; max-width: 816px; justify-self: center; aspect-ratio: 8.5 / 11; border-radius: 4px; background: var(--surface); box-shadow: var(--shadow-sm); }
+
+.signPanel {
+  position: sticky; top: var(--head); align-self: start; min-width: 0;
+  height: calc(100vh - var(--head)); height: calc(100dvh - var(--head));
+  display: flex; flex-direction: column; border-left: 1px solid var(--divider); background: var(--page);
+  scroll-margin-top: var(--head);
+}
+.signScroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 16px; align-content: start; padding: 22px 24px 16px; }
+.signFoot { flex: none; display: grid; gap: 10px; padding: 12px 24px calc(18px + env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); background: var(--page); }
+.signIntro { display: grid; gap: 4px; }
+.signIntro h1 { font-size: 22px; font-weight: 700; overflow-wrap: anywhere; }
+.signIntro p { margin: 0; font-size: 15px; line-height: 1.45; color: var(--text-2); }
+.signIntro strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.narrowOnly { display: none; }
+
+.field { display: grid; gap: 6px; }
+.field label, .padLabel { font-size: 14px; font-weight: 600; }
+.page .bigInput { height: 48px; padding: 0 14px; border-radius: 10px; font-size: 17px; }
+.padBlock { display: grid; gap: 6px; }
+
+.companyRow { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
+/* The signature is dark ink on clear: it sits on paper white in both themes. */
+.companyImage { width: 120px; height: 48px; flex: none; object-fit: contain; border-radius: 8px; background: #fff; }
+.companyText { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.companyText strong { font-size: 15px; overflow-wrap: anywhere; }
+.companyText span { font-size: 13px; font-weight: 600; color: var(--green-dark); }
+.companyRow .textButton { margin: 0; flex: none; }
+
+@media (max-width: 999px) {
+  .sign { grid-template-columns: minmax(0, 1fr); }
+  .docHint {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+    padding: 10px 12px 10px 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-xs); font-size: 15px; font-weight: 600;
+  }
+  .signPanel { position: static; height: auto; border-left: 0; border-top: 1px solid var(--divider); }
+  .signScroll { overflow: visible; padding: 22px var(--gutter) 16px; }
+  .signFoot {
+    position: sticky; bottom: 0;
+    padding: 12px var(--gutter) calc(12px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--page) 94%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .wideOnly { display: none; }
+  .narrowOnly { display: inline; }
+}
+
+/* ---------- Signed ---------- */
+.done {
+  flex: 1; width: 100%; max-width: 1060px; margin: 0 auto; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; gap: 28px;
+  padding: 44px max(40px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(40px, env(safe-area-inset-left));
+}
+.doneHead { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.bigCheck { width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center; background: var(--green-solid); color: #fff; box-shadow: 0 0 0 10px var(--green-tint); animation: pop-in var(--dur-slow) var(--ease-spring); }
+.doneHead h1 { margin-top: 8px; font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
+.doneHead p { margin: 0; max-width: 640px; font-size: 17px; line-height: 1.5; color: var(--text-2); }
+.doneHead p strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.actions { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.actCell { display: grid; grid-template-rows: 1fr auto; gap: 8px; min-width: 0; }
+.act {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-height: 150px; padding: 18px;
+  border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-xs);
+  font: inherit; color: var(--ink); text-align: left; touch-action: manipulation;
+  transition: border-color var(--dur-fast), transform var(--dur-fast), box-shadow var(--dur-fast);
+}
+button.act { cursor: pointer; }
+button.act:hover:not(:disabled) { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+button.act:active:not(:disabled) { transform: scale(0.98); }
+button.act:focus-visible { outline: none; box-shadow: var(--ring); }
+button.act:disabled { cursor: not-allowed; }
+button.act:disabled .actIcon, button.act:disabled .actTitle { opacity: 0.55; }
+button.act[aria-busy="true"] { cursor: progress; }
+.act[data-done] { border-color: color-mix(in srgb, var(--green) 35%, var(--border)); background: var(--green-tint); box-shadow: none; }
+.actIcon { width: 48px; height: 48px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--fill-2); color: var(--ink); }
+.act[data-done] .actIcon { background: var(--green-tint-2); color: var(--green-dark); }
+.actTitle { display: inline-flex; align-items: center; gap: 6px; font-size: 17px; font-weight: 700; }
+.act[data-done] .actTitle { color: var(--green-dark); }
+.actText { font-size: 14px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.act[data-done] .actText { color: var(--green-dark); }
+.actProblem { margin: 0; padding: 0 4px; font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--danger); }
+
+.officeKnows { width: 100%; display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-radius: 14px; background: var(--fill-2); }
+.officeKnows p { margin: 0; flex: 1; font-size: 15px; line-height: 1.45; }
+.officeIcon { width: 40px; height: 40px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--solid); color: var(--on-solid); }
+
+.doneButtons { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: auto; }
+.page .doneButton { height: 54px; padding: 0 22px; border-radius: 12px; font-size: 16px; gap: 10px; }
+
+/* ---------- Phones ---------- */
+@media (max-width: 760px) {
+  .actions { grid-template-columns: minmax(0, 1fr); }
+  .act { min-height: 0; }
+  .done { padding: 28px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); gap: 22px; }
+  .doneHead h1 { font-size: 26px; }
+  .doneHead p { font-size: 16px; }
+  .doneButtons { width: 100%; }
+  .doneButtons > * { flex: 1 1 200px; }
+}
+
+@media (max-width: 600px) {
+  .page { --gutter: 16px; }
+  .header { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  .backText, .meName { display: none; }
+  .back { padding: 0 8px; margin-left: 0; }
+  .price { font-size: 34px; }
+  .estimate { padding: 14px 14px 16px; }
+  .bottomPrice strong { font-size: 21px; }
+  .bottomBar .bigButton { padding: 0 16px; font-size: 16px; }
+  .signScroll, .signFoot { padding-left: var(--gutter); padding-right: var(--gutter); }
+}
+
+@media print {
+  .header, .bottomBar { display: none; }
+}

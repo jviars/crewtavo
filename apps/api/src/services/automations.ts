@@ -19,6 +19,7 @@ import {
   type SubjectKind,
   type TemplateVars,
 } from "@crewtavo/core";
+import { hidesExactPrice } from "@crewtavo/core/estimates";
 import type { Env } from "../env";
 import { firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink } from "../lib/links";
@@ -62,6 +63,14 @@ const SUBJECTS: SubjectKind[] = ["client", "request", "quote", "job", "visit", "
 
 export function money(amount: number | string | null | undefined, currency = "USD") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(amount ?? 0));
+}
+
+/** A price range as a client reads it: "$18,300 to $21,050" (cents only when an end has them). */
+export function moneyRange(low: number | string | null | undefined, high: number | string | null | undefined, currency = "USD") {
+  const ends = [Number(low ?? 0), Number(high ?? 0)];
+  const digits = ends.every((n) => Number.isInteger(n)) ? 0 : 2;
+  const format = new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return `${format.format(ends[0]!)} to ${format.format(ends[1]!)}`;
 }
 
 export function companyAddress(address: Record<string, string | undefined> | null | undefined): string {
@@ -110,7 +119,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
     case "quote": {
       const { data } = await admin
         .from("quotes")
-        .select("number, title, status, total, client_id, property_id, property:properties(line1, city, region), lines:quote_line_items(name)")
+        .select("number, title, status, total, range_low, range_high, priced_on_site_at, exact_sent_at, roof_package_id, client_id, property_id, property:properties(line1, city, region), lines:quote_line_items(name)")
         .eq("company_id", companyId)
         .eq("id", subjectId)
         .maybeSingle();
@@ -118,9 +127,13 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
       clientId = data.client_id;
       propertyId = data.property_id;
       facts = { status: data.status, amount: Number(data.total), line_items: (data.lines as Array<{ name: string }>).map((l) => l.name) };
-      vars = { number: data.number, title: data.title, total: fmt(data.total), address: addressOf(data.property as Property) };
+      // Sent as a price range, the client hasn't seen the exact price (lost or archived since included),
+      // so an email about it doesn't show it either.
+      const total = hidesExactPrice(data) ? moneyRange(data.range_low, data.range_high, co.currency || "USD") : fmt(data.total);
+      vars = { number: data.number, title: data.title, total, address: addressOf(data.property as Property) };
       label = `Quote #${data.number}`;
-      appPath = `/quotes/${subjectId}`;
+      // A roof package's estimate is worked on in Roofing, where the office books the visit.
+      appPath = data.roof_package_id ? `/roofing/${subjectId}` : `/quotes/${subjectId}`;
       break;
     }
     case "job": {

@@ -20,6 +20,7 @@ export const TRIGGERS: TriggerDef[] = [
   { verb: "quote.sent", label: "A quote is sent", group: "Quotes", subject: "quote", delayable: true },
   { verb: "quote.approved", label: "A quote is approved", group: "Quotes", subject: "quote", delayable: true },
   { verb: "quote.changes_requested", label: "A client asks for changes to a quote", group: "Quotes", subject: "quote", delayable: false },
+  { verb: "quote.range_accepted", label: "A client says yes to a price range", group: "Quotes", subject: "quote", delayable: true },
   { verb: "quote.lost", label: "A quote is marked lost", group: "Quotes", subject: "quote", delayable: true },
   { verb: "job.created", label: "A job is created", group: "Jobs", subject: "job", delayable: true },
   { verb: "job.completed", label: "A job is completed", group: "Jobs", subject: "job", delayable: true },
