@@ -1,4 +1,5 @@
 /** Time for the week: the running clock, hours per person per day, edits, and approval for payroll. */
+import { breakPay, isUnpaidBreak, SHORT_BREAK_MINUTES } from "@crewtavo/core/breaks";
 import { isIsoDate, localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -22,6 +23,7 @@ import { CATEGORY_LABELS, type TimerCategory } from "../field/fieldData";
 import { useMyCrews } from "../schedule/myCrews";
 import { useDispatchOptions } from "../schedule/VisitDialog";
 import { timeEntryProblem } from "@crewtavo/core/pay";
+import { describePlace, type EntryPlaces, type StoredPlace } from "./clockPlace";
 import { entrySpan } from "./entrySpan";
 import { PayPeriods } from "./PayPeriods";
 
@@ -52,6 +54,11 @@ export function TimesheetsPage() {
   const isLead = session.role === "crew_lead";
   const canApprove = isOffice || (isLead && can(session, "timesheets"));
   const approvable = (userId: string) => canApprove && !(isLead && userId === session.userId);
+  // Where people clocked in and out: the office's to see, and a crew lead's for their crew (the
+  // database decides which, and never shows someone their own).
+  const seesPlaces = isOffice || isLead;
+  // Breaks the company doesn't pay for (Settings → Company) are left out of paid hours.
+  const pay = breakPay(session.company.settings);
   const [week, setWeek] = useState(mondayOf(todayIn(tz)));
   // Pay (each person's pay for a period, and marking it paid) is for the office with job costs.
   const seesPay = hasRole(session, "admin", "office") && can(session, "job_costs");
@@ -72,7 +79,11 @@ export function TimesheetsPage() {
           .order("started_at"),
         api.get<TeamMember[]>("/team"),
       ]);
-      return { rows: unwrap(rows) as unknown as Entry[], team };
+      const entries = unwrap(rows) as unknown as Entry[];
+      const places = seesPlaces && entries.length
+        ? (unwrap(await supabase().rpc("time_entry_places", { p_company: session.company.id, p_entries: entries.map((e) => e.id) })) as unknown as EntryPlaces[])
+        : [];
+      return { rows: entries, team, places: Object.fromEntries(places.map((p) => [p.id, p])) as Record<string, EntryPlaces | undefined> };
     },
   });
   const refresh = () => {
@@ -116,6 +127,10 @@ export function TimesheetsPage() {
   const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
   const pendingAll = rows.filter((r) => r.ended_at && !r.approved_at && approvable(r.user_id)).length;
   const isThisWeek = week === mondayOf(todayIn(tz));
+  const paidHours = (r: Entry) => (isUnpaidBreak(r, pay) ? 0 : hours(r.started_at, r.ended_at));
+  const placeOf = (id: string) => data.data?.places[id];
+  const placeCell = (place: StoredPlace | null | undefined, entry: EntryPlaces | undefined) =>
+    place ? `${describePlace(place, entry?.site ?? null).text}${place.lat != null ? ` (${place.lat}, ${place.lng})` : ""}` : "";
 
   const exportCsv = () =>
     downloadCsv(
@@ -123,9 +138,13 @@ export function TimesheetsPage() {
       toCsv(
         rows.map((r) => ({
           person: name(r.user_id), date: dayOf(r.started_at), start: fmtTime(r.started_at), end: r.ended_at ? fmtTime(r.ended_at) : "",
-          hours: r.ended_at ? hours(r.started_at, r.ended_at).toFixed(2) : "", category: CATEGORY_LABELS[r.category], work: r.visit?.title ?? r.job?.title ?? "", approved: r.approved_at ? "yes" : "no",
+          hours: r.ended_at ? hours(r.started_at, r.ended_at).toFixed(2) : "", paid_hours: r.ended_at ? paidHours(r).toFixed(2) : "", category: CATEGORY_LABELS[r.category], work: r.visit?.title ?? r.job?.title ?? "", approved: r.approved_at ? "yes" : "no",
+          clock_in: placeCell(placeOf(r.id)?.in_place, placeOf(r.id)), clock_out: placeCell(placeOf(r.id)?.out_place, placeOf(r.id)),
         })),
-        [{ key: "person", label: "Person" }, { key: "date", label: "Date" }, { key: "start", label: "Start" }, { key: "end", label: "End" }, { key: "hours", label: "Hours" }, { key: "category", label: "Type" }, { key: "work", label: "Visit or job" }, { key: "approved", label: "Approved" }],
+        [
+          { key: "person", label: "Person" }, { key: "date", label: "Date" }, { key: "start", label: "Start" }, { key: "end", label: "End" }, { key: "hours", label: "Hours" }, { key: "paid_hours", label: "Paid hours" }, { key: "category", label: "Type" }, { key: "work", label: "Visit or job" }, { key: "approved", label: "Approved" },
+          ...(seesPlaces ? [{ key: "clock_in" as const, label: "Clock-in location" }, { key: "clock_out" as const, label: "Clock-out location" }] : []),
+        ],
       ),
     );
 
@@ -175,7 +194,8 @@ export function TimesheetsPage() {
 
       {people.map((userId) => {
         const mine = rows.filter((r) => r.user_id === userId);
-        const total = mine.reduce((s, r) => s + hours(r.started_at, r.ended_at), 0);
+        const total = mine.reduce((s, r) => s + paidHours(r), 0);
+        const unpaid = mine.filter((r) => isUnpaidBreak(r, pay)).reduce((s, r) => s + hours(r.started_at, r.ended_at), 0);
         const pending = mine.filter((r) => r.ended_at && !r.approved_at).length;
         const rate = data.data?.team.find((m) => m.user_id === userId)?.labor_rate;
         return (
@@ -184,12 +204,13 @@ export function TimesheetsPage() {
               <span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: color(userId) }}><Face name={name(userId)} photo={photo(userId)} /></span>
               <strong>{name(userId)}</strong>
               <span className="tabular"><strong>{total.toFixed(2)}</strong> h{isOffice && rate ? <span className="muted"> · {formatMoney(total * Number(rate))}</span> : null}</span>
+              {unpaid > 0 && <span className="muted small tabular">+ {unpaid.toFixed(2)} h unpaid breaks</span>}
               {total > 40 && <span className="chip chip-amber">{(total - 40).toFixed(1)} h over 40</span>}
               {approvable(userId) && pending > 0 && <Button size="sm" icon="check" loading={approve.isPending && approve.variables?.length === 1 && approve.variables[0] === userId} onClick={() => approve.mutate([userId])}>Approve {pending}</Button>}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", borderBottom: "1px solid var(--divider)" }} className="hide-mobile">
               {days.map((d) => {
-                const h = mine.filter((r) => dayOf(r.started_at) === d).reduce((s, r) => s + hours(r.started_at, r.ended_at), 0);
+                const h = mine.filter((r) => dayOf(r.started_at) === d).reduce((s, r) => s + paidHours(r), 0);
                 return (
                   <div key={d} style={{ padding: "10px 12px", borderRight: "1px solid var(--row-divider)", background: d === todayIn(tz) ? "var(--green-tint)" : undefined }}>
                     <div className="muted small">{dayLabel(d).split(",")[0]}</div>
@@ -206,8 +227,11 @@ export function TimesheetsPage() {
                   <span className="grow">
                     <span className="tabular">{fmtTime(r.started_at)} – {r.ended_at ? fmtTime(r.ended_at) : "now"}</span>
                     <span className="muted small" style={{ display: "block" }}>{r.visit?.title ?? r.job?.title ?? CATEGORY_LABELS[r.category]}{r.notes ? ` · ${r.notes}` : ""}</span>
+                    {placeOf(r.id) && <ClockPlaces places={placeOf(r.id)!} userId={r.user_id} name={name} />}
                   </span>
-                  <span className="tabular strong">{hours(r.started_at, r.ended_at).toFixed(2)} h</span>
+                  {isUnpaidBreak(r, pay)
+                    ? <span className="tabular muted" title={pay === "unpaid" ? "Breaks aren't paid time" : `Breaks over ${SHORT_BREAK_MINUTES} minutes aren't paid time`}>{hours(r.started_at, r.ended_at).toFixed(2)} h unpaid</span>
+                    : <span className="tabular strong">{hours(r.started_at, r.ended_at).toFixed(2)} h</span>}
                   {r.auto_stopped_at && !r.approved_at && <span title="The clock was left running, so Crewtavo stopped it. Check the end time."><StatusPill label="Check end time" tone="danger" /></span>}
                   {r.approved_at ? <StatusPill label="Approved" tone="good" /> : r.ended_at ? <StatusPill label="Pending" tone="warning" /> : <StatusPill label="Running" tone="info" />}
                   {canEdit && (
@@ -229,6 +253,27 @@ export function TimesheetsPage() {
 
       {editing && <TimeEntryDialog entry={editing === "new" ? null : editing} team={data.data?.team ?? []} defaultDate={isThisWeek ? todayIn(tz) : week} onClose={() => setEditing(null)} onSaved={refresh} />}
     </>
+  );
+}
+
+/** Where the clock started and stopped, for the office and crew leads. Each place opens on a map. */
+function ClockPlaces({ places, userId, name }: { places: EntryPlaces; userId: string; name: (id: string) => string }) {
+  const ends = [["In", places.in_place], ["Out", places.out_place]] as const;
+  return (
+    <span className="small row wrap" style={{ gap: "0 12px" }}>
+      {ends.map(([label, place]) => {
+        if (!place) return null;
+        const d = describePlace(place, places.site);
+        // A crew lead clocking in the crew sends where their own phone is.
+        const text = `${label}: ${d.text}${place.by && place.by !== userId ? ` (${name(place.by)}'s phone)` : ""}`;
+        return (
+          <span key={label} className="row" style={{ gap: 4, color: d.tone === "good" ? "var(--green-dark)" : d.tone === "warning" ? "var(--warning)" : "var(--text-2)" }}>
+            <Icon name="pin" size={12} />
+            {d.mapUrl ? <a href={d.mapUrl} target="_blank" rel="noreferrer" title={d.title} style={{ color: "inherit" }}>{text}</a> : text}
+          </span>
+        );
+      })}
+    </span>
   );
 }
 

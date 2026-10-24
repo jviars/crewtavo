@@ -1906,14 +1906,14 @@ isOneToOne: false
                   ]
                 },"time_entries": {
                   Row: {
-                    "approved_at": string | null,"approved_by": string | null,"auto_stopped_at": string | null,"category": string,"company_id": string,"created_at": string,"ended_at": string | null,"id": string,"job_id": string | null,"labor_rate": number | null,"notes": string | null,"reminded_at": string | null,"started_at": string,"updated_at": string,"user_id": string,"visit_id": string | null
+                    "approved_at": string | null,"approved_by": string | null,"auto_stopped_at": string | null,"category": string,"company_id": string,"created_at": string,"ended_at": string | null,"id": string,"in_place": Json | null,"job_id": string | null,"labor_rate": number | null,"notes": string | null,"out_place": Json | null,"reminded_at": string | null,"started_at": string,"updated_at": string,"user_id": string,"visit_id": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "approved_at"?: string | null,"approved_by"?: string | null,"auto_stopped_at"?: string | null,"category"?: string,"company_id": string,"created_at"?: string,"ended_at"?: string | null,"id"?: string,"job_id"?: string | null,"labor_rate"?: number | null,"notes"?: string | null,"reminded_at"?: string | null,"started_at": string,"updated_at"?: string,"user_id"?: string,"visit_id"?: string | null
+                    "approved_at"?: string | null,"approved_by"?: string | null,"auto_stopped_at"?: string | null,"category"?: string,"company_id": string,"created_at"?: string,"ended_at"?: string | null,"id"?: string,"in_place"?: Json | null,"job_id"?: string | null,"labor_rate"?: number | null,"notes"?: string | null,"out_place"?: Json | null,"reminded_at"?: string | null,"started_at": string,"updated_at"?: string,"user_id"?: string,"visit_id"?: string | null
                   }
                   Update: {
-                    "approved_at"?: string | null,"approved_by"?: string | null,"auto_stopped_at"?: string | null,"category"?: string,"company_id"?: string,"created_at"?: string,"ended_at"?: string | null,"id"?: string,"job_id"?: string | null,"labor_rate"?: number | null,"notes"?: string | null,"reminded_at"?: string | null,"started_at"?: string,"updated_at"?: string,"user_id"?: string,"visit_id"?: string | null
+                    "approved_at"?: string | null,"approved_by"?: string | null,"auto_stopped_at"?: string | null,"category"?: string,"company_id"?: string,"created_at"?: string,"ended_at"?: string | null,"id"?: string,"in_place"?: Json | null,"job_id"?: string | null,"labor_rate"?: number | null,"notes"?: string | null,"out_place"?: Json | null,"reminded_at"?: string | null,"started_at"?: string,"updated_at"?: string,"user_id"?: string,"visit_id"?: string | null
                   }
                   Relationships: [
                     {
@@ -2364,6 +2364,11 @@ isOneToOne: false
                            },
 "stripe_import_invoice":
 { Args: { "p_company": string,"p_data": Json,"p_quiet"?: boolean }; Returns: string
+                           },
+"time_entry_places":
+{ Args: { "p_company": string,"p_entries": (string)[] }; Returns: {
+              "id": string,"in_place": Json,"out_place": Json,"site": Json
+            }[]
                            },
 "user_id_for_email":
 { Args: { "p_email": string }; Returns: string

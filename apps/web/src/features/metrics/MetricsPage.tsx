@@ -3,6 +3,7 @@
  * requests, the team's hours, and clients won and lapsed) over one date range. Money lives on
  * Finance. Owners and office staff with "Finance and metrics".
  */
+import { breakPay, isUnpaidBreak } from "@crewtavo/core/breaks";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
@@ -217,9 +218,10 @@ function Team({ range }: { range: Range }) {
         fetchAll((a, b) => supabase().from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("company_id", cid).gte("started_at", range.start).lt("started_at", range.end).range(a, b)),
         timeRates(can(session, "job_costs"), { from: range.start, to: range.end }),
       ]);
-      // A running timer counts up to now.
+      // A running timer counts up to now. Breaks the company doesn't pay for aren't paid hours.
       const now = new Date().toISOString();
-      return rows.map((e) => ({ ...e, labor_rate: rates[e.id] ?? null, running: !e.ended_at, ended_at: e.ended_at ?? now }));
+      const pay = breakPay(company.settings);
+      return rows.map((e) => ({ ...e, labor_rate: rates[e.id] ?? null, running: !e.ended_at, ended_at: e.ended_at ?? now, paid: isUnpaidBreak(e, pay) ? 0 : hoursBetween(e.started_at, e.ended_at ?? now) }));
     },
   });
   const buckets = bucketsFor(range);
@@ -229,7 +231,7 @@ function Team({ range }: { range: Range }) {
         const member = (id: string) => team.data?.find((m) => m.user_id === id);
         const people = new Map<string, { id: string; name: string; total: number; visit: number; drive: number; other: number; approved: number; cost: number; running: boolean }>();
         for (const e of entries) {
-          const h = hoursBetween(e.started_at, e.ended_at);
+          const h = e.paid;
           const row = people.get(e.user_id) ?? { id: e.user_id, name: member(e.user_id)?.profile?.full_name ?? "Former team member", total: 0, visit: 0, drive: 0, other: 0, approved: 0, cost: 0, running: false };
           row.total += h;
           if (e.category === "visit" || e.category === "assessment") row.visit += h;
@@ -240,22 +242,22 @@ function Team({ range }: { range: Range }) {
           row.cost += h * Number(e.labor_rate ?? member(e.user_id)?.labor_rate ?? 0);
           people.set(e.user_id, row);
         }
-        const total = sum(entries, (e) => hoursBetween(e.started_at, e.ended_at));
+        const total = sum(entries, (e) => e.paid);
         const onVisits = sum(entries.filter((e) => e.category === "visit" || e.category === "assessment"), (e) => hoursBetween(e.started_at, e.ended_at));
-        const pending = sum(entries.filter((e) => !e.approved_at && !e.running), (e) => hoursBetween(e.started_at, e.ended_at));
+        const pending = sum(entries.filter((e) => !e.approved_at && !e.running), (e) => e.paid);
         const categories = new Map<string, number>();
         for (const e of entries) categories.set(e.category, (categories.get(e.category) ?? 0) + hoursBetween(e.started_at, e.ended_at));
         return (
           <>
             <KpiStrip label="Team this period">
-              <Kpi label="Hours tracked" value={hrs(total)} hint={plural(people.size, "person", "people")} />
+              <Kpi label="Paid hours" value={hrs(total)} hint={plural(people.size, "person", "people")} />
               <Kpi label="On visits" value={pct(onVisits, total)} hint={hrs(onVisits)} />
               {can(session, "job_costs") && <Kpi label="Labor cost" value={formatMoney(sum([...people.values()], (p) => p.cost))} />}
               <Kpi label="Awaiting approval" value={hrs(pending)} hint={pending ? <Link to="/timesheets">Review timesheets</Link> : "All caught up"} />
             </KpiStrip>
             <div className="report-grid">
               <ReportCard title="Hours worked" value={hrs(total)}>
-                <TrendChart buckets={buckets} values={bucketize(entries, buckets, (e) => e.started_at, (e) => hoursBetween(e.started_at, e.ended_at), company.timezone)} format={(n) => hrs(n)} label="Hours worked over time" color="var(--ink)" height={200} />
+                <TrendChart buckets={buckets} values={bucketize(entries, buckets, (e) => e.started_at, (e) => e.paid, company.timezone)} format={(n) => hrs(n)} label="Hours worked over time" color="var(--ink)" height={200} />
               </ReportCard>
               <ReportCard title="Where the time went">
                 <HBars rows={[...categories].sort((a, b) => b[1] - a[1]).map(([c, value]) => ({ key: c, label: CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c, value }))} format={hrs} empty="No time tracked in this period." />

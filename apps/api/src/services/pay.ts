@@ -4,7 +4,7 @@
  * Timesheets → Pay (routes/pay.ts) and AI assistants' pay tools both use these. Pay rates are read
  * with the server's key, so who may ask (office and up with job costs) is checked here.
  */
-import { addDays, localDate, OFFICE, paySummary, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
+import { addDays, breakPay, localDate, OFFICE, paySummary, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
 import type { Env } from "../env";
 import { HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
@@ -39,7 +39,7 @@ async function names(s: PayScope) {
 export async function payPeriodSummary(s: PayScope, from: string, to: string) {
   mayPay(s);
   if (to < from) throw new HttpError(400, "The period has to end on or after it starts.");
-  const { tz } = await companyZone(s);
+  const { tz, settings } = await companyZone(s);
   const start = zonedTimeToUtc(from, "00:00", tz).toISOString();
   const end = zonedTimeToUtc(addDays(to, 1), "00:00", tz).toISOString();
   const entries: Array<{ id: string; user_id: string; started_at: string; ended_at: string | null; category: string; approved_at: string | null }> = [];
@@ -53,7 +53,7 @@ export async function payPeriodSummary(s: PayScope, from: string, to: string) {
     names(s),
     s.db.from("pay_periods").select("id, status, paid_at, notes, lines:pay_period_lines(user_id, paid_amount, method, reference, paid_at)").eq("company_id", s.companyId).eq("starts_on", from).eq("ends_on", to).maybeSingle(),
   ]);
-  const summary = paySummary(entries, (e) => rates[e.id] ?? 0, nameOf, tz);
+  const summary = paySummary(entries, (e) => rates[e.id] ?? 0, nameOf, tz, breakPay(settings));
   const paid = new Map(((period.data?.lines ?? []) as Array<{ user_id: string; paid_amount: number | null; method: string | null; reference: string | null; paid_at: string | null }>).map((l) => [l.user_id, l]));
   return {
     from,

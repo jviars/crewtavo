@@ -21,6 +21,7 @@
     "./chat": "./src/chat.ts",
     "./database": "./src/database.types.ts",
     "./time": "./src/time.ts",
+    "./breaks": "./src/breaks.ts",
     "./recurrence": "./src/recurrence.ts",
     "./routing": "./src/routing.ts",
     "./ical": "./src/ical.ts",

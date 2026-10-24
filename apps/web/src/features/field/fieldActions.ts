@@ -5,7 +5,7 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 import { api, supabase, unwrap } from "@/lib/api";
-import { clockVisit } from "./fieldData";
+import { clockVisit, type ClockPlace } from "./fieldData";
 
 export interface VisitStatusChange {
   companyId: string;
@@ -15,6 +15,8 @@ export interface VisitStatusChange {
   status: string;
   /** When it was tapped. */
   at: string;
+  /** Where the phone was, when the tap starts or stops the clock (useStatusTap). */
+  place?: ClockPlace;
 }
 
 /**
@@ -45,8 +47,8 @@ export async function setVisitStatus(v: VisitStatusChange) {
   // The visit's status is shared, but each person's clock is their own: when the visit has moved on
   // (a crewmate finished it first), this person still clocks in and out as they tapped. Only a
   // cancelled visit doesn't start a clock.
-  if (v.status === "in_progress" && !(result.skipped && result.status === "cancelled")) await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "start", v.at);
-  if (v.status === "completed") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "stop", v.at);
+  if (v.status === "in_progress" && !(result.skipped && result.status === "cancelled")) await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "start", v.at, v.place);
+  if (v.status === "completed") await clockVisit(v.companyId, v.userId, { id: v.visitId, job_id: v.jobId }, "stop", v.at, v.place);
   return { skipped: Boolean(result.skipped), visitStatus: result.status };
 }
 

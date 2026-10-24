@@ -2,14 +2,76 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { supabase, unwrap } from "@/lib/api";
+import { useSession, type Company } from "@/lib/session";
+import type { VisitStatusChange } from "./fieldActions";
 
 export type TimerCategory = "visit" | "assessment" | "drive" | "shop" | "break" | "other";
 
 /**
- * Start or stop the signed-in person's clock for a visit. Only one clock runs at a time. `at` is
- * when it happened, which matters when the tap was made offline and is only being sent now.
+ * Where the phone was as a clock started or stopped, or why it couldn't say. Saved with the clock
+ * for the office and crew leads; the person's own screens never show it.
  */
-export async function clockVisit(companyId: string, userId: string, visit: { id: string; job_id: string | null }, action: "start" | "stop", at = new Date().toISOString()) {
+export type ClockPlace = { lat: number; lng: number; accuracy: number } | { missing: "denied" | "unavailable" | "timeout" | "unsupported" };
+
+/** Whether the company keeps where people clock in and out (Settings → Company). On unless switched off. */
+export const recordsPlaces = (company: Pick<Company, "settings">) => (company.settings?.clock as { record_location?: boolean } | undefined)?.record_location !== false;
+
+/**
+ * Where this phone is, for a clock starting or stopping. The first time, the phone asks the person.
+ * A "no", or no fix within 10 seconds, is kept as the reason and the clock goes on regardless. Gives
+ * up after 20 seconds even while that question is still on screen, so a clock is never held longer.
+ */
+export function locate(): Promise<ClockPlace> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve({ missing: "unsupported" });
+  return new Promise((resolve) => {
+    const stop = setTimeout(() => resolve({ missing: "timeout" }), 20_000);
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        clearTimeout(stop);
+        // Six places is about 10 cm; more says nothing.
+        resolve({ lat: Number(p.coords.latitude.toFixed(6)), lng: Number(p.coords.longitude.toFixed(6)), accuracy: Math.round(p.coords.accuracy) });
+      },
+      (e) => {
+        clearTimeout(stop);
+        resolve({ missing: e.code === e.PERMISSION_DENIED ? "denied" : e.code === e.TIMEOUT ? "timeout" : "unavailable" });
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  });
+}
+
+/** Where to say this clock tap happened: the phone's place, or nothing when the company doesn't keep them. */
+export const clockPlace = (company: Pick<Company, "settings">) => (recordsPlaces(company) ? locate() : Promise.resolve(undefined));
+
+/** Statuses that start or stop the person's clock on a visit (see setVisitStatus). */
+export const clocksOn = (status: string) => status === "in_progress" || status === "completed";
+
+/**
+ * Status taps on a visit, with where the phone was when the tap starts or stops the clock. Finds
+ * the place first (`locating` is the visit it's for, so its button can show it's busy), then saves
+ * the tap as it was made: the time is when it was tapped.
+ */
+export function useStatusTap(send: (change: VisitStatusChange) => void) {
+  const session = useSession();
+  const [locating, setLocating] = useState<string | null>(null);
+  const tap = async (visit: { id: string; jobId: string | null }, status: string) => {
+    const change: VisitStatusChange = { companyId: session.company.id, userId: session.userId, visitId: visit.id, jobId: visit.jobId, status, at: new Date().toISOString() };
+    if (clocksOn(status) && recordsPlaces(session.company)) {
+      setLocating(visit.id);
+      change.place = await locate();
+      setLocating(null);
+    }
+    send(change);
+  };
+  return { tap, locating };
+}
+
+/**
+ * Start or stop the signed-in person's clock for a visit. Only one clock runs at a time. `at` is
+ * when it happened, which matters when the tap was made offline and is only being sent now, and
+ * `place` is where the phone was then.
+ */
+export async function clockVisit(companyId: string, userId: string, visit: { id: string; job_id: string | null }, action: "start" | "stop", at = new Date().toISOString(), place?: ClockPlace) {
   const db = supabase();
   const open = unwrap(await db.from("time_entries").select("id, visit_id, started_at").eq("user_id", userId).eq("company_id", companyId).is("ended_at", null));
   const now = at;
@@ -23,23 +85,23 @@ export async function clockVisit(companyId: string, userId: string, visit: { id:
   for (const entry of open) {
     // A clock started after `at` (another queued action ran first) can't end before it began.
     if (entry.started_at >= now) continue;
-    unwrap(await db.from("time_entries").update({ ended_at: now }).eq("id", entry.id));
+    unwrap(await db.from("time_entries").update({ ended_at: now, out_place: place }).eq("id", entry.id));
   }
   if (action === "start") {
-    unwrap(await db.from("time_entries").insert({ company_id: companyId, user_id: userId, visit_id: visit.id, job_id: visit.job_id, category: "visit", started_at: now }));
+    unwrap(await db.from("time_entries").insert({ company_id: companyId, user_id: userId, visit_id: visit.id, job_id: visit.job_id, category: "visit", started_at: now, in_place: place }));
   }
 }
 
 /** Start a general timer (driving, shop time, a break), stopping whatever was running. */
-export async function startTimer(companyId: string, userId: string, category: TimerCategory) {
+export async function startTimer(companyId: string, userId: string, category: TimerCategory, place?: ClockPlace) {
   const db = supabase();
   const now = new Date().toISOString();
-  unwrap(await db.from("time_entries").update({ ended_at: now }).eq("user_id", userId).eq("company_id", companyId).is("ended_at", null));
-  unwrap(await db.from("time_entries").insert({ company_id: companyId, user_id: userId, category, started_at: now }));
+  unwrap(await db.from("time_entries").update({ ended_at: now, out_place: place }).eq("user_id", userId).eq("company_id", companyId).is("ended_at", null));
+  unwrap(await db.from("time_entries").insert({ company_id: companyId, user_id: userId, category, started_at: now, in_place: place }));
 }
 
-export async function stopTimers(companyId: string, userId: string) {
-  unwrap(await supabase().from("time_entries").update({ ended_at: new Date().toISOString() }).eq("user_id", userId).eq("company_id", companyId).is("ended_at", null));
+export async function stopTimers(companyId: string, userId: string, place?: ClockPlace) {
+  unwrap(await supabase().from("time_entries").update({ ended_at: new Date().toISOString(), out_place: place }).eq("user_id", userId).eq("company_id", companyId).is("ended_at", null));
 }
 
 /** The clock currently running for me, if any. */

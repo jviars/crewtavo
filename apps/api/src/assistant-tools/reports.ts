@@ -4,7 +4,7 @@
  * roles without it; who sees reports at all (owners, admins and office staff with "Finance and
  * metrics") and job costs is checked here, as the Finance page checks it.
  */
-import { jobProfit, localDate, moneyFigures, previousRange, REPORT_PRESETS, resolveRange, salesFigures, teamHours, type ReportPreset } from "@crewtavo/core";
+import { breakPay, jobProfit, localDate, moneyFigures, previousRange, REPORT_PRESETS, resolveRange, salesFigures, teamHours, type ReportPreset } from "@crewtavo/core";
 import { z } from "zod";
 import { adminClient } from "../lib/supabase";
 import { timeRates } from "../services/payRates";
@@ -117,22 +117,24 @@ export const reportTools = {
     },
   }),
   team_hours_report: tool({
-    description: "Time tracked in a period (default this month): hours by person and category, share on visits, hours waiting for approval, and labor cost (if your role sees job costs).",
+    description: "Time tracked in a period (default this month): paid hours by person and category (breaks count as the company pays them; unpaid break time is listed apart), share on visits, hours waiting for approval, and labor cost (if your role sees job costs).",
     input: z.object({ ...rangeInput, ...companyArg }),
     run: async (ctx, a) => {
       requireRole(ctx, OFFICE, "reports");
       const range = rangeOf(ctx, a);
       const costs = roleAllows(ctx, OFFICE, "job_costs");
-      const [entries, nameOf, rates] = await Promise.all([
+      const [entries, nameOf, rates, company] = await Promise.all([
         all((f, t) => ctx.db.from("time_entries").select("id, user_id, job_id, started_at, ended_at, category, approved_at").eq("company_id", ctx.companyId).gte("started_at", range.start).lt("started_at", range.end).range(f, t)),
         teamNames(ctx),
         costs ? timeRates(adminClient(ctx.env), ctx.companyId, { from: range.start, to: range.end }) : Promise.resolve({} as Record<string, number>),
+        rows(ctx.db.from("companies").select("settings").eq("id", ctx.companyId)),
       ]);
       const now = new Date().toISOString();
       const result = teamHours(
         entries.map((e) => ({ ...e, running: !e.ended_at, ended_at: e.ended_at ?? now })),
         (id) => nameOf(id),
         (e) => rates[e.id] ?? 0,
+        breakPay(company[0]?.settings),
       );
       return costs ? { period: range, ...result } : { period: range, ...result, labor_cost: undefined, by_person: result.by_person.map(({ cost: _, ...p }) => p) };
     },

@@ -4,6 +4,7 @@
  * pure sums over the rows each report reads. Money is in dollars, rounded to the cent where it's
  * shown; hours are decimal hours.
  */
+import { isUnpaidBreak, type BreakPay } from "./breaks";
 import { addDays, zonedTimeToUtc } from "./time";
 
 export const REPORT_PRESETS = [
@@ -282,11 +283,16 @@ export function jobProfit(
 
 export interface TimeRow extends CostedTime { user_id: string; category: string; running?: boolean }
 
-/** Hours by person and category, what's on visits, what's waiting for approval, and labor cost. */
-export function teamHours(entries: readonly TimeRow[], nameOf: (userId: string) => string, rateOf: (entry: TimeRow) => number) {
+/**
+ * Paid hours by person and category, what's on visits, what's waiting for approval, and labor
+ * cost. Breaks count as the company pays them (`breaks`); the unpaid ones are left out of the
+ * hours and cost but kept in by_category, and their total is unpaid_break_hours.
+ */
+export function teamHours(entries: readonly TimeRow[], nameOf: (userId: string) => string, rateOf: (entry: TimeRow) => number, breaks: BreakPay) {
+  const paid = (e: TimeRow) => (isUnpaidBreak(e, breaks) ? 0 : hoursBetween(e.started_at, e.ended_at));
   const people = new Map<string, { user_id: string; name: string; total: number; visit: number; drive: number; other: number; approved: number; cost: number; running: boolean }>();
   for (const e of entries) {
-    const h = hoursBetween(e.started_at, e.ended_at);
+    const h = paid(e);
     const row = people.get(e.user_id) ?? { user_id: e.user_id, name: nameOf(e.user_id), total: 0, visit: 0, drive: 0, other: 0, approved: 0, cost: 0, running: false };
     row.total += h;
     if (e.category === "visit" || e.category === "assessment") row.visit += h;
@@ -297,9 +303,10 @@ export function teamHours(entries: readonly TimeRow[], nameOf: (userId: string) 
     row.cost += h * rateOf(e);
     people.set(e.user_id, row);
   }
-  const total = sum(entries, (e) => hoursBetween(e.started_at, e.ended_at));
-  const onVisits = sum(entries.filter((e) => e.category === "visit" || e.category === "assessment"), (e) => hoursBetween(e.started_at, e.ended_at));
-  const pending = sum(entries.filter((e) => !e.approved_at && !e.running), (e) => hoursBetween(e.started_at, e.ended_at));
+  const total = sum(entries, paid);
+  const onVisits = sum(entries.filter((e) => e.category === "visit" || e.category === "assessment"), paid);
+  const pending = sum(entries.filter((e) => !e.approved_at && !e.running), paid);
+  const unpaidBreaks = sum(entries.filter((e) => isUnpaidBreak(e, breaks)), (e) => hoursBetween(e.started_at, e.ended_at));
   const categories = new Map<string, number>();
   for (const e of entries) categories.set(e.category, (categories.get(e.category) ?? 0) + hoursBetween(e.started_at, e.ended_at));
   const h = (n: number) => Math.round(n * 100) / 100;
@@ -308,6 +315,7 @@ export function teamHours(entries: readonly TimeRow[], nameOf: (userId: string) 
     on_visits_hours: h(onVisits),
     on_visits_percent: percent(onVisits, total),
     awaiting_approval_hours: h(pending),
+    unpaid_break_hours: h(unpaidBreaks),
     labor_cost: cents(sum([...people.values()], (p) => p.cost)),
     by_person: [...people.values()].map((p) => ({ ...p, total: h(p.total), visit: h(p.visit), drive: h(p.drive), other: h(p.other), approved: h(p.approved), cost: cents(p.cost) })).sort((a, b) => b.total - a.total),
     by_category: [...categories].map(([category, hours]) => ({ category, hours: h(hours) })).sort((a, b) => b.hours - a.hours),

@@ -249,8 +249,22 @@ describe("figures", () => {
     const profit = jobProfit([{ id: "j1", number: 7, title: "Seal", financials: { contract_total: 500 }, lines: [{ quantity: 2, unit_cost: 50 }] }], time, [{ job_id: "j1", amount: 35 }], rate, 60);
     expect(profit.jobs[0]).toMatchObject({ revenue: 500, labor: 65, expenses: 35, materials: 100, cost: 200, profit: 300, margin_percent: 60 });
     expect(profit.below_target).toEqual([]);
-    const hours = teamHours(time, () => "Ana", rate);
+    const hours = teamHours(time, () => "Ana", rate, "short_paid");
     expect(hours).toMatchObject({ hours: 3, on_visits_hours: 2, awaiting_approval_hours: 1, labor_cost: 65 });
+  });
+
+  it("leaves unpaid breaks out of team hours and labor cost, as the company pays them", () => {
+    const time = [
+      { id: "t1", job_id: "j1", user_id: "u1", started_at: "2026-10-05T12:00:00Z", ended_at: "2026-10-05T16:00:00Z", approved_at: "x", category: "visit" },
+      { id: "t2", job_id: null, user_id: "u1", started_at: "2026-10-05T16:00:00Z", ended_at: "2026-10-05T16:10:00Z", approved_at: "x", category: "break" },
+      { id: "t3", job_id: null, user_id: "u1", started_at: "2026-10-05T17:00:00Z", ended_at: "2026-10-05T17:30:00Z", approved_at: "x", category: "break" },
+    ];
+    const lunch = teamHours(time, () => "Ana", () => 20, "short_paid");
+    expect(lunch).toMatchObject({ unpaid_break_hours: 0.5, labor_cost: 83.33 });
+    expect(lunch.hours).toBeCloseTo(4.17, 2);
+    expect(lunch.by_category.find((c) => c.category === "break")?.hours).toBeCloseTo(0.67, 2);
+    expect(teamHours(time, () => "Ana", () => 20, "paid")).toMatchObject({ hours: 4.67, unpaid_break_hours: 0 });
+    expect(teamHours(time, () => "Ana", () => 20, "unpaid")).toMatchObject({ hours: 4, unpaid_break_hours: 0.67, labor_cost: 80 });
   });
 });
 
@@ -266,7 +280,7 @@ describe("time and pay", () => {
     expect(timeEntryProblem(span, [{ started_at: "2026-10-19T16:00:00Z", ended_at: "2026-10-19T17:00:00Z" }], now)).toBeNull();
   });
 
-  it("sums a pay period: approved hours at their rates, breaks unpaid, hours over 40 a week flagged", () => {
+  it("sums a pay period: approved hours at their rates, unpaid breaks apart, hours over 40 a week flagged", () => {
     const entries = [
       // Monday to Friday, 9 approved hours a day: 45 hours, 5 over 40.
       ...[19, 20, 21, 22, 23].map((d, i) => ({ id: `w${i}`, user_id: "u1", started_at: `2026-10-${d}T12:00:00Z`, ended_at: `2026-10-${d}T21:00:00Z`, category: "visit", approved_at: "x" })),
@@ -274,12 +288,24 @@ describe("time and pay", () => {
       { id: "p", user_id: "u2", started_at: "2026-10-19T12:00:00Z", ended_at: "2026-10-19T14:00:00Z", category: "shop", approved_at: null },
       { id: "r", user_id: "u2", started_at: "2026-10-20T12:00:00Z", ended_at: null, category: "visit", approved_at: null },
     ];
-    const pay = paySummary(entries, () => 20, (id) => (id === "u1" ? "Ana" : "Bo"), tz);
+    const pay = paySummary(entries, () => 20, (id) => (id === "u1" ? "Ana" : "Bo"), tz, "short_paid");
     expect(pay.people).toEqual([
       { user_id: "u1", name: "Ana", hours: 45, break_hours: 0.5, overtime_hours: 5, amount: 900, unapproved_hours: 0, running: false },
       { user_id: "u2", name: "Bo", hours: 0, break_hours: 0, overtime_hours: 0, amount: 0, unapproved_hours: 2, running: true },
     ]);
     expect(pay).toMatchObject({ hours: 45, amount: 900, overtime_hours: 5, unapproved_hours: 2, running_clocks: 1 });
+  });
+
+  it("pays breaks as the company pays them: short ones under the federal rule, all, or none", () => {
+    const day = [
+      { id: "w", user_id: "u1", started_at: "2026-10-19T12:00:00Z", ended_at: "2026-10-19T20:00:00Z", category: "visit", approved_at: "x" },
+      { id: "rest", user_id: "u1", started_at: "2026-10-19T14:00:00Z", ended_at: "2026-10-19T14:15:00Z", category: "break", approved_at: "x" },
+      { id: "lunch", user_id: "u1", started_at: "2026-10-19T16:00:00Z", ended_at: "2026-10-19T16:30:00Z", category: "break", approved_at: "x" },
+    ];
+    const ana = (breaks: "short_paid" | "paid" | "unpaid") => paySummary(day, () => 20, () => "Ana", tz, breaks).people[0];
+    expect(ana("short_paid")).toMatchObject({ hours: 8.25, break_hours: 0.5, amount: 165 });
+    expect(ana("paid")).toMatchObject({ hours: 8.75, break_hours: 0, amount: 175 });
+    expect(ana("unpaid")).toMatchObject({ hours: 8, break_hours: 0.75, amount: 160 });
   });
 
   it("checks a payment against the balance", () => {

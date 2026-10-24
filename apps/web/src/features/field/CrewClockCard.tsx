@@ -1,10 +1,11 @@
 /**
  * For a crew lead on My day: the crew's clocks in one place. Clock everyone in (onto a visit, the
- * drive or the shop) or out with one tap, or one person at a time. Their time lands on their own
+ * drive or the shop), switch them (to lunch and back) or clock them out with one tap, or one person
+ * at a time. Their time lands on their own
  * timesheets, ready for the office.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/Button";
+import { Button, Spinner } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -13,7 +14,7 @@ import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useMyCrews } from "../schedule/myCrews";
 import { useDispatchOptions } from "../schedule/VisitDialog";
-import { CATEGORY_LABELS, formatDuration, type TimerCategory } from "./fieldData";
+import { CATEGORY_LABELS, clockPlace, formatDuration, type TimerCategory } from "./fieldData";
 
 interface VisitTarget { id: string; title: string; job: { id: string } | null; status: string }
 type Target = { category: TimerCategory; visit?: VisitTarget };
@@ -52,8 +53,10 @@ export function CrewClockCard({ visits }: { visits: VisitTarget[] }) {
     mutationFn: async ({ who, target }: { who: string[]; target: Target | null }) => {
       const now = new Date().toISOString();
       const db = supabase();
+      // Where the lead's phone is: the crew is with them when they clock everyone in or out.
+      const place = await clockPlace(session.company);
       // Stop whatever they're on, then (when clocking in) start the new one.
-      unwrap(await db.from("time_entries").update({ ended_at: now }).eq("company_id", session.company.id).in("user_id", who).is("ended_at", null));
+      unwrap(await db.from("time_entries").update({ ended_at: now, out_place: place }).eq("company_id", session.company.id).in("user_id", who).is("ended_at", null));
       if (target) {
         unwrap(
           await db.from("time_entries").insert(
@@ -64,6 +67,7 @@ export function CrewClockCard({ visits }: { visits: VisitTarget[] }) {
               visit_id: target.visit?.id ?? null,
               job_id: target.visit?.job?.id ?? null,
               started_at: now,
+              in_place: place,
             })),
           ),
         );
@@ -85,14 +89,16 @@ export function CrewClockCard({ visits }: { visits: VisitTarget[] }) {
     ...visits.filter((v) => !["completed", "cancelled"].includes(v.status)).map((v) => ({ label: v.title, target: { category: "visit" as const, visit: v } })),
     { label: CATEGORY_LABELS.drive, target: { category: "drive" } },
     { label: CATEGORY_LABELS.shop, target: { category: "shop" } },
+    // Lunch for the whole crew; clock them back onto the visit after.
+    { label: CATEGORY_LABELS.break, target: { category: "break" } },
     { label: CATEGORY_LABELS.other, target: { category: "other" } },
   ];
   const clockIn = (who: string[], label: string, text = label) => (
     <Menu
       label={label}
       triggerClassName="btn btn-sm"
-      trigger={<><Icon name="play" size={14} />{text}</>}
-      items={targets.map((t) => ({ label: t.label, onSelect: () => act.mutate({ who, target: t.target }) }))}
+      trigger={<>{act.isPending && act.variables?.target && act.variables.who.join() === who.join() ? <Spinner size={14} /> : <Icon name="play" size={14} />}{text}</>}
+      items={targets.map((t) => ({ label: t.label, disabled: act.isPending, onSelect: () => act.mutate({ who, target: t.target }) }))}
     />
   );
 
@@ -101,6 +107,8 @@ export function CrewClockCard({ visits }: { visits: VisitTarget[] }) {
       <div className="card-head" style={{ flexWrap: "wrap", gap: 8 }}>
         <strong className="grow">Crew clock</strong>
         {off.length > 0 && clockIn(off, off.length === people.length ? "Clock everyone in" : `Clock in ${off.length} more`)}
+        {/* Everyone on the clock onto something else at once: lunch, and back onto the visit after. */}
+        {on.length > 0 && clockIn(on, on.length === people.length ? "Switch everyone" : `Switch the ${on.length} on the clock`, "Switch")}
         {on.length > 0 && <Button size="sm" variant="dark" icon="pause" loading={act.isPending && act.variables?.target === null && act.variables.who.length > 1} onClick={() => act.mutate({ who: on, target: null })}>Clock everyone out</Button>}
       </div>
       {people.map((id) => {

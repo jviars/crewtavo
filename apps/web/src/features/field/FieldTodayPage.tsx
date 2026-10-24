@@ -21,6 +21,7 @@ import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
 import { CrewClockCard } from "./CrewClockCard";
 import { pendingVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
+import { useStatusTap } from "./fieldData";
 import { InstallAppCard } from "./InstallAppCard";
 import { OfflineNote } from "./OfflineNote";
 import { FIELD_SCOPE } from "@/lib/offline";
@@ -98,8 +99,8 @@ export function FieldTodayPage() {
     },
     onSettled: refresh,
   });
-  const changeStatus = (visit: Visit, status: string) =>
-    setStatus.mutate({ companyId: session.company.id, userId: session.userId, visitId: visit.id, jobId: visit.job?.id ?? null, status, at: new Date().toISOString() });
+  const statusTap = useStatusTap((change) => setStatus.mutate(change));
+  const changeStatus = (visit: Visit, status: string) => statusTap.tap({ id: visit.id, jobId: visit.job?.id ?? null }, status);
 
   // The route the office or crew lead set (Organize route), else timed visits by time, then the rest.
   const order = (a: Visit, b: Visit) =>
@@ -126,7 +127,7 @@ export function FieldTodayPage() {
 
       <OfflineNote />
       {!hasRole(session, "admin", "office", "estimator") && <InstallAppCard />}
-      <ClockCard />
+      <ClockCard visits={open.filter((v) => v.status === "in_progress").map((v) => ({ id: v.id, title: v.title, job_id: v.job?.id ?? null }))} />
       {session.role === "crew_lead" && <CrewClockCard visits={data.data?.today ?? []} />}
 
       {data.isPending && <Loading label="Loading your visits"><div className="stack">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={2} />)}</div></Loading>}
@@ -152,7 +153,7 @@ export function FieldTodayPage() {
       <div className="stack">
         {open.map((v, i) => {
           const next = NEXT[v.status];
-          const busy = setStatus.isPending && !setStatus.isPaused && setStatus.variables?.visitId === v.id;
+          const busy = (setStatus.isPending && !setStatus.isPaused && setStatus.variables?.visitId === v.id) || statusTap.locating === v.id;
           return (
             <article key={v.id} className="field-card" style={v.status === "in_progress" ? { borderColor: "var(--green)", boxShadow: "var(--ring)" } : undefined}>
               <div className="row">

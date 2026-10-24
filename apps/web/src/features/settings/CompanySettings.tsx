@@ -1,3 +1,4 @@
+import { BREAK_PAY_LABELS, breakPay, type BreakPay } from "@crewtavo/core/breaks";
 import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { PRESETS } from "@crewtavo/core/presets";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,6 +12,11 @@ import { useSession } from "@/lib/session";
 import { CompanyLogo } from "./CompanyLogo";
 
 const ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "America/Puerto_Rico", "America/Toronto", "America/Vancouver", "Europe/London", "Australia/Sydney"];
+const BREAK_HINTS: Record<BreakPay, string> = {
+  short_paid: "Breaks of 20 minutes or less count as paid time; longer ones, like lunch, don't. This follows federal rules.",
+  paid: "Every break counts as paid time, lunch included.",
+  unpaid: "No break counts as paid time. Federal rules say rest breaks of 20 minutes or less must be paid, so check before choosing this.",
+};
 const BRAND_COLORS = ["#0f2a35", "#3b7d23", "#1d4ed8", "#b45309", "#be123c", "#6d28d9", "#0f766e", "#1f2937"];
 
 export function CompanySettings() {
@@ -34,6 +40,8 @@ export function CompanySettings() {
       quote_valid_days: String(s.quote_valid_days ?? 30), hours_start: s.working_hours?.start ?? "07:00", hours_end: s.working_hours?.end ?? "18:00",
       color: s.branding?.color ?? "#0f2a35",
       hub_tips: s.hub_tips ? "1" : "",
+      record_location: s.clock?.record_location === false ? "" : "1",
+      breaks: breakPay(s),
     });
   }, [details.data, f]);
 
@@ -64,6 +72,7 @@ export function CompanySettings() {
         working_hours: { start: v.hours_start, end: v.hours_end },
         branding: { ...(previous.branding ?? {}), color: v.color },
         hub_tips: v.hub_tips === "1",
+        clock: { ...(previous.clock ?? {}), record_location: v.record_location === "1", breaks: v.breaks },
         depot,
       };
       unwrap(
@@ -136,6 +145,20 @@ export function CompanySettings() {
         <label className="switch-row" style={{ fontWeight: 500 }}>
           <input type="checkbox" className="switch" checked={f.hub_tips === "1"} onChange={(e) => setF({ ...f, hub_tips: e.target.checked ? "1" : "" })} />
           Let clients add a tip when they pay online
+        </label>
+      </div>
+      <div className="card card-pad stack">
+        <strong>Time clock</strong>
+        <div className="form-grid">
+          <Field label="Breaks" hint={BREAK_HINTS[f.breaks as BreakPay]}>
+            <select className="select" value={f.breaks} onChange={set("breaks")}>
+              {(Object.keys(BREAK_PAY_LABELS) as BreakPay[]).map((b) => <option key={b} value={b}>{BREAK_PAY_LABELS[b]}</option>)}
+            </select>
+          </Field>
+        </div>
+        <label className="switch-row" style={{ fontWeight: 500 }}>
+          <input type="checkbox" className="switch" checked={f.record_location === "1"} onChange={(e) => setF({ ...f, record_location: e.target.checked ? "1" : "" })} />
+          Save where people are when they clock in and out (the office and crew leads see it on Timesheets)
         </label>
       </div>
       <FormError error={save.error} />

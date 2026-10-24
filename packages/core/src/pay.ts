@@ -3,6 +3,7 @@
  * tools), and a pay period's summary for each person (Timesheets → Pay and the pay tools). Crewtavo
  * doesn't pay anyone; the summary is what the business pays through its own payroll.
  */
+import { isUnpaidBreak, type BreakPay } from "./breaks";
 import { addDays, localDate, parseZonedTime } from "./time";
 
 /**
@@ -36,11 +37,12 @@ export const mondayOf = (date: string) => addDays(date, -((new Date(`${date}T12:
 export interface PayEntry { id: string; user_id: string; started_at: string; ended_at: string | null; category: string; approved_at: string | null }
 
 /**
- * Each person's pay for a period: approved hours (breaks aren't paid, but are shown), the amount
- * at the rate each entry is costed at, hours over 40 in a week (flagged for the payroll service;
- * the amount is at straight time), and what's not approved or still running.
+ * Each person's pay for a period: approved hours, with breaks paid as the company pays them
+ * (`breaks`, settings.clock.breaks; unpaid ones are shown as break_hours), the amount at the rate
+ * each entry is costed at, hours over 40 in a week (flagged for the payroll service; the amount is
+ * at straight time), and what's not approved or still running.
  */
-export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntry) => number, nameOf: (userId: string) => string, timeZone: string) {
+export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntry) => number, nameOf: (userId: string) => string, timeZone: string, breaks: BreakPay) {
   const h = (ms: number) => ms / 3_600_000;
   const people = new Map<string, { user_id: string; name: string; hours: number; break_hours: number; overtime_hours: number; amount: number; unapproved_hours: number; running: boolean; weeks: Map<string, number> }>();
   for (const e of entries) {
@@ -51,7 +53,7 @@ export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntr
       continue;
     }
     const hours = Math.max(0, h(Date.parse(e.ended_at) - Date.parse(e.started_at)));
-    if (e.category === "break") {
+    if (isUnpaidBreak(e, breaks)) {
       row.break_hours += hours;
       continue;
     }

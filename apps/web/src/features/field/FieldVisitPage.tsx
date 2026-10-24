@@ -21,7 +21,7 @@ import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
 import { FieldPlans } from "../plans/FieldPlans";
 import { pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
-import { formatDuration } from "./fieldData";
+import { formatDuration, useStatusTap } from "./fieldData";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { SignaturePad } from "./SignaturePad";
 
@@ -76,9 +76,10 @@ export function FieldVisitPage() {
     },
     onSettled: refresh,
   });
+  const statusTap = useStatusTap((change) => statusMutation.mutate(change));
   const setStatus = {
-    mutate: (status: string) => statusMutation.mutate({ companyId: session.company.id, userId: session.userId, visitId: id, jobId: v?.job?.id ?? null, status, at: new Date().toISOString() }),
-    isPending: statusMutation.isPending && !statusMutation.isPaused,
+    mutate: (status: string) => statusTap.tap({ id, jobId: v?.job?.id ?? null }, status),
+    isPending: (statusMutation.isPending && !statusMutation.isPaused) || statusTap.locating === id,
   };
   const [notes, setNotes] = useState("");
   useEffect(() => setNotes(v?.notes ?? ""), [v?.notes]);

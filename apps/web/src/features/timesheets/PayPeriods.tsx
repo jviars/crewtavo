@@ -4,6 +4,7 @@
  * has paid them through its own payroll or bank. Crewtavo moves no money. The same work as AI
  * assistants' pay tools (apps/api/src/services/pay.ts).
  */
+import { breakPay, SHORT_BREAK_MINUTES, type BreakPay } from "@crewtavo/core/breaks";
 import { mondayOf } from "@crewtavo/core/pay";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -23,6 +24,13 @@ interface Paid { paid_amount: number | null; method: string | null; reference: s
 interface PersonPay { user_id: string; name: string; hours: number; break_hours: number; overtime_hours: number; amount: number; unapproved_hours: number; running: boolean; paid: Paid | null }
 interface Summary { from: string; to: string; period_id: string | null; status: string; people: PersonPay[]; hours: number; amount: number; overtime_hours: number; unapproved_hours: number; running_clocks: number }
 interface Period { id: string; starts_on: string; ends_on: string; status: string; paid_total: number; lines: Array<{ user_id: string; name: string }> }
+
+/** How the company pays breaks (Settings → Company), as the note under a period says it. */
+const BREAK_RULE: Record<BreakPay, string> = {
+  short_paid: `Breaks of ${SHORT_BREAK_MINUTES} minutes or less are paid; longer ones aren't.`,
+  paid: "Breaks are paid.",
+  unpaid: "Breaks aren't paid.",
+};
 
 const METHODS = [
   ["direct_deposit", "Direct deposit"],
@@ -118,7 +126,7 @@ export function PayPeriods() {
               <strong className="grow" style={{ minWidth: 140 }}>{p.name}</strong>
               <span className="tabular">{p.hours.toFixed(2)} h</span>
               {p.overtime_hours > 0 && <span className="muted small tabular">{p.overtime_hours.toFixed(1)} over 40</span>}
-              {p.break_hours > 0 && <span className="muted small tabular">{p.break_hours.toFixed(1)} h breaks</span>}
+              {p.break_hours > 0 && <span className="muted small tabular">{p.break_hours.toFixed(1)} h unpaid breaks</span>}
               <span className="tabular strong" style={{ minWidth: 90, textAlign: "right" }}>{formatMoney(p.amount)}</span>
               {p.paid ? (
                 <span title={[methodLabel(p.paid.method), p.paid.reference].filter(Boolean).join(" · ")}><StatusPill label={`Paid ${formatMoney(p.paid.paid_amount)}`} tone="good" /></span>
@@ -129,7 +137,7 @@ export function PayPeriods() {
               ) : null}
             </div>
           ))}
-          <p className="muted small" style={{ margin: 12 }}>Approved time at each person's pay rate. Breaks aren't paid. Hours over 40 in a week are shown for your payroll service; the amounts here are at straight time.</p>
+          <p className="muted small" style={{ margin: 12 }}>Approved time at each person's pay rate. {BREAK_RULE[breakPay(session.company.settings)]} Hours over 40 in a week are shown for your payroll service; the amounts here are at straight time.</p>
         </section>
       )}
 
