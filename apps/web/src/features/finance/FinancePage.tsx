@@ -622,22 +622,24 @@ function Profit({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [jobs, lines, settings] = await Promise.all([
-        fetchAll((a, b) => db.from("jobs").select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost)").eq("company_id", cid).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end).range(a, b)),
+        fetchAll((a, b) => db.from("jobs").select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost, unit_labor_cost)").eq("company_id", cid).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end).range(a, b)),
         // Deposit and progress invoices are partial billings of the same work, so count items from the rest.
         fetchAll((a, b) => db.from("invoice_line_items").select("name, quantity, unit_price, invoice:invoices!inner(issued_on, status, kind)").eq("company_id", cid).gte("invoice.issued_on", range.from).lte("invoice.issued_on", range.to).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress)").gte("unit_price", 0).range(a, b)),
         db.from("companies").select("settings").eq("id", cid).single(),
       ]);
       const ids = jobs.map((j) => j.id);
-      const [time, expenses, rates] = ids.length
+      const [time, expenses, rates, crewPay] = ids.length
         ? await Promise.all([
             fetchAll((a, b) => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", ids.slice(0, 300)).range(a, b)),
             fetchAll((a, b) => db.from("expenses").select("job_id, amount").in("job_id", ids.slice(0, 300)).range(a, b)),
             timeRates(costs, { job_ids: ids.slice(0, 300) }),
+            // Sub and crew pay that's agreed, done or paid: for those with job costs, nothing for anyone else.
+            costs ? db.rpc("job_pay_costs", { p_jobs: ids.slice(0, 300) }).then(unwrap) : Promise.resolve([]),
           ])
-        : [[], [], {} as Rates];
+        : [[], [], {} as Rates, []];
       const target = Number(((unwrap(settings).settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
       // Costed as AI assistants' job_profit costs it (packages/core/src/reports.ts).
-      const costed = jobProfit(jobs, time, expenses, (t) => Number(rates[t.id] ?? 0), target).jobs.map((j) => ({ ...j, margin: j.margin_percent }));
+      const costed = jobProfit(jobs, time, expenses, (t) => Number(rates[t.id] ?? 0), target, crewPay).jobs.map((j) => ({ ...j, margin: j.margin_percent }));
       return { jobs: costed, lines, target };
     },
   });
@@ -665,7 +667,7 @@ function Profit({ range }: { range: Range }) {
               {costs && <Kpi label="Below target margin" value={d.target ? formatNumber(below.length) : "—"} hint={d.target ? `Target ${d.target}%` : "No target set"} tone={below.length ? "bad" : undefined} />}
             </KpiStrip>
             {costs && (
-              <ReportCard title="Job profitability" subtitle="Labor, expenses and materials against each job's contract total">
+              <ReportCard title="Job profitability" subtitle="Labor, sub and crew pay, expenses and materials against each job's contract total">
                 <ReportTable
                   rows={d.jobs}
                   rowKey={(r) => r.id}

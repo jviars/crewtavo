@@ -2,9 +2,12 @@
  * Delivers notifications beyond the bell: email, text and phone push, by each person's choices
  * (Settings → Profile → Notifications). Runs every minute; each notification is claimed once, about
  * a minute after it's made so quick changes have folded together, and skipped if already read.
- * One email and one text per person per run, however many notifications there are.
+ * One email and one text per person per run, however many notifications there are. A sub on a
+ * sign-in Crewtavo made for them is reached at the phone and email the office keeps on their record
+ * (public.sub_notice_contacts), so the office's corrections reach them; a phone they put on their own
+ * profile comes first for texts.
  */
-import { DEFAULT_NOTIFICATION_PREFS, notificationTopic, type NotificationChannel, type NotificationTopic } from "@crewtavo/core";
+import { DEFAULT_NOTIFICATION_PREFS, isPlaceholderEmail, notificationTopic, type NotificationChannel, type NotificationTopic } from "@crewtavo/core";
 import type { Env } from "../env";
 import { renderEmail } from "../lib/email";
 import { sendEmail, sendSms, smsConfigured } from "../lib/notify";
@@ -33,16 +36,26 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
 
   const userIds = [...new Set(rows.map((r) => r.user_id))];
   const companyIds = [...new Set(rows.map((r) => r.company_id))];
-  const [prefs, profiles, companies, devices] = await Promise.all([
+  const [prefs, profiles, companies, devices, subContacts] = await Promise.all([
     admin.from("notification_prefs").select("company_id, user_id, email, sms, push").in("user_id", userIds),
     admin.from("profiles").select("user_id, email, phone, full_name").in("user_id", userIds),
     admin.from("companies").select("id, name, email").in("id", companyIds),
     admin.from("push_subscriptions").select("id, user_id, endpoint, p256dh, auth").in("user_id", userIds),
+    // A sub's sign-in made by Crewtavo: the phone and email the office keeps for them, as they are now.
+    admin.rpc("sub_notice_contacts", { p_users: userIds }),
   ]);
+  if (subContacts.error) reportError(new Error(subContacts.error.message), { task: "notify", step: "sub_notice_contacts" });
   const prefsFor = (companyId: string, userId: string): Record<NotificationChannel, string[]> =>
     prefs.data?.find((p) => p.company_id === companyId && p.user_id === userId) ?? DEFAULT_NOTIFICATION_PREFS;
   const base = (env.APP_URL ?? "").replace(/\/$/, "");
   const url = (link: string | null) => (base && link ? `${base}${link}` : base || null);
+  // Where several at once lead: a sub's job offers and pay to My jobs, anything else home.
+  const batchLink = (items: Row[]) => (items.every((i) => i.kind === "jobs") ? "/field/jobs" : "/");
+
+  // Each notice is one paragraph of the email, its title, words and link on their own lines: line
+  // breaks typed into a notice (a sub's reason for turning down a job) are run together, so nothing
+  // but the app's own link can stand alone as a paragraph and show as a button (lib/email.ts).
+  const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
   const groups = new Map<string, Row[]>();
   for (const r of rows) groups.set(`${r.company_id}:${r.user_id}`, [...(groups.get(`${r.company_id}:${r.user_id}`) ?? []), r]);
@@ -52,20 +65,26 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
     const company = companies.data?.find((c) => c.id === companyId);
     const person = profiles.data?.find((p) => p.user_id === userId);
     if (!company || !person) continue;
+    // A sub's own sign-in: email to the address on the office's record (its own is a stand-in), and
+    // texts to the phone they put on their profile, else the record's. Everyone else: their account's.
+    const sub = (subContacts.data ?? []).find((c) => c.company_id === companyId && c.user_id === userId);
+    const emailTo = sub ? sub.email : person.email;
+    const phoneTo = person.phone || sub?.phone || null;
     const chosen = prefsFor(companyId, userId);
     const pick = (channel: NotificationChannel) => items.filter((i) => chosen[channel].includes(notificationTopic(i.kind) as NotificationTopic));
 
     try {
       const forEmail = pick("email");
-      if (forEmail.length && person.email) {
+      // Never to a sub's stand-in address.
+      if (forEmail.length && emailTo && !isPlaceholderEmail(emailTo)) {
         const text = [
           forEmail.length === 1 ? "" : `${forEmail.length} updates from ${company.name}:`,
-          ...forEmail.map((i) => [i.title, i.body && i.body !== i.title ? i.body : null, url(i.link)].filter(Boolean).join("\n")),
+          ...forEmail.map((i) => [oneLine(i.title), i.body && i.body !== i.title ? oneLine(i.body) : null, url(i.link)].filter(Boolean).join("\n")),
           `You get these because of your notification settings. Change them in Crewtavo under Settings → Profile${base ? `: ${base}/settings?tab=profile` : "."}`,
         ].filter(Boolean).join("\n\n");
         const result = await sendEmail(
           env,
-          { to: person.email, subject: forEmail.length === 1 ? forEmail[0]!.title : `${forEmail.length} updates from ${company.name}`, ...renderEmail({ companyName: company.name, text }), replyTo: company.email ?? undefined, fromName: company.name },
+          { to: emailTo, subject: forEmail.length === 1 ? forEmail[0]!.title : `${forEmail.length} updates from ${company.name}`, ...renderEmail({ companyName: company.name, text }), replyTo: company.email ?? undefined, fromName: company.name },
           companyId,
         );
         if (result.sent) counts.email++;
@@ -73,11 +92,11 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
       }
 
       const forSms = pick("sms");
-      if (forSms.length && person.phone && smsConfigured(env)) {
+      if (forSms.length && phoneTo && smsConfigured(env)) {
         const first = forSms[0]!;
         const more = forSms.length > 1 ? ` (+${forSms.length - 1} more)` : "";
-        const link = url(forSms.length > 1 ? "/" : first.link);
-        const result = await sendSms(env, { to: person.phone, body: `${company.name}: ${first.title}${more}${link ? ` ${link}` : ""}` });
+        const link = url(forSms.length > 1 ? batchLink(forSms) : first.link);
+        const result = await sendSms(env, { to: phoneTo, body: `${company.name}: ${first.title}${more}${link ? ` ${link}` : ""}` });
         if (result.sent) counts.sms++;
         else counts.failed++;
       }
@@ -89,7 +108,7 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
         // Up to three separately; more than that, one summary.
         const messages = forPush.length <= 3
           ? forPush.map((i) => ({ title: i.title, body: i.body && i.body !== i.title ? i.body : company.name, link: i.link ?? "/", tag: i.id }))
-          : [{ title: `${forPush.length} updates from ${company.name}`, body: forPush.map((i) => i.title).slice(0, 4).join("\n"), link: "/", tag: `batch-${companyId}` }];
+          : [{ title: `${forPush.length} updates from ${company.name}`, body: forPush.map((i) => i.title).slice(0, 4).join("\n"), link: batchLink(forPush), tag: `batch-${companyId}` }];
         for (const device of phones) {
           for (const message of messages) {
             const sent = await sendPush(env, device, message, contact);

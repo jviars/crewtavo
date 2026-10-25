@@ -234,8 +234,14 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   site plan can go on the measuring map, lined up with the aerial by tapping two spots, to measure
   new paving from it.
 - **People and roles:** General manager, Office manager, Operations manager, Foreman and Employee
-  to start with, renamable, plus your own. A foreman runs their crew and never sees prices. The
+  to start with, renamable, plus your own. A foreman runs their crew and never sees prices. A
+  Subcontractor sign-in sees only their own jobs, their price on each and their paperwork. The
   database enforces every rule, not just the screens.
+- **Subcontractors:** a record for each sub, whether or not they sign in, with their W-9,
+  insurance certificates and licenses, expiry reminders, and upload links for subs without an
+  account. Job offers they accept or decline in the field app (a lapsed certificate warns, and the
+  offer records it), what's owed and paid, 1099-NEC totals by year, and a workers' comp audit
+  report. Subs sign in with a link or a code by text or email, no password.
 - **Communication:** email from your own mailbox, two-way texting through Twilio, a message center,
   and notifications in the app, by email, by text or as phone push, each person's choice.
 - **Automations and marketing:** rules like "when a quote is sent, wait 3 days, then email the
@@ -247,8 +253,10 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   an assistant only reads until that person chooses what it can change, or gives it full access,
   with or without money (and it never does more than their role allows). Every call is logged.
 - **Pay:** Timesheets → Pay sums each person's approved hours at their rate for a week or any
-  dates, flags overtime and unapproved time, downloads for your payroll service, and records who's
-  been paid and how. Paid time is locked. Crewtavo doesn't move the money.
+  dates, adds their piece pay (per square, per job or per day, from their rate card), flags
+  overtime and unapproved time, downloads for your payroll service, and records who's been paid and
+  how. Paid time is locked. Subs are paid by the job instead, under Subcontractors. Crewtavo
+  doesn't move the money.
 - **Every trade:** trade presets ([`packages/core/src/presets`](packages/core/src/presets)) load
   starter services, quote formulas, checklists, booking forms and SOP categories when a company
   signs up: lawn and exterior maintenance, paving and sitework, roofing and exteriors, or a general

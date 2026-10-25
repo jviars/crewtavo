@@ -30,7 +30,8 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('b6000000-0000-0000-0000-000000000006', 'lead@lima.test', '{"full_name": "Lee Lead"}'),
   ('b6000000-0000-0000-0000-000000000007', 'crew@lima.test', '{"full_name": "Cree Crew"}'),
   ('b6000000-0000-0000-0000-000000000008', 'helper@lima.test', '{"full_name": "Hal Helper"}'),
-  ('b6000000-0000-0000-0000-000000000009', 'hedges@lima.test', '{"full_name": "Ivy Hedges"}');
+  ('b6000000-0000-0000-0000-000000000009', 'hedges@lima.test', '{"full_name": "Ivy Hedges"}'),
+  ('b6000000-0000-0000-0000-000000000010', 'sam@siding.test', '{"full_name": "Sam Sub"}');
 
 begin;
 set local role authenticated;
@@ -83,6 +84,10 @@ insert into public.memberships (company_id, user_id, role) values (:'mike', 'b60
 insert into public.crews (company_id, name, lead_user_id) values (:'mike', 'Mike crew', 'b6000000-0000-0000-0000-000000000003') returning id as crew4 \gset
 insert into public.crew_members (company_id, crew_id, user_id) values (:'mike', :'crew4', 'b6000000-0000-0000-0000-000000000007');
 commit;
+-- Sam signs in as a sub of Lima, on the mowing visit (the server makes a sub's sign-in).
+insert into public.subcontractors (company_id, name) values (:'lima', 'Sam''s Siding') returning id as sam_sub \gset
+insert into public.memberships (company_id, user_id, role, subcontractor_id) values (:'lima', 'b6000000-0000-0000-0000-000000000010', 'subcontractor', :'sam_sub');
+insert into public.visit_assignees (company_id, visit_id, user_id) values (:'lima', :'v1', 'b6000000-0000-0000-0000-000000000010');
 
 \o
 \echo 'Policy lookups'
@@ -116,7 +121,7 @@ begin
       case t.kind
       when 'company' then
         insert into t60_answers values (u, t.id, 'member', private.is_member(t.id), t.id = any (private.member_companies()));
-        foreach r slice 1 in array array[['owner','owner'], ['owner','admin'], ['office','office'], ['field_crew','crew_lead']]::public.member_role[][] loop
+        foreach r slice 1 in array array[['owner','owner'], ['owner','admin'], ['office','office'], ['field_crew','crew_lead'], ['subcontractor','subcontractor']]::public.member_role[][] loop
           insert into t60_answers values (u, t.id, r::text, private.has_role(t.id, r), t.id = any (private.role_companies(r)));
         end loop;
         foreach a in array array['invoices', 'team', 'apps', 'schedule', 'equipment', 'nothing'] loop
@@ -157,7 +162,10 @@ begin
   end loop;
 end $$;
 reset role;
-select t60.check((select count(distinct who) from t60_answers) = 9, 'every person was asked');
+select t60.check((select count(distinct who) from t60_answers) = 10, 'every person was asked');
+select t60.check((select bool_and(not per_row) from t60_answers where who = 'b6000000-0000-0000-0000-000000000010' and what = 'member')
+  and (select bool_or(per_row) from t60_answers where who = 'b6000000-0000-0000-0000-000000000010' and what = '{subcontractor,subcontractor}'),
+  'a sub is no member of any company, though they have a sign-in at the Subcontractor level');
 select t60.check(not exists (select 1 from t60_answers where what <> 'on_my_crew' and per_row is distinct from coalesce(listed, false)),
   'the lists answer exactly as the per-row checks do' || coalesce(': ' || (select string_agg(distinct what, ', ') from t60_answers where what <> 'on_my_crew' and per_row is distinct from coalesce(listed, false)), ''));
 select t60.check(not exists (select 1 from t60_answers where what = 'on_my_crew' and per_row is distinct from listed)
@@ -277,6 +285,8 @@ select set_config('request.jwt.claims', '{"sub": "b6000000-0000-0000-0000-000000
 select t60.check(not exists (select 1 from public.t60_notes), 'an inactive member reads nothing');
 select set_config('request.jwt.claims', '{"sub": "b6000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 select t60.check((select array_agg(label) from public.t60_notes) = '{Mike Mowing}', 'an owner reads their own company''s');
+select set_config('request.jwt.claims', '{"sub": "b6000000-0000-0000-0000-000000000010", "role": "authenticated"}', true);
+select t60.check(not exists (select 1 from public.t60_notes), 'and a sub reads nothing a member would');
 rollback;
 drop table public.t60_notes;
 
@@ -299,7 +309,7 @@ create function t60.read_crew_notes(p_folded boolean) returns void language plpg
 declare
   u uuid;
 begin
-  for u in select ('b6000000-0000-0000-0000-' || lpad(g::text, 12, '0'))::uuid from generate_series(1, 9) g loop
+  for u in select ('b6000000-0000-0000-0000-' || lpad(g::text, 12, '0'))::uuid from generate_series(1, 10) g loop
     perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
     insert into t60_seen select u, p_folded, array(select label from public.t60_crew_notes order by label);
   end loop;
@@ -314,7 +324,7 @@ begin;
 set local role authenticated;
 select t60.read_crew_notes(true);
 commit;
-select t60.check((select count(*) from t60_seen) = 18
+select t60.check((select count(*) from t60_seen) = 20
   and not exists (select 1 from t60_seen b join t60_seen a on a.who = b.who and a.folded and not b.folded where a.labels is distinct from b.labels),
   'and everyone reads the same rows as before');
 select t60.check((select labels from t60_seen where folded and who = 'b6000000-0000-0000-0000-000000000006')

@@ -1,5 +1,5 @@
 /** Roles: name a role, pick its access level, and choose which areas it includes. */
-import { LEVEL_PERMISSIONS, LEVEL_SUMMARY, PERMISSIONS, ROLE_LABELS, ROLES, type Permission, type Role } from "@crewtavo/core/roles";
+import { LEVEL_PERMISSIONS, LEVEL_SUMMARY, PERMISSIONS, ROLE_LABELS, STAFF, type Permission, type Role } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -13,7 +13,8 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useCompanyRoles, type CompanyRole } from "./roles";
 
-const LEVELS = ROLES.filter((r) => r !== "owner");
+// The team's levels. A custom role is never a sub's (the database refuses it).
+const LEVELS = STAFF.filter((r) => r !== "owner");
 const label = (p: Permission) => PERMISSIONS.find((x) => x.key === p)?.label ?? p;
 
 export function RolesSettings() {
@@ -77,7 +78,7 @@ export function RolesSettings() {
       )}
       <div className="card">
         <div className="card-head"><strong>Built-in roles</strong></div>
-        {ROLES.map((r) => (
+        {STAFF.map((r) => (
           <div key={r} className="card-row" style={{ alignItems: "flex-start" }}>
             <strong style={{ width: 110, flex: "none" }}>{ROLE_LABELS[r]}</strong>
             <span className="muted small">{LEVEL_SUMMARY[r]}</span>

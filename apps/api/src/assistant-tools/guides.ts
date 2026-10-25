@@ -3,7 +3,7 @@
  * the guide editor makes (markdownToGuide in packages/core). Every saved change is kept as a
  * revision, as when someone edits one in Crewtavo.
  */
-import { markdownToGuide, ROLES } from "@crewtavo/core";
+import { markdownToGuide, STAFF, type Role } from "@crewtavo/core";
 import { z } from "zod";
 import { changed, companyArg, one, rows, tool, type ToolContext } from "./tool";
 
@@ -52,7 +52,7 @@ export const guideTools = {
       category: z.string().trim().max(80).nullable().optional().describe("A category's name; made if it doesn't exist yet."),
       status: z.enum(["draft", "published"]).optional(),
       required: z.boolean().optional().describe("Required reading: people are asked to read and acknowledge it."),
-      audience: z.array(z.enum(ROLES)).optional().describe("Who must read it when it's required; everyone when left out."),
+      audience: z.array(z.enum(STAFF as [Role, ...Role[]])).optional().describe("Who must read it when it's required; everyone when left out."),
       tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
       ...companyArg,
     }),

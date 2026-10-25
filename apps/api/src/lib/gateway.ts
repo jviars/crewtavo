@@ -6,7 +6,7 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
-import { guardAssistant } from "./assistants";
+import { guardAssistant, guardConsent } from "./assistants";
 import { authMetadata, signsIdTokens, withoutOpenId } from "./authMetadata";
 import { guardSignIn, isGuessable } from "./signInGuard";
 import type { Stack } from "./stack";
@@ -27,7 +27,7 @@ export function gateway(env: Env, stack: Stack) {
     });
   }
   // An AI assistant's token only reads here unless the person allowed it to change things, and never
-  // changes their sign-in (lib/assistants.ts).
+  // changes their sign-in (lib/assistants.ts)...
   routes.all("/auth/v1/*", async (c) => {
     const address = visitor(c);
     const send = (request: Request) => forward(request, stack.auth, "/auth/v1", address);
@@ -35,18 +35,47 @@ export function gateway(env: Env, stack: Stack) {
     // A connector's sign-in asking for an ID token Auth can't sign goes ahead without one.
     const plain = c.req.method === "GET" && c.req.path === "/auth/v1/oauth/authorize" ? withoutOpenId(new URL(incoming.url)) : null;
     if (plain && !(await signsIdTokens(`${stack.auth.replace(/\/$/, "")}/.well-known/jwks.json`))) incoming = new Request(plain, incoming);
-    return guardAssistant(env, incoming, "/auth/v1", (request) => (isGuessable(request.method, new URL(request.url), "/auth/v1") ? guardSignIn(env, request, send) : send(request)));
+    // ...and only someone on a team connects one (a sub's sign-in can't).
+    return guardConsent(env, incoming, "/auth/v1", (consented) =>
+      guardAssistant(env, consented, "/auth/v1", (request) => (isGuessable(request.method, new URL(request.url), "/auth/v1") ? guardSignIn(env, request, send) : send(request))),
+    );
   });
   routes.all("/rest/v1/*", (c) => guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c))));
-  routes.all("/storage/v1/*", (c) => {
+  routes.all("/storage/v1/*", async (c) => {
     if (unsizedUpload(c.req.raw)) {
       return c.json({ statusCode: "411", error: "Length Required", message: "Send the file's size (Content-Length) with the upload, or send it as a form." }, 411);
     }
     // The upload's size goes along: Storage checks a file sent as the bare body against
     // FILE_SIZE_LIMIT by it (a form's file it checks as it arrives).
-    return guardAssistant(env, c.req.raw, "/storage/v1", (request) => forward(request, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" }, true));
+    const request = c.req.raw;
+    const res = await guardAssistant(env, request, "/storage/v1", (r) => forward(r, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" }, true));
+    return safeFile(request, res);
   });
   return routes;
+}
+
+/** Stored files a browser may show in place: PDFs and photos. Not SVG drawings, which can run scripts. */
+const SHOWN_INLINE = new Set(["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif", "image/webp", "image/gif"]);
+
+/**
+ * A stored file, as served from this server's own address (where the app and its sign-in live).
+ * Storage serves a file with whatever type it was uploaded with, so a file someone uploaded as a web
+ * page (a sub's "paperwork", say) would run as the app when the office opened it. Every file is
+ * served as exactly its type (nosniff); anything but a PDF or a photo downloads instead of opening,
+ * and if it's opened anyway it runs in a sandbox with nothing allowed. (PDFs aren't sandboxed:
+ * Chrome won't show a PDF in a sandboxed page.)
+ */
+export function safeFile(request: Request, res: Response): Response {
+  if (!["GET", "HEAD"].includes(request.method) || !new URL(request.url).pathname.startsWith("/storage/v1/object/")) return res;
+  const headers = new Headers(res.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  const type = (headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  if (res.ok && !SHOWN_INLINE.has(type)) {
+    const named = headers.get("content-disposition")?.match(/;\s*filename\*?=.*$/i)?.[0] ?? "";
+    headers.set("Content-Disposition", `attachment${named}`);
+    headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
+  }
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 /**

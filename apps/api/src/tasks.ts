@@ -8,15 +8,17 @@ import { runAccountingJob, SentButUnrecorded } from "./integrations/accounting";
 import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
 import { syncStripeInvoice } from "./integrations/stripe";
 import { reportError } from "./lib/monitoring";
+import { emailConfigured, smsConfigured } from "./lib/notify";
 import { adminClient, type Db } from "./lib/supabase";
 import { runAddressTask } from "./services/address";
 import { rollUpVisits } from "./services/analytics";
 import { checkHosting } from "./services/hosting";
-import { tidyPlanFiles } from "./services/planFiles";
+import { tidyPlanFiles, tidySubFiles } from "./services/planFiles";
 import { keepRailwayAlive } from "./services/railway";
 import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
 import { deliverNotifications } from "./services/delivery";
+import { remindSubs } from "./services/subs";
 import { dailyOutlook } from "./services/external";
 import { autoRoutes } from "./services/routes";
 
@@ -63,8 +65,10 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return keepRailwayAlive(env, adminClient(env));
     case "hosting":
       return checkHosting(env, adminClient(env));
-    case "plans":
-      return tidyPlanFiles(adminClient(env));
+    case "plans": {
+      const admin = adminClient(env);
+      return { ...(await tidyPlanFiles(admin)), subs: await tidySubFiles(admin) };
+    }
     case "routes":
       return autoRoutes(env);
     case "website":
@@ -155,9 +159,18 @@ export async function materializeJob(admin: Db, job: RecurringJobRow, prune = fa
       .eq("status", "scheduled")
       .not("recurrence_key", "is", null)
       .gte("scheduled_on", today);
-    const drop = (stale ?? []).filter((v) => !dates.includes(v.recurrence_key!)).map((v) => v.id);
+    let drop = (stale ?? []).filter((v) => !dates.includes(v.recurrence_key!)).map((v) => v.id);
     if (drop.length) {
-      await admin.from("visits").delete().in("id", drop);
+      // A visit that job pay whose work is done (or paid) covers stays: that pay's visits are kept as
+      // they were (20261025003001_job_pay.sql), so deleting it would be refused, and the rest with it.
+      const { data: kept, error: keptError } = await admin.from("job_pay_visits").select("visit_id, pay:job_pay!inner(status)").in("visit_id", drop).in("pay.status", ["done", "paid"]);
+      if (keptError) throw new Error(keptError.message);
+      const keep = new Set((kept ?? []).map((k) => k.visit_id));
+      drop = drop.filter((id) => !keep.has(id));
+    }
+    if (drop.length) {
+      const { error: dropError } = await admin.from("visits").delete().in("id", drop);
+      if (dropError) throw new Error(dropError.message);
       removed = drop.length;
     }
   }
@@ -227,8 +240,9 @@ async function materializeRecurringVisits(env: Env) {
 
 /**
  * Hourly upkeep: invoices past their due date flip to overdue (which fires "invoice past due"
- * automations), day-before visit reminder events are emitted for companies that use them, and
- * forgotten clocks get a reminder or are stopped.
+ * automations), day-before visit reminder events are emitted for companies that use them, job offers
+ * to subs past their time to answer by run out, subs' certificates running out are flagged,
+ * forgotten clocks get a reminder or are stopped, and old sign-in codes are cleared.
  */
 async function hourlyUpkeep(env: Env) {
   const admin = adminClient(env);
@@ -247,9 +261,31 @@ async function hourlyUpkeep(env: Env) {
   const reminders = await step("emit_visit_reminders", admin.rpc("emit_visit_reminders"));
   // Maintenance coming due or overdue: one notification per change, to the people who look after it.
   const equipment = await step("emit_equipment_alerts", admin.rpc("emit_equipment_alerts"));
+  // Offers to subs left unanswered past their time to answer by: they run out (a new price leaves the
+  // agreed one), and the office hears.
+  const offers = await step("expire_sub_offers", admin.rpc("expire_sub_offers"));
+  // Subs' insurance running out: the office hears 30 days before, 7 days before and on the day, and
+  // so does the sub (by email or text, with their link), each once, from 8 in the morning.
+  // The sub is only promised a link when there's a way to send it (the company's own mailbox counts too).
+  const links = Boolean(env.APP_URL);
+  const subAlerts = await step(
+    "emit_sub_document_alerts",
+    admin.rpc("emit_sub_document_alerts", { p_can_text: links && smsConfigured(env), p_can_email: links && emailConfigured(env) }),
+  );
+  let reminded = null;
+  try {
+    reminded = await remindSubs(env, admin, subAlerts ?? []);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    problems.push(`remind_subs: ${message}`);
+    reportError(err, { task: "followups", step: "remind_subs" });
+  }
   // Clocks left running: remind after 10 hours, stop after 16 (per-company limits in settings.clock).
   const clocks = await step("clock_upkeep", admin.rpc("clock_upkeep"));
-  return { overdue: overdue ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, clocks, problems };
+  // Sign-in codes texted to subs over a day ago (services/signInCodes.ts): long run out, kept until now
+  // for looking into a run of requests.
+  const codes = await step("tidy_sign_in_codes", admin.rpc("tidy_sign_in_codes"));
+  return { overdue: overdue ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, offers: offers ?? 0, subs: { alerts: subAlerts?.length ?? 0, reminded }, clocks, codes: codes ?? 0, problems };
 }
 
 const WEATHER_FIELDS =

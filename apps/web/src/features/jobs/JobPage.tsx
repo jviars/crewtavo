@@ -25,6 +25,8 @@ import { ExpensesCard } from "./ExpensesCard";
 import { MaterialsCard } from "./JobMaterials";
 import { PlansCard } from "../plans/PlansCard";
 import { InvoiceJobDialog, JobDetailsDialog, type JobRecord } from "./JobDialogs";
+import { jobCosts } from "./jobCosts";
+import { JobPayCard, seesJobPay } from "./JobPayCard";
 import { ScopeOfWork } from "./ScopeOfWork";
 
 export function JobPage() {
@@ -50,7 +52,7 @@ export function JobPage() {
       unwrapOne(
         await supabase()
           .from("jobs")
-          .select("*, financials:job_financials(contract_total), client:clients(id, display_name, phone, email), property:properties(id, line1, city, region, postal_code, lat, lng), quote:quotes!jobs_company_id_quote_id_fkey(id, number, deposit_amount), crew:crews(name), lines:job_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, sort, service_id), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, hold_reason, invoice_id, completed_at, crew:crews(name, color), assignees:visit_assignees(user_id))")
+          .select("*, financials:job_financials(contract_total), client:clients(id, display_name, phone, email), property:properties(id, line1, city, region, postal_code, lat, lng), quote:quotes!jobs_company_id_quote_id_fkey(id, number, deposit_amount), crew:crews(name), lines:job_line_items(id, name, description, quantity, unit, unit_price, unit_cost, unit_labor_cost, taxable, sort, service_id), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, hold_reason, invoice_id, completed_at, crew:crews(name, color), assignees:visit_assignees(user_id))")
           .eq("id", id)
           .order("sort", { referencedTable: "job_line_items" })
           .order("scheduled_on", { referencedTable: "visits" })
@@ -71,16 +73,18 @@ export function JobPage() {
     queryKey: ["job", id, "costs"],
     enabled: seesCosts,
     queryFn: async () => {
-      const [time, expenses, rates] = await Promise.all([
+      const [time, expenses, rates, crewPay] = await Promise.all([
         supabase().from("time_entries").select("id, started_at, ended_at").eq("job_id", id),
         supabase().from("expenses").select("amount").eq("job_id", id),
         // Pay rates come from the server: nobody reads them on time entries directly.
         api.post<Record<string, number>>("/time/rates", { job_ids: [id] }),
+        // Sub and crew pay that's agreed, done or paid (totals only).
+        supabase().rpc("job_pay_costs", { p_jobs: [id] }),
       ]);
       const entries = unwrap(time);
       const hours = entries.reduce((s, t) => s + (t.ended_at ? (Date.parse(t.ended_at) - Date.parse(t.started_at)) / 3_600_000 : 0), 0);
       const labor = entries.reduce((s, t) => s + (t.ended_at ? ((Date.parse(t.ended_at) - Date.parse(t.started_at)) / 3_600_000) * Number(rates[t.id] ?? 0) : 0), 0);
-      return { hours, labor, expenses: unwrap(expenses).reduce((s, e) => s + Number(e.amount), 0) };
+      return { hours, labor, crewPay: unwrap(crewPay), expenses: unwrap(expenses).reduce((s, e) => s + Number(e.amount), 0) };
     },
   });
 
@@ -117,12 +121,8 @@ export function JobPage() {
   if (job.error || !j) return <PageError error={job.error} onRetry={() => job.refetch()} back={<BackLink to="/jobs">Jobs</BackLink>} />;
 
   const contract = Number(j.financials?.contract_total ?? 0);
-  const materials = j.lines.reduce((s, l) => s + Number(l.quantity) * Number(l.unit_cost ?? 0), 0);
-  const labor = costs.data?.labor ?? 0;
-  const expenses = costs.data?.expenses ?? 0;
-  const totalCost = labor + expenses + materials;
-  const profit = contract - totalCost;
-  const margin = contract > 0 ? Math.round((profit / contract) * 100) : null;
+  const cost = jobCosts({ contract, lines: j.lines, labor: costs.data?.labor ?? 0, expenses: costs.data?.expenses ?? 0, crewPay: costs.data?.crewPay ?? [] });
+  const { materials, labor, crew, expenses, profit, margin } = cost;
   const visits = j.visits;
   const upcoming = visits.filter((v) => !["completed", "cancelled"].includes(v.status));
   const past = visits.filter((v) => ["completed", "cancelled"].includes(v.status));
@@ -257,6 +257,8 @@ export function JobPage() {
 
           {seesCosts && <ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} />}
 
+          {seesJobPay(session) && <JobPayCard job={{ id: j.id, number: j.number, title: j.title, archived: j.status === "archived" }} visits={visits} lines={j.lines} />}
+
           {seesInvoices && (
             <section className="stack">
               <h2 className="section-title">Invoices</h2>
@@ -281,17 +283,19 @@ export function JobPage() {
               <strong>Job costing</strong>
               {costs.isPending ? <Skeleton height={60} /> : (
                 <>
-                  <ProfitBar price={contract} labor={labor} expenses={expenses} materials={materials} />
+                  <ProfitBar price={contract} labor={labor} crew={crew} expenses={expenses} materials={materials} />
                   <div className="totals" style={{ marginTop: 6 }}>
                     <div className="line"><span>Price</span><span>{formatMoneyCents(contract)}</span></div>
-                    <div className="line"><span>Line item costs</span><span>{formatMoneyCents(materials)}</span></div>
+                    <div className="line"><span>{cost.actualLabor ? "Line item materials" : "Line item costs"}</span><span>{formatMoneyCents(materials)}</span></div>
                     <div className="line"><span>Labor ({(costs.data?.hours ?? 0).toFixed(1)} h)</span><span>{formatMoneyCents(labor)}</span></div>
+                    <div className="line"><span>Sub and crew pay</span><span>{formatMoneyCents(crew)}</span></div>
                     <div className="line"><span>Expenses</span><span>{formatMoneyCents(expenses)}</span></div>
                     <div className="line grand" style={{ fontSize: 15 }}>
                       <span>Profit</span>
                       <span style={{ color: profit < 0 ? "var(--danger)" : "var(--green-dark)" }}>{formatMoneyCents(profit)}{margin !== null ? ` (${margin}%)` : ""}</span>
                     </div>
                   </div>
+                  {cost.note && <span className="muted small">{cost.note}</span>}
                   {labor === 0 && (costs.data?.hours ?? 0) > 0 && <span className="muted small">Set labor rates in Settings → Team to cost tracked hours.</span>}
                 </>
               )}
@@ -343,13 +347,14 @@ export function JobPage() {
 }
 
 /** Price split into costs and profit, like Jobber's job profit bar. */
-function ProfitBar({ price, labor, expenses, materials }: { price: number; labor: number; expenses: number; materials: number }) {
-  const total = Math.max(price, labor + expenses + materials, 1);
+function ProfitBar({ price, labor, crew, expenses, materials }: { price: number; labor: number; crew: number; expenses: number; materials: number }) {
+  const total = Math.max(price, labor + crew + expenses + materials, 1);
   const parts = [
     { label: "Line item costs", value: materials, color: "#c9852a" },
     { label: "Labor", value: labor, color: "#3474d4" },
+    { label: "Sub and crew pay", value: crew, color: "#0e9aa7" },
     { label: "Expenses", value: expenses, color: "#8b5cf6" },
-    { label: "Profit", value: Math.max(0, price - labor - expenses - materials), color: "var(--green)" },
+    { label: "Profit", value: Math.max(0, price - labor - crew - expenses - materials), color: "var(--green)" },
   ];
   return (
     <div style={{ display: "flex", height: 12, borderRadius: 999, overflow: "hidden", background: "var(--fill-2)" }} role="img" aria-label={parts.map((p) => `${p.label} ${formatMoney(p.value)}`).join(", ")}>

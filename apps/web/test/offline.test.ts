@@ -12,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveVisitNotes, setVisitStatus } from "../src/features/field/fieldActions";
 import { api, setActiveCompany, unwrap } from "../src/lib/api";
 import { ApiError, OFFLINE, SESSION_EXPIRED } from "../src/lib/errors";
-import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, OFFLINE_MUTATIONS, pendingFieldActions, startOfflineCache, SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
+import { ROLES } from "@crewtavo/core/roles";
+import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, OFFLINE_MUTATIONS, pendingFieldActions, startOfflineCache, SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
 import { FakeCaches, loadServiceWorker } from "./serviceWorker";
 
 // The phone's storage, which can be made to run out of room.
@@ -73,13 +74,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-/** The server side of a visit status change, with the clock rules of fieldData.clockVisit. */
+/** The server side of a visit status change, with the clock rules of fieldData.clockVisit (and no clock for a tap that says so). */
 function fakeServer() {
   const s = { patches: [] as string[], entries: [] as Array<{ visit_id: string; started_at: string; ended_at: string | null }> };
-  const setVisitStatus = async (v: { visitId: string; status: string; at: string }) => {
+  const setVisitStatus = async (v: { visitId: string; status: string; at: string; clock?: boolean }) => {
     await new Promise((r) => setTimeout(r, 5));
     s.patches.push(v.status);
-    const action = v.status === "in_progress" ? "start" : v.status === "completed" ? "stop" : null;
+    const action = v.clock === false ? null : v.status === "in_progress" ? "start" : v.status === "completed" ? "stop" : null;
     if (!action) return;
     for (const e of s.entries.filter((e) => e.ended_at === null)) {
       if (action === "start" && e.visit_id === v.visitId) return;
@@ -116,6 +117,31 @@ describe("restoring the saved queue", () => {
     // One two-hour entry on the timesheet, not two.
     expect(server.s.entries).toEqual([{ visit_id: "v1", started_at: "2026-10-17T13:20:00.000Z", ended_at: "2026-10-17T15:20:00.000Z" }]);
     expect(saved("u1")!.mutations).toHaveLength(0);
+    stop();
+  });
+
+  it("keeps a sub's taps without a clock that way after the app closes and opens again (decided at the tap)", async () => {
+    const before = newClient();
+    before.setMutationDefaults(["visit-status"], { mutationFn: async () => undefined });
+    onlineManager.setOnline(false);
+    const stopBefore = startOfflineCache(before, "u11", true);
+    for (const [status, at] of [["en_route", "2026-10-17T13:00:00.000Z"], ["in_progress", "2026-10-17T13:20:00.000Z"], ["completed", "2026-10-17T15:20:00.000Z"]]) {
+      void tap(before, "visit-status", { visitId: "v1", status, at, clock: false });
+    }
+    await settle();
+    stopBefore();
+    before.clear();
+    expect(saved("u11")!.mutations.map((m) => (m.state.variables as { clock?: boolean }).clock)).toEqual([false, false, false]);
+
+    const qc = newClient();
+    const server = fakeServer();
+    qc.setMutationDefaults(["visit-status"], { mutationFn: server.setVisitStatus });
+    onlineManager.setOnline(true);
+    const stop = startOfflineCache(qc, "u11", true);
+    await settle();
+    expect(server.s.patches).toEqual(["en_route", "in_progress", "completed"]);
+    expect(server.s.entries).toEqual([]);
+    expect(saved("u11")!.mutations).toHaveLength(0);
     stop();
   });
 
@@ -1047,5 +1073,11 @@ describe("screens", () => {
       }
     }
     expect(found.sort()).toEqual(["features/field/FieldTodayPage.tsx visit-status", "features/field/FieldVisitPage.tsx checklist-save", "features/field/FieldVisitPage.tsx visit-notes", "features/field/FieldVisitPage.tsx visit-status"]);
+  });
+});
+
+describe("whose day is kept", () => {
+  it("keeps My day on the phone for crew leads, field crew and subs, and not for the office", () => {
+    expect(ROLES.filter(keepsDayOffline)).toEqual(["crew_lead", "field_crew", "subcontractor"]);
   });
 });

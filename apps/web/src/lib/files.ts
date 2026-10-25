@@ -1,7 +1,8 @@
 /** Photo and receipt uploads to the private "files" bucket, under the company's folder. */
 import { supabase } from "./api";
 
-const MAX_BYTES = 15 * 1024 * 1024;
+/** The largest file an upload sends (a photo once it's shrunk). */
+export const MAX_BYTES = 15 * 1024 * 1024;
 
 /** Shrink a photo to at most `max` pixels on its long side (phones take huge pictures). */
 export async function compressImage(file: File, max = 2000, quality = 0.82): Promise<Blob> {

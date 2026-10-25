@@ -11,7 +11,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { ShellSkeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
+import { EmptyState, ErrorState } from "@/components/ui/States";
 import { LoginPage, SetPasswordPage } from "@/features/auth/LoginPage";
 import { OnboardingPage } from "@/features/auth/OnboardingPage";
 import { FirstRun, SetupGate } from "@/features/setup/SetupPage";
@@ -19,25 +19,56 @@ import { registerFieldActions } from "@/features/field/fieldActions";
 import { TermsPage } from "@/features/legal/License";
 import { RailwaySetupPage } from "@/features/setup/RailwaySetupPage";
 import { api, ApiError, companyFeatures, loadConfig, setActiveCompany, supabase, type AppConfig } from "./api";
-import { forgetOfflineCache, keepQueuedFieldActions, pendingFieldActions, startOfflineCache } from "./offline";
+import { forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, pendingFieldActions, startOfflineCache } from "./offline";
 import { setSessionExpiredHandler } from "./queryClient";
 import { toast } from "./toast";
 
+/**
+ * The active company. A sub gets only its basics (company_basics() in the database): no slug, trade
+ * or address, and settings with just the clock, branding and working hours.
+ */
 export interface Company {
   id: string;
   name: string;
-  slug: string;
-  trade_preset: string;
+  slug?: string;
+  trade_preset?: string;
   timezone: string;
   currency: string;
   /** The shop's address (Settings → Company). */
   address?: { line1?: string; city?: string; region?: string; postal_code?: string } | null;
+  phone?: string | null;
   settings: Record<string, unknown>;
+}
+
+/** The sub a person signs in as, when their level is Subcontractor, and what the office lets them do. */
+export interface SubLogin {
+  id: string;
+  name: string;
+  /** They see the client's phone and email, not just their name. */
+  can_contact_clients: boolean;
+  /** Their own clock, for an office that also wants their hours. */
+  uses_clock: boolean;
+  /**
+   * A sign-in Crewtavo made for this sub (false: someone's own account, which signs in with its own
+   * password and is told at its own address, as it always has).
+   */
+  own_sign_in?: boolean;
+  /**
+   * For their own sign-in: their record has a number sign-in codes are texted to, and an email (not a
+   * placeholder) codes and notices are emailed to: how they get back in on a new phone, and where
+   * notices go. Never the number or address themselves.
+   */
+  has_phone?: boolean;
+  has_email?: boolean;
+  /** For their own sign-in: the office has a phone for them, which texts go to unless they add their own. */
+  phone_on_file?: boolean;
 }
 
 interface Me {
   profile: { user_id: string; email: string | null; full_name: string; phone: string | null; color?: string | null; avatar_url?: string | null };
-  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; email_connected?: boolean; ai_connected?: boolean; fal_connected?: boolean; terms_accepted?: boolean; railway_needed?: boolean }>;
+  /** False when every sign-in this person has is a sub's: they can't set up a business with it. */
+  can_create_company?: boolean;
+  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; subcontractor?: SubLogin | null; email_connected?: boolean; ai_connected?: boolean; fal_connected?: boolean; terms_accepted?: boolean; railway_needed?: boolean }>;
 }
 
 export interface Session {
@@ -51,6 +82,8 @@ export interface Session {
   roleName: string;
   /** Areas this person's role includes. */
   permissions: Permission[];
+  /** The sub they sign in as (role "subcontractor"); null for the team. */
+  subcontractor: SubLogin | null;
   switchCompany: (id: string) => void;
   /** True once signed out. */
   signOut: () => Promise<boolean>;
@@ -113,7 +146,7 @@ function redeemEmailLink(): Promise<string | null> {
   redeeming ??= supabase()
     .auth.verifyOtp({ token_hash: emailLink.tokenHash, type: emailLink.type })
     .then(
-      ({ error }) => (error ? "That link has expired or was already used. Sign in below, or ask for a new link." : null),
+      ({ error }) => (error ? "That link has expired or was already used. Ask whoever sent it for a new one, or sign in below." : null),
       () => "Couldn't open that link. Check your connection and try again.",
     )
     .finally(() => {
@@ -210,7 +243,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   const membership = me.data?.memberships.find((m) => m.company.id === companyId) ?? me.data?.memberships[0];
   setActiveCompany(membership?.company.id ?? null);
 
-  // Crews keep their day on the phone; queued field actions survive closing the app (lib/offline.ts).
+  // Crews and subs keep their day on the phone; queued field actions survive closing the app (lib/offline.ts).
   const userId = auth?.user.id;
   const role = membership?.role;
   // Screens wait for the saved data, so it's in place before they start loading their own.
@@ -219,7 +252,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
     if (!userId || !role) return;
     // In this order: startOfflineCache adds its retry rules to the defaults registered here.
     registerFieldActions(queryClient);
-    const stop = startOfflineCache(queryClient, userId, role === "crew_lead" || role === "field_crew");
+    const stop = startOfflineCache(queryClient, userId, keepsDayOffline(role));
     setCacheFor(userId);
     return () => {
       stop();
@@ -277,6 +310,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
       role: membership.role,
       roleName: membership.role_name,
       permissions: membership.permissions ?? [],
+      subcontractor: membership.role === "subcontractor" ? membership.subcontractor ?? null : null,
       switchCompany,
       signOut,
       refresh: () => me.refetch(),
@@ -313,6 +347,16 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   }
   if (!me.data) return <ShellSkeleton />;
   if (!membership) {
+    // Someone who only ever signed in as a sub, whose sign-in the office took away: not a business to set up.
+    if (requireCompany && me.data.can_create_company === false) {
+      return (
+        <Centered>
+          <EmptyState icon="lock" title="Your sign-in is turned off" action={<Button variant="ghost" icon="logout" onClick={() => signOut()}>Sign out</Button>}>
+            The business that gave you this sign-in has turned it off. Ask their office to turn it back on.
+          </EmptyState>
+        </Centered>
+      );
+    }
     return requireCompany ? <OnboardingPage onCreated={() => me.refetch()} onSignOut={signOut} /> : <>{children}</>;
   }
   // Only false from the server counts: an account saved for working offline may predate it.
@@ -334,8 +378,24 @@ export function useSession(): Session {
   return session;
 }
 
+/** The session where there may be none yet: a screen that needs a sign-in but not a company (AI assistant consent). */
+export const useSessionIfAny = (): Session | null => useContext(SessionContext);
+
 /** Owners can do everything; otherwise check the member's role. */
 export const hasRole = (session: Pick<Session, "role">, ...roles: string[]) => session.role === "owner" || roles.includes(session.role);
+
+/** A subcontractor, signed in for their own visits and paperwork only (docs/subcontractors-plan.md). */
+export const isSub = (session: Pick<Session, "role">) => session.role === "subcontractor";
+
+/** Someone every one of whose sign-ins is a sub's: no team anywhere (an AI assistant isn't for them). */
+export const onlySubs = (companies: ReadonlyArray<{ role: string }> | null | undefined) => Boolean(companies?.length) && companies!.every((m) => m.role === "subcontractor");
+
+/**
+ * Whether this person's own time is kept: everyone on the team, and a sub only when the office
+ * turned on "Uses the clock" for them. Otherwise a sub has no clock, and Start and Complete don't
+ * clock them in or out (the database refuses their time too).
+ */
+export const keepsTime = (session: Pick<Session, "role" | "subcontractor">) => session.role !== "subcontractor" || session.subcontractor?.uses_clock === true;
 
 /** Does this person's role include an area (invoices, reports, marketing...)? */
 export const can = (session: Pick<Session, "role" | "permissions">, permission: Permission) => session.role === "owner" || session.permissions.includes(permission);

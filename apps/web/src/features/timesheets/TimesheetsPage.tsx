@@ -26,6 +26,7 @@ import { timeEntryProblem } from "@crewtavo/core/pay";
 import { describePlace, type EntryPlaces, type StoredPlace } from "./clockPlace";
 import { entrySpan } from "./entrySpan";
 import { PayPeriods } from "./PayPeriods";
+import { memberName } from "../subs/memberName";
 
 const hours = (start: string, end: string | null) => ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 3_600_000;
 const mondayOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
@@ -43,7 +44,7 @@ interface Entry {
   visit: { title: string } | null;
   job: { title: string } | null;
 }
-interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null }
+interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null; sub?: { id: string; name: string } }
 
 export function TimesheetsPage() {
   const session = useSession();
@@ -77,7 +78,8 @@ export function TimesheetsPage() {
           .gte("started_at", zonedTimeToUtc(week, "00:00", tz).toISOString())
           .lt("started_at", zonedTimeToUtc(addDaysIso(week, 7), "00:00", tz).toISOString())
           .order("started_at"),
-        api.get<TeamMember[]>("/team"),
+        // Subs too, for one the office keeps hours for ("Uses the clock" on their page).
+        api.get<TeamMember[]>("/team?with_subs=1"),
       ]);
       const entries = unwrap(rows) as unknown as Entry[];
       const places = seesPlaces && entries.length
@@ -117,7 +119,7 @@ export function TimesheetsPage() {
     onSuccess: refresh,
   });
 
-  const name = (id: string) => data.data?.team.find((m) => m.user_id === id)?.profile?.full_name ?? "Team member";
+  const name = (id: string) => memberName(data.data?.team.find((m) => m.user_id === id), "Team member");
   const color = (id: string) => data.data?.team.find((m) => m.user_id === id)?.profile?.color ?? "var(--text-3)";
   const photo = (id: string) => data.data?.team.find((m) => m.user_id === id)?.profile?.avatar_url;
   const rows = data.data?.rows ?? [];

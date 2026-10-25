@@ -1,15 +1,17 @@
-/** Sign in (password, emailed link or Google), create an account, reset a password, or set a new one. */
+/** Sign in (password, emailed link, Google or a sub's code by text or email), create an account, reset a password, or set a new one. */
+import { SIGN_IN_CODE_DIGITS, SIGN_IN_CODE_MINUTES } from "@crewtavo/core/subs";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { api, loadConfig, supabase } from "@/lib/api";
+import { api, loadConfig, supabase, type AppConfig } from "@/lib/api";
 import { KEY_FILE_NAME, readKeyFile } from "@/lib/keyFile";
 import styles from "./auth.module.css";
 import { BrandLockup } from "@/components/shell/BrandMark";
+import { afterAsking, ASK_THE_OFFICE, askFor, codeDigits, codeProblem, emailInstead, filledAtOnce, newPhoneOffers, NOTHING_CAME, readAddress, resendIn, resendLabel, sentTo, signInWith, TEXTING_OFF, wholeCode, type CodeStep, type CodeWay } from "./textCode";
 
-type Mode = "sign_in" | "sign_up" | "magic_link" | "forgot" | "recover";
+type Mode = "sign_in" | "sign_up" | "magic_link" | "forgot" | "recover" | "code";
 
 type AuthSettings = { external?: Record<string, boolean>; disable_signup?: boolean };
 
@@ -96,7 +98,10 @@ function useSignInWhenConfirmed(pending: { email: string; password: string } | n
 
 export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
   const settings = useAuthSettings();
+  // Already loaded by SessionProvider: whether this Crewtavo can text or email a sub a code on a new phone.
+  const config = useQuery({ queryKey: ["config"], queryFn: loadConfig, staleTime: Infinity, meta: { silent: true } });
   const [mode, setMode] = useState<Mode>("sign_in");
+  const [codeWay, setCodeWay] = useState<CodeWay>("text");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -206,6 +211,8 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
       setBusy(false);
     }
   }
+
+  if (mode === "code") return <CodeSignIn initialWay={codeWay} features={config.data?.features} onBack={() => switchTo("sign_in")} />;
 
   if (emailOff)
     return (
@@ -324,6 +331,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
             {mode === "sign_in" && <Button size="lg" variant="ghost" icon="mail" onClick={() => switchTo("magic_link")}>Email me a sign-in link</Button>}
           </>
         )}
+        {mode === "sign_in" && config.data && <NewPhoneOffer offers={newPhoneOffers(config.data.features)} onPick={(way) => { setCodeWay(way); switchTo("code"); }} />}
 
         <div className={styles.links} style={{ justifyContent: "center" }}>
           {mode === "sign_in" ? (
@@ -331,6 +339,187 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
           ) : (
             <span className="muted">{mode === "sign_up" ? "Already have an account? " : ""}<button type="button" className="link-btn" onClick={() => switchTo("sign_in")}>{mode === "sign_up" ? "Sign in" : "Back to sign in"}</button></span>
           )}
+        </div>
+      </form>
+    </AuthLayout>
+  );
+}
+
+/**
+ * Under the sign-in form, for a sub on a new phone: a code by text (and by email instead, for a sub
+ * with no phone on file), a code by email, or asking the office.
+ */
+function NewPhoneOffer({ offers, onPick }: { offers: ReturnType<typeof newPhoneOffers>; onPick: (way: CodeWay) => void }) {
+  if (offers === "ask_office") return <p className="muted small" style={{ margin: 0, textAlign: "center" }}>{ASK_THE_OFFICE}</p>;
+  return offers.map((offer) => (
+    <button key={offer.way} type="button" className="link-btn small" style={{ justifySelf: "center" }} onClick={() => onPick(offer.way)}>
+      {offer.label}
+    </button>
+  ));
+}
+
+/** The words that change with the way the code goes. */
+const WAY_WORDS = {
+  text: {
+    intro: `For subcontractors. We'll text a ${SIGN_IN_CODE_DIGITS}-digit code to the number the office has for you.`,
+    send: "Text me a code",
+    icon: "smartphone",
+    other: "Use a different number",
+    switchTo: "Get a code by text instead",
+  },
+  email: {
+    intro: `For subcontractors. We'll email a ${SIGN_IN_CODE_DIGITS}-digit code to the address the office has for you.`,
+    send: "Email me a code",
+    icon: "mail",
+    other: "Use a different email",
+    switchTo: "No phone on file? Get a code by email instead",
+  },
+} as const;
+
+/**
+ * A sub on a new phone signs in with a code (textCode.ts): their number or email, then the code. Text
+ * comes first when this Crewtavo can text, with email for a sub with no phone on file; email alone when
+ * it can't. The answer never says whether the number or address has a sign-in. Once in, the app opens
+ * where they were: the offer or visit link they opened, or My day (AppShell sends a sub anywhere else there).
+ */
+function CodeSignIn({ initialWay, features, onBack }: { initialWay: CodeWay; features: AppConfig["features"] | undefined; onBack: () => void }) {
+  const [way, setWay] = useState<CodeWay>(initialWay);
+  const [step, setStep] = useState<CodeStep>({ step: "address" });
+  // What was typed for each way, so switching back and forth keeps it.
+  const [typed, setTyped] = useState<Record<CodeWay, string>>({ text: "", email: "" });
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState<false | "send" | "sign_in">(false);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now);
+  const wait = step.step === "code" ? resendIn(step.sentAt, now) : 0;
+  const words = WAY_WORDS[way];
+  // Both ways are open only when this Crewtavo texts and emails; the other way is a link under the form.
+  const otherWay: CodeWay | null = emailInstead(features) ? (way === "text" ? "email" : "text") : null;
+
+  // The countdown to "Send a new code", from the time the last one went (a timer alone drifts in a background tab).
+  useEffect(() => {
+    if (!wait) return;
+    const t = setTimeout(() => setNow(Date.now()), 1000);
+    return () => clearTimeout(t);
+  }, [wait, now]);
+
+  async function sendCode(address: string) {
+    setBusy("send");
+    setError(null);
+    try {
+      setStep(afterAsking(await askFor(way, address), address, Date.now()));
+      setNow(Date.now());
+      setCode("");
+    } catch (err) {
+      setError(codeProblem(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signIn(address: string, entered: string) {
+    setBusy("sign_in");
+    setError(null);
+    try {
+      await signInWith(way, address, entered); // SessionProvider opens the app.
+    } catch (err) {
+      setError(codeProblem(err));
+      setBusy(false);
+    }
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (step.step === "address") {
+      const read = readAddress(way, typed[way]);
+      if ("error" in read) return setError(read.error);
+      void sendCode(read.address);
+    } else if (step.step === "code" && wholeCode(code)) {
+      void signIn(step.address, code);
+    }
+  }
+
+  // Filled in from the text, or pasted (maxLength would cut "123 456" short): sign in straight away.
+  function enterCode(input: string) {
+    const next = codeDigits(input);
+    const all = filledAtOnce(code, next);
+    setCode(next);
+    setError(null);
+    if (all && step.step === "code" && !busy) void signIn(step.address, next);
+  }
+  function pasteCode(e: ClipboardEvent<HTMLInputElement>) {
+    e.preventDefault();
+    enterCode(e.clipboardData.getData("text"));
+  }
+
+  function switchWay(next: CodeWay) {
+    setWay(next);
+    setStep({ step: "address" });
+    setCode("");
+    setError(null);
+  }
+
+  const alert = error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>;
+
+  if (step.step === "off")
+    return (
+      <AuthLayout>
+        <div className={`card card-pad ${styles.card}`} style={{ padding: 28 }}>
+          <h1 className={styles.title} style={{ fontSize: 22 }}>We can't text you a code</h1>
+          <p className="muted" style={{ margin: 0 }}>{TEXTING_OFF}</p>
+          {features?.emailCodes && <Button variant="primary" icon="mail" onClick={() => switchWay("email")}>Get a code by email instead</Button>}
+          <Button variant="ghost" icon="arrowLeft" onClick={onBack}>Back to sign in</Button>
+        </div>
+      </AuthLayout>
+    );
+
+  return (
+    <AuthLayout>
+      <form className={`card card-pad ${styles.card}`} style={{ padding: 28 }} onSubmit={submit} noValidate>
+        {step.step === "address" ? (
+          <>
+            <h1 className={styles.title}>Get a sign-in code</h1>
+            <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>{words.intro}</p>
+            {way === "text" ? (
+              <Field label="Mobile phone" hint="With the area code. Outside the US and Canada, start with + and your country code.">
+                <input className="input" type="tel" inputMode="tel" autoComplete="tel" value={typed.text} onChange={(e) => { setTyped({ ...typed, text: e.target.value }); setError(null); }} maxLength={40} required autoFocus />
+              </Field>
+            ) : (
+              <Field label="Email">
+                <input className="input" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} value={typed.email} onChange={(e) => { setTyped({ ...typed, email: e.target.value }); setError(null); }} maxLength={254} required autoFocus />
+              </Field>
+            )}
+            {alert}
+            <Button type="submit" variant="primary" size="lg" icon={words.icon} loading={busy === "send"}>{words.send}</Button>
+            {otherWay && <button type="button" className="link-btn small" style={{ justifySelf: "center" }} onClick={() => switchWay(otherWay)}>{WAY_WORDS[otherWay].switchTo}</button>}
+          </>
+        ) : (
+          <>
+            <h1 className={styles.title}>Enter your code</h1>
+            <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>{sentTo(way, step.address)}</p>
+            <Field label="Code" hint={`It runs out in ${SIGN_IN_CODE_MINUTES} minutes.`}>
+              <input
+                className="input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]*"
+                maxLength={SIGN_IN_CODE_DIGITS}
+                value={code}
+                onChange={(e) => enterCode(e.target.value)}
+                onPaste={pasteCode}
+                autoFocus
+                style={{ fontSize: 22, letterSpacing: "0.3em", fontVariantNumeric: "tabular-nums" }}
+              />
+            </Field>
+            {alert}
+            <Button type="submit" variant="primary" size="lg" loading={busy === "sign_in"} disabled={!wholeCode(code) || Boolean(busy)}>Sign in</Button>
+            <Button disabled={wait > 0 || Boolean(busy)} loading={busy === "send"} onClick={() => sendCode(step.address)}>{resendLabel(wait)}</Button>
+            <p className="muted small" style={{ margin: 0, textAlign: "center" }}>{NOTHING_CAME[way]}</p>
+            <button type="button" className="link-btn small" style={{ justifySelf: "center" }} onClick={() => { setStep({ step: "address" }); setCode(""); setError(null); }}>{words.other}</button>
+          </>
+        )}
+        <div className={styles.links} style={{ justifyContent: "center" }}>
+          <button type="button" className="link-btn" onClick={onBack}>Back to sign in</button>
         </div>
       </form>
     </AuthLayout>

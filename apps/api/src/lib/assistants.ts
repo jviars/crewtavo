@@ -11,13 +11,15 @@
  * it changes things. The database checks every Data API write and file again (the assistant_access
  * and assistant_areas migrations), so it all holds on a Supabase project without the gateway too.
  */
-import { toAssistantAccess, type AssistantAccess } from "@crewtavo/core";
+import { isStaff, toAssistantAccess, type AssistantAccess } from "@crewtavo/core";
 import type { Env } from "../env";
 import { bearerToken } from "./auth";
 import { userClient, type Db } from "./supabase";
 
 export const ASSISTANT_READ_ONLY = "This assistant can only read. To let it make changes, choose what it can change in Crewtavo, under Settings → AI assistants.";
 export const ASSISTANT_NO_API = "An AI assistant can't make changes through Crewtavo's API. It changes things with its Crewtavo tools, as far as it's been allowed in Settings → AI assistants.";
+/** Assistants work for a business's own team: never with a sub's sign-in (mcp.ts, guardConsent). */
+export const NO_ASSISTANTS_FOR_SUBS = "AI assistants are for a business's own team. A subcontractor's sign-in can't use one.";
 
 /** Requests that only read. */
 export const isRead = (method: string) => method === "GET" || method === "HEAD" || method === "OPTIONS";
@@ -73,4 +75,31 @@ export async function guardAssistant(env: Env, request: Request, prefix: string,
     return Response.json({ code: "assistant_read_only", message: ASSISTANT_READ_ONLY }, { status: 403 });
   }
   return send(request);
+}
+
+/**
+ * The gateway's part in connecting an assistant (server.ts): Allow on the consent screen
+ * (/oauth/consent, Supabase Auth's OAuth server) is refused for someone whose only sign-ins are a
+ * sub's. Asked with their own token, so row-level security answers. The MCP tools refuse a sub's
+ * sign-in too (mcp.ts), and the database gives an assistant nothing through one (private.my_subs),
+ * which holds on a Supabase project without the gateway.
+ */
+export async function guardConsent(env: Env, request: Request, prefix: string, send: (request: Request) => Promise<Response>): Promise<Response> {
+  const path = new URL(request.url).pathname.slice(prefix.length);
+  if (request.method !== "POST" || !/^\/oauth\/authorizations\/[^/]+\/consent$/.test(path)) return send(request);
+  const text = await request.text();
+  const replay = new Request(request.url, { method: request.method, headers: request.headers, body: text });
+  let action: unknown = null;
+  try {
+    action = (JSON.parse(text) as { action?: unknown } | null)?.action;
+  } catch {
+    // Auth answers a body it can't read itself.
+  }
+  const token = bearerToken(request.headers.get("authorization") ?? undefined);
+  if (action !== "approve" || !token) return send(replay);
+  const { data } = await userClient(env, token).from("memberships").select("role").eq("active", true);
+  if (data?.length && !data.some((m) => isStaff(m.role))) {
+    return Response.json({ code: 403, error_code: "assistant_not_allowed", msg: NO_ASSISTANTS_FOR_SUBS }, { status: 403 });
+  }
+  return send(replay);
 }

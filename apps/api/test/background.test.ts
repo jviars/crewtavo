@@ -127,6 +127,31 @@ describe("recurring visits", () => {
     expect(await materializeJob(db, { ...recurringJob("job-1", "FREQ=DAILY", "2026-10-20"), ends_on: "2026-10-20" })).toEqual({ created: 0, removed: 0 });
     expect(queries.some((q) => verb(q) === "upsert")).toBe(false);
   });
+
+  it("keep a visit that done job pay covers when the schedule drops it, and remove the rest", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    // A weekly schedule on Mondays now: the Tuesday and Wednesday visits are stale; job pay whose work is done covers the Tuesday's.
+    const { db, queries } = fakeDb((q) =>
+      q.table === "visits" && verb(q) === "select"
+        ? { data: [{ id: "v-tue", recurrence_key: "2026-10-20" }, { id: "v-wed", recurrence_key: "2026-10-21" }] }
+        : q.table === "job_pay_visits" ? { data: [{ visit_id: "v-tue", pay: { status: "done" } }] } : { data: [] },
+    );
+    expect(await materializeJob(db, recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO", "2026-10-19"), true)).toMatchObject({ removed: 1 });
+    const covered = queries.find((q) => q.table === "job_pay_visits")!;
+    expect(covered.calls).toContainEqual(["in", "visit_id", ["v-tue", "v-wed"]]);
+    expect(covered.calls).toContainEqual(["in", "pay.status", ["done", "paid"]]);
+    const removed = queries.find((q) => q.table === "visits" && verb(q) === "delete")!;
+    expect(removed.calls).toContainEqual(["in", "id", ["v-wed"]]);
+  });
+
+  it("say so when removing stale visits fails, instead of counting them removed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    const { db } = fakeDb((q) =>
+      q.table === "visits" && verb(q) === "select" ? { data: [{ id: "v-wed", recurrence_key: "2026-10-21" }] }
+        : q.table === "visits" && verb(q) === "delete" ? { error: { message: "This pay's work is done, so the visits it covers stay as they are." } } : { data: [] },
+    );
+    await expect(materializeJob(db, recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO", "2026-10-19"), true)).rejects.toThrow("visits it covers stay");
+  });
 });
 
 describe("lists past 1,000 rows", () => {
@@ -583,5 +608,99 @@ describe("automation runs", () => {
     expect(await processAutomations(env, { limit: 50 })).toEqual({ claimed: 1, done: 0, skipped: 0, failed: 0, lost: 1 });
     expect(rpcs.filter((r) => r.fn === "finish_automation_run").map((r) => r.args.p_status)).toEqual(["done"]);
     expect(queries.filter((q) => q.table === "automation_rules" && verb(q) === "update")).toEqual([]);
+  });
+
+  it("know the sub, their price and their reason when a sub turns an offer down", async () => {
+    const rows: Record<string, unknown> = {
+      automation_rules: {
+        id: "rule-1", name: "Tell me", trigger: "sub_offer.declined", enabled: true, conditions: [], run_count: 0,
+        actions: [{ type: "notify", roles: ["owner"], title: "{{sub.name}} turned down {{title}} at {{sub.price}}", body: "They said: {{sub.reason}}" }],
+      },
+      companies: { id: COMPANY, name: "Romeo Roofing", timezone: "America/New_York", currency: "USD", settings: {}, address: {} },
+      jobs: { number: 7, title: "Smith roof", status: "active", kind: "one_off", financials: { contract_total: 10800 }, client_id: null, property_id: null, property: null, lines: [] },
+      activity: { data: { job_pay_id: "pay-1", sub_name: "Apex Roofing", total: 2210, was: 2040, change: true, reason: "Same roof, same price" } },
+      memberships: [{ user_id: "owner-1", role: "owner" }],
+    };
+    const { queries } = fakeDb(
+      (q) => ({ data: verb(q) === "select" ? (rows[q.table] ?? null) : null }),
+      (fn) =>
+        fn === "claim_automation_runs"
+          ? { data: [{ ...run(1), subject_type: "job", subject_id: "job-1", activity_id: 99 }] }
+          : fn === "start_automation_run" || fn === "finish_automation_run" ? { data: true } : {},
+    );
+    expect(await processAutomations(env, { limit: 50 })).toMatchObject({ done: 1 });
+    // The event's own data, read from the activity that queued the run.
+    expect(queries.filter((q) => q.table === "activity").map((q) => q.calls.filter(([n]) => n === "eq"))).toEqual([[["eq", "company_id", COMPANY], ["eq", "id", 99]]]);
+    const sent = call(queries.find((q) => q.table === "notifications" && verb(q) === "insert")!, "insert")![1];
+    expect(sent).toEqual([expect.objectContaining({ user_id: "owner-1", title: "Apex Roofing turned down Smith roof at $2,210.00", body: "They said: Same roof, same price", link: "/jobs/job-1" })]);
+  });
+
+  /** A sub_offer.declined rule's run on the Smith roof job, as the database would queue it. */
+  const offerRun = (actions: unknown[], memberships: unknown[], roles: Record<string, string[]> = {}) => {
+    const rows: Record<string, unknown> = {
+      automation_rules: { id: "rule-1", name: "Tell me", trigger: "sub_offer.declined", enabled: true, conditions: [], run_count: 0, actions },
+      companies: { id: COMPANY, name: "Romeo Roofing", timezone: "America/New_York", currency: "USD", settings: {}, address: {} },
+      jobs: { number: 7, title: "Smith roof", status: "active", kind: "one_off", financials: { contract_total: 10800 }, client_id: "client-1", property_id: null, property: null, lines: [] },
+      clients: { id: "client-1", display_name: "Ann Client", email: "ann@example.com", phone: "+15405550111", tags: [], status: "active", lead_source: null },
+      activity: { data: { job_pay_id: "pay-1", sub_name: "Apex Roofing", total: 2210, reason: "Too far" } },
+      memberships,
+    };
+    return fakeDb(
+      (q) => {
+        if (q.table === "company_roles") return { data: Object.entries(roles).map(([id, permissions]) => ({ id, permissions })) };
+        return { data: verb(q) === "select" ? (rows[q.table] ?? null) : null };
+      },
+      (fn) =>
+        fn === "claim_automation_runs"
+          ? { data: [{ ...run(1), subject_type: "job", subject_id: "job-1", activity_id: 99 }] }
+          : fn === "start_automation_run" || fn === "finish_automation_run" ? { data: true } : {},
+    );
+  };
+
+  it("about a sub's offer tell only the office with the Subcontractors area, whoever the rule names", async () => {
+    const memberships = [
+      { user_id: "owner-1", role: "owner", role_id: null },
+      { user_id: "office-1", role: "office", role_id: null },
+      // An office person whose custom role has automations but not subs, and the crew.
+      { user_id: "clerk-1", role: "office", role_id: "role-clerk" },
+      { user_id: "lead-1", role: "crew_lead", role_id: null },
+      { user_id: "crew-1", role: "field_crew", role_id: null },
+    ];
+    // Written straight to the database: crew levels and people by name.
+    const { queries } = offerRun([{ type: "notify", roles: ["owner", "office", "crew_lead", "field_crew"], title: "{{sub.name}} asked {{sub.price}}" }], memberships, { "role-clerk": ["automations"] });
+    expect(await processAutomations(env, { limit: 50 })).toMatchObject({ done: 1 });
+    const sent = call(queries.find((q) => q.table === "notifications" && verb(q) === "insert")!, "insert")![1] as Array<{ user_id: string }>;
+    expect(sent.map((n) => n.user_id).sort()).toEqual(["office-1", "owner-1"]);
+  });
+
+  it("about a sub's offer fail rather than tell someone without the area", async () => {
+    const { queries, rpcs } = offerRun([{ type: "notify", user_ids: ["crew-1"], title: "{{sub.price}}" }], [{ user_id: "crew-1", role: "field_crew", role_id: null }]);
+    expect(await processAutomations(env, { limit: 50 })).toMatchObject({ failed: 1 });
+    expect(queries.some((q) => q.table === "notifications" && verb(q) === "insert")).toBe(false);
+    expect(rpcs.find((r) => r.fn === "finish_automation_run")!.args.p_error).toMatch(/Only the office with the Subcontractors area/);
+  });
+
+  it("about a sub's offer only notify and make tasks, and a task never shows their price or reason", async () => {
+    const texts: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => (texts.push(String(input)), Response.json({ sid: "SM1" })));
+    const { queries, rpcs } = offerRun(
+      [
+        { type: "send_sms", body: "Apex wanted {{sub.price}}" },
+        { type: "add_note", body: "{{sub.price}}" },
+        { type: "create_task", title: "Call {{sub.name}} back about {{sub.price}} ({{sub.reason}})", days_from_now: 1 },
+      ],
+      [],
+    );
+    const texting = { ...env, TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "t", TWILIO_FROM_NUMBER: "+15405550000" };
+    expect(await processAutomations(texting, { limit: 50 })).toMatchObject({ failed: 1 });
+    expect(texts.filter((u) => u.includes("twilio"))).toEqual([]);
+    expect(queries.some((q) => q.table === "messages")).toBe(false);
+    const task = call(queries.find((q) => q.table === "visits" && verb(q) === "insert")!, "insert")![1] as { title: string };
+    expect(task.title).toBe("Call Apex Roofing back about  ()");
+    expect(rpcs.find((r) => r.fn === "finish_automation_run")!.args.p_result).toEqual([
+      { type: "send_sms", ok: false, detail: "This action doesn't fit what starts this rule." },
+      { type: "add_note", ok: false, detail: "This action doesn't fit what starts this rule." },
+      expect.objectContaining({ type: "create_task", ok: true }),
+    ]);
   });
 });

@@ -1,4 +1,4 @@
-import { isRole, memberPermissions, type Permission, type Role } from "@crewtavo/core";
+import { isRole, memberPermissions, STAFF, type Permission, type Role } from "@crewtavo/core";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../env";
 import { ASSISTANT_NO_API, isRead } from "./assistants";
@@ -26,22 +26,25 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   if (client && !isRead(c.req.method)) throw new HttpError(403, ASSISTANT_NO_API);
   c.set("userId", sub);
   c.set("token", token);
+  const meta = (data.claims as { app_metadata?: unknown }).app_metadata;
+  c.set("appMetadata", meta && typeof meta === "object" ? (meta as Record<string, unknown>) : {});
   c.set("db", db);
   await next();
 });
 
 /**
- * Requires membership in the company named by the X-Company-Id header, optionally with one of
- * `roles` and a role that includes `permission`. Postgres RLS enforces the same rules; this gives
- * clear errors before any work starts.
+ * Requires membership in the company named by the X-Company-Id header, with one of `roles` (the
+ * team, STAFF, when none are given) and a role that includes `permission`. Postgres RLS enforces
+ * the same rules; this gives clear errors before any work starts. Closed to subs by default: a
+ * route a sub uses opts in with WITH_SUBS (or names "subcontractor").
  */
-export function requireCompany(roles?: readonly Role[], permission?: Permission) {
+export function requireCompany(roles: readonly Role[] = STAFF, permission?: Permission) {
   return createMiddleware<AppEnv>(async (c, next) => {
     const companyId = c.req.header("x-company-id");
     if (!companyId || !uuid.safeParse(companyId).success) throw new HttpError(400, "Choose a company first.");
     const { data, error } = await c.var.db
       .from("memberships")
-      .select("role, role_id")
+      .select("role, role_id, subcontractor_id")
       .eq("company_id", companyId)
       .eq("user_id", c.var.userId)
       .eq("active", true)
@@ -55,12 +58,13 @@ export function requireCompany(roles?: readonly Role[], permission?: Permission)
       custom = role.data?.permissions ?? [];
     }
     const permissions = memberPermissions(data.role, custom);
-    if ((roles && !roles.includes(data.role)) || (permission && !permissions.includes(permission))) {
+    if (!roles.includes(data.role) || (permission && !permissions.includes(permission))) {
       throw new HttpError(403, "You don't have permission to do that. Ask an admin if you need it.");
     }
     c.set("companyId", companyId);
     c.set("role", data.role);
     c.set("permissions", permissions);
+    c.set("subcontractorId", data.subcontractor_id ?? null);
     await next();
   });
 }

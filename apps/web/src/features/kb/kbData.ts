@@ -1,4 +1,5 @@
 /** Shared knowledge base data: categories, the page index and what the current person still has to read. */
+import { ROLE_LABELS as LEVEL_LABELS, STAFF } from "@crewtavo/core/roles";
 import { useQuery } from "@tanstack/react-query";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -15,7 +16,8 @@ export interface SopIndexRow {
   tags: string[];
 }
 
-export const ROLE_LABELS: Record<string, string> = { owner: "Owner", admin: "Admin", office: "Office", estimator: "Estimator", crew_lead: "Crew lead", field_crew: "Field crew" };
+/** Who a guide is for: the team's levels (a sub never reads guides). */
+export const ROLE_LABELS: Record<string, string> = Object.fromEntries(STAFF.map((r) => [r, LEVEL_LABELS[r]]));
 
 export function useIsEditor() {
   const session = useSession();

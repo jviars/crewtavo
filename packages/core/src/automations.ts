@@ -8,11 +8,41 @@ export type SubjectKind = "client" | "request" | "quote" | "job" | "visit" | "in
 export interface TriggerDef {
   verb: string;
   label: string;
-  group: "Clients" | "Requests" | "Quotes" | "Jobs" | "Visits" | "Invoices";
+  group: "Clients" | "Requests" | "Quotes" | "Jobs" | "Visits" | "Invoices" | "Subcontractors";
   subject: SubjectKind;
   /** Delays only make sense for some triggers (follow-ups). */
   delayable: boolean;
+  /** Only these actions, when the rest don't fit (a sub's offer has no client to email or tag). */
+  actions?: ActionType[];
+  /**
+   * Tokens from the event itself ({{sub.name}}), beyond the record's. `officeOnly` ones (a sub's price)
+   * go only in the office's notices, never in a task, which is on the schedule where the crew sees it.
+   */
+  variables?: Array<{ token: string; label: string; officeOnly?: boolean }>;
+  /** The record's tokens that would mislead here (a job's {{total}} is the client's price, not the sub's). */
+  hides?: string[];
+  /** The area someone needs to build a rule on it, see it or its runs (the database holds to it too). */
+  area?: "subs";
+  /** Only these levels can be notified (no crew, nobody "on the visit"); the engine holds to it too. */
+  notifyRoles?: string[];
 }
+
+/**
+ * Job offers to subs (supabase/migrations/20261025004001_sub_offers.sql), on the job they're for:
+ * for the office's own notices and tasks only, with the sub's name and price. Only someone with the
+ * Subcontractors area builds these rules or sees them, and only the office with that area is told
+ * (docs/subcontractors-plan.md: crew leads and field crew never see a sub's price); a task, which the
+ * crew sees on the schedule, never shows the price or the sub's reason. A follow-up waiting on an
+ * offer that's sent is called off once the offer is over, so a delay means "if they still haven't
+ * answered".
+ */
+const SUB_OFFER: Pick<TriggerDef, "group" | "subject" | "actions" | "hides" | "area" | "notifyRoles"> = {
+  group: "Subcontractors", subject: "job", actions: ["notify", "create_task"], hides: ["total"], area: "subs", notifyRoles: ["owner", "admin", "office"],
+};
+const SUB_VARIABLES = [
+  { token: "sub.name", label: "Sub's name" },
+  { token: "sub.price", label: "Their price", officeOnly: true },
+];
 
 export const TRIGGERS: TriggerDef[] = [
   { verb: "client.created", label: "A client is added", group: "Clients", subject: "client", delayable: true },
@@ -32,9 +62,22 @@ export const TRIGGERS: TriggerDef[] = [
   { verb: "invoice.overdue", label: "An invoice becomes past due", group: "Invoices", subject: "invoice", delayable: true },
   { verb: "invoice.paid", label: "An invoice is paid in full", group: "Invoices", subject: "invoice", delayable: true },
   { verb: "payment.received", label: "A payment is received", group: "Invoices", subject: "invoice", delayable: false },
+  { ...SUB_OFFER, verb: "sub_offer.sent", label: "A job is offered to a sub", delayable: true, variables: SUB_VARIABLES },
+  { ...SUB_OFFER, verb: "sub_offer.accepted", label: "A sub takes a job offer", delayable: true, variables: SUB_VARIABLES },
+  {
+    ...SUB_OFFER, verb: "sub_offer.declined", label: "A sub turns down a job offer", delayable: false,
+    variables: [...SUB_VARIABLES, { token: "sub.reason", label: "Their reason", officeOnly: true }],
+  },
+  { ...SUB_OFFER, verb: "sub_offer.expired", label: "A job offer to a sub runs out", delayable: false, variables: SUB_VARIABLES },
 ];
 
 export const triggerDef = (verb: string) => TRIGGERS.find((t) => t.verb === verb);
+
+/** Whether someone with these areas may build, see and run rules on this trigger (most need none beyond automations). */
+export const triggerAllowed = (verb: string, hasArea: (area: NonNullable<TriggerDef["area"]>) => boolean) => {
+  const area = triggerDef(verb)?.area;
+  return !area || hasArea(area);
+};
 
 // ---------------------------------------------------------------------------------------------
 // Conditions
@@ -218,7 +261,14 @@ export const STATUS_ACTION_CHOICES: Partial<Record<SubjectKind, Array<{ value: s
 
 export const actionsFor = (subject: SubjectKind) => ACTIONS.filter((a) => a.subjects === "all" || a.subjects.includes(subject));
 
-/** Plural role names for "Notify owners, office". */
+/** The actions a rule started by `verb` can take: its record's, and only those that fit the trigger. */
+export function actionsForTrigger(verb: string) {
+  const trigger = triggerDef(verb);
+  if (!trigger) return ACTIONS;
+  return actionsFor(trigger.subject).filter((a) => !trigger.actions || trigger.actions.includes(a.type));
+}
+
+/** Plural role names for "Notify owners, office": the team's levels, never a sub's (automations don't notify subs). */
 export const ROLE_GROUP_LABELS: Record<string, string> = {
   owner: "Owners", admin: "Admins", office: "Office", estimator: "Estimators", crew_lead: "Crew leads", field_crew: "Field crew",
   assigned: "The people on the visit",
@@ -244,6 +294,38 @@ export const TEMPLATE_VARIABLES: Array<{ token: string; label: string; subjects:
 ];
 
 export const variablesFor = (subject: SubjectKind) => TEMPLATE_VARIABLES.filter((v) => v.subjects === "all" || v.subjects.includes(subject));
+
+/**
+ * The tokens for a rule started by `verb`: its record's (less any that would mislead) and the event's
+ * own. For a task (`forTask`), not the event's office-only ones: a task is on the schedule.
+ */
+export function variablesForTrigger(verb: string, forTask = false): Array<{ token: string; label: string }> {
+  const trigger = triggerDef(verb);
+  if (!trigger) return TEMPLATE_VARIABLES;
+  const own = (trigger.variables ?? []).filter((v) => !(forTask && v.officeOnly)).map(({ token, label }) => ({ token, label }));
+  return [...variablesFor(trigger.subject).filter((v) => !trigger.hides?.includes(v.token)), ...own];
+}
+
+/** The event's office-only tokens for `verb` ("sub.price"): never in a task. */
+export const officeOnlyTokens = (verb: string) => (triggerDef(verb)?.variables ?? []).filter((v) => v.officeOnly).map((v) => v.token);
+
+/** Whether a template uses one of these tokens ({{ sub.price }} in any spacing). */
+export const usesToken = (template: string | undefined, tokens: readonly string[]) =>
+  [...(template ?? "").matchAll(/\{\{\s*([a-z_]+(?:\.[a-z_]+)?)\s*\}\}/gi)].some((m) => tokens.includes(m[1]!.toLowerCase()));
+
+/** The record's values with the event's office-only ones blanked, for a task's title. */
+export function taskVars(verb: string, vars: TemplateVars): TemplateVars {
+  const hidden = officeOnlyTokens(verb);
+  if (!hidden.length) return vars;
+  const out: TemplateVars = { ...vars };
+  for (const token of hidden) {
+    const [head, tail] = token.split(".") as [string, string | undefined];
+    const group = out[head];
+    if (tail && group && typeof group === "object") out[head] = { ...group, [tail]: "" };
+    else if (!tail) out[head] = "";
+  }
+  return out;
+}
 
 const BUSINESS = /\b(llc|inc|ltd|co|corp|company|hoa|association|assn|builders|construction|contracting|services|group|partners|properties|management|church|school|academy|town|city|county|village|district|of|the|and)\b|&/i;
 
@@ -304,9 +386,21 @@ export function validateRule(rule: RuleShape): string[] {
     if (a.type === "create_task" && !a.title?.trim()) errors.push(`${n}: name the task.`);
     if (a.type === "create_task" && !(a.days_from_now >= 0 && a.days_from_now <= 365)) errors.push(`${n}: the task must be due within a year.`);
     if (a.type === "update_status" && trigger && !STATUS_ACTION_CHOICES[trigger.subject]?.some((s) => s.value === a.status)) errors.push(`${n}: choose a status.`);
+    if (trigger && a.type !== "update_status" && !actionsForTrigger(trigger.verb).some((t) => t.type === a.type)) {
+      errors.push(`${n}: “${ACTIONS.find((t) => t.type === a.type)?.label ?? a.type}” doesn't fit what starts this rule.`);
+    }
+    if (trigger?.notifyRoles && a.type === "notify" && (a.roles ?? []).some((r) => !trigger.notifyRoles!.includes(r))) {
+      errors.push(`${n}: only the office hears about this (${listWords(trigger.notifyRoles.map((r) => ROLE_GROUP_LABELS[r]?.toLowerCase() ?? r))}), never the crew.`);
+    }
+    if (trigger && a.type === "create_task" && usesToken(a.title, officeOnlyTokens(trigger.verb))) {
+      errors.push(`${n}: a task is on the schedule, where the crew sees it, so it can't show the sub's price or reason.`);
+    }
   });
   return errors;
 }
+
+/** "owners, admins and office". */
+const listWords = (words: string[]) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`);
 
 export function describeDelay(minutes: number): string {
   if (!minutes) return "";

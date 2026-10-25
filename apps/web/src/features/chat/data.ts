@@ -103,8 +103,9 @@ interface MessagePage {
   has_more: boolean;
 }
 
-/** Is team chat on for this business (Apps → Team chat)? */
-export const chatOn = (session: Pick<Session, "company">) => (session.company.settings as { team_chat?: { enabled?: boolean } } | null)?.team_chat?.enabled === true;
+/** Is team chat on for this business (Apps → Team chat)? It's the team's: a sub never has it. */
+export const chatOn = (session: Pick<Session, "company" | "role">) =>
+  session.role !== "subcontractor" && (session.company.settings as { team_chat?: { enabled?: boolean } } | null)?.team_chat?.enabled === true;
 
 // ---------------------------------------------------------------------------------------------
 // Queries

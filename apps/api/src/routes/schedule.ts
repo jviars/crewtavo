@@ -2,7 +2,7 @@
  * Dashboard and scheduling: the calendar feed, moving visits, rain-day shifts, routing, find-a-time.
  * The scheduling itself is in services/schedule.ts, which AI assistants' tools use too.
  */
-import { DISPATCH } from "@crewtavo/core";
+import { DISPATCH, WITH_SUBS } from "@crewtavo/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -108,16 +108,25 @@ schedule.post("/properties/geocode", requireUser, requireCompany(), async (c) =>
   return c.json({ queued: body.ids.length }, 202);
 });
 
-/** Visits between two dates (inclusive), plus the unscheduled queue and other calendars' events. */
-schedule.get("/schedule", requireUser, requireCompany(), async (c) => {
+/**
+ * Visits between two dates (inclusive), plus the unscheduled queue and other calendars' events. A
+ * sub (My day) gets their own visits, each with its client's name, and phone and email if the office
+ * allows it, from visit_contact(): they can't read clients.
+ */
+schedule.get("/schedule", requireUser, requireCompany(WITH_SUBS), async (c) => {
   const from = c.req.query("from");
   const to = c.req.query("to") ?? from;
   const crew = c.req.query("crew_id");
   if (!isoDate.safeParse(from).success || !isoDate.safeParse(to).success) throw new HttpError(400, "from and to must be YYYY-MM-DD");
-  return c.json(await scheduleRange(scope(c), from!, to!, crew));
+  const range = await scheduleRange(scope(c), from!, to!, crew);
+  if (c.var.role !== "subcontractor") return c.json(range);
+  const withContact = async <V extends { id: string }>(visits: V[]) =>
+    Promise.all(visits.map(async (v) => ({ ...v, contact: must(await c.var.db.rpc("visit_contact", { p_visit: v.id }))[0] ?? null })));
+  return c.json({ ...range, visits: await withContact(range.visits), unscheduled: await withContact(range.unscheduled) });
 });
 
-schedule.patch("/visits/:id", requireUser, requireCompany(), async (c) => {
+/** Changes a visit. The crew and subs change their own visit's status and notes (services/schedule.ts). */
+schedule.patch("/visits/:id", requireUser, requireCompany(WITH_SUBS), async (c) => {
   return c.json(await updateVisit(scope(c), param(c, "id"), await readJson(c, visitChangeInput)));
 });
 

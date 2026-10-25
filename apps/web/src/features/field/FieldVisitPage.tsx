@@ -1,4 +1,8 @@
-/** One visit on a phone: where, how to get in, what to do, checklist, photos, receipts and notes. */
+/**
+ * One visit on a phone: where, how to get in, what to do, checklist, photos, receipts and notes. A
+ * sub gets the client's name (and phone, if the office allows it) from visit_contact(), their own
+ * price for the job once it's agreed, and no clock, receipts or materials: those are the team's.
+ */
 import { onlineManager, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ChangeEvent } from "react";
 import { useParams } from "react-router-dom";
@@ -14,16 +18,18 @@ import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
 import { addressLine, formatDateTime, timeAgo } from "@/lib/format";
-import { hasRole, useSession } from "@/lib/session";
+import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
 import { FieldPlans } from "../plans/FieldPlans";
+import { contactLinks, visitContact, type VisitContact } from "./contact";
 import { pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitStatusChange } from "./fieldActions";
 import { formatDuration, useStatusTap } from "./fieldData";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { SignaturePad } from "./SignaturePad";
+import { YourPrice } from "./YourPrice";
 
 interface ChecklistItem { key: string; label: string; type: "check" | "number" | "text" | "choice" | "photo" | "signature"; required: boolean; options?: string[] }
 
@@ -32,6 +38,8 @@ export function FieldVisitPage() {
   const session = useSession();
   const queryClient = useQueryClient();
   const [expense, setExpense] = useState(false);
+  const sub = isSub(session);
+  const clocks = keepsTime(session);
 
   const visit = useQuery({
     queryKey: ["field-visit", id],
@@ -55,8 +63,17 @@ export function FieldVisitPage() {
     meta: { silent: true },
     queryFn: async () => unwrap(await supabase().from("property_access").select("gate_code, lockbox_code, alarm_code, instructions").eq("property_id", v!.property!.id))[0] ?? null,
   });
+  // A sub can't read clients: the name, and the phone if they may call, come from visit_contact().
+  // Kept on the phone with the visit, for no signal.
+  const contact = useQuery({
+    queryKey: ["field-visit", id, "contact"],
+    enabled: sub,
+    meta: { silent: true },
+    queryFn: async () => (unwrap(await supabase().rpc("visit_contact", { p_visit: id })) as VisitContact[])[0] ?? null,
+  });
   const myTime = useQuery({
     queryKey: ["field-visit", id, "time"],
+    enabled: clocks,
     queryFn: async () => unwrap(await supabase().from("time_entries").select("started_at, ended_at").eq("visit_id", id).eq("user_id", session.userId)),
   });
   const refresh = () => {
@@ -98,7 +115,7 @@ export function FieldVisitPage() {
   if (visit.isPending) return <DetailSkeleton />;
   if (visit.error || !v) return <PageError error={visit.error} onRetry={() => visit.refetch()} back={<BackLink to="/field">My day</BackLink>} />;
 
-  const client = (v.job?.client ?? v.request?.client) as { display_name: string; phone: string | null } | null;
+  const client = visitContact((v.job?.client ?? v.request?.client) as { display_name: string; phone: string | null } | null, contact.data);
   const codes = access.data;
   const minutes = (myTime.data ?? []).reduce((s, t) => s + ((t.ended_at ? Date.parse(t.ended_at) : Date.now()) - Date.parse(t.started_at)), 0);
   const complete = async () => {
@@ -120,7 +137,7 @@ export function FieldVisitPage() {
           <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
           <span className="muted">{v.starts_at ? formatDateTime(v.starts_at) : v.scheduled_on ? "Anytime today" : "Not scheduled"}</span>
           {v.series_total && v.series_total > 1 && <span className="chip chip-blue">Day {v.series_day} of {v.series_total}</span>}
-          {minutes > 0 && <span className="chip"><Icon name="clock" size={12} />You: {formatDuration(minutes)}</span>}
+          {clocks && minutes > 0 && <span className="chip"><Icon name="clock" size={12} />You: {formatDuration(minutes)}</span>}
         </div>
       </div>
       {v.status === "completed" && v.completed_at && <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Completed {timeAgo(v.completed_at)}.</div></div>}
@@ -128,13 +145,14 @@ export function FieldVisitPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
         {primary && <Button variant={primary.variant} icon={primary.icon} className="big-action" loading={setStatus.isPending} onClick={primary.run}>{primary.label}</Button>}
         {v.status === "scheduled" && <Button variant="primary" icon="play" className="big-action" loading={setStatus.isPending} onClick={() => setStatus.mutate("in_progress")}>Start visit</Button>}
-        {client?.phone && <a className="btn big-action" href={`tel:${client.phone}`}><Icon name="phone" size={18} />Call</a>}
-        {client?.phone && <a className="btn big-action" href={`sms:${client.phone}`}><Icon name="messages" size={18} />Text</a>}
+        {contactLinks(client).map((link) => (
+          <a key={link.label} className="btn big-action" href={link.href}><Icon name={link.label === "Call" ? "phone" : "messages"} size={18} />{link.label}</a>
+        ))}
         {v.property && <MapsLink className="btn big-action" place={v.property}><Icon name="navigation" size={18} />Directions</MapsLink>}
       </div>
 
       <section className="card card-pad stack-sm">
-        <strong style={{ fontSize: 16 }}>{client?.display_name ?? "Site"}</strong>
+        <strong style={{ fontSize: 16 }}>{client.name ?? "Site"}</strong>
         {v.property && <MapsLink className="address-link" place={v.property}>{addressLine(v.property)}</MapsLink>}
         {access.isPending && v.property ? <Skeleton width="40%" /> : (
           <>
@@ -156,6 +174,7 @@ export function FieldVisitPage() {
         </section>
       )}
       {v.job && <section className="card card-pad"><ScopeOfWork jobId={v.job.id} title="The work" bare /></section>}
+      {sub && <YourPrice visitId={v.id} />}
       <FieldPlans visitId={v.id} jobId={v.job?.id ?? null} propertyId={v.property?.id ?? v.job?.property_id ?? null} />
       {v.equipment.length > 0 && (
         <section className="card card-pad stack-sm">
@@ -167,19 +186,19 @@ export function FieldVisitPage() {
       )}
 
       <Checklist visitId={v.id} />
-      {v.job && <MaterialsCard jobId={v.job.id} visitId={v.id} compact />}
+      {v.job && !sub && <MaterialsCard jobId={v.job.id} visitId={v.id} compact />}
       <Photos visitId={v.id} />
 
       <section className="card card-pad stack-sm">
         <label htmlFor="visit-notes"><strong>Notes for the office</strong></label>
         <textarea id="visit-notes" className="textarea" value={notes} maxLength={5000} onChange={(e) => setNotes(e.target.value)} placeholder="Extra work they asked about, damage you noticed, materials used…" />
         <div className="row-between">
-          {v.job && <Button size="sm" variant="ghost" icon="receipt" onClick={() => setExpense(true)}>Add a receipt</Button>}
+          {v.job && !sub && <Button size="sm" variant="ghost" icon="receipt" onClick={() => setExpense(true)}>Add a receipt</Button>}
           <Button size="sm" loading={saveNotes.isPending && !saveNotes.isPaused} disabled={notes === (v.notes ?? "")} onClick={() => saveNotes.mutate({ companyId: session.company.id, visitId: id, notes: notes.trim() || null })}>Save notes</Button>
         </div>
       </section>
 
-      {expense && v.job && <ExpenseDialog jobId={v.job.id} expense={null} onClose={() => setExpense(false)} onSaved={() => toast.success("Receipt sent to the office")} />}
+      {expense && v.job && !sub && <ExpenseDialog jobId={v.job.id} expense={null} onClose={() => setExpense(false)} onSaved={() => toast.success("Receipt sent to the office")} />}
     </>
   );
 }
@@ -314,7 +333,10 @@ function Checklist({ visitId }: { visitId: string }) {
 }
 
 function Photos({ visitId }: { visitId: string }) {
-  const { company } = useSession();
+  const session = useSession();
+  const { company } = session;
+  // A sub removes only the photos they added.
+  const canRemove = (p: { created_by: string | null }) => !isSub(session) || p.created_by === session.userId;
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(0);
   const photos = useQuery({
@@ -362,7 +384,7 @@ function Photos({ visitId }: { visitId: string }) {
         {photos.data?.map((p) => (
           <div key={p.id} className="thumb">
             {p.url ? <a href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt={p.caption ?? p.file_name} loading="lazy" /></a> : <span className="muted small">Unavailable</span>}
-            <button type="button" className="thumb-x" aria-label="Remove photo" onClick={async () => (await confirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true })) && remove.mutate(p)}><Icon name="x" size={12} strokeWidth={3} /></button>
+            {canRemove(p) && <button type="button" className="thumb-x" aria-label="Remove photo" onClick={async () => (await confirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true })) && remove.mutate(p)}><Icon name="x" size={12} strokeWidth={3} /></button>}
           </div>
         ))}
         {Array.from({ length: uploading }, (_, i) => <div key={`u${i}`} className="thumb" style={{ display: "grid", placeItems: "center" }}><span className="spinner" style={{ width: 20, height: 20, color: "var(--text-3)" }} /></div>)}

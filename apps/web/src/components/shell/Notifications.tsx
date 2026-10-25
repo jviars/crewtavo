@@ -14,7 +14,7 @@ import { Button } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 
-const ICONS: Record<string, IconName> = { quote: "quote", invoice: "invoice", request: "requests", job: "job", visit: "calendar", client: "clients", equipment: "truck" };
+const ICONS: Record<string, IconName> = { quote: "quote", invoice: "invoice", request: "requests", job: "job", visit: "calendar", client: "clients", equipment: "truck", subs: "users", jobs: "job" };
 
 const subjectPath = (type: string, id: string | null) =>
   !id ? null : ({ client: `/clients/${id}`, request: `/requests/${id}`, quote: `/quotes/${id}`, job: `/jobs/${id}`, invoice: `/invoices/${id}`, equipment: `/equipment/${id}` } as Record<string, string>)[type] ?? null;

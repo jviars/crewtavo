@@ -2,14 +2,15 @@
  * Uploads through the gateway (lib/gateway.ts): Storage checks a file sent as the bare body against
  * FILE_SIZE_LIMIT by its Content-Length, so the gateway passes that on, and refuses a bare upload
  * that doesn't say how big it is. Forms (what supabase-js and the plans uploader send) Storage checks
- * as they arrive.
+ * as they arrive. And stored files come back from this server's own address, so anything but a PDF
+ * or a photo downloads instead of running as the app.
  */
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import type { HttpBindings } from "@hono/node-server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Env } from "../src/env";
-import { gateway, unsizedUpload } from "../src/lib/gateway";
+import { gateway, safeFile, unsizedUpload } from "../src/lib/gateway";
 
 const env: Env = { SUPABASE_URL: "http://127.0.0.1:8080", SUPABASE_SECRET_KEY: "sb_secret_test" };
 const from = { incoming: { socket: { remoteAddress: "127.0.0.1" } } } as unknown as HttpBindings;
@@ -26,6 +27,14 @@ beforeAll(async () => {
       if (text.length < 500) text += chunk.toString("utf8");
     });
     req.on("end", () => {
+      // A stored file, served with the type it was uploaded with (?as=), as Storage does.
+      const as = new URL(req.url ?? "/", "http://x").searchParams.get("as");
+      if (as) {
+        res.setHeader("content-type", as);
+        if (req.url?.includes("download")) res.setHeader("content-disposition", 'attachment; filename="gl.pdf"');
+        res.end("<script>steal()</script>");
+        return;
+      }
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ url: req.url, length: req.headers["content-length"] ?? null, chunked: req.headers["transfer-encoding"] === "chunked", bytes, text }));
     });
@@ -89,5 +98,43 @@ describe("uploads through the gateway", () => {
     expect(unsizedUpload(req("POST", { "content-type": "multipart/form-data; boundary=x" }, stream(1) as unknown as BodyInit))).toBe(false);
     expect(unsizedUpload(new Request("http://x/storage/v1/object/a"))).toBe(false);
     expect(unsizedUpload(req("DELETE", {}, null))).toBe(false);
+  });
+});
+
+describe("stored files through the gateway", () => {
+  const get = (path: string, method = "GET") => routes().request(path, { method }, from);
+
+  it("downloads a file uploaded as a web page or a drawing, and never runs it as the app", async () => {
+    for (const type of ["text/html", "image/svg+xml", "text/plain; charset=utf-8", "application/octet-stream", "application/xhtml+xml"]) {
+      const res = await get(`/storage/v1/object/sign/files/co/subs/s/x?token=t&as=${encodeURIComponent(type)}`);
+      expect(res.status, type).toBe(200);
+      expect(res.headers.get("x-content-type-options"), type).toBe("nosniff");
+      expect(res.headers.get("content-disposition"), type).toBe("attachment");
+      expect(res.headers.get("content-security-policy"), type).toBe("sandbox; default-src 'none'");
+    }
+    const authenticated = await get("/storage/v1/object/authenticated/files/co/visit/v/x.html?as=text%2Fhtml");
+    expect(authenticated.headers.get("content-disposition")).toBe("attachment");
+  });
+
+  it("shows PDFs and photos in place, not sandboxed (a PDF won't show in a sandbox)", async () => {
+    for (const type of ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/webp"]) {
+      const res = await get(`/storage/v1/object/sign/files/co/subs/s/x?token=t&as=${encodeURIComponent(type)}`);
+      expect(res.headers.get("x-content-type-options"), type).toBe("nosniff");
+      expect(res.headers.get("content-disposition"), type).toBeNull();
+      expect(res.headers.get("content-security-policy"), type).toBeNull();
+    }
+    const head = await get("/storage/v1/object/public/files/co/logo/x.png?as=image%2Fpng", "HEAD");
+    expect(head.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("keeps the file's name when it downloads", async () => {
+    const res = await get("/storage/v1/object/sign/files/co/x?token=t&download=1&as=text%2Fcsv");
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="gl.pdf"');
+  });
+
+  it("leaves uploads and the rest of Storage alone", () => {
+    const html = new Response("x", { headers: { "content-type": "text/html" } });
+    expect(safeFile(new Request("http://x/storage/v1/object/files/co/a.html", { method: "POST", body: "x" }), html)).toBe(html);
+    expect(safeFile(new Request("http://x/storage/v1/bucket"), html)).toBe(html);
   });
 });

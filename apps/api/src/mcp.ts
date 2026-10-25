@@ -12,14 +12,14 @@
  * also only reads until the person who made it chooses what it can change, or gives it full access
  * (packages/core/src/assistants.ts, lib/assistants.ts). The tools are in assistant-tools/.
  */
-import { assistantRefusal, isRole, mayChange, memberPermissions, READ_ONLY_ACCESS, type AssistantAccess } from "@crewtavo/core";
+import { assistantRefusal, isStaff, mayChange, memberPermissions, READ_ONLY_ACCESS, type AssistantAccess } from "@crewtavo/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import { rows, TOOLS, type ToolContext } from "./assistant-tools";
 import type { AppEnv, Env } from "./env";
 import { ownOrigin } from "./lib/address";
-import { connectionAccess } from "./lib/assistants";
+import { connectionAccess, NO_ASSISTANTS_FOR_SUBS } from "./lib/assistants";
 import { authMetadata } from "./lib/authMetadata";
 import { bearerToken } from "./lib/auth";
 import { appUrl } from "./lib/http";
@@ -178,13 +178,14 @@ mcp.post("/mcp", async (c) => {
 
 async function toolContext(env: Env, db: Db, userId: string, origin: string, access: AssistantAccess | null, companyId?: string): Promise<ToolContext> {
   // Many-to-one embeds come back as a single object at runtime.
-  const memberships = (await rows(
+  const all = (await rows(
     db.from("memberships").select("company_id, role, role_id, company:companies(timezone, settings)").eq("user_id", userId).eq("active", true),
   )) as unknown as Array<{ company_id: string; role: string; role_id: string | null; company: { timezone: string; settings: { assistants?: { enabled?: boolean; read_only?: boolean } } | null } | null }>;
-  if (!memberships.length) throw new Error("You aren't a member of any company in Crewtavo yet.");
+  // A sub's sign-in is never an assistant's to use (the database gives an assistant none of it too).
+  const memberships = all.filter((m) => isStaff(m.role));
+  if (!memberships.length) throw new Error(all.length ? NO_ASSISTANTS_FOR_SUBS : "You aren't a member of any company in Crewtavo yet.");
   const chosen = companyId ? memberships.find((m) => m.company_id === companyId) : memberships[0];
-  if (!chosen) throw new Error("You aren't a member of that company.");
-  if (!isRole(chosen.role)) throw new Error("You aren't a member of that company.");
+  if (!chosen || !isStaff(chosen.role)) throw new Error(companyId && all.some((m) => m.company_id === companyId) ? NO_ASSISTANTS_FOR_SUBS : "You aren't a member of that company.");
   // The areas their role gives them, as requireCompany works them out (lib/auth.ts).
   const custom = chosen.role_id ? ((await rows(db.from("company_roles").select("permissions").eq("id", chosen.role_id)))[0]?.permissions ?? []) : null;
   const settings = chosen.company?.settings?.assistants ?? {};

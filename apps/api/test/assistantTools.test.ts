@@ -30,10 +30,11 @@ const CONNECTIONS: Record<string, { level: string; areas: string[] }> = {
 };
 
 type Row = Record<string, any>;
-/** Supabase in memory: tables of rows, inserts that keep what they're given, and the person's role. */
-function supabase(role = "owner") {
+/** Supabase in memory: tables of rows, inserts that keep what they're given, the person's role, and what database functions answer. */
+function supabase(role = "owner", answers: Record<string, unknown> = {}) {
   const db: Record<string, Row[]> = { clients: [], properties: [], jobs: [], visits: [], assistant_calls: [] };
   const sent: Array<{ method: string; table: string; body: any }> = [];
+  const memberships: URL[] = [];
   let id = 0;
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
@@ -42,10 +43,12 @@ function supabase(role = "owner") {
     const table = url.pathname.replace("/rest/v1/", "");
     if (url.pathname === "/auth/v1/user") return Response.json({ id: "user-1", aud: "authenticated", role: "authenticated" });
     if (table === "rpc/rate_limit_hit") return Response.json(true);
+    if (table in answers) return Response.json(answers[table]);
     if (table === "assistant_connections") {
       const client = url.searchParams.get("client_id")?.replace(/^eq\./, "") ?? "";
       return Response.json(CONNECTIONS[client] ? [CONNECTIONS[client]] : []);
     }
+    if (table === "memberships") memberships.push(url);
     if (table === "memberships") return Response.json([{ company_id: "company-1", role, role_id: null, company: { timezone: "America/New_York", settings: {} } }]);
     if (!url.pathname.startsWith("/rest/v1/")) return Response.json([]);
     sent.push({ method, table, body });
@@ -64,7 +67,7 @@ function supabase(role = "owner") {
     }
     return Response.json(rows);
   });
-  return { db, sent };
+  return { db, sent, memberships };
 }
 
 afterEach(() => {
@@ -144,6 +147,17 @@ describe("money", () => {
     expect(sent.filter((s) => ["payments", "quotes", "pay_periods"].includes(s.table))).toEqual([]);
   });
 
+  it("job profit counts sub and crew pay as labor, once", async () => {
+    const { db } = supabase("owner", { "rpc/job_pay_costs": [{ job_id: "j1", amount: 2700, payees: 1 }] });
+    db.jobs.push(
+      { id: "j1", number: 12, title: "New roof", status: "completed", financials: { contract_total: 12150 }, client: { display_name: "Ann" }, lines: [{ quantity: 27, unit_cost: 300, unit_labor_cost: 120 }] },
+      { id: "j2", number: 13, title: "Gutters", status: "completed", financials: { contract_total: 1440 }, client: { display_name: "Ann" }, lines: [{ quantity: 120, unit_cost: 5, unit_labor_cost: 2 }] },
+    );
+    const result = await call("full", "job_profit", {});
+    expect(result.jobs.find((j: Row) => j.id === "j1")).toMatchObject({ crew_pay: 2700, materials: 4860, line_labor_left_out: 3240, actual_labor: true, cost: 7560, profit: 4590 });
+    expect(result.jobs.find((j: Row) => j.id === "j2")).toMatchObject({ crew_pay: 0, materials: 600, line_labor_left_out: 0, actual_labor: false, cost: 600 });
+  });
+
   it("figures are for the roles that see them", async () => {
     supabase("estimator");
     expect((await call("full", "money_report", {})).error).toBe("Your role in Crewtavo doesn't allow that. An owner or admin can change your role.");
@@ -159,6 +173,20 @@ describe("tools", () => {
     expect(res.error).toContain("items.0.name");
     expect(res.error).toContain("items.0.unit_price");
     expect(res.error).toContain("items.1.name");
+  });
+
+  it("keep subs off the team: not listed, no Subcontractor level, not invited or made one", async () => {
+    const { memberships } = supabase();
+    const listed = await call("full", "list_team", {});
+    expect(listed.levels.map((l: { level: string }) => l.level)).not.toContain("subcontractor");
+    expect(listed.levels.map((l: { level: string }) => l.level)).toContain("field_crew");
+    // The people list asks the database for the team only.
+    expect(memberships.filter((u) => u.searchParams.get("select") === "user_id,role,role_id,active").map((u) => u.searchParams.get("role"))).toEqual(["neq.subcontractor"]);
+    const invite = await call("full", "invite_person", { email: "sub@example.com", role: "subcontractor" });
+    expect(invite.error).toMatch(/^Invalid arguments\. /);
+    expect(invites.calls).toEqual([]);
+    const change = await call("full", "change_role", { user_id: "00000000-0000-4000-8000-000000000009", role: "subcontractor" });
+    expect(change.error).toMatch(/^Invalid arguments\. /);
   });
 
   it("invite people without handing the assistant their link", async () => {
@@ -394,5 +422,37 @@ describe("quotes that offer options", () => {
       ["6-inch gutters", true, false, "Size"],
       ["Guards", true, false, null],
     ]);
+  });
+});
+
+describe("automations about subs' offers", () => {
+  // An office person whose role has automations but not the Subcontractors area.
+  const clerk = () =>
+    supabase("office", {
+      memberships: [{ company_id: "company-1", role: "office", role_id: "role-clerk", company: { timezone: "America/New_York", settings: {} } }],
+      company_roles: [{ permissions: ["automations"] }],
+    });
+  const rule = { name: "Tell me", trigger: "sub_offer.declined", actions: [{ type: "notify", roles: ["owner"], title: "{{sub.name}} said no" }] };
+
+  it("aren't offered or made without the Subcontractors area", async () => {
+    const { sent } = clerk();
+    const options = await call("full", "automation_options", {});
+    expect(options.triggers.map((t: { trigger: string }) => t.trigger)).not.toContain("sub_offer.declined");
+    expect(options.triggers.map((t: { trigger: string }) => t.trigger)).toContain("quote.sent");
+    expect((await call("full", "save_automation", rule)).error).toMatch(/Subcontractors area/);
+    expect(sent.some((s) => s.table === "automation_rules" && s.method === "POST")).toBe(false);
+  });
+
+  it("tell only the office, and keep the sub's price out of a task, for someone with the area", async () => {
+    const { sent } = supabase("owner");
+    const options = await call("full", "automation_options", {});
+    expect(options.triggers.find((t: { trigger: string }) => t.trigger === "sub_offer.declined")).toMatchObject({
+      only_actions: ["notify", "create_task"], only_notify_roles: ["owner", "admin", "office"],
+      extra_tokens: expect.arrayContaining([{ token: "{{sub.price}}", label: "Their price", not_in_tasks: true }]),
+    });
+    expect((await call("full", "save_automation", { ...rule, actions: [{ type: "notify", roles: ["field_crew"], title: "x" }] })).error).toMatch(/only the office hears about this/);
+    expect((await call("full", "save_automation", { ...rule, actions: [{ type: "create_task", title: "Call {{sub.name}} about {{sub.price}}", days_from_now: 1 }] })).error).toMatch(/can't show the sub's price/);
+    expect(await call("full", "save_automation", rule)).toMatchObject({ does: "When a sub turns down a job offer: notify Owners." });
+    expect(sent.filter((s) => s.table === "automation_rules" && s.method === "POST")).toHaveLength(1);
   });
 });

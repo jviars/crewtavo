@@ -902,14 +902,14 @@ isOneToOne: true
                   ]
                 },"job_line_items": {
                   Row: {
-                    "company_id": string,"description": string | null,"id": string,"job_id": string,"name": string,"quantity": number,"service_id": string | null,"sort": number,"source_quote_id": string | null,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number
+                    "company_id": string,"description": string | null,"id": string,"job_id": string,"name": string,"quantity": number,"service_id": string | null,"sort": number,"source_quote_id": string | null,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_labor_cost": number | null,"unit_price": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"description"?: string | null,"id"?: string,"job_id": string,"name": string,"quantity"?: number,"service_id"?: string | null,"sort"?: number,"source_quote_id"?: string | null,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
+                    "company_id": string,"description"?: string | null,"id"?: string,"job_id": string,"name": string,"quantity"?: number,"service_id"?: string | null,"sort"?: number,"source_quote_id"?: string | null,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_labor_cost"?: number | null,"unit_price"?: number
                   }
                   Update: {
-                    "company_id"?: string,"description"?: string | null,"id"?: string,"job_id"?: string,"name"?: string,"quantity"?: number,"service_id"?: string | null,"sort"?: number,"source_quote_id"?: string | null,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
+                    "company_id"?: string,"description"?: string | null,"id"?: string,"job_id"?: string,"name"?: string,"quantity"?: number,"service_id"?: string | null,"sort"?: number,"source_quote_id"?: string | null,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_labor_cost"?: number | null,"unit_price"?: number
                   }
                   Relationships: [
                     {
@@ -964,6 +964,102 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     },{
       foreignKeyName: "job_materials_company_id_visit_id_fkey"
+      columns: ["company_id","visit_id"]
+isOneToOne: false
+      referencedRelation: "visits"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"job_pay": {
+                  Row: {
+                    "accepted_snapshot": Json | null,"answered_at": string | null,"answered_by": string | null,"company_id": string,"created_at": string,"created_by": string | null,"decline_reason": string | null,"earned_on": string | null,"id": string,"insurance_warning": Json | null,"job_id": string,"method": string | null,"notes": string | null,"offer_outcome": string | null,"offer_round": number,"offered_at": string | null,"offered_by": string | null,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"pay_period_id": string | null,"reference": string | null,"respond_by": string | null,"status": string,"subcontractor_id": string | null,"total": number,"updated_at": string,"user_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "accepted_snapshot"?: Json | null,"answered_at"?: string | null,"answered_by"?: string | null,"company_id": string,"created_at"?: string,"created_by"?: string | null,"decline_reason"?: string | null,"earned_on"?: string | null,"id"?: string,"insurance_warning"?: Json | null,"job_id": string,"method"?: string | null,"notes"?: string | null,"offer_outcome"?: string | null,"offer_round"?: number,"offered_at"?: string | null,"offered_by"?: string | null,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"pay_period_id"?: string | null,"reference"?: string | null,"respond_by"?: string | null,"status"?: string,"subcontractor_id"?: string | null,"total"?: number,"updated_at"?: string,"user_id"?: string | null
+                  }
+                  Update: {
+                    "accepted_snapshot"?: Json | null,"answered_at"?: string | null,"answered_by"?: string | null,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"decline_reason"?: string | null,"earned_on"?: string | null,"id"?: string,"insurance_warning"?: Json | null,"job_id"?: string,"method"?: string | null,"notes"?: string | null,"offer_outcome"?: string | null,"offer_round"?: number,"offered_at"?: string | null,"offered_by"?: string | null,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"pay_period_id"?: string | null,"reference"?: string | null,"respond_by"?: string | null,"status"?: string,"subcontractor_id"?: string | null,"total"?: number,"updated_at"?: string,"user_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "job_pay_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "job_pay_company_id_job_id_fkey"
+      columns: ["company_id","job_id"]
+isOneToOne: false
+      referencedRelation: "jobs"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "job_pay_company_id_pay_period_id_fkey"
+      columns: ["company_id","pay_period_id"]
+isOneToOne: false
+      referencedRelation: "pay_periods"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "job_pay_company_id_subcontractor_id_fkey"
+      columns: ["company_id","subcontractor_id"]
+isOneToOne: false
+      referencedRelation: "subcontractors"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"job_pay_lines": {
+                  Row: {
+                    "amount": number,"basis": string,"company_id": string,"created_at": string,"description": string,"id": string,"job_pay_id": string,"pay_rate_id": string | null,"quantity": number,"rate": number,"service_id": string | null,"sort": number,"unit": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount"?: number,"basis"?: string,"company_id": string,"created_at"?: string,"description": string,"id"?: string,"job_pay_id": string,"pay_rate_id"?: string | null,"quantity"?: number,"rate"?: number,"service_id"?: string | null,"sort"?: number,"unit"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "amount"?: number,"basis"?: string,"company_id"?: string,"created_at"?: string,"description"?: string,"id"?: string,"job_pay_id"?: string,"pay_rate_id"?: string | null,"quantity"?: number,"rate"?: number,"service_id"?: string | null,"sort"?: number,"unit"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "job_pay_lines_company_id_job_pay_id_fkey"
+      columns: ["company_id","job_pay_id"]
+isOneToOne: false
+      referencedRelation: "job_pay"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "job_pay_lines_company_id_pay_rate_id_fkey"
+      columns: ["company_id","pay_rate_id"]
+isOneToOne: false
+      referencedRelation: "pay_rates"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "job_pay_lines_company_id_service_id_fkey"
+      columns: ["company_id","service_id"]
+isOneToOne: false
+      referencedRelation: "services"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"job_pay_visits": {
+                  Row: {
+                    "assigned": (string)[],"cancelled_while_agreed": boolean,"company_id": string,"created_at": string,"job_pay_id": string,"visit_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "assigned"?: (string)[],"cancelled_while_agreed"?: boolean,"company_id": string,"created_at"?: string,"job_pay_id": string,"visit_id": string
+                  }
+                  Update: {
+                    "assigned"?: (string)[],"cancelled_while_agreed"?: boolean,"company_id"?: string,"created_at"?: string,"job_pay_id"?: string,"visit_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "job_pay_visits_company_id_job_pay_id_fkey"
+      columns: ["company_id","job_pay_id"]
+isOneToOne: false
+      referencedRelation: "job_pay"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "job_pay_visits_company_id_visit_id_fkey"
       columns: ["company_id","visit_id"]
 isOneToOne: false
       referencedRelation: "visits"
@@ -1060,14 +1156,14 @@ isOneToOne: false
                   ]
                 },"memberships": {
                   Row: {
-                    "active": boolean,"company_id": string,"created_at": string,"labor_rate": number | null,"role": Database["public"]['Enums']["member_role"],"role_id": string | null,"updated_at": string,"user_id": string
+                    "active": boolean,"company_id": string,"created_at": string,"labor_rate": number | null,"role": Database["public"]['Enums']["member_role"],"role_id": string | null,"subcontractor_id": string | null,"updated_at": string,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "active"?: boolean,"company_id": string,"created_at"?: string,"labor_rate"?: number | null,"role"?: Database["public"]['Enums']["member_role"],"role_id"?: string | null,"updated_at"?: string,"user_id": string
+                    "active"?: boolean,"company_id": string,"created_at"?: string,"labor_rate"?: number | null,"role"?: Database["public"]['Enums']["member_role"],"role_id"?: string | null,"subcontractor_id"?: string | null,"updated_at"?: string,"user_id": string
                   }
                   Update: {
-                    "active"?: boolean,"company_id"?: string,"created_at"?: string,"labor_rate"?: number | null,"role"?: Database["public"]['Enums']["member_role"],"role_id"?: string | null,"updated_at"?: string,"user_id"?: string
+                    "active"?: boolean,"company_id"?: string,"created_at"?: string,"labor_rate"?: number | null,"role"?: Database["public"]['Enums']["member_role"],"role_id"?: string | null,"subcontractor_id"?: string | null,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
                     {
@@ -1081,6 +1177,12 @@ isOneToOne: false
       columns: ["company_id","role_id"]
 isOneToOne: false
       referencedRelation: "company_roles"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "memberships_subcontractor_fkey"
+      columns: ["company_id","subcontractor_id"]
+isOneToOne: false
+      referencedRelation: "subcontractors"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -1192,14 +1294,14 @@ isOneToOne: false
                   ]
                 },"pay_period_lines": {
                   Row: {
-                    "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"reference": string | null,"updated_at": string,"user_id": string
+                    "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"piece_amount": number,"reference": string | null,"updated_at": string,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount"?: number,"break_hours"?: number,"company_id": string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id": string,"reference"?: string | null,"updated_at"?: string,"user_id": string
+                    "amount"?: number,"break_hours"?: number,"company_id": string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id": string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id": string
                   }
                   Update: {
-                    "amount"?: number,"break_hours"?: number,"company_id"?: string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id"?: string,"reference"?: string | null,"updated_at"?: string,"user_id"?: string
+                    "amount"?: number,"break_hours"?: number,"company_id"?: string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id"?: string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
                     {
@@ -1228,6 +1330,38 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "companies"
       referencedColumns: ["id"]
+    }
+                  ]
+                },"pay_rates": {
+                  Row: {
+                    "active": boolean,"basis": string,"company_id": string,"created_at": string,"created_by": string | null,"description": string | null,"id": string,"rate": number,"service_id": string | null,"squares_basis": string,"subcontractor_id": string | null,"unit": string | null,"updated_at": string,"user_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "active"?: boolean,"basis": string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"description"?: string | null,"id"?: string,"rate": number,"service_id"?: string | null,"squares_basis"?: string,"subcontractor_id"?: string | null,"unit"?: string | null,"updated_at"?: string,"user_id"?: string | null
+                  }
+                  Update: {
+                    "active"?: boolean,"basis"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"description"?: string | null,"id"?: string,"rate"?: number,"service_id"?: string | null,"squares_basis"?: string,"subcontractor_id"?: string | null,"unit"?: string | null,"updated_at"?: string,"user_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "pay_rates_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "pay_rates_company_id_service_id_fkey"
+      columns: ["company_id","service_id"]
+isOneToOne: false
+      referencedRelation: "services"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "pay_rates_company_id_subcontractor_id_fkey"
+      columns: ["company_id","subcontractor_id"]
+isOneToOne: false
+      referencedRelation: "subcontractors"
+      referencedColumns: ["company_id","id"]
     }
                   ]
                 },"payments": {
@@ -1928,6 +2062,46 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"sub_documents": {
+                  Row: {
+                    "alerted_state": string | null,"carrier": string | null,"company_id": string,"content_type": string | null,"created_at": string,"expires_on": string | null,"file_name": string | null,"id": string,"kind": string,"path": string,"policy_number": string | null,"size_bytes": number | null,"starts_on": string | null,"subcontractor_id": string,"superseded_at": string | null,"superseded_by": string | null,"title": string | null,"updated_at": string,"uploaded_by": string | null,"uploaded_via": string,"verified_at": string | null,"verified_by": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "alerted_state"?: string | null,"carrier"?: string | null,"company_id": string,"content_type"?: string | null,"created_at"?: string,"expires_on"?: string | null,"file_name"?: string | null,"id"?: string,"kind": string,"path": string,"policy_number"?: string | null,"size_bytes"?: number | null,"starts_on"?: string | null,"subcontractor_id": string,"superseded_at"?: string | null,"superseded_by"?: string | null,"title"?: string | null,"updated_at"?: string,"uploaded_by"?: string | null,"uploaded_via"?: string,"verified_at"?: string | null,"verified_by"?: string | null
+                  }
+                  Update: {
+                    "alerted_state"?: string | null,"carrier"?: string | null,"company_id"?: string,"content_type"?: string | null,"created_at"?: string,"expires_on"?: string | null,"file_name"?: string | null,"id"?: string,"kind"?: string,"path"?: string,"policy_number"?: string | null,"size_bytes"?: number | null,"starts_on"?: string | null,"subcontractor_id"?: string,"superseded_at"?: string | null,"superseded_by"?: string | null,"title"?: string | null,"updated_at"?: string,"uploaded_by"?: string | null,"uploaded_via"?: string,"verified_at"?: string | null,"verified_by"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "sub_documents_company_id_subcontractor_id_fkey"
+      columns: ["company_id","subcontractor_id"]
+isOneToOne: false
+      referencedRelation: "subcontractors"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"subcontractors": {
+                  Row: {
+                    "active": boolean,"address": NonNullable<Json>,"can_contact_clients": boolean,"company_id": string,"contact_name": string | null,"created_at": string,"created_by": string | null,"email": string | null,"id": string,"name": string,"notes": string | null,"phone": string | null,"tax_classification": string | null,"trade": string | null,"updated_at": string,"uses_clock": boolean
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "active"?: boolean,"address"?: NonNullable<Json>,"can_contact_clients"?: boolean,"company_id": string,"contact_name"?: string | null,"created_at"?: string,"created_by"?: string | null,"email"?: string | null,"id"?: string,"name": string,"notes"?: string | null,"phone"?: string | null,"tax_classification"?: string | null,"trade"?: string | null,"updated_at"?: string,"uses_clock"?: boolean
+                  }
+                  Update: {
+                    "active"?: boolean,"address"?: NonNullable<Json>,"can_contact_clients"?: boolean,"company_id"?: string,"contact_name"?: string | null,"created_at"?: string,"created_by"?: string | null,"email"?: string | null,"id"?: string,"name"?: string,"notes"?: string | null,"phone"?: string | null,"tax_classification"?: string | null,"trade"?: string | null,"updated_at"?: string,"uses_clock"?: boolean
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "subcontractors_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"sync_links": {
                   Row: {
                     "company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token": string | null,"synced_at": string
@@ -2193,6 +2367,14 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"sub_paperwork": {
+                  Row: {
+                    "company_id": string | null,"days_left": number | null,"document_id": string | null,"expires_on": string | null,"kind": string | null,"requirement": string | null,"state": string | null,"subcontractor_id": string | null,"verified": boolean | null,"waiting": boolean | null
+                  }
+                  ComputedFields: never
+                  Relationships: [
+                    
+                  ]
                 }
           }
           Functions: {
@@ -2201,6 +2383,9 @@ isOneToOne: false
                            },
 "accept_terms":
 { Args: { "p_company": string,"p_version": string }; Returns: string
+                           },
+"answer_sub_offer":
+{ Args: { "p_accept": boolean,"p_company"?: string,"p_pay": string,"p_reason"?: string,"p_round"?: number }; Returns: boolean
                            },
 "apply_promo_code":
 { Args: { "p_code": string,"p_id": string,"p_kind": string,"p_option"?: string,"p_selected"?: (string)[] }; Returns: Json
@@ -2216,6 +2401,43 @@ isOneToOne: false
               "client_id": string,"display_name": string,"email": string
             }[]
                            },
+"change_sub_offer":
+{ Args: { "p_lines": Json,"p_pay": string,"p_respond_by"?: string }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
 "chat_audience":
 { Args: { "p_channel": string }; Returns: string[]
                            },
@@ -2331,6 +2553,11 @@ isOneToOne: false
 "clock_upkeep":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"company_basics":
+{ Args: { "p_company": string }; Returns: {
+              "currency": string,"id": string,"logo": string,"name": string,"phone": string,"settings": Json,"timezone": string
+            }[]
+                           },
 "convert_quote_to_job":
 { Args: { "p_quote": string }; Returns: string
                            },
@@ -2349,13 +2576,24 @@ isOneToOne: false
 "emit_equipment_alerts":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
+"emit_sub_document_alerts":
+{ Args: { "p_can_email"?: boolean,"p_can_text"?: boolean }; Returns: {
+              "alert": string,"company_id": string,"days_left": number,"document_id": string,"expires_on": string,"kind": string,"remind_sub": boolean,"subcontractor_id": string
+            }[]
+                           },
 "emit_visit_reminders":
 { Args: Record<PropertyKey, never>; Returns: number
+                           },
+"end_sessions":
+{ Args: { "p_user": string }; Returns: number
                            },
 "equipment_conflicts":
 { Args: { "p_company": string,"p_day": string,"p_ends": string,"p_equipment": (string)[],"p_except"?: string,"p_starts": string }; Returns: {
               "ends_at": string,"equipment_id": string,"starts_at": string,"title": string,"visit_id": string
             }[]
+                           },
+"expire_sub_offers":
+{ Args: Record<PropertyKey, never>; Returns: number
                            },
 "finish_automation_run":
 { Args: { "p_error"?: string,"p_id": number,"p_result": Json,"p_status": string,"p_token": string }; Returns: boolean
@@ -2373,6 +2611,209 @@ isOneToOne: false
               "cost": number,"name": string,"quantity": number,"unit": string,"unit_cost": number
             }[]
                            },
+"job_pay_accept":
+{ Args: { "p_pay": string,"p_visits"?: (string)[] }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"job_pay_cancel":
+{ Args: { "p_pay": string }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"job_pay_costs":
+{ Args: { "p_jobs": (string)[] }; Returns: {
+              "amount": number,"job_id": string,"payees": number
+            }[]
+                           },
+"job_pay_covers":
+{ Args: { "p_job": string,"p_subcontractor"?: string,"p_user"?: string }; Returns: {
+              "sign_ins": number,"visit_ids": (string)[]
+            }[]
+                           },
+"job_pay_mark_done":
+{ Args: { "p_earned_on"?: string,"p_pay": string }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"job_pay_mark_paid":
+{ Args: { "p_amount"?: number,"p_method": string,"p_paid_on"?: string,"p_pays": (string)[],"p_reference"?: string }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }[]
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: false
+        isSetofReturn: true
+      } },
+"job_pay_start":
+{ Args: { "p_job": string,"p_subcontractor"?: string,"p_user"?: string,"p_visits"?: (string)[] }; Returns: string
+                           },
+"job_pay_suggest":
+{ Args: { "p_job": string,"p_subcontractor"?: string,"p_user"?: string,"p_visits"?: (string)[] }; Returns: {
+              "amount": number,"basis": string,"check_it": boolean,"description": string,"note": string,"pay_rate_id": string,"quantity": number,"rate": number,"service_id": string,"sort": number,"unit": string
+            }[]
+                           },
+"job_pay_unmark_paid":
+{ Args: { "p_pays": (string)[] }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }[]
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: false
+        isSetofReturn: true
+      } },
 "job_scope":
 { Args: { "p_job": string }; Returns: {
               "description": string,"id": string,"name": string,"quantity": number,"sort": number,"unit": string
@@ -2391,6 +2832,16 @@ isOneToOne: false
                            },
 "my_crew_ids":
 { Args: { "p_company": string }; Returns: (string)[]
+                           },
+"my_sub_offers":
+{ Args: { "p_all"?: boolean,"p_company"?: string }; Returns: {
+              "agreed_lines": Json,"agreed_total": number,"answered_at": string,"can_answer": boolean,"city": string,"company_id": string,"decline_reason": string,"earned_on": string,"id": string,"insurance_warning": (string)[],"is_change": boolean,"job_id": string,"job_title": string,"lines": Json,"notes": string,"offer_round": number,"offered_at": string,"outcome": string,"paid_amount": number,"paid_at": string,"region": string,"respond_by": string,"scope": Json,"status": string,"subcontractor_id": string,"total": number,"visits": Json
+            }[]
+                           },
+"my_sub_pay_totals":
+{ Args: { "p_company": string }; Returns: {
+              "counted": number,"owed": number,"owed_jobs": number,"paid": number,"payments": number,"year": number
+            }[]
                            },
 "promo_code_usage":
 { Args: { "p_company": string }; Returns: {
@@ -2426,6 +2877,63 @@ isOneToOne: false
               "acknowledged": boolean,"body_text": string,"category": string,"id": string,"rank": number,"required": boolean,"revision": number,"snippet": string,"title": string
             }[]
                            },
+"send_sub_offer":
+{ Args: { "p_pay": string,"p_respond_by"?: string }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"set_sub_reminders":
+{ Args: { "p_company": string,"p_remind_subs": boolean }; Returns: undefined
+                           },
+"set_sub_sign_in_countries":
+{ Args: { "p_company": string,"p_countries": (string)[] }; Returns: (string)[]
+                           },
+"sign_in_code_check":
+{ Args: { "p_address_hash": string,"p_channel": string,"p_code_hash": string,"p_ip_hash"?: string,"p_user"?: string }; Returns: string
+                           },
+"sign_in_code_save":
+{ Args: { "p_address_hash": string,"p_channel": string,"p_code_hash": string,"p_ip_hash"?: string,"p_user"?: string }; Returns: undefined
+                           },
+"sign_in_codes_check":
+{ Args: { "p_address_hash": string,"p_channel": string,"p_code_hashes": (string)[],"p_ip_hash"?: string,"p_users": (string)[] }; Returns: {
+              "result": string,"user_id": string
+            }[]
+                           },
+"sign_in_codes_save":
+{ Args: { "p_address_hash": string,"p_channel": string,"p_code_hashes": (string)[],"p_ip_hash"?: string,"p_users": (string)[] }; Returns: undefined
+                           },
 "sign_quote":
 { Args: { "p_approval": Json,"p_expected_total"?: number,"p_option"?: string,"p_quote": string }; Returns: Json
                            },
@@ -2444,6 +2952,34 @@ isOneToOne: false
 "stripe_import_invoice":
 { Args: { "p_company": string,"p_data": Json,"p_quiet"?: boolean }; Returns: string
                            },
+"sub_1099_totals":
+{ Args: { "p_company": string,"p_year": number }; Returns: {
+              "active": boolean,"address": Json,"card_or_app_payments": number,"card_or_app_total": number,"contact_name": string,"corporation": boolean,"email": string,"name": string,"payments": number,"payroll_payments": number,"payroll_total": number,"phone": string,"subcontractor_id": string,"tax_classification": string,"total": number
+            }[]
+                           },
+"sub_notice_contacts":
+{ Args: { "p_users": (string)[] }; Returns: {
+              "company_id": string,"email": string,"phone": string,"user_id": string
+            }[]
+                           },
+"sub_sign_ins_for_email":
+{ Args: { "p_email": string }; Returns: {
+              "company_id": string,"company_name": string,"subcontractor_id": string,"user_id": string
+            }[]
+                           },
+"sub_sign_ins_for_phone":
+{ Args: { "p_phone": string }; Returns: {
+              "company_id": string,"company_name": string,"subcontractor_id": string,"user_id": string
+            }[]
+                           },
+"sub_wc_audit":
+{ Args: { "p_company": string,"p_from": string,"p_to": string }; Returns: {
+              "amount": number,"coverage": string,"covered_amount": number,"covered_dates": (string)[],"documents": Json,"job_id": string,"job_number": number,"job_pay_id": string,"job_title": string,"pay_amount": number,"status": string,"sub_name": string,"subcontractor_id": string,"uncovered_amount": number,"work_dates": (string)[]
+            }[]
+                           },
+"tidy_sign_in_codes":
+{ Args: Record<PropertyKey, never>; Returns: number
+                           },
 "time_entry_places":
 { Args: { "p_company": string,"p_entries": (string)[] }; Returns: {
               "id": string,"in_place": Json,"out_place": Json,"site": Json
@@ -2451,6 +2987,11 @@ isOneToOne: false
                            },
 "user_id_for_email":
 { Args: { "p_email": string }; Returns: string
+                           },
+"visit_contact":
+{ Args: { "p_visit": string }; Returns: {
+              "email": string,"name": string,"phone": string
+            }[]
                            },
 "web_analytics_save":
 { Args: { "p_changes": Json,"p_company": string }; Returns: Json
@@ -2466,10 +3007,47 @@ isOneToOne: false
                            },
 "web_visit_for":
 { Args: { "p_agent": string,"p_company": string,"p_ip": string }; Returns: Json
-                           }
+                           },
+"withdraw_sub_offer":
+{ Args: { "p_pay": string }; Returns: {
+              "accepted_snapshot": Json | null,
+"answered_at": string | null,
+"answered_by": string | null,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"decline_reason": string | null,
+"earned_on": string | null,
+"id": string,
+"insurance_warning": Json | null,
+"job_id": string,
+"method": string | null,
+"notes": string | null,
+"offer_outcome": string | null,
+"offer_round": number,
+"offered_at": string | null,
+"offered_by": string | null,
+"paid_amount": number | null,
+"paid_at": string | null,
+"paid_by": string | null,
+"pay_period_id": string | null,
+"reference": string | null,
+"respond_by": string | null,
+"status": string,
+"subcontractor_id": string | null,
+"total": number,
+"updated_at": string,
+"user_id": string | null
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "job_pay"
+        isOneToOne: true
+        isSetofReturn: false
+      } }
           }
           Enums: {
-            "member_role": "owner"|"admin"|"office"|"estimator"|"crew_lead"|"field_crew"
+            "member_role": "owner"|"admin"|"office"|"estimator"|"crew_lead"|"field_crew"|"subcontractor"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -2585,7 +3163,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "member_role": ["owner", "admin", "office", "estimator", "crew_lead", "field_crew"]
+            "member_role": ["owner", "admin", "office", "estimator", "crew_lead", "field_crew", "subcontractor"]
           }
         }
 } as const

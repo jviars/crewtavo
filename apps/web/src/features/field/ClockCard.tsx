@@ -1,12 +1,13 @@
 /**
  * The running clock: what I'm on, for how long, and start/stop/switch. Used on My day and Timesheets.
- * On My day it also offers the visits under way, to clock back onto one after a break.
+ * On My day it also offers the visits under way, to clock back onto one after a break. Not there for
+ * a sub unless the office keeps their hours.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Spinner } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
-import { hasRole, useSession } from "@/lib/session";
+import { hasRole, keepsTime, useSession } from "@/lib/session";
 import { CATEGORY_LABELS, clockPlace, clockVisit, recordsPlaces, startTimer, stopTimers, useElapsed, useRunningTimer, type TimerCategory } from "./fieldData";
 
 interface VisitUnderWay { id: string; title: string; job_id: string | null }
@@ -15,7 +16,8 @@ type ClockAction = TimerCategory | "stop" | VisitUnderWay;
 export function ClockCard({ visits = [] }: { visits?: VisitUnderWay[] }) {
   const session = useSession();
   const queryClient = useQueryClient();
-  const timer = useRunningTimer(session.company.id, session.userId);
+  const clocks = keepsTime(session);
+  const timer = useRunningTimer(session.company.id, session.userId, clocks);
   const elapsed = useElapsed(timer.data?.started_at);
   const action = useMutation({
     meta: { success: (_: unknown, v: ClockAction) => (v === "stop" ? "Clock stopped" : typeof v === "object" ? `${v.title}: clock started` : `${CATEGORY_LABELS[v]}: clock started`) },
@@ -33,6 +35,7 @@ export function ClockCard({ visits = [] }: { visits?: VisitUnderWay[] }) {
   const on = Boolean(timer.data);
   // Finding where the phone is can take a few seconds.
   const starting = action.isPending && action.variables !== "stop";
+  if (!clocks) return null;
   return (
     <div className="card card-pad row wrap" style={{ gap: 12, background: on ? "var(--green-tint)" : undefined, borderColor: on ? "transparent" : undefined, transition: "background 200ms" }}>
       <span className="avatar" style={{ width: 40, height: 40, background: on ? "var(--green-solid)" : "var(--fill-3)", color: on ? "#fff" : "var(--text-2)" }}><Icon name="clock" size={20} /></span>

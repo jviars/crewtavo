@@ -1,11 +1,12 @@
 /**
  * The daily "plans" task (services/planFiles.ts), with PostgREST and Storage stubbed through fetch:
- * files on nothing go, and uploads never recorded go once they're a day old.
+ * files on nothing go, and uploads never recorded go once they're a day old (plans, and subs'
+ * paperwork).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { adminClient } from "../src/lib/supabase";
-import { tidyPlanFiles } from "../src/services/planFiles";
+import { tidyPlanFiles, tidySubFiles } from "../src/services/planFiles";
 
 const env: Env = { SUPABASE_URL: "https://example.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", SUPABASE_SECRET_KEY: "sb_secret_test" };
 const NOW = Date.parse("2026-10-20T04:20:00Z");
@@ -50,5 +51,52 @@ describe("tidying plans and files", () => {
     expect(["property_id", "request_id", "quote_id", "job_id"].map((k) => lostQuery.get(k))).toEqual(["is.null", "is.null", "is.null", "is.null"]);
     // Recent uploads may still be on their way.
     expect(calls.find((c) => c.path === "/rest/v1/plan_files" && c.search.has("path"))?.search.get("path")).toBe("in.(co-1/plans/kept.pdf,co-1/plans/stray.pdf)");
+  });
+});
+
+describe("tidying subs' paperwork", () => {
+  // co-1/subs holds two subs' folders: one with a recorded file, a stray and an upload on its way;
+  // the other left behind by a deleted sub.
+  function serveSubs(lookupFails = false) {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const body = typeof init?.body === "string" && init.body ? JSON.parse(init.body) : undefined;
+      const call: Call = { method: (init?.method ?? "GET").toUpperCase(), path: url.pathname, search: url.searchParams, body };
+      calls.push(call);
+      if (call.path === "/rest/v1/companies") return Response.json([{ id: "co-1" }]);
+      if (call.path === "/rest/v1/sub_documents") {
+        return lookupFails ? Response.json({ code: "57014", message: "timeout", details: null, hint: null }, { status: 500 }) : Response.json([{ path: "co-1/subs/s1/kept.pdf" }]);
+      }
+      if (call.path === "/storage/v1/object/list/files") {
+        if (body.prefix === "co-1/subs") return Response.json([{ id: null, name: "s1" }, { id: null, name: "gone" }]);
+        if (body.prefix === "co-1/subs/s1") {
+          return Response.json([
+            { id: "o1", name: "kept.pdf", created_at: hoursAgo(72) },
+            { id: "o2", name: "stray.pdf", created_at: hoursAgo(30) },
+            { id: "o3", name: "uploading.pdf", created_at: hoursAgo(2) },
+          ]);
+        }
+        if (body.prefix === "co-1/subs/gone") return Response.json([{ id: "o4", name: "w9.pdf", created_at: hoursAgo(500) }]);
+        return Response.json([]);
+      }
+      return Response.json([]);
+    });
+    return calls;
+  }
+
+  it("removes day-old files sent by link that were never recorded, and those of deleted subs", async () => {
+    const calls = serveSubs();
+    expect(await tidySubFiles(adminClient(env), NOW)).toEqual({ unrecorded: 2 });
+    const removed = calls.filter((c) => c.path === "/storage/v1/object/files" && c.method === "DELETE").map((c) => c.body.prefixes);
+    expect(removed).toEqual([["co-1/subs/s1/stray.pdf"], ["co-1/subs/gone/w9.pdf"]]);
+    // Recent uploads may still be on their way.
+    expect(calls.find((c) => c.path === "/rest/v1/sub_documents")?.search.get("path")).toBe("in.(co-1/subs/s1/kept.pdf,co-1/subs/s1/stray.pdf)");
+  });
+
+  it("removes nothing when it can't tell what's recorded", async () => {
+    const calls = serveSubs(true);
+    await expect(tidySubFiles(adminClient(env), NOW)).rejects.toThrow("timeout");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 });

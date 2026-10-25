@@ -1,5 +1,5 @@
 /** Company roles (custom + built-in) for pickers: one value per choice, "role:<id>" or "level:<access level>". */
-import { ROLE_LABELS, ROLES, type Permission, type Role } from "@crewtavo/core/roles";
+import { ROLE_LABELS, STAFF, type Permission, type Role } from "@crewtavo/core/roles";
 import { useQuery } from "@tanstack/react-query";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -16,11 +16,14 @@ export function useCompanyRoles() {
 
 export interface RoleChoice { value: string; label: string; group: "Your roles" | "Built-in" }
 
-/** Choices for a role picker. Only owners can make someone an owner. */
+/**
+ * Choices for a role picker. Only owners can make someone an owner. Never Subcontractor: a sub's
+ * sign-in comes from their page under Subcontractors.
+ */
 export function roleChoices(roles: CompanyRole[] | undefined, viewerIsOwner: boolean): RoleChoice[] {
   return [
     ...(roles ?? []).map((r) => ({ value: `role:${r.id}`, label: r.name, group: "Your roles" as const })),
-    ...ROLES.filter((r) => r !== "owner" || viewerIsOwner).map((r) => ({ value: `level:${r}`, label: ROLE_LABELS[r], group: "Built-in" as const })),
+    ...STAFF.filter((r) => r !== "owner" || viewerIsOwner).map((r) => ({ value: `level:${r}`, label: ROLE_LABELS[r], group: "Built-in" as const })),
   ];
 }
 

@@ -4,7 +4,7 @@
  * with the words people type when they're looking for them.
  */
 import type { IconName } from "@/components/ui/Icon";
-import { can, hasRole, type Session } from "@/lib/session";
+import { can, hasRole, isSub, type Session } from "@/lib/session";
 
 export type SettingsTab = "profile" | "company" | "schedule" | "address" | "hosting" | "team" | "roles" | "crews" | "prices" | "templates" | "contracts" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "license";
 export type SettingsItem = { label: string; icon: IconName; keywords: string } & ({ tab: SettingsTab } | { to: string });
@@ -18,9 +18,12 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
   const sellsPackages = canSell && can(session, "sales");
   const managesEmail = isAdmin && (can(session, "apps") || can(session, "settings"));
   const connectsApps = isAdmin && can(session, "apps");
+  const profile: SettingsItem = { tab: "profile", label: "Profile", icon: "user", keywords: "my account name photo picture avatar password phone notifications theme dark mode appearance spare keys recovery calendar feed directions maps app measure map default imagery" };
+  // A sub's settings are their own profile and notifications.
+  if (isSub(session)) return [{ title: "You", items: [profile] }];
 
   const groups: Array<{ title: string; items: Array<SettingsItem | false | undefined> }> = [
-    { title: "You", items: [{ tab: "profile", label: "Profile", icon: "user", keywords: "my account name photo picture avatar password phone notifications theme dark mode appearance spare keys recovery calendar feed directions maps app measure map default imagery" }] },
+    { title: "You", items: [profile] },
     {
       title: "Business",
       items: [
