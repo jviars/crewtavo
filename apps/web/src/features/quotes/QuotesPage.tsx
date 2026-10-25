@@ -11,7 +11,9 @@ import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatMoney, timeAgo } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
 import { can, hasRole, useSession } from "@/lib/session";
+import { choiceLabel, isSignedQuote } from "../documents/build";
 import { NewQuoteDialog } from "./NewQuoteDialog";
+import { listPrice, withOptionLines } from "./options";
 
 const FILTERS = [
   { key: "open", label: "Open", statuses: ["draft", "sent", "changes_requested", "approved"] },
@@ -22,6 +24,18 @@ const FILTERS = [
   { key: "closed", label: "Converted or lost", statuses: ["converted", "lost", "archived"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+
+/**
+ * Under a quote's price when it offers options (`count`): once it's signed, the option they chose
+ * (`option`, quotes.option_id: "Better · Designer shingle"), whose total the price is; before, how
+ * many there are ("3 options"), as the price is from the cheapest of them (options.ts listPrice).
+ * The sales board says the same.
+ */
+export function optionsNote(status: string, count: number, option: { name: string; tier: string | null } | null): string | null {
+  if (!count) return null;
+  if (option && isSignedQuote(status)) return choiceLabel(option);
+  return `${count} ${count === 1 ? "option" : "options"}`;
+}
 
 export function QuotesPage() {
   const session = useSession();
@@ -40,19 +54,19 @@ export function QuotesPage() {
     queryFn: async () => {
       let q = supabase()
         .from("quotes")
-        .select("id, number, title, status, total, sent_at, valid_until, updated_at, client:clients(display_name)")
+        .select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), sent_at, valid_until, updated_at, client:clients(display_name), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)")
         .eq("company_id", session.company.id)
         .in("status", [...statuses])
         .order("updated_at", { ascending: false })
         .limit(200);
       if (term) q = /^\d+$/.test(term) ? q.eq("number", Number(term)) : q.or(await titleOrClientFilter(session.company.id, term));
-      return unwrap(await q);
+      return withOptionLines(unwrap(await q));
     },
   });
 
   if (quotes.isPending) return <ListPageSkeleton columns={5} tabs={6} />;
   const rows = quotes.data ?? [];
-  const total = rows.reduce((s, q) => s + Number(q.total), 0);
+  const total = rows.reduce((s, q) => s + listPrice(q).amount, 0);
 
   return (
     <>
@@ -96,18 +110,25 @@ export function QuotesPage() {
           <table className="table table-stack">
             <thead><tr><th>#</th><th>Quote</th><th className="num">Total</th><th>Sent</th><th>Status</th></tr></thead>
             <tbody>
-              {rows.map((q) => (
-                <tr key={q.id} className="row-link" onClick={() => navigate(`/quotes/${q.id}`)}>
-                  <td className="muted tabular" style={{ width: 56 }}>#{q.number}</td>
-                  <td>
-                    <Link className="cell-link" to={`/quotes/${q.id}`} onClick={(e) => e.stopPropagation()}>{q.title}</Link>
-                    <div className="muted small">{q.client?.display_name}</div>
-                  </td>
-                  <td className="num">{formatMoney(q.total)}</td>
-                  <td title={q.sent_at ? formatDate(q.sent_at) : undefined}>{q.sent_at ? timeAgo(q.sent_at) : <span className="muted">Not sent</span>}</td>
-                  <td><EntityStatus kind="quote" status={q.status} /></td>
-                </tr>
-              ))}
+              {rows.map((q) => {
+                const note = optionsNote(q.status, q.options.length, q.option);
+                const price = listPrice(q);
+                return (
+                  <tr key={q.id} className="row-link" onClick={() => navigate(`/quotes/${q.id}`)}>
+                    <td className="muted tabular" style={{ width: 56 }}>#{q.number}</td>
+                    <td>
+                      <Link className="cell-link" to={`/quotes/${q.id}`} onClick={(e) => e.stopPropagation()}>{q.title}</Link>
+                      <div className="muted small">{q.client?.display_name}</div>
+                    </td>
+                    <td className="num">
+                      {price.from ? <span title="Its cheapest option">From {formatMoney(price.amount)}</span> : formatMoney(price.amount)}
+                      {note && <div className="muted small">{note}</div>}
+                    </td>
+                    <td title={q.sent_at ? formatDate(q.sent_at) : undefined}>{q.sent_at ? timeAgo(q.sent_at) : <span className="muted">Not sent</span>}</td>
+                    <td><EntityStatus kind="quote" status={q.status} /></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div className="list-foot"><span>{rows.length} {rows.length === 1 ? "quote" : "quotes"}</span><strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(total)}</strong></div>

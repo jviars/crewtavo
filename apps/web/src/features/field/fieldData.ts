@@ -2,7 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { supabase, unwrap } from "@/lib/api";
-import { useSession, type Company } from "@/lib/session";
+import { isSub, keepsTime, useSession, type Company, type Session } from "@/lib/session";
 import type { VisitStatusChange } from "./fieldActions";
 
 export type TimerCategory = "visit" | "assessment" | "drive" | "shop" | "break" | "other";
@@ -47,16 +47,33 @@ export const clockPlace = (company: Pick<Company, "settings">) => (recordsPlaces
 export const clocksOn = (status: string) => status === "in_progress" || status === "completed";
 
 /**
+ * What a status tap saves, as it was made: the time is when it was tapped, and whether it clocks
+ * this person in and out (not a sub without a clock), which stays with it if it has to wait for
+ * signal. `locate`: the phone's place goes with it, for a tap that starts or stops the clock where
+ * the company keeps where people clock in.
+ */
+export function statusChange(
+  session: Pick<Session, "role" | "subcontractor" | "userId"> & { company: Pick<Company, "id" | "settings"> },
+  visit: { id: string; jobId: string | null },
+  status: string,
+  at = new Date().toISOString(),
+): { change: VisitStatusChange; locate: boolean } {
+  const clock = keepsTime(session);
+  const change: VisitStatusChange = { companyId: session.company.id, userId: session.userId, visitId: visit.id, jobId: visit.jobId, status, at, clock, ...(isSub(session) && { sub: true }) };
+  return { change, locate: clock && clocksOn(status) && recordsPlaces(session.company) };
+}
+
+/**
  * Status taps on a visit, with where the phone was when the tap starts or stops the clock. Finds
  * the place first (`locating` is the visit it's for, so its button can show it's busy), then saves
- * the tap as it was made: the time is when it was tapped.
+ * the tap as statusChange() made it.
  */
 export function useStatusTap(send: (change: VisitStatusChange) => void) {
   const session = useSession();
   const [locating, setLocating] = useState<string | null>(null);
   const tap = async (visit: { id: string; jobId: string | null }, status: string) => {
-    const change: VisitStatusChange = { companyId: session.company.id, userId: session.userId, visitId: visit.id, jobId: visit.jobId, status, at: new Date().toISOString() };
-    if (clocksOn(status) && recordsPlaces(session.company)) {
+    const { change, locate: withPlace } = statusChange(session, visit, status);
+    if (withPlace) {
       setLocating(visit.id);
       change.place = await locate();
       setLocating(null);
@@ -104,10 +121,11 @@ export async function stopTimers(companyId: string, userId: string, place?: Cloc
   unwrap(await supabase().from("time_entries").update({ ended_at: new Date().toISOString(), out_place: place }).eq("user_id", userId).eq("company_id", companyId).is("ended_at", null));
 }
 
-/** The clock currently running for me, if any. */
-export function useRunningTimer(companyId: string, userId: string) {
+/** The clock currently running for me, if any. `enabled` is false for someone without a clock (a sub, mostly). */
+export function useRunningTimer(companyId: string, userId: string, enabled = true) {
   return useQuery({
     queryKey: ["running-timer", companyId, userId],
+    enabled,
     refetchInterval: 60_000,
     queryFn: async () =>
       unwrap(

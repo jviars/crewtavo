@@ -1,30 +1,44 @@
+import { optionBaseTotal, quoteTotals } from "@crewtavo/core/money";
+import { optionsRange, priceRange } from "@crewtavo/core/estimates";
 import { describe, expect, it } from "vitest";
 import { readApproval } from "../src/features/documents/build";
 import { currentStep, STEPS, type TakeoffRow } from "../src/features/paving/data";
 import { ROOF_STEPS, roofStep, type RoofStepQuote } from "../src/features/roofing/data";
 import {
-  autoApplyKey,
+  autoFillKey,
   canMarkAgreed,
   copySentence,
   dayText,
   depositLabel,
-  documentFacts,
+  emptyOptions,
+  emptyOptionsText,
   estimateShare,
   estimateSubject,
+  hasFilledLines,
   homeownerName,
   isSignedCopy,
+  jobLinesText,
+  lowestOption,
   notesTitle,
   onWhen,
+  isPriced,
+  leaningChoices,
+  optionPrices,
+  optionsIntro,
+  optionTicks,
   personName,
+  rangeAcrossOptions,
   rangeIntro,
+  rangeNow,
   rangeOutdated,
   rangePill,
   rangeState,
   rangeStepStatus,
+  rangeWordsFor,
   salesPeople,
+  sendWords,
   signedHeadline,
   signedSentence,
-  skippedNote,
   visitStepStatus,
   type RangeQuote,
   type TeamMember,
@@ -111,13 +125,13 @@ describe("where the range stands", () => {
     expect(rangeState(range({ status: "lost" }))).toBe("closed");
   });
 
-  it("lets the office mark a yes only while the range is waiting for an answer", () => {
+  it("lets the office mark a yes while the range waits for an answer, or before it went out", () => {
     expect(canMarkAgreed(range(out))).toBe(true);
     // They asked a question first, then said yes on the phone.
     expect(canMarkAgreed(range({ ...out, status: "changes_requested" }))).toBe(true);
-    expect(canMarkAgreed(range())).toBe(false);
-    // Saved on a draft but never delivered: they haven't seen it.
-    expect(canMarkAgreed(range({ range_low: 18300, range_high: 21050 }))).toBe(false);
+    // The office told them the range on the phone before sending it, or its email didn't go.
+    expect(canMarkAgreed(range())).toBe(true);
+    expect(canMarkAgreed(range({ range_low: 18300, range_high: 21050 }))).toBe(true);
     expect(canMarkAgreed(range({ ...out, range_accepted_at: "2026-10-23T23:41:00Z" }))).toBe(false);
     expect(canMarkAgreed(range({ ...out, exact_sent_at: "2026-10-23T14:00:00Z" }))).toBe(false);
     expect(canMarkAgreed(range({ ...out, priced_on_site_at: "2026-10-24T18:00:00Z" }))).toBe(false);
@@ -126,11 +140,45 @@ describe("where the range stands", () => {
     expect(canMarkAgreed(range({ status: "sent" }))).toBe(false);
   });
 
+  it("needs a price to make a range from, an option's or the estimate's", () => {
+    const line = (option_id: string | null, unit_price: number) => ({ option_id, quantity: 1, unit_price, taxable: true, optional: false, selected: true });
+    const two = [{ id: "good" }, { id: "best" }];
+    expect(isPriced({ total: 0, lines: [] })).toBe(false);
+    expect(isPriced({ total: 16800, lines: [line(null, 16800)] })).toBe(true);
+    // Offered before the roof was measured: no option has lines of its own yet.
+    expect(isPriced({ total: 250, options: two, lines: [line(null, 250)] })).toBe(false);
+    expect(isPriced({ total: 0, options: two, lines: [line("best", 34000)] })).toBe(true);
+  });
+
+  it("offers each option they could be leaning toward, with its tier and its own range", () => {
+    const settings = { pct: 15, round: 50 };
+    const options = [
+      { id: "good", name: "Architectural shingle", tier: "Good" },
+      { id: "best", name: "Standing-seam metal", tier: "Best" },
+      { id: "cedar", name: "Cedar shakes", tier: "Premium" },
+    ];
+    const lines = [
+      { option_id: null, quantity: 1, unit_price: 250, taxable: true, optional: false, selected: true },
+      { option_id: "good", quantity: 1, unit_price: 16997.06, taxable: true, optional: false, selected: true },
+      { option_id: "best", quantity: 1, unit_price: 34911.81, taxable: true, optional: false, selected: false },
+    ];
+    const choices = leaningChoices({ total: 17247.06, options, lines }, settings);
+    expect(choices.map((c) => [c.option.id, c.tier, c.range])).toEqual([
+      // The permit is on every option, so it's in each one's range: $17,247.06 and $35,161.81.
+      ["good", "Good", { low: 17200, high: 19850 }],
+      ["best", "Best", { low: 35150, high: 40450 }],
+      // No lines of its own yet: no range.
+      ["cedar", "Premium", null],
+    ]);
+  });
+
   it("notices the estimate changed since the range went out", () => {
     const settings = { pct: 15, round: 50 };
-    expect(rangeOutdated(range(out), settings)).toBe(false);
-    expect(rangeOutdated(range({ ...out, total: 18950 }), settings)).toBe(true);
-    expect(rangeOutdated(range(), settings)).toBe(false);
+    // Without options the lines don't matter, only the total.
+    const sent = (patch: Partial<RangeQuote> = {}) => ({ ...range(patch), lines: [] });
+    expect(rangeOutdated(sent(out), settings)).toBe(false);
+    expect(rangeOutdated(sent({ ...out, total: 18950 }), settings)).toBe(true);
+    expect(rangeOutdated(sent(), settings)).toBe(false);
   });
 
   it("says where the step is", () => {
@@ -169,6 +217,128 @@ describe("where the range stands", () => {
       "Thanks for having us look at your roof. From our measurements, your new roof will cost between $18,300 and $21,050. You can see what's included and let us know when you'd like us to come out:",
     );
     expect(estimateSubject("Ridgeline Roofing")).toBe("Your roof estimate from Ridgeline Roofing");
+    // In the business's own currency, as the server words it.
+    expect(rangeIntro({ low: 18300, high: 21050 }, 0, "CAD")).toContain("between CA$18,300 and CA$21,050.");
+  });
+});
+
+describe("the range with options", () => {
+  // Good is shown, so its roof is selected; Better's and Best's are kept unselected. Best has an add-on.
+  const line = (option_id: string | null, unit_price: number, patch: { optional?: boolean; selected?: boolean } = {}) => ({ option_id, quantity: 1, unit_price, taxable: true, optional: false, selected: option_id === null || option_id === "good", ...patch });
+  const lines = [line(null, 1900), line("good", 13552), line("better", 16698), line("best", 27830), line("best", 900, { optional: true, selected: false }), line("better", 0, { selected: false })];
+  const options = [{ id: "good", name: "Architectural shingle", tier: null }, { id: "better", name: "Designer shingle", tier: null }, { id: "best", name: "Standing-seam metal", tier: null }];
+  const opts = { taxRate: 0.06, discountAmount: 0, promo: null };
+  const shown = quoteTotals(lines, opts).total;
+  const quote = { total: shown, tax_rate: 0.06, discount_amount: 0, promo: null, options, lines };
+  const settings = { pct: 15, round: 50 };
+
+  it("runs from the cheapest option's low end to the priciest one's high end, as the server sends it", () => {
+    const bases = options.map((o) => optionBaseTotal(lines, o.id, opts)!);
+    expect(optionPrices(quote).map((p) => p.total)).toEqual(bases);
+    expect(rangeNow(quote, settings)).toEqual(optionsRange(bases, settings));
+    expect(rangeNow(quote, settings).low).toBe(priceRange(bases[0], settings).low);
+    expect(rangeNow(quote, settings).high).toBe(priceRange(bases[2], settings).high);
+    // Without options, it's around the total.
+    expect(rangeNow({ total: shown }, settings)).toEqual(priceRange(shown, settings));
+  });
+
+  it("doesn't move when another option is shown, so a range sent stays up to date", () => {
+    const sent = rangeNow(quote, settings);
+    const out = { status: "sent", range_low: sent.low, range_high: sent.high, range_sent_at: "2026-10-22T13:20:00Z", range_accepted_at: null, priced_on_site_at: null };
+    expect(rangeOutdated({ ...quote, ...out }, settings)).toBe(false);
+    // Best shown instead (the database flips which option's lines are selected): the same range.
+    const bestShown = lines.map((l) => (l.option_id === null ? l : { ...l, selected: l.option_id === "best" && !l.optional }));
+    expect(rangeOutdated({ ...quote, ...out, lines: bestShown, total: quoteTotals(bestShown, opts).total }, settings)).toBe(false);
+    // A line changed on an option: the range moves.
+    expect(rangeOutdated({ ...quote, ...out, lines: lines.map((l, i) => (i === 3 ? { ...l, unit_price: 31000 } : l)) }, settings)).toBe(true);
+  });
+
+  it("leaves out an option with no lines yet", () => {
+    const waiting = { ...quote, options: [...options, { id: "fourth", name: "Cedar shake", tier: null }] };
+    expect(optionPrices(waiting).map((p) => p.id)).toEqual(["good", "better", "best"]);
+    expect(rangeNow(waiting, settings)).toEqual(rangeNow(quote, settings));
+  });
+
+  it("says the range runs across the options, in the server's words", () => {
+    expect(rangeIntro({ low: 18300, high: 34050 }, 3)).toBe(
+      "Thanks for having us look at your roof. From our measurements, your new roof will cost between $18,300 and $34,050, depending on the option you pick. You can see the options and let us know when you'd like us to come out:",
+    );
+    // One option with a price is a range like any other.
+    expect(rangeIntro({ low: 18300, high: 21050 }, 1)).toBe(rangeIntro({ low: 18300, high: 21050 }));
+  });
+
+  it("sends the exact price with how many options there are and the lowest", () => {
+    expect(optionsIntro(optionPrices(quote))).toBe(
+      `Thanks for the opportunity. Here's your quote, with 3 options from ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(optionPrices(quote)[0]!.total)}. You can compare them, choose the one you want and approve it online:`,
+    );
+    expect(optionsIntro([{ total: 100 }])).toBe("");
+    expect(optionsIntro([])).toBe("");
+  });
+
+  it("prices each option with the office's discount or a promo code, as the server does", () => {
+    // $500 off: Good is the shared $1,900 and its $13,552 roof, less $500, with 6% tax on the rest.
+    const discounted = { ...quote, discount_amount: 500 };
+    const withDiscount = { taxRate: 0.06, discountAmount: 500, promo: null };
+    expect(optionPrices(discounted)[0]).toEqual({ id: "good", total: 15849.12 });
+    expect(optionPrices(discounted).map((p) => p.total)).toEqual(options.map((o) => optionBaseTotal(lines, o.id, withDiscount)));
+    expect(rangeNow(discounted, settings)).toEqual(optionsRange(optionPrices(discounted).map((p) => p.total), settings));
+    expect(rangeNow(discounted, settings).low).toBeLessThan(rangeNow(quote, settings).low);
+    // A 10% promo code is worked out on each option's own charges: $1,545.20 off Good's $15,452.
+    const promoted = { ...quote, promo: { kind: "percent", value: 10 } };
+    expect(optionPrices(promoted)[0]).toEqual({ id: "good", total: 14741.21 });
+    expect(optionPrices(promoted).map((p) => p.total)).toEqual(options.map((o) => optionBaseTotal(lines, o.id, { taxRate: 0.06, discountAmount: 0, promo: promoted.promo })));
+    expect(rangeNow(promoted, settings)).toEqual(optionsRange(optionPrices(promoted).map((p) => p.total), settings));
+    // The ticks sit at those prices too.
+    expect(optionTicks(promoted, rangeNow(promoted, settings).high).map((t) => t.total)).toEqual(optionPrices(promoted).map((p) => p.total));
+    expect(lowestOption(promoted)).toBe(14741.21);
+  });
+
+  it("starts a list's price from the cheapest option", () => {
+    expect(lowestOption(quote)).toBe(Math.min(...optionPrices(quote).map((p) => p.total)));
+    expect(lowestOption({ total: 100 })).toBeNull();
+    expect(lowestOption({ ...quote, options: [{ id: "fourth" }] })).toBeNull();
+  });
+
+  it("words what's sent only once the options are known, never as one estimate", () => {
+    // From the quote page the options load first: until then there's nothing to word.
+    const { options: _options, ...noOptions } = quote;
+    expect(sendWords(noOptions, "range", settings)).toBeNull();
+    expect(sendWords(noOptions, "exact", settings)).toBeNull();
+    const ranged = sendWords(quote, "range", settings)!;
+    expect(ranged.range).toEqual(optionsRange(options.map((o) => optionBaseTotal(lines, o.id, opts)!), settings));
+    expect(ranged.range).not.toEqual(priceRange(shown, settings));
+    expect(ranged.message).toBe(rangeIntro(ranged.range, 3));
+    expect(ranged.message).toContain("depending on the option you pick");
+    expect(sendWords(quote, "exact", settings)!.message).toBe(optionsIntro(optionPrices(quote)));
+    // An estimate without options is worded as one.
+    const single = sendWords({ ...noOptions, options: [] }, "range", settings)!;
+    expect(single.range).toEqual(priceRange(shown, settings));
+    expect(single.message).toBe(rangeIntro(priceRange(shown, settings)));
+    expect(sendWords({ ...noOptions, options: [] }, "exact", settings)!.message).toBe("");
+  });
+
+  it("puts a tick on the range card at each option's price, cheapest first, with its tier word", () => {
+    const high = rangeNow(quote, settings).high;
+    const ticks = optionTicks(quote, high);
+    expect(ticks.map((t) => t.label)).toEqual(["Good", "Better", "Best"]);
+    expect(ticks.map((t) => t.total)).toEqual(optionPrices(quote).map((p) => p.total));
+    expect(ticks.every((t) => t.at > 0 && t.at < 1)).toBe(true);
+    expect(ticks[0]!.at).toBeLessThan(ticks[2]!.at);
+    // An option's own tier word, and its name when another has one of its own.
+    expect(optionTicks({ ...quote, options: options.map((o) => (o.id === "best" ? { ...o, tier: "Premium" } : o)) }, high).map((t) => t.label)).toEqual(["Architectural shingle", "Designer shingle", "Premium"]);
+  });
+
+  it("says a range sent across the options runs from the lowest option to the highest", () => {
+    const sent = { low: 18300, high: 34050 };
+    expect(rangeAcrossOptions(quote)).toBe(true);
+    expect(rangeWordsFor(sent, quote)).toBe("$18,300 to $34,050, from the lowest option to the highest");
+    // One estimate's range is just the range.
+    expect(rangeAcrossOptions({ total: shown })).toBe(false);
+    expect(rangeWordsFor(sent, { total: shown, options: [] })).toBe("$18,300 to $34,050");
+    // Only one option with a price yet: the range is that option's, so it doesn't say "options".
+    const onePriced = { ...quote, lines: lines.filter((l) => l.option_id === null || l.option_id === "good") };
+    expect(rangeAcrossOptions(onePriced)).toBe(false);
+    expect(rangeWordsFor(sent, onePriced)).toBe("$18,300 to $34,050");
   });
 });
 
@@ -234,6 +404,15 @@ describe("the job", () => {
     expect(depositLabel(5000, 20000)).toBe("Bill the 25% deposit, $5,000");
     expect(depositLabel(1000, 0)).toBe("Bill the deposit, $1,000");
   });
+
+  it("says which lines come along to the job: every one, or the option chosen and the ones on every option", () => {
+    expect(jobLinesText({ option_id: null, options: [] })).toBe("Every line comes along, so nothing gets typed twice.");
+    const options = [{ id: "good", name: "Architectural shingle" }, { id: "better", name: "Designer shingle " }];
+    expect(jobLinesText({ option_id: "better", options })).toBe("The lines for Designer shingle and the ones on every option come along, so nothing gets typed twice.");
+    expect(jobLinesText({ option_id: "good", options })).not.toContain("Every line");
+    // The chosen option isn't loaded (or is gone): still never "every line".
+    expect(jobLinesText({ option_id: "gone", options })).toBe("The lines they signed for come along, so nothing gets typed twice.");
+  });
 });
 
 describe("the team", () => {
@@ -262,36 +441,59 @@ describe("the team", () => {
 });
 
 describe("putting the package on", () => {
-  const quote = { id: "q1", roof_package_id: "p1", lines: [] as unknown[] };
+  const quote = { id: "q1", roof_package_id: "p1", lines: [] as Array<{ option_id: string | null }>, options: [] as Array<{ id: string }> };
   const ready = { editable: true, busy: false, hadLines: false };
 
   it("puts it on once, for a measured estimate with a package and no lines", () => {
-    expect(autoApplyKey(quote, takeoff, ready)).toBe("q1:p1:m1");
-    expect(autoApplyKey({ ...quote, lines: [{}] }, takeoff, ready)).toBeNull();
-    expect(autoApplyKey({ ...quote, roof_package_id: null }, takeoff, ready)).toBeNull();
-    expect(autoApplyKey(quote, null, ready)).toBeNull();
-    expect(autoApplyKey(quote, takeoff, { ...ready, editable: false })).toBeNull();
+    expect(autoFillKey(quote, takeoff, ready)).toBe("q1:p1:m1");
+    expect(autoFillKey({ ...quote, lines: [{ option_id: null }] }, takeoff, ready)).toBeNull();
+    expect(autoFillKey({ ...quote, roof_package_id: null }, takeoff, ready)).toBeNull();
+    expect(autoFillKey(quote, null, ready)).toBeNull();
+    expect(autoFillKey(quote, takeoff, { ...ready, editable: false })).toBeNull();
     // Not while edits are saving, and never for one whose lines were all taken off by hand.
-    expect(autoApplyKey(quote, takeoff, { ...ready, busy: true })).toBeNull();
-    expect(autoApplyKey(quote, takeoff, { ...ready, hadLines: true })).toBeNull();
+    expect(autoFillKey(quote, takeoff, { ...ready, busy: true })).toBeNull();
+    expect(autoFillKey(quote, takeoff, { ...ready, hadLines: true })).toBeNull();
     // A new measurement is a new try.
-    expect(autoApplyKey(quote, { id: "m2" }, ready)).toBe("q1:p1:m2");
+    expect(autoFillKey(quote, { id: "m2" }, ready)).toBe("q1:p1:m2");
   });
 
-  it("says what it left off", () => {
-    expect(skippedNote([])).toBeNull();
-    expect(skippedNote([{ name: "Steep roof charge", reason: "None on this roof" }])).toBe("Left off, with nothing to measure on this roof: Steep roof charge.");
-    expect(skippedNote([
-      { name: "Valley flashing", reason: "None on this roof" },
-      { name: "Ridge vent", reason: "None on this roof" },
-      { name: "Steep roof charge", reason: "None on this roof" },
-      { name: "Drip edge", reason: "eave_ft has no value" },
-    ])).toBe("Left off, with nothing to measure on this roof: Valley flashing, Ridge vent and Steep roof charge. Couldn't work out Drip edge from the roof. Check the measurements, then add it below.");
+  it("fills the options picked before the roof was measured, once for those options and that measurement", () => {
+    const offered = { ...quote, options: [{ id: "o3" }, { id: "o1" }, { id: "o2" }] };
+    expect(autoFillKey(offered, takeoff, ready)).toBe("q1:o1,o2,o3:m1");
+    // Lines on every option added by hand before measuring don't stop it.
+    expect(autoFillKey({ ...offered, lines: [{ option_id: null }] }, takeoff, ready)).toBe("q1:o1,o2,o3:m1");
+    expect(autoFillKey({ ...offered, lines: [{ option_id: "o1" }, { option_id: "o2" }, { option_id: "o3" }] }, takeoff, ready)).toBeNull();
+    expect(autoFillKey(offered, null, ready)).toBeNull();
+    expect(autoFillKey(offered, takeoff, { ...ready, busy: true })).toBeNull();
+    expect(autoFillKey({ ...offered, options: [{ id: "o1" }, { id: "o4" }] }, takeoff, ready)).toBe("q1:o1,o4:m1");
   });
 
-  it("puts the package and the roof under the document's address", () => {
-    expect(documentFacts("Architectural shingle", { roofing_squares: 22, roof_pitch: "6/12" })).toEqual(["Architectural shingle", "22.0 squares", "6/12 pitch"]);
-    expect(documentFacts(null, { roofing_squares: null, roof_pitch: null })).toEqual([]);
-    expect(documentFacts(" ", null)).toEqual([]);
+  it("never fills an option emptied by hand", () => {
+    const offered = { ...quote, options: [{ id: "o1" }, { id: "o2" }, { id: "o3" }] };
+    // Better's lines all taken off on the estimate step (Good's are there): no fill, here or on the next visit.
+    expect(autoFillKey({ ...offered, lines: [{ option_id: "o1" }, { option_id: null }] }, takeoff, ready)).toBeNull();
+    expect(autoFillKey({ ...offered, lines: [{ option_id: "o1" }] }, takeoff, { ...ready, hadLines: true })).toBeNull();
+    // Every option emptied on this screen: still none.
+    expect(autoFillKey(offered, takeoff, { ...ready, hadLines: true })).toBeNull();
+    // What counts as having had them: with options, an option's own line.
+    expect(hasFilledLines({ ...offered, lines: [{ option_id: null }] })).toBe(false);
+    expect(hasFilledLines({ ...offered, lines: [{ option_id: "o2" }] })).toBe(true);
+    expect(hasFilledLines({ ...quote, lines: [{ option_id: null }] })).toBe(true);
+    expect(hasFilledLines(quote)).toBe(false);
+  });
+
+  it("says which options have nothing of their own, and how they get priced", () => {
+    const opts = [{ id: "o1", name: "Architectural shingle" }, { id: "o2", name: "Designer shingle" }, { id: "o3", name: "Standing-seam metal" }];
+    expect(emptyOptions(opts, [{ option_id: "o1" }, { option_id: null }]).map((o) => o.id)).toEqual(["o2", "o3"]);
+    expect(emptyOptions(opts, [{ option_id: "o1" }, { option_id: "o2" }, { option_id: "o3" }])).toEqual([]);
+    // Before the roof is measured.
+    expect(emptyOptionsText(["Good", "Better", "Best"], 3, { measured: false, fromPackages: true })).toEqual({ text: "Each option is priced from its package once the roof is measured.", action: "Measure the roof" });
+    expect(emptyOptionsText(["Better", "Best"], 3, { measured: false, fromPackages: true })!.text).toBe("Better and Best are priced from their packages once the roof is measured.");
+    expect(emptyOptionsText(["Best"], 3, { measured: false, fromPackages: true })!.text).toBe("Best is priced from its package once the roof is measured.");
+    // Measured: priced from their packages when asked, or by hand when their packages are gone.
+    expect(emptyOptionsText(["Better"], 3, { measured: true, fromPackages: true })).toEqual({ text: "Better has nothing on it yet.", action: "Price it from its package" });
+    expect(emptyOptionsText(["Good", "Better", "Best"], 3, { measured: true, fromPackages: true })).toEqual({ text: "Good, Better and Best have nothing on them yet.", action: "Price them from their packages" });
+    expect(emptyOptionsText(["Best"], 3, { measured: true, fromPackages: false })).toEqual({ text: "Best has nothing on it yet. Add its lines from your price list.", action: null });
+    expect(emptyOptionsText([], 3, { measured: true, fromPackages: true })).toBeNull();
   });
 });

@@ -2,9 +2,11 @@
  * The crew's day on the phone, for job sites with no signal. What My day and a visit show is kept
  * in this browser's storage, and field actions (on my way, start, complete, checklist, notes) made
  * offline wait in order and go out when the connection is back, even if the app was closed in
- * between. Office screens aren't kept: they hold prices and client details that don't belong on a
- * crew phone. Cleared when the person signs out; when the app signs them out (an expired sign-in),
- * only their unsent field actions are kept, for when they sign back in.
+ * between. Those screens are kept for crews and subs (OFFLINE_LEVELS), and a sub's My jobs too (only
+ * to read: answering an offer needs signal). Office screens aren't kept:
+ * they hold prices and client details that don't belong on a crew phone. Cleared when the person signs
+ * out; when the app signs them out (an expired sign-in), only their unsent field actions are kept,
+ * for when they sign back in.
  *
  * They go out while Crewtavo is on the screen: as it opens, when the connection is back, and when it
  * comes back on the screen. Put away, one already waiting there waits (React Query carries on with a
@@ -13,6 +15,7 @@
  * worker). Where the phone has Background Sync (Android), the service worker says how many are
  * waiting once there's signal (tellServiceWorker).
  */
+import type { Role } from "@crewtavo/core/roles";
 import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type MutationFunction, type QueryClient } from "@tanstack/react-query";
 import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } from "./errors";
 
@@ -21,8 +24,11 @@ import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } 
 if (typeof navigator !== "undefined" && navigator.onLine === false) onlineManager.setOnline(false);
 
 const VERSION = 1;
+/** Whose My day is kept on the phone: the people out on job sites, subs included. */
+export const OFFLINE_LEVELS: readonly Role[] = ["crew_lead", "field_crew", "subcontractor"];
+export const keepsDayOffline = (role: string) => (OFFLINE_LEVELS as readonly string[]).includes(role);
 /** Queries worth having with no signal. */
-const KEEP = new Set(["field", "field-visit", "checklist", "running-timer", "material-choices", "my-crews", "dispatch-options", "crew-clock", "job"]);
+const KEEP = new Set(["field", "field-visit", "field-jobs", "checklist", "running-timer", "material-choices", "my-crews", "dispatch-options", "crew-clock", "job"]);
 /** Mutations that can wait for a connection (their functions are registered with setMutationDefaults). */
 export const OFFLINE_MUTATIONS = new Set(["visit-status", "checklist-save", "visit-notes"]);
 /** Field actions run one at a time, in the order they were made. */

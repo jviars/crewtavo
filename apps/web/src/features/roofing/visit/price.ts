@@ -3,11 +3,15 @@
  * the estimate's lines come to, the price the salesperson sets with the homeowner (before tax) and
  * what the homeowner pays at it, where that sits on the range they were sent, what changed since
  * the range, what's still missing before signing, and the sentences on the signed screen.
+ *
+ * On an estimate with options, the price is the option they chose (quotes.option_id): its lines and
+ * the shared ones, and a price set on site is "Price adjustment" lines on that option alone, above
+ * or below what it comes to less the office's discount, as the server books it (services/
+ * roofPackages.ts setSitePrice; core siteSubtotal, sitePriceAdjustment and siteAdjustmentLines).
  */
-import { isSiteAdjustment, lineChanges, sitePriceAdjustment, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
-import { lineTotal, quoteTotals, toCents } from "@crewtavo/core/money";
+import { isSiteAdjustment, lineChanges, SITE_ADJUSTMENT_NAME, siteAdjustmentLines, sitePriceAdjustment, siteSubtotal, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
+import { lineTotal, quoteTotals, toCents, type Amount } from "@crewtavo/core/money";
 import { formatNumber } from "@/lib/format";
-import type { TakeoffRow } from "../../paving/data";
 import { counts, money } from "../estimate/rows";
 import type { EstimateLine, EstimateQuote } from "../estimate/types";
 
@@ -17,27 +21,34 @@ export const MAX_SITE_PRICE = 10_000_000;
 /** "Round to" goes down to a whole hundred. */
 export const ROUND_TO = 100;
 
-type PriceLine = Pick<EstimateLine, "name" | "service_id" | "formula" | "quantity" | "unit" | "unit_price" | "taxable" | "optional" | "selected">;
-type PriceQuote = Pick<EstimateQuote, "tax_rate" | "discount_amount" | "promo_code_id" | "priced_on_site_at"> & { lines: readonly PriceLine[] };
+type PriceLine = Pick<EstimateLine, "option_id" | "name" | "service_id" | "formula" | "quantity" | "unit" | "unit_price" | "taxable" | "optional" | "selected">;
+/** The quote as the price reads it; `option_id` is the option they chose (none without options). */
+type PriceQuote = Pick<EstimateQuote, "tax_rate" | "discount_amount" | "promo_code_id" | "priced_on_site_at"> & { option_id?: string | null; lines: readonly PriceLine[] };
 
 const sumCents = (lines: readonly PriceLine[]) => lines.reduce((sum, l) => sum + toCents(lineTotal(l.quantity, l.unit_price)), 0);
+/** The option the price is for: the one chosen, or none for an estimate without options. */
+const chosen = (quote: Pick<PriceQuote, "option_id">) => quote.option_id ?? null;
 
-/** The estimate's own lines: everything that counts, without the price adjustment set on site. */
-export const estimateLines = <L extends PriceLine>(lines: readonly L[]): L[] => lines.filter((l) => counts(l) && !isSiteAdjustment(l));
+/** The estimate's own lines: everything that counts with `optionId` chosen, without the price adjustment set on site. */
+export const estimateLines = <L extends PriceLine>(lines: readonly L[], optionId: string | null = null): L[] => lines.filter((l) => counts(l, optionId) && !isSiteAdjustment(l));
 
-/** What the estimate's lines come to, before tax and any discount. */
-export const estimateSubtotal = (lines: readonly PriceLine[]) => sumCents(estimateLines(lines)) / 100;
+/** What the estimate's lines come to with `optionId` chosen, before tax and any discount (core siteSubtotal). */
+export const estimateSubtotal = (lines: readonly PriceLine[], optionId: string | null = null) => sumCents(estimateLines(lines, optionId)) / 100;
+
+/** The price adjustment lines set on site that count with the option chosen, in cents (below zero on an option priced lower). */
+const adjustmentCents = (quote: PriceQuote) => sumCents(quote.lines.filter((l) => counts(l, chosen(quote)) && isSiteAdjustment(l)));
 
 /**
  * What's already on the quote beside its lines, in cents (less than 0 is money off): a promo code's
  * discount, or, until a price is set on site, the discount the office gave on the quote (and any
  * price adjustment line). Once a price was set on site, that price is where the screen starts
- * instead (savedSitePrice), so this is only the promo code's.
+ * instead (savedSitePrice), so this is only the promo code's, or with options the office's discount.
  */
 function keptCents(quote: PriceQuote): number {
   if (quote.promo_code_id) return -toCents(quote.discount_amount);
-  if (quote.priced_on_site_at) return 0;
-  return sumCents(quote.lines.filter((l) => counts(l) && isSiteAdjustment(l))) - toCents(quote.discount_amount);
+  // With options a price set on site is a line, so the quote's discount is always the office's.
+  if (quote.priced_on_site_at) return chosen(quote) !== null ? -toCents(quote.discount_amount) : 0;
+  return adjustmentCents(quote) - toCents(quote.discount_amount);
 }
 
 /**
@@ -45,21 +56,22 @@ function keptCents(quote: PriceQuote): number {
  * gave on the quote. It follows the lines, so work added on site is charged for. Before tax.
  */
 export function estimatePrice(quote: PriceQuote): number {
-  return Math.max(0, sumCents(estimateLines(quote.lines)) + keptCents(quote)) / 100;
+  return Math.max(0, sumCents(estimateLines(quote.lines, chosen(quote))) + keptCents(quote)) / 100;
 }
 
 /**
- * The price set on site last time (Review and sign saves it as an adjustment line or a discount).
- * The screen starts from it, so going on doesn't quietly drop it. Null when no price was set on
- * site (an office discount isn't one: the price follows the lines, less it), or a promo code sets
- * the discount.
+ * The price set on site last time (Review and sign saves it as an adjustment line or a discount;
+ * with options, a line on the option chosen). The screen starts from it, so going on doesn't quietly
+ * drop it. Null when no price was set on site (an office discount isn't one: the price follows the
+ * lines, less it), or a promo code sets the discount. Choosing another option clears it (the
+ * database takes the price off with the option it was set for).
  */
 export function savedSitePrice(quote: PriceQuote): number | null {
   if (quote.promo_code_id || !quote.priced_on_site_at) return null;
-  const extra = sumCents(quote.lines.filter((l) => counts(l) && isSiteAdjustment(l)));
+  const extra = adjustmentCents(quote);
   const discount = toCents(quote.discount_amount);
   if (!extra && !discount) return null;
-  return Math.max(0, sumCents(estimateLines(quote.lines)) + extra - discount) / 100;
+  return Math.max(0, sumCents(estimateLines(quote.lines, chosen(quote))) + extra - discount) / 100;
 }
 
 /**
@@ -85,15 +97,78 @@ export function keptNote(quote: PriceQuote): string | null {
 /**
  * What the quote comes to at a price set before tax (null: the estimate's price), worked out the way
  * the server and the database will: below the estimate's lines it's a discount, above them a taxable
- * price adjustment line. A promo code keeps its own discount.
+ * price adjustment line. With options it's always price adjustment lines, on the option chosen, of
+ * the price less what the option comes to after the office's discount (which stays): below the
+ * estimate a taxed and an untaxed one, as a discount comes off (core siteAdjustmentLines, which the
+ * server books). A promo code keeps its own discount.
  */
 export function totalsAt(quote: PriceQuote, price: number | null): { subtotal: number; discount: number; tax: number; total: number } {
-  const lines = estimateLines(quote.lines);
+  const optionId = chosen(quote);
+  const lines = estimateLines(quote.lines, optionId);
   if (quote.promo_code_id) return quoteTotals([...lines], { taxRate: quote.tax_rate, discountAmount: quote.discount_amount });
-  const { discount, extra } = sitePriceAdjustment(estimateSubtotal(quote.lines), price ?? estimatePrice(quote));
+  const target = price ?? estimatePrice(quote);
+  if (optionId !== null) {
+    const { extra } = sitePriceAdjustment(optionNet(quote), target, { onOption: true });
+    const priced = [...lines, ...siteAdjustmentLines(extra, lines).map((l) => ({ quantity: 1, ...l }))];
+    return quoteTotals(priced, { taxRate: quote.tax_rate, discountAmount: quote.discount_amount });
+  }
+  const { discount, extra } = sitePriceAdjustment(estimateSubtotal(quote.lines), target);
   const priced = extra > 0 ? [...lines, { quantity: 1, unit_price: extra, taxable: true }] : [...lines];
   return quoteTotals(priced, { taxRate: quote.tax_rate, discountAmount: discount });
 }
+
+/** A line as the paper beside the visit prints it. */
+export type PaperLine = Pick<EstimateLine, "id" | "option_id" | "service_id" | "name" | "description" | "quantity" | "unit" | "unit_price" | "taxable" | "optional" | "selected" | "formula" | "sort">;
+
+/**
+ * The estimate's lines and discount as they will be once Review and sign saves the price set here
+ * (null: the estimate's), for the paper beside the visit: the earlier price adjustment swapped for
+ * the new one, booked as the server books it (services/roofPackages.ts setSitePrice). Below the
+ * estimate it's a discount, above it a price adjustment line; with options it's always lines on the
+ * option chosen, and the office's discount stays. A promo code keeps its own discount, so the
+ * estimate is as it is.
+ */
+export function sitePriced<L extends PaperLine>(quote: Omit<PriceQuote, "lines"> & { lines: readonly L[] }, override: number | null): { lines: Array<L | PaperLine>; discount: number } {
+  if (quote.promo_code_id) return { lines: [...quote.lines], discount: Number(quote.discount_amount) };
+  const shown = chosen(quote);
+  const onOption = shown !== null;
+  const price = priceToSave(quote, override);
+  const subtotal = siteSubtotal(quote.lines, shown);
+  const net = onOption ? (toCents(subtotal) - toCents(quote.discount_amount)) / 100 : subtotal;
+  const { discount, extra } = price === null ? { discount: 0, extra: 0 } : sitePriceAdjustment(net, price, { onOption });
+  const work = quote.lines.filter((l) => counts(l, shown) && !isSiteAdjustment(l));
+  const parts = onOption ? siteAdjustmentLines(extra, work) : extra > 0 ? [{ unit_price: extra, taxable: true }] : [];
+  const sort = quote.lines.reduce((max, l) => Math.max(max, l.sort), 0) + 1;
+  const kept = quote.lines.filter((l) => !(isSiteAdjustment(l) && (l.option_id === null || l.option_id === shown)));
+  const added: PaperLine[] = parts.map((part, i) => ({
+    id: `site-price-${i}`,
+    option_id: shown,
+    service_id: null,
+    name: SITE_ADJUSTMENT_NAME,
+    description: null,
+    quantity: 1,
+    unit: "ea",
+    unit_price: part.unit_price,
+    taxable: part.taxable,
+    optional: false,
+    selected: true,
+    formula: null,
+    sort: sort + i,
+  }));
+  return { lines: [...kept, ...added], discount: onOption ? Number(quote.discount_amount) : discount };
+}
+
+/**
+ * What the option chosen comes to before tax, less the office's discount and without a price set on
+ * site: what the server measures a price set on an option against (siteSubtotal less discount_amount).
+ */
+export const optionNet = (quote: PriceQuote) => (toCents(estimateSubtotal(quote.lines, chosen(quote))) - toCents(quote.discount_amount)) / 100;
+
+/**
+ * The key the price typed on the iPad is kept under for the tab: the quote's, and with options the
+ * option's too, so choosing another option starts from its own price.
+ */
+export const keptPriceKey = (quoteId: string, optionId: string | null) => `crewtavo.site-price.${quoteId}${optionId ? `.${optionId}` : ""}`;
 
 /** An amount rounded down to a whole `step` ($19,524 → $19,500). */
 export const roundDown = (amount: number, step = ROUND_TO) => (Math.floor(toCents(amount) / (step * 100)) * step * 100) / 100;
@@ -106,18 +181,31 @@ export function parsePrice(text: string): number | null {
   return value > 0 && value <= MAX_SITE_PRICE ? value : null;
 }
 
+/** The most of one thing a line can be set to by hand (LineEditor). */
+export const MAX_QUANTITY = 100_000;
+
+/** How many of something, as typed ("3", "1,200", "2.5"), to a thousandth; null when it isn't one above zero. */
+export function readQuantity(text: string): number | null {
+  const clean = text.replace(/[\s,]/g, "");
+  if (!/^\d*(\.\d{0,3})?$/.test(clean) || !/\d/.test(clean)) return null;
+  const n = Math.round(Number(clean) * 1000) / 1000;
+  return n > 0 && n <= MAX_QUANTITY ? n : null;
+}
+
 /** A price in the box: "19,524", or "19,524.50" when there are cents. */
 export const priceInputText = (n: number) => formatNumber(n, toCents(n) % 100 === 0 ? 0 : 2);
 
 /**
  * What the set price does to the estimate, in a line under the box: the difference from what its
  * lines come to (estimateSubtotal), which is what the document shows as a discount or an adjustment.
+ * On an option (`onOption`), it's the difference from what the option comes to after the office's
+ * `discount`, and either way it's a price adjustment line.
  */
-export function adjustmentNote(subtotal: number, price: number | null): string | null {
+export function adjustmentNote(subtotal: number, price: number | null, { onOption = false, discount = 0 }: { onOption?: boolean; discount?: Amount } = {}): string | null {
   if (price === null) return null;
-  const diff = toCents(price) - toCents(subtotal);
+  const diff = toCents(price) - toCents(subtotal) + (onOption ? toCents(discount) : 0);
   if (diff > 0) return `The extra ${money(diff / 100)} shows on the estimate as a price adjustment.`;
-  if (diff < 0) return `The ${money(-diff / 100)} off shows on the estimate as a discount.`;
+  if (diff < 0) return `The ${money(-diff / 100)} off shows on the estimate as ${onOption ? "a price adjustment" : "a discount"}.`;
   return null;
 }
 
@@ -145,14 +233,16 @@ export function shortDay(iso: string, timeZone: string, now: Date = new Date()):
 }
 
 /**
- * What the salesperson changed since the range went out. The price adjustment isn't a change to the
- * work: it's the price, shown on its own.
+ * What the salesperson changed since the range went out, on the option being looked at (null without
+ * options) and the shared lines. The price adjustment isn't a change to the work: it's the price,
+ * shown on its own.
  */
-export function visitChanges(rangeLines: readonly SnapshotLine[] | null | undefined, lines: ReadonlyArray<PriceLine & { id: string }>): LineChange[] | null {
+export function visitChanges(rangeLines: readonly SnapshotLine[] | null | undefined, lines: ReadonlyArray<PriceLine & { id: string }>, optionId: string | null = null): LineChange[] | null {
   if (!rangeLines) return null;
   return lineChanges(
     rangeLines.filter((s) => !isSiteAdjustment(s)),
     lines.filter((l) => !isSiteAdjustment(l)),
+    optionId,
   );
 }
 
@@ -166,20 +256,6 @@ export function signBlocker(s: { name: string; signature: string | null; company
   if (s.name.trim().length < 2) return "Type your name to finish";
   if (s.companyNeeded && !s.companySignature) return `Sign for ${s.company} to finish`;
   return null;
-}
-
-/**
- * The strip under the address on the document: the package, the roof's squares and its pitch,
- * worded as the homeowner's link words them (hub/document.ts), so both copies read the same.
- */
-export function roofFacts(packageName: string | null | undefined, takeoff: Pick<TakeoffRow, "roofing_squares" | "roof_pitch"> | null | undefined): string[] {
-  const facts = packageName?.trim() ? [packageName.trim()] : [];
-  const squares = takeoff?.roofing_squares == null ? 0 : Number(takeoff.roofing_squares);
-  if (squares > 0) {
-    facts.push(`${formatNumber(squares, 1)} squares`);
-    if (takeoff?.roof_pitch) facts.push(`${takeoff.roof_pitch} pitch`);
-  }
-  return facts;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,19 +1,22 @@
 /**
- * Sending quotes and invoices to clients, starting a quote from a request, invoicing many jobs and
- * payment reminders: the steps with side effects (email, texts, Stripe). The sales routes
- * (routes/sales.ts) and AI assistants' tools (assistant-tools/quotes.ts, invoices.ts) both use
- * these, with the person's own client.
+ * Sending quotes and invoices to clients, starting a quote from a request, turning a quote into a
+ * job, invoicing many jobs and payment reminders: the steps with side effects (email, texts, Stripe).
+ * The sales routes (routes/sales.ts) and AI assistants' tools (assistant-tools/quotes.ts, invoices.ts)
+ * both use these, with the person's own client. Also how a quote that offers options is priced before
+ * the client chooses, and the most its deposit can be.
  */
-import { inRangeMode } from "@crewtavo/core/estimates";
+import { hidesExactPrice, inRangeMode, optionsIntroText, rangeIntroText } from "@crewtavo/core/estimates";
+import { optionBaseTotal, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { z } from "zod";
 import type { Env } from "../env";
 import { syncStripeInvoice } from "../integrations/stripe";
 import { firstName, isEmail, renderEmail } from "../lib/email";
-import { dbError, HttpError, must } from "../lib/http";
+import { asJson, dbError, HttpError, must } from "../lib/http";
 import { clientLink } from "../lib/links";
 import { sendEmail, sendSms } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 import { companyAddress } from "./automations";
+import { loadOptions, manualApproval } from "./contracts";
 import { logoImage } from "./logo";
 
 /** Who's sending, from where: the person's client, their company, and the address client links use. */
@@ -43,13 +46,96 @@ export interface DeliverDefaults {
   subject?: string;
 }
 
-/** The words a price range goes out with when the person didn't write their own, in whole dollars. */
-export function rangeMessage(company: { name: string; currency: string | null }, low: number, high: number): Required<DeliverDefaults> {
+/**
+ * The words a price range goes out with when the person didn't write their own, in whole dollars
+ * (core rangeIntroText, the same words the office's send dialog shows). With two or three options
+ * (`optionCount`) the range runs across them.
+ */
+export function rangeMessage(company: { name: string; currency: string | null }, low: number, high: number, optionCount = 0): Required<DeliverDefaults> {
   const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", maximumFractionDigits: 0 });
   return {
-    intro: `Thanks for having us look at your roof. From our measurements, your new roof will cost between ${money.format(low)} and ${money.format(high)}. You can see what's included and let us know when you'd like us to come out:`,
+    intro: rangeIntroText(money.format(low), money.format(high), optionCount),
     subject: `Your roof estimate from ${company.name}`,
   };
+}
+
+/**
+ * Each option's price before its add-ons, for the options that have one (core optionBaseTotal): what
+ * the Client Hub shows on the option cards and what the price range is made from. An option with no
+ * lines of its own yet has no price, so it isn't counted or quoted.
+ */
+export function optionPrices(quote: {
+  tax_rate: number;
+  discount_amount: number;
+  promo: TotalsPromo | null;
+  lines: readonly OptionLine[];
+  options: ReadonlyArray<{ id: string }>;
+}): number[] {
+  const opts = { taxRate: quote.tax_rate, discountAmount: quote.discount_amount, promo: quote.promo };
+  return quote.options.map((o) => optionBaseTotal(quote.lines, o.id, opts)).filter((total): total is number => total !== null);
+}
+
+/**
+ * The words a quote that offers options goes out with when the person didn't write their own (core
+ * optionsIntroText): how many options have a price (`prices`, from optionPrices) and the lowest of
+ * them. Null with fewer than two, when the quote's own total says it.
+ */
+export function optionsMessage(currency: string | null, prices: readonly number[]): DeliverDefaults | null {
+  if (prices.length < 2) return null;
+  return { intro: optionsIntroText(prices.length, new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Math.min(...prices))) };
+}
+
+/**
+ * What a quote that offers options costs before the client chooses: how many options have a price
+ * and the lowest of them (optionPrices), as its email said it (optionsMessage), never the total of
+ * whichever option is shown. Null once it's signed (its total is the option they chose), while its
+ * exact price is hidden behind a range (the range says it), and with fewer than two priced options
+ * (its own total says it, as the email did). The Client Hub's home page and automations' {{total}}
+ * say it this way.
+ */
+export function optionsFrom(quote: Parameters<typeof optionPrices>[0] & { status: string; range_low: Amount; priced_on_site_at: string | null; exact_sent_at?: string | null }): { count: number; from: number } | null {
+  if (quote.status === "approved" || quote.status === "converted" || hidesExactPrice(quote)) return null;
+  const prices = optionPrices(quote);
+  return prices.length >= 2 ? { count: prices.length, from: Math.min(...prices) } : null;
+}
+
+/**
+ * The most a quote's deposit can be, as the office's deposit input caps it (web QuotePage
+ * depositCap): the cheapest option's price before its add-ons, so it's never more than they'd pay
+ * whichever option they choose; the quote's total without options. Null while there's no price to
+ * hold it to yet: options none of which has lines of its own (offered before the roof was measured),
+ * or a quote with no lines.
+ */
+export function depositCap(quote: Parameters<typeof optionPrices>[0] & { total: Amount }): number | null {
+  const prices = optionPrices(quote);
+  if (prices.length) return Math.min(...prices);
+  return quote.options.length || !quote.lines.length ? null : Number(quote.total ?? 0);
+}
+
+/**
+ * Keeps the deposit asked for within depositCap once the estimate's price can have gone down (a
+ * cheaper option offered, options filled in once measured, lines or the discount changed by an
+ * assistant): a deposit larger than that is lowered to it, so the Client Hub never asks for more
+ * than the price they choose, the contract's {Deposit} never says more than its {Total}, and billing
+ * the deposit works once it's a job. Returns the new deposit, or null when it was within it.
+ */
+export async function keepDepositInCap(db: Db, companyId: string, quoteId: string): Promise<number | null> {
+  const quote = must(
+    await db
+      .from("quotes")
+      .select("deposit_amount, total, tax_rate, discount_amount, promo:promo_codes(kind, value), lines:quote_line_items(option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)")
+      .eq("id", quoteId)
+      .eq("company_id", companyId)
+      .maybeSingle(),
+    "Quote not found.",
+  );
+  const cap = depositCap(quote);
+  if (cap === null || toCents(quote.deposit_amount) <= Math.max(toCents(cap), 0)) return null;
+  const lowered = Math.max(toCents(cap), 0) / 100;
+  // Only while it's still the deposit read, so one typed meanwhile on another screen stays.
+  const { error } = await db.from("quotes").update({ deposit_amount: lowered }).eq("id", quoteId).eq("company_id", companyId).eq("deposit_amount", quote.deposit_amount);
+  if (error) throw dbError(error);
+  return lowered;
 }
 
 /** Email or text the client their link to a quote or invoice (or just make the link), and log it on their timeline. */
@@ -113,13 +199,16 @@ export async function quoteFromRequest(s: SalesScope, requestId: string) {
 /**
  * Send a quote (or take its link to share): it's then with the client. A roof estimate that's out as
  * a price range goes out with the range's words, so the message never gives away the exact total
- * its link hides.
+ * its link hides. A quote that offers options says so, with the lowest price, rather than the total
+ * of whichever option is shown.
  */
 export async function sendQuote(s: SalesScope, id: string, body: SendBody) {
   const quote = must(
     await s.db
       .from("quotes")
-      .select("id, number, status, total, client_id, range_low, range_high, priced_on_site_at, exact_sent_at, client:clients(display_name, email, phone), lines:quote_line_items(id)")
+      .select(
+        "id, number, status, total, tax_rate, discount_amount, client_id, range_low, range_high, priced_on_site_at, exact_sent_at, client:clients(display_name, email, phone), promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)",
+      )
       .eq("id", id)
       .eq("company_id", s.companyId)
       .maybeSingle(),
@@ -128,9 +217,10 @@ export async function sendQuote(s: SalesScope, id: string, body: SendBody) {
   if (["converted", "lost", "archived"].includes(quote.status)) throw new HttpError(400, `This quote is ${quote.status}, so it can't be sent.`);
   if (!quote.lines.length) throw new HttpError(400, "Add at least one line item before sending.");
   let defaults: DeliverDefaults = {};
-  if (inRangeMode(quote)) {
+  const prices = optionPrices(quote);
+  if (inRangeMode(quote) || prices.length >= 2) {
     const company = must(await s.db.from("companies").select("name, currency").eq("id", s.companyId).maybeSingle());
-    defaults = rangeMessage(company, Number(quote.range_low), Number(quote.range_high));
+    defaults = inRangeMode(quote) ? rangeMessage(company, Number(quote.range_low), Number(quote.range_high), prices.length) : (optionsMessage(company.currency, prices) ?? {});
   }
   const result = await deliver(s, "quote", quote, body, defaults);
   // Sent, or the office took the link to share themselves: the quote is now with the client.
@@ -138,6 +228,37 @@ export async function sendQuote(s: SalesScope, id: string, body: SendBody) {
     await s.db.from("quotes").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", id).in("status", ["draft", "changes_requested"]);
   }
   return result;
+}
+
+/** Quotes the client hasn't answered yet: what convertQuote keeps the contract of first. */
+const UNSIGNED = ["draft", "sent", "changes_requested"];
+
+/**
+ * Turn a quote into a job (convert_quote_to_job), as the office's "Convert to job" and "Create the
+ * job now" and the assistants do it. A quote the client never signed (the office heard yes another
+ * way and converts it straight from sent) first gets the approval "Mark approved" would keep
+ * (contracts.ts manualApproval, `by` its name): the template and the contract it was sent with,
+ * filled in, so its signed copy prints those words and not today's. Only the approval is written,
+ * not the status, so a change order still joins its job in the database's one step; and only while
+ * it's unsigned, so a signature that came in meanwhile keeps its own. One that offers options is
+ * approved with the option chosen first (the database refuses it otherwise). Returns the job's id.
+ */
+export async function convertQuote(s: Pick<SalesScope, "db" | "companyId">, quoteId: string, by: string): Promise<string> {
+  const quote = must(await s.db.from("quotes").select("id, status, approval").eq("id", quoteId).eq("company_id", s.companyId).maybeSingle(), "Quote not found.");
+  const before = quote.approval;
+  const kept = UNSIGNED.includes(quote.status) && !(await loadOptions(s.db, s.companyId, quoteId)).length;
+  if (kept) {
+    const approval = await manualApproval(s.db, s.companyId, quoteId, { name: by, optionId: null });
+    const { error } = await s.db.from("quotes").update({ approval: asJson(approval) }).eq("id", quoteId).eq("company_id", s.companyId).in("status", UNSIGNED);
+    if (error) throw dbError(error);
+  }
+  const { data, error } = await s.db.rpc("convert_quote_to_job", { p_quote: quoteId });
+  if (error) {
+    // Not a job after all: it's still unsigned, so it goes back to the approval it had.
+    if (kept) await s.db.from("quotes").update({ approval: before }).eq("id", quoteId).eq("company_id", s.companyId).in("status", UNSIGNED);
+    throw dbError(error);
+  }
+  return data;
 }
 
 /** Send an invoice (or take its link): a draft becomes sent, and goes to Stripe so the Pay button is ready. */

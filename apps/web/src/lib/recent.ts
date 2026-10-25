@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 
 export interface RecentItem {
-  kind: "client" | "request" | "quote" | "job" | "invoice" | "equipment";
+  kind: "client" | "request" | "quote" | "job" | "invoice" | "equipment" | "sub";
   id: string;
   title: string;
   subtitle?: string;

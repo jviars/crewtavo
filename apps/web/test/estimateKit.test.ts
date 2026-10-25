@@ -1,6 +1,7 @@
 import type { Section } from "@crewtavo/core/geo";
 import { lineChanges, snapshotLines, SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import type { LineMaterials } from "@crewtavo/core/materials";
+import { optionTotals, quoteTotals } from "@crewtavo/core/money";
 import { MutationObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { takeoffVariables, type TakeoffRow } from "../src/features/paving/data";
@@ -12,16 +13,21 @@ import {
   changesTotal,
   countLabel,
   countNoun,
+  counts,
+  destinationText,
   estimateFigures,
   estimateRows,
   isPendingLine,
   lessOf,
+  lineDestination,
   lineDetail,
   lineKind,
   measuredInto,
   measuredWhat,
   moreOf,
   nothingToMeasure,
+  ownServices,
+  packageServices,
   quickAddPrice,
   rangePosition,
   removedLine,
@@ -39,6 +45,7 @@ import type { EstimateLine, EstimateService } from "../src/features/roofing/esti
 let n = 0;
 const line = (patch: Partial<EstimateLine>): EstimateLine => ({
   id: `l${++n}`,
+  option_id: null,
   service_id: `s${n}`,
   name: "Line",
   description: null,
@@ -195,6 +202,13 @@ describe("the rows", () => {
     expect(other[1]!.less).toBeNull();
   });
 
+  it("shows a price set below the estimate on an option as one row, though it's booked as a taxed and an untaxed line", () => {
+    const taxed = line({ id: "taxed", option_id: "o1", name: SITE_ADJUSTMENT_NAME, service_id: null, unit_price: -952.38, sort: 8 });
+    const untaxed = line({ id: "untaxed", option_id: "o1", name: SITE_ADJUSTMENT_NAME, service_id: null, unit_price: -47.62, taxable: false, sort: 9 });
+    const { other } = estimateRows([{ ...boots, option_id: null }, taxed, untaxed], { optionId: "o1" });
+    expect(other.map((r) => [r.key, r.kind, r.amount])).toEqual([["boots", "count", 135], ["taxed", "adjustment", -1000]]);
+  });
+
   it("tags what changed since the range, and puts a line taken off back where it was", () => {
     const range = snapshotLines(whitfield);
     const chimney = line({ id: "chimney", name: "Chimney flashing", unit: "ea", quantity: 1, unit_price: 650, sort: 7 });
@@ -292,7 +306,7 @@ describe("a line just saved", () => {
     expect(measuredInto(vent, { field: "quantity", value: 42 }).quantity).toBe(42);
     expect(measuredInto(line({ formula: "steep_squares * 25", quantity: 1, unit_price: 0 }), { field: "unit_price", value: 112.505 }).unit_price).toBe(112.51);
     // Nothing measured (a put-back line the roof couldn't work out) keeps what it had.
-    expect(measuredInto(vent, { error: "No ridge" })).toBe(vent);
+    expect(measuredInto(vent, { field: "quantity" })).toBe(vent);
     expect(measuredInto(vent, null)).toBe(vent);
   });
 
@@ -406,6 +420,111 @@ describe("the office's numbers", () => {
   it("shows nothing when no cost is known", () => {
     expect(estimateFigures({ subtotal: 500, discount_amount: 0, lines: [line({ unit_price: 500 })] })).toBeNull();
     expect(estimateFigures({ subtotal: 0, discount_amount: 0, lines: [] })).toBeNull();
+  });
+});
+
+describe("an estimate that offers options", () => {
+  // Good is shown: its roof is selected. Better's and Best's are kept unselected by the database,
+  // and Better's ridge vent is an add-on nobody picked. The tear-off, drip edge, boots and dumpster are on every option.
+  const good = line({ id: "good", option_id: "o-good", name: "Architectural shingle roof", formula: "squares", unit: "square", quantity: 24.2, unit_price: 560, unit_cost: 330, sort: 1 });
+  const better = line({ id: "better", option_id: "o-better", name: "Designer shingle roof", formula: "squares", unit: "square", quantity: 24.2, unit_price: 690, unit_cost: 410, selected: false, sort: 1 });
+  const vent = line({ id: "vent", option_id: "o-better", name: "Ridge vent", unit: "ea", quantity: 1, unit_price: 380, unit_cost: 150, optional: true, selected: false, sort: 7 });
+  const best = line({ id: "best", option_id: "o-best", name: "Standing-seam metal roof", formula: "squares", unit: "square", quantity: 24.2, unit_price: 1150, unit_cost: 700, selected: false, sort: 1 });
+  const lines = [good, better, vent, best, tearoff, drip, boots, dumpster];
+  const opts = { taxRate: 0.07, discountAmount: 250, promo: null };
+  // What the database has with Good shown: only Good's lines and the shared ones are selected.
+  const shown = quoteTotals(lines, opts);
+  const quote = { option_id: "o-good", subtotal: shown.subtotal, discount_amount: 250, tax_rate: 0.07, promo: null, lines };
+
+  it("counts the shared lines on every option, and an option's own lines only on it", () => {
+    expect(counts(tearoff, "o-better")).toBe(true);
+    // Better's roof isn't selected while Good is shown, but it's what Better is made of.
+    expect(counts(better, "o-better")).toBe(true);
+    expect(counts(better, "o-good")).toBe(false);
+    expect(counts(vent, "o-better")).toBe(false);
+    expect(counts(good, null)).toBe(false);
+  });
+
+  it("lists the option looked at with the shared lines, and keeps another option's lines taken off to it", () => {
+    const rows = estimateRows(lines, { optionId: "o-better" });
+    expect([...rows.roof, ...rows.other].map((r) => r.key)).toEqual(["better", "tearoff", "drip", "boots", "dumpster"]);
+    const takenOff = removedLine(good);
+    expect(takenOff.option_id).toBe("o-good");
+    expect(estimateRows(lines.filter((l) => l !== good), { optionId: "o-better", removed: [takenOff] }).roof.map((r) => r.key)).toEqual(["better", "tearoff", "drip"]);
+    expect(estimateRows(lines.filter((l) => l !== good), { optionId: "o-good", removed: [takenOff] }).roof.map((r) => r.key)).toEqual(["removed:good", "tearoff", "drip"]);
+  });
+
+  it("works out the numbers for the option looked at, as the database will price it once shown", () => {
+    const f = estimateFigures(quote, "o-better")!;
+    const totals = optionTotals(lines, "o-better", "o-good", opts);
+    expect(f.price).toBe(totals.subtotal - totals.discount);
+    // Better's roof and the shared lines; not the ridge vent nobody picked.
+    expect(f.cost).toBe(9922 + 990 + 336 + 45 + 325);
+    // The option shown is the quote's own saved totals.
+    expect(estimateFigures(quote)!.price).toBe(shown.subtotal - 250);
+    expect(estimateFigures(quote, "o-good")!.cost).toBe(7986 + 990 + 336 + 45 + 325);
+  });
+
+  it("keeps the totals on screen to the option shown while lines change", () => {
+    const after = withLines({ lines, tax_rate: 0.07, discount_amount: 250, promo_code_id: null, subtotal: 0, tax_amount: 0, total: 0 }, lines.map((l) => (l.id === "boots" ? { ...l, quantity: 4 } : l)));
+    expect(after.total).toBe(optionTotals(after.lines, "o-good", "o-good", opts).total);
+  });
+
+  it("puts a line added on screen on every option, unless it's the option's own service or they choose otherwise", () => {
+    const own = packageServices({ roof_service_id: "s-designer", items: [{ service_id: "s-underlayment", kind: "included" }, { service_id: "s-decking", kind: "quick" }] });
+    expect([...own].sort()).toEqual(["s-designer", "s-underlayment"]);
+    expect(lineDestination(service({ id: "s-decking" }), "o-better", { own })).toBeNull();
+    expect(lineDestination(service({ id: "s-underlayment" }), "o-better", { own })).toBe("o-better");
+    // Chosen: only on the option looked at. The option's own stays on it whatever's chosen.
+    expect(lineDestination(service({ id: "s-decking" }), "o-better", { own, place: "only" })).toBe("o-better");
+    expect(lineDestination(service({ id: "s-underlayment" }), "o-better", { own, place: "every" })).toBe("o-better");
+    // A roof by the square is the option's own roof, even before its package loads.
+    expect(lineDestination(service({ id: "s-metal", name: "Standing-seam metal roof", formula: "squares" }), "o-best")).toBe("o-best");
+    expect(lineDestination(service({ id: "s-designer" }), null, { own, place: "only" })).toBeNull();
+    expect(lineDestination(null, "o-better", { place: "only" })).toBe("o-better");
+    expect(lineDestination(null, "o-better")).toBeNull();
+    expect(packageServices(null).size).toBe(0);
+    expect(destinationText("o-better", "Better")).toBe("Only on Better");
+    expect(destinationText(null, "Better")).toBe("On every option");
+  });
+
+  it("never puts a line on every option when another option has its own line of that service", () => {
+    // Better's package includes a ridge vent; Good has it as a quick add. On every option, Better would have two.
+    const betterVent = line({ id: "better-vent", option_id: "o-better", service_id: "s-vent", name: "Ridge vent", formula: "ridge_ft", unit: "ft", quantity: 48, unit_price: 9, selected: false });
+    const quoteLines = [...lines, betterVent];
+    const vent = service({ id: "s-vent", name: "Ridge vent", formula: "ridge_ft", unit: "ft", unit_price: 9 });
+    expect(lineDestination(vent, "o-good", { lines: quoteLines })).toBe("o-good");
+    expect(lineDestination(vent, "o-good", { lines: quoteLines, place: "every" })).toBe("o-good");
+    // Even with the option's package not loaded (no own services known).
+    expect(lineDestination(vent, "o-good", { own: new Set(), lines: quoteLines })).toBe("o-good");
+    // Looking at Better itself, or a service no other option has its own line of: as usual.
+    expect(lineDestination(vent, "o-better", { lines: quoteLines })).toBeNull();
+    expect(lineDestination(service({ id: "s-skylight", name: "Skylight" }), "o-good", { lines: quoteLines })).toBeNull();
+    // A shared line of it doesn't count: that one is on Good already.
+    expect(lineDestination(service({ id: dumpster.service_id! }), "o-good", { lines: quoteLines })).toBeNull();
+  });
+
+  it("knows an option's own services from its package and the lines it had", () => {
+    const pkg = new Set(["s-designer"]);
+    const had = [{ option_id: "o-better", service_id: "s-underlayment" }, { option_id: "o-good", service_id: "s-felt" }, { option_id: null, service_id: "s-dumpster" }, { option_id: "o-better", service_id: null }];
+    expect([...ownServices(pkg, "o-better", had)].sort()).toEqual(["s-designer", "s-underlayment"]);
+    expect(ownServices(pkg, "o-best", had)).toBe(pkg);
+    expect(ownServices(pkg, null, had)).toBe(pkg);
+    // Taken off on this screen with its package not loaded: put on again, it goes back on Better.
+    const taken = removedLine(better);
+    expect(lineDestination(service({ id: better.service_id! }), "o-better", { own: ownServices(new Set(), "o-better", [taken]) })).toBe("o-better");
+  });
+
+  it("marks the shared lines while one option is looked at, since taking one off takes it off every option", () => {
+    const rows = estimateRows(lines, { optionId: "o-better" });
+    const all = [...rows.roof, ...rows.other];
+    expect(all.filter((r) => r.shared).map((r) => r.key)).toEqual(["tearoff", "drip", "boots", "dumpster"]);
+    expect(all.find((r) => r.key === "dumpster")!.lessLabel).toBe("Take Dumpster off every option");
+    expect(all.find((r) => r.key === "boots")!.lessLabel).toBe("One fewer boot");
+    expect(all.find((r) => r.key === "better")!.shared).toBe(false);
+    // Without options nothing is marked.
+    expect([...estimateRows(whitfield).roof, ...estimateRows(whitfield).other].some((r) => r.shared)).toBe(false);
+    expect(estimateRows(whitfield).other.find((r) => r.key === "dumpster")!.lessLabel).toBe("Take Dumpster off");
   });
 });
 

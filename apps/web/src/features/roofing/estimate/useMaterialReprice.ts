@@ -15,6 +15,8 @@ import { editKey, refreshEstimateAfterEdits } from "./data";
 /** The parts of a quote line pricing reads (both the project page's lines and the estimate kit's fit). */
 export interface PricedLine {
   id: string;
+  /** The option it's on; null on every option. Every option's lines are priced. */
+  option_id: string | null;
   name: string;
   service_id: string | null;
   quantity: number;

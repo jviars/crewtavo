@@ -1,6 +1,7 @@
 /**
- * The schedule step: the signed estimate becomes a job (every line comes along), and the deposit it
- * asked for can be billed straight away. Once there's a job, it's the way to its schedule.
+ * The schedule step: the signed estimate becomes a job (every line comes along; with options, the
+ * shared ones and the option chosen), and the deposit it asked for can be billed straight away. Once
+ * there's a job, it's the way to its schedule.
  */
 import { useMutation } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
@@ -12,7 +13,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 import type { FlowInvoice } from "../../paving/ProjectFlow";
 import type { EstimateQuote } from "../estimate";
 import type { RoofProjectExtras } from "./data";
-import { depositLabel, OPEN, SIGNED } from "./model";
+import { depositLabel, jobLinesText, OPEN, SIGNED } from "./model";
 import styles from "./flow.module.css";
 
 export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
@@ -78,7 +79,7 @@ export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
   if (SIGNED.includes(quote.status)) {
     return (
       <div className={styles.stepBody}>
-        <p className={styles.stepLead}>Turn the signed estimate into a job. Every line comes along, so nothing gets typed twice.</p>
+        <p className={styles.stepLead}>Turn the signed estimate into a job. {jobLinesText(quote)}</p>
         <div className={styles.actions}>
           <Button variant="primary" icon="calendar" loading={convert.isPending} disabled={bill.isPending} onClick={() => convert.mutate()}>Schedule the job</Button>
           {depositButton}
@@ -88,6 +89,14 @@ export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
   }
   const early = quote.lines.length > 0 && OPEN.includes(quote.status);
   if (!early) return <span className="muted small">After it's signed, the estimate becomes the crew's job.</span>;
+  // An estimate with options becomes the job of the one they chose, so that's marked first (the quote's Mark approved asks which).
+  if (quote.options.length) {
+    return (
+      <span className="muted small">
+        Usually after it's signed. If {quote.client?.display_name ?? "the client"} said yes another way, <Link to={`/quotes/${quote.id}`}>mark it approved on the quote</Link> with the option they chose, then make the job here.
+      </span>
+    );
+  }
   return (
     <div className={styles.stepBody}>
       <span className="muted small">Usually after it's signed. If {quote.client?.display_name ?? "the client"} said yes another way, you can make the job now.</span>

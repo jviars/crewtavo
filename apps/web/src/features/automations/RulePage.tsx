@@ -4,21 +4,25 @@
  */
 import {
   actionsFor,
+  actionsForTrigger,
   describeRuleSentence,
   fieldsFor,
   OP_LABELS,
+  ROLE_GROUP_LABELS,
   STATUS_ACTION_CHOICES,
   statusChoices,
   TRIGGERS,
+  triggerAllowed,
   triggerDef,
   validateRule,
-  variablesFor,
+  variablesForTrigger,
   type Action,
   type ActionType,
   type Condition,
   type ConditionOp,
   type SubjectKind,
 } from "@crewtavo/core/automations";
+import { STAFF } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
@@ -56,7 +60,8 @@ const BLANK: Draft = {
   enabled: true,
 };
 
-const ROLE_OPTIONS: Array<[string, string]> = [["owner", "Owners"], ["admin", "Admins"], ["office", "Office"], ["estimator", "Estimators"], ["crew_lead", "Crew leads"], ["field_crew", "Field crew"]];
+// Who a rule can notify: the team's levels (automations never notify subs).
+const ROLE_OPTIONS: Array<[string, string]> = STAFF.map((r) => [r, ROLE_GROUP_LABELS[r] ?? r]);
 const ACTION_ICON: Record<ActionType, IconName> = { notify: "bell", send_email: "mail", send_sms: "messages", add_tag: "tag", remove_tag: "tag", add_note: "note", create_task: "calendarCheck", request_review: "star", update_status: "archive" };
 const STEP_COLORS = { when: "#3474d4", wait: "#8b5cf6", if: "#c9852a", then: "#3b7d23" };
 
@@ -125,6 +130,8 @@ function RulePageScreen() {
 
   const trigger = triggerDef(draft.trigger);
   const subject: SubjectKind = trigger?.subject ?? "quote";
+  // Rules about subs' offers (their prices) are for people with the Subcontractors area.
+  const triggers = TRIGGERS.filter((t) => t.verb === draft.trigger || triggerAllowed(t.verb, (area) => can(session, area)));
   const errors = useMemo(() => validateRule(draft), [draft]);
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -212,11 +219,13 @@ function RulePageScreen() {
             <Step color={STEP_COLORS.when} icon="bolt" title="When">
               <select className="select" value={draft.trigger} onChange={(e) => {
                 const next = triggerDef(e.target.value);
-                set({ trigger: e.target.value, conditions: next?.subject === subject ? draft.conditions : [], delay_minutes: next?.delayable ? draft.delay_minutes : 0 });
+                // Who can be told about it may be fewer (a sub's offer: the office only).
+                const actions = draft.actions.map((a) => (a.type === "notify" && next?.notifyRoles ? { ...a, roles: (a.roles ?? []).filter((r) => next.notifyRoles!.includes(r)) } : a));
+                set({ trigger: e.target.value, conditions: next?.subject === subject ? draft.conditions : [], delay_minutes: next?.delayable ? draft.delay_minutes : 0, actions });
               }} aria-label="Trigger">
-                {[...new Set(TRIGGERS.map((t) => t.group))].map((group) => (
+                {[...new Set(triggers.map((t) => t.group))].map((group) => (
                   <optgroup key={group} label={group}>
-                    {TRIGGERS.filter((t) => t.group === group).map((t) => <option key={t.verb} value={t.verb}>{t.label}</option>)}
+                    {triggers.filter((t) => t.group === group).map((t) => <option key={t.verb} value={t.verb}>{t.label}</option>)}
                   </optgroup>
                 ))}
               </select>
@@ -270,6 +279,7 @@ function RulePageScreen() {
                   index={i}
                   count={draft.actions.length}
                   subject={subject}
+                  verb={draft.trigger}
                   value={a}
                   onChange={(next) => set({ actions: draft.actions.map((x, j) => (j === i ? next : x)) })}
                   onRemove={() => set({ actions: draft.actions.filter((_, j) => j !== i) })}
@@ -286,7 +296,7 @@ function RulePageScreen() {
                   align="start"
                   triggerClassName="btn btn-sm btn-ghost"
                   trigger={<><Icon name="plus" size={14} />Add action</>}
-                  items={actionsFor(subject).map((a) => ({ label: a.label, icon: ACTION_ICON[a.type], onSelect: () => set({ actions: [...draft.actions, blankAction(a.type, subject)] }) }))}
+                  items={actionsForTrigger(draft.trigger).map((a) => ({ label: a.label, icon: ACTION_ICON[a.type], onSelect: () => set({ actions: [...draft.actions, blankAction(a.type, subject)] }) }))}
                 />
               )}
             </Step>
@@ -390,11 +400,21 @@ function ConditionRow({ subject, value, invalid, onChange, onRemove }: { subject
   );
 }
 
-/** Clickable {{variables}} that insert at the cursor of the field they belong to. */
-function Tokens({ subject, target, onInsert }: { subject: SubjectKind; target: React.RefObject<HTMLInputElement | HTMLTextAreaElement>; onInsert: (text: string) => void }) {
+/**
+ * Who a notice can go to: the team's levels, and the people on the visit (or the job's next visits).
+ * About a sub's offer, only the office: never the crew, who don't see subs' prices.
+ */
+function whoToTell(verb: string, subject: SubjectKind): Array<[string, string]> {
+  const only = triggerDef(verb)?.notifyRoles;
+  if (only) return ROLE_OPTIONS.filter(([role]) => only.includes(role));
+  return [...ROLE_OPTIONS, ...(subject === "visit" || subject === "job" ? [["assigned", subject === "job" ? "People on its next visits" : "People on the visit"] as [string, string]] : [])];
+}
+
+/** Clickable {{variables}} that insert at the cursor of the field they belong to. A task (on the schedule) gets no office-only ones. */
+function Tokens({ verb, forTask = false, target, onInsert }: { verb: string; forTask?: boolean; target: React.RefObject<HTMLInputElement | HTMLTextAreaElement>; onInsert: (text: string) => void }) {
   return (
     <div className="token-list">
-      {variablesFor(subject).map((v) => (
+      {variablesForTrigger(verb, forTask).map((v) => (
         <button
           key={v.token}
           type="button"
@@ -422,7 +442,7 @@ function Tokens({ subject, target, onInsert }: { subject: SubjectKind; target: R
   );
 }
 
-function ActionEditor({ index, count, subject, value, onChange, onRemove, onMove }: { index: number; count: number; subject: SubjectKind; value: Action; onChange: (a: Action) => void; onRemove: () => void; onMove: (dir: -1 | 1) => void }) {
+function ActionEditor({ index, count, subject, verb, value, onChange, onRemove, onMove }: { index: number; count: number; subject: SubjectKind; verb: string; value: Action; onChange: (a: Action) => void; onRemove: () => void; onMove: (dir: -1 | 1) => void }) {
   const tags = useClientTags();
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -450,7 +470,7 @@ function ActionEditor({ index, count, subject, value, onChange, onRemove, onMove
           <div className="field">
             <span>Who</span>
             <div className="row wrap" style={{ gap: 6 }}>
-              {[...ROLE_OPTIONS, ...(subject === "visit" || subject === "job" ? [["assigned", subject === "job" ? "People on its next visits" : "People on the visit"] as [string, string]] : [])].map(([role, label]) => {
+              {whoToTell(verb, subject).map(([role, label]) => {
                 const on = value.roles?.includes(role) ?? false;
                 return <button key={role} type="button" className="tab" aria-pressed={on} onClick={() => onChange({ ...value, roles: on ? (value.roles ?? []).filter((r) => r !== role) : [...(value.roles ?? []), role] })}>{label}</button>;
               })}
@@ -458,7 +478,7 @@ function ActionEditor({ index, count, subject, value, onChange, onRemove, onMove
           </div>
           <Field label="Title"><input ref={titleRef} className="input" value={value.title} maxLength={200} onFocus={() => setTarget("title")} onChange={(e) => onChange({ ...value, title: e.target.value })} placeholder="Quote #{{number}} approved" /></Field>
           <Field label="Details" optional><textarea ref={bodyRef} className="textarea" style={{ minHeight: 60 }} value={value.body ?? ""} maxLength={1000} onFocus={() => setTarget("body")} onChange={(e) => onChange({ ...value, body: e.target.value })} /></Field>
-          <Tokens subject={subject} target={tokenTarget} onInsert={insertToken} />
+          <Tokens verb={verb} target={tokenTarget} onInsert={insertToken} />
         </>
       )}
 
@@ -466,7 +486,7 @@ function ActionEditor({ index, count, subject, value, onChange, onRemove, onMove
         <>
           <Field label="Subject"><input ref={titleRef} className="input" value={value.subject} maxLength={200} onFocus={() => setTarget("title")} onChange={(e) => onChange({ ...value, subject: e.target.value })} /></Field>
           <Field label="Message"><textarea ref={bodyRef} className="textarea" style={{ minHeight: 140 }} value={value.body} maxLength={8000} onFocus={() => setTarget("body")} onChange={(e) => onChange({ ...value, body: e.target.value })} /></Field>
-          <Tokens subject={subject} target={tokenTarget} onInsert={insertToken} />
+          <Tokens verb={verb} target={tokenTarget} onInsert={insertToken} />
         </>
       )}
 
@@ -475,7 +495,7 @@ function ActionEditor({ index, count, subject, value, onChange, onRemove, onMove
           <Field label="Message" hint={`${value.body.length}/640 characters${value.body.length > 160 ? ` · sent as ${Math.ceil(value.body.length / 153)} texts` : ""}`}>
             <textarea ref={bodyRef} className="textarea" style={{ minHeight: 80 }} value={value.body} maxLength={640} onChange={(e) => onChange({ ...value, body: e.target.value })} />
           </Field>
-          <Tokens subject={subject} target={bodyRef} onInsert={(text) => onChange({ ...value, body: text })} />
+          <Tokens verb={verb} target={bodyRef} onInsert={(text) => onChange({ ...value, body: text })} />
         </>
       )}
 
@@ -489,7 +509,7 @@ function ActionEditor({ index, count, subject, value, onChange, onRemove, onMove
       {value.type === "add_note" && (
         <>
           <Field label="Note"><textarea ref={bodyRef} className="textarea" style={{ minHeight: 60 }} value={value.body} maxLength={2000} onChange={(e) => onChange({ ...value, body: e.target.value })} /></Field>
-          <Tokens subject={subject} target={bodyRef} onInsert={(text) => onChange({ ...value, body: text })} />
+          <Tokens verb={verb} target={bodyRef} onInsert={(text) => onChange({ ...value, body: text })} />
         </>
       )}
 
@@ -501,7 +521,7 @@ function ActionEditor({ index, count, subject, value, onChange, onRemove, onMove
               {[0, 1, 2, 3, 5, 7, 14, 30].map((d) => <option key={d} value={d}>{d === 0 ? "Same day" : d === 1 ? "Next day" : `In ${d} days`}</option>)}
             </select>
           </Field>
-          <div style={{ gridColumn: "1 / -1" }}><Tokens subject={subject} target={titleRef} onInsert={(text) => onChange({ ...value, title: text })} /></div>
+          <div style={{ gridColumn: "1 / -1" }}><Tokens verb={verb} forTask target={titleRef} onInsert={(text) => onChange({ ...value, title: text })} /></div>
         </div>
       )}
 

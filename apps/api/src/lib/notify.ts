@@ -7,7 +7,7 @@
  * SMS uses Twilio over REST. When nothing is set up, sends are skipped and the caller gets
  * { sent: false } plus the reason; the UI can then offer the link to copy instead.
  */
-import { isPersonalMailDomain } from "@crewtavo/core/email";
+import { isPersonalMailDomain, isPlaceholderEmail } from "@crewtavo/core/email";
 import type { Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
@@ -78,7 +78,28 @@ export async function loadMailbox(env: Env, companyId: string): Promise<Mailbox 
   return value;
 }
 
-export const forgetMailbox = (companyId: string) => cache.delete(companyId);
+/** Whether any company has a mailbox (anyMailbox), cached alongside. */
+let someMailbox: { at: number; value: boolean } | null = null;
+
+export const forgetMailbox = (companyId: string) => {
+  cache.delete(companyId);
+  someMailbox = null;
+};
+
+/**
+ * Whether any company here sends email from its own mailbox (cached for a minute), for what the
+ * sign-in page offers before anyone is known (GET /api/config). Null when it can't be told.
+ */
+export async function anyMailbox(env: Env): Promise<boolean | null> {
+  if (someMailbox && Date.now() - someMailbox.at < CACHE_MS) return someMailbox.value;
+  const { data, error } = await adminClient(env).from("integrations").select("company_id").eq("provider", "email").neq("status", "disconnected").limit(1);
+  if (error) {
+    reportError(new Error(`Couldn't tell whether any company has a mailbox: ${error.message}`), { feature: "mailbox" });
+    return null;
+  }
+  someMailbox = { at: Date.now(), value: Boolean(data?.length) };
+  return someMailbox.value;
+}
 
 /** Is there a server-wide way to send (Resend for the whole install, or Mailpit in development)? */
 export const emailConfigured = (env: Env) => Boolean((env.RESEND_API_KEY && env.EMAIL_FROM) || env.MAILPIT_URL);
@@ -134,6 +155,8 @@ export async function checkMailbox(env: Env, companyId: string, mailbox: Mailbox
 }
 
 export async function sendEmail(env: Env, message: EmailMessage, companyId?: string | null): Promise<SendResult> {
+  // A sub's stand-in address (a sign-in without an email of their own) never gets anything.
+  if (isPlaceholderEmail(message.to)) return { sent: false, reason: "They have no email address. Text them instead." };
   if (companyId) {
     const mailbox = await loadMailbox(env, companyId).catch(() => null);
     if (mailbox) {

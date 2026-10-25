@@ -297,6 +297,14 @@
       "style": "shingle",
       "roof": "Architectural shingle roof",
       "default": true,
+      "tier": "Good",
+      "highlights": [
+        "Architectural shingles in the color you pick",
+        "Old roof torn off down to the deck",
+        "New drip edge, ridge cap and pipe boots",
+        "Yard cleaned up and the old roof hauled away"
+      ],
+      "warranty": "30-year manufacturer warranty on the shingles, 10 years on our workmanship.",
       "included": [
         {
           "service": "Tear-off and disposal"
@@ -344,6 +352,14 @@
       "name": "Designer shingle",
       "style": "designer",
       "roof": "Designer shingle roof",
+      "tier": "Better",
+      "highlights": [
+        "Thicker designer shingles with a slate or shake look",
+        "Old roof torn off down to the deck",
+        "New drip edge, ridge cap and pipe boots",
+        "Yard cleaned up and the old roof hauled away"
+      ],
+      "warranty": "50-year manufacturer warranty on the shingles, 15 years on our workmanship.",
       "included": [
         {
           "service": "Tear-off and disposal"
@@ -391,6 +407,14 @@
       "name": "Standing-seam metal",
       "style": "metal",
       "roof": "Standing-seam metal roof",
+      "tier": "Best",
+      "highlights": [
+        "Standing-seam metal panels with hidden fasteners",
+        "Sheds snow and stands up to high winds",
+        "Built to last 40 years or more",
+        "Old roof torn off down to the deck"
+      ],
+      "warranty": "40-year manufacturer warranty on the panel finish, 20 years on our workmanship.",
       "included": [
         {
           "service": "Tear-off and disposal"

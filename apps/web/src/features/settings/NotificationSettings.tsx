@@ -3,6 +3,7 @@
  * this phone. The bell in the app always shows everything. Above it, where the browser offers it,
  * installing Crewtavo as an app on this device (lib/install.ts).
  */
+import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { DEFAULT_NOTIFICATION_PREFS, NOTIFICATION_TOPICS, type NotificationChannel, type NotificationTopic } from "@crewtavo/core/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/Button";
@@ -12,15 +13,31 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useInstallHint } from "@/lib/install";
 import { disablePush, enablePush, pushState } from "@/lib/push";
-import { hasRole, useSession, type Session } from "@/lib/session";
+import { hasRole, isSub, keepsTime, useSession, type Session } from "@/lib/session";
+import { homeScreenSignInNote, subSignsInOnHomeScreen } from "../auth/textCode";
 import { toast } from "@/lib/toast";
 import { InstallAppButton } from "../field/InstallAppCard";
 import { chatOn } from "../chat/data";
+import { managesSubs } from "../subs/subsData";
 
 type Prefs = Record<NotificationChannel, NotificationTopic[]>;
 
 /** Railway's warnings go to owners and admins of a Crewtavo on Railway (Settings → Hosting). */
 const railwayWarnings = (session: Session) => hasRole(session, "admin") && session.config.platform === "railway";
+
+/**
+ * The kinds this person hears about. A sub hears about their visits, their job offers and pay, and
+ * their own paperwork, and their clock only if the office keeps their hours. The team never gets a
+ * sub's job offers.
+ */
+function topicsFor(session: Session) {
+  if (isSub(session)) {
+    return NOTIFICATION_TOPICS.filter((t) => t.key === "schedule" || t.key === "jobs" || t.key === "subs" || (t.key === "time" && keepsTime(session))).map((t) =>
+      t.key === "subs" ? { ...t, label: "My paperwork", hint: "When your insurance is about to run out" } : t,
+    );
+  }
+  return NOTIFICATION_TOPICS.filter((t) => t.key !== "jobs" && (t.key !== "chat" || chatOn(session)) && (t.key !== "hosting" || railwayWarnings(session)) && (t.key !== "subs" || managesSubs(session)));
+}
 
 const COLUMNS: Array<{ channel: NotificationChannel; label: string }> = [
   { channel: "push", label: "This phone" },
@@ -69,8 +86,17 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
     const current = prefs.data ?? DEFAULT_NOTIFICATION_PREFS;
     save.mutate({ ...current, [channel]: on ? [...new Set([...current[channel], topic])] : current[channel].filter((t) => t !== topic) });
   };
+  // A sub on a sign-in Crewtavo made for them is emailed at the address the office keeps for them
+  // (their sign-in's own is a stand-in nothing is sent to), and texted at the phone they add here, or
+  // else the office's (services/delivery.ts).
+  const sub = isSub(session) && session.subcontractor?.own_sign_in ? session.subcontractor : null;
   const available = (channel: NotificationChannel) =>
-    channel === "email" ? session.config.features.email : channel === "sms" ? session.config.features.sms && Boolean(phone) : true;
+    channel === "email"
+      ? session.config.features.email && (sub ? Boolean(sub.has_email) : !isPlaceholderEmail(session.profile.email))
+      : channel === "sms"
+        ? session.config.features.sms && (Boolean(phone) || Boolean(sub?.phone_on_file))
+        : true;
+  const pushSub = isSub(session) ? { blocked: !subSignsInOnHomeScreen(session.config.features, session.subcontractor), note: homeScreenSignInNote(session.config.features, session.subcontractor) } : null;
 
   return (
     <>
@@ -85,7 +111,7 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
       <strong>Notifications</strong>
       <span className="muted small">The bell shows everything. Choose what also reaches you when you're not in Crewtavo.</span>
 
-      <PushRow state={push.data} busy={pushToggle.isPending} onToggle={(on) => pushToggle.mutate(on)} onTest={() => test.mutate()} testing={test.isPending} />
+      <PushRow state={push.data} sub={pushSub} busy={pushToggle.isPending} onToggle={(on) => pushToggle.mutate(on)} onTest={() => test.mutate()} testing={test.isPending} />
       <FormError error={pushToggle.error ?? test.error} />
 
       {prefs.isPending ? (
@@ -100,7 +126,7 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
               </tr>
             </thead>
             <tbody>
-              {NOTIFICATION_TOPICS.filter((t) => (t.key !== "chat" || chatOn(session)) && (t.key !== "hosting" || railwayWarnings(session))).map((t) => (
+              {topicsFor(session).map((t) => (
                 <tr key={t.key}>
                   <th scope="row" style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", whiteSpace: "normal", padding: "10px 8px 10px 0" }}>
                     {t.label}
@@ -112,7 +138,8 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
                         type="checkbox"
                         style={{ width: 20, height: 20 }}
                         aria-label={`${t.label} by ${c.label.toLowerCase()}`}
-                        checked={(prefs.data ?? DEFAULT_NOTIFICATION_PREFS)[c.channel].includes(t.key)}
+                        // Off where it can't reach them, whatever was saved: a box can't be ticked for nothing.
+                        checked={available(c.channel) && (prefs.data ?? DEFAULT_NOTIFICATION_PREFS)[c.channel].includes(t.key)}
                         disabled={!available(c.channel)}
                         onChange={(e) => toggle(c.channel, t.key, e.target.checked)}
                       />
@@ -126,18 +153,34 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
       )}
       {!session.config.features.sms ? (
         <span className="muted small">Texts need texting turned on for the company.</span>
-      ) : !phone ? (
-        <span className="muted small">Add your mobile phone above to get texts.</span>
+      ) : !available("sms") ? (
+        <span className="muted small">{isSub(session) ? `Add your mobile phone above to get texts, or ask ${session.company.name} to add it.` : "Add your mobile phone above to get texts."}</span>
       ) : null}
-      {!session.config.features.email && <span className="muted small">Email needs the company's email connected (Settings → Email).</span>}
+      {isSub(session)
+        ? !available("email") && (
+          <span className="muted small">
+            {session.config.features.email ? `Ask ${session.company.name} to add your email to get these by email.` : `${session.company.name} doesn't send email from Crewtavo yet.`}
+          </span>
+        )
+        : !session.config.features.email && <span className="muted small">Email needs the company's email connected (Settings → Email).</span>}
       <FormError error={save.error} />
     </div>
     </>
   );
 }
 
-function PushRow({ state, busy, testing, onToggle, onTest }: { state: Awaited<ReturnType<typeof pushState>> | undefined; busy: boolean; testing: boolean; onToggle: (on: boolean) => void; onTest: () => void }) {
+/**
+ * Turning push on for this phone. On an iPhone it needs the app on the Home Screen, which keeps its
+ * own sign-in: a sub is shown how only when they can sign in there (a code by text or email, or their
+ * own password), and told what to do in it. A sub with neither needs a phone or email on file first.
+ */
+function PushRow({ state, sub, busy, testing, onToggle, onTest }: {
+  state: Awaited<ReturnType<typeof pushState>> | undefined; sub: { blocked: boolean; note: string | null } | null; busy: boolean; testing: boolean; onToggle: (on: boolean) => void; onTest: () => void;
+}) {
   if (!state) return <Skeleton height={38} radius={8} />;
+  if (state === "needs-install" && sub?.blocked) {
+    return <span className="muted small">On an iPhone, notifications need the app on your Home Screen. To sign in there, the office needs your phone number or email on file. Ask them to add it. You'll still see everything in the bell.</span>;
+  }
   if (state === "needs-install") {
     return (
       <div className="callout callout-info">
@@ -145,6 +188,7 @@ function PushRow({ state, busy, testing, onToggle, onTest }: { state: Awaited<Re
         <div className="grow small" style={{ fontWeight: 400 }}>
           <div style={{ fontWeight: 700 }}>Get notifications on this iPhone</div>
           Tap the Share button, choose <strong>Add to Home Screen</strong>, then open Crewtavo from your Home Screen and turn notifications on here.
+          {sub?.note && <> {sub.note}</>}
         </div>
       </div>
     );

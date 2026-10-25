@@ -2,11 +2,12 @@
  * How a roof estimate reads, as plain functions the office page, the iPad and the tests share: which
  * kind of line each one is (the roof itself, the tear-off by layers, something measured from the roof,
  * or a count like pipe boots), the words beside it ("48 ft of ridge · $9 a foot", "3 boots"), what −
- * and + do to it, the rows in their two sections with what changed since the range, and the office's
- * own numbers (cost, profit, margin).
+ * and + do to it, the rows in their two sections with what changed since the range, where a line
+ * added to an estimate with options goes, and the office's own numbers (cost, profit, margin), each
+ * for the option being looked at (core money.ts countsOn and optionTotals).
  */
 import { isSiteAdjustment, marginPct, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
-import { lineTotal, quoteTotals, toCents } from "@crewtavo/core/money";
+import { countsOn, lineTotal, optionTotals, quoteTotals, toCents, type Amount, type TotalsPromo } from "@crewtavo/core/money";
 import { formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { formulaValue } from "../../paving/data";
 import { layersOf, roofServiceKind } from "../data";
@@ -261,6 +262,8 @@ export interface EstimateRow {
   /** Labels for − and + (screen readers): "One fewer boot", "Take Drip edge off". */
   lessLabel: string;
   moreLabel: string;
+  /** Looking at one option of several: the line is on every option, so taking it off takes it off them all. */
+  shared: boolean;
 }
 
 export interface RowOptions {
@@ -274,22 +277,31 @@ export interface RowOptions {
   removed?: readonly RemovedLine[];
   /** The roof's waste, for "with 10% waste". */
   wastePct?: number | null;
+  /** The option being looked at: its lines and the shared ones show. Null for an estimate without options. */
+  optionId?: string | null;
 }
 
-export const counts = (l: Pick<EstimateLine, "optional" | "selected">) => !l.optional || l.selected;
+/**
+ * Whether a line counts with `optionId` being looked at (null for an estimate without options): it's
+ * on every option or on that one, and it isn't an add-on left off (core countsOn). A required line of
+ * an option that isn't shown counts on its own option, as it will once that option is chosen.
+ */
+export const counts = (l: Pick<EstimateLine, "option_id" | "optional" | "selected">, optionId: string | null) => countsOn(l, optionId);
 
-function labels(kind: RowKind, name: string, unit: string, quantity: number, formula: string | null): { lessLabel: string; moreLabel: string } {
-  if (kind === "layers") return { lessLabel: layersOf(formula) > 1 ? "One fewer layer" : `Take ${baseName(name)} off`, moreLabel: "One more layer" };
+function labels(kind: RowKind, name: string, unit: string, quantity: number, formula: string | null, shared: boolean): { lessLabel: string; moreLabel: string } {
+  const off = (what: string) => `Take ${what} off${shared ? " every option" : ""}`;
+  if (kind === "layers") return { lessLabel: layersOf(formula) > 1 ? "One fewer layer" : off(baseName(name)), moreLabel: "One more layer" };
   if (kind === "count") {
     const noun = countNoun(name, unit)?.[0];
-    return { lessLabel: quantity <= 1 ? `Take ${name} off` : `One fewer ${noun ?? `of ${name}`}`, moreLabel: `One more ${noun ?? `of ${name}`}` };
+    return { lessLabel: quantity <= 1 ? off(name) : `One fewer ${noun ?? `of ${name}`}`, moreLabel: `One more ${noun ?? `of ${name}`}` };
   }
-  return { lessLabel: `Take ${name} off`, moreLabel: "" };
+  return { lessLabel: off(name), moreLabel: "" };
 }
 
 /** The estimate's rows: the roof's (from the measurements) and everything else, in order. */
 export function estimateRows(lines: readonly EstimateLine[], options: RowOptions = {}): { roof: EstimateRow[]; other: EstimateRow[] } {
-  const visible = lines.filter(counts).sort((a, b) => a.sort - b.sort);
+  const optionId = options.optionId ?? null;
+  const visible = lines.filter((l) => counts(l, optionId)).sort((a, b) => a.sort - b.sort);
   // Since the range when there is one (a line changed and changed back isn't a change), else this screen's own.
   const tags = new Map<string, RowTag>();
   if (options.changes) {
@@ -302,6 +314,7 @@ export function estimateRows(lines: readonly EstimateLine[], options: RowOptions
   const placed: Array<{ row: EstimateRow; at: number; order: number }> = visible.map((line, order) => {
     const kind = lineKind(line);
     const quantity = Number(line.quantity);
+    const shared = optionId !== null && line.option_id == null;
     return {
       at: line.sort,
       order,
@@ -317,14 +330,15 @@ export function estimateRows(lines: readonly EstimateLine[], options: RowOptions
         tag: tags.get(line.id) ?? null,
         less: lessOf(line),
         more: moreOf(line),
-        ...labels(kind, line.name, line.unit, quantity, line.formula),
+        ...labels(kind, line.name, line.unit, quantity, line.formula, shared),
+        shared,
       },
     };
   });
 
-  // Lines taken off: this screen's own (they know their place), then the range's.
+  // Lines taken off: this screen's own (they know their place), then the range's; another option's stay with it.
   const gone = new Map<string, RemovedLine>();
-  for (const r of options.removed ?? []) gone.set(r.id, r);
+  for (const r of options.removed ?? []) if (r.option_id == null || r.option_id === optionId) gone.set(r.id, r);
   for (const c of options.changes ?? []) if (c.kind === "removed" && c.snapshot && !gone.has(c.id)) gone.set(c.id, { ...c.snapshot, sort: null });
   const present = (s: SnapshotLine) => visible.find((l) => l.id === s.id) ?? visible.find((l) => l.service_id === s.service_id && l.name === s.name);
   const range = options.rangeLines ?? [];
@@ -363,6 +377,7 @@ export function estimateRows(lines: readonly EstimateLine[], options: RowOptions
         more: null,
         lessLabel: "",
         moreLabel: "",
+        shared: false,
       },
     });
   }
@@ -370,14 +385,18 @@ export function estimateRows(lines: readonly EstimateLine[], options: RowOptions
   const rows = placed.map((p) => p.row);
   const roof = rows.filter((r) => isRoofSection(r.kind));
   const other = rows.filter((r) => !isRoofSection(r.kind));
-  // The price set on site sits at the end, under everything it's added to.
-  return { roof, other: [...other.filter((r) => r.kind !== "adjustment"), ...other.filter((r) => r.kind === "adjustment")] };
+  // The price set on site sits at the end, under everything it's added to. Set below the estimate on
+  // an option it's two lines, the taxed part and the untaxed (core siteAdjustmentLines): one price, one row.
+  const set = other.filter((r) => r.kind === "adjustment" && r.line);
+  const price = set.length > 1 ? [{ ...set[0]!, amount: set.reduce((sum, r) => sum + toCents(r.amount), 0) / 100, tag: set.find((r) => r.tag)?.tag ?? null }] : set;
+  return { roof, other: [...other.filter((r) => r.kind !== "adjustment"), ...price, ...other.filter((r) => r.kind === "adjustment" && !r.line)] };
 }
 
 /** A line as it is now, to keep while it's crossed out (and to put it back from). */
 export function removedLine(line: EstimateLine): RemovedLine {
   return {
     id: line.id,
+    option_id: line.option_id,
     service_id: line.service_id,
     name: line.name,
     quantity: Number(line.quantity),
@@ -409,7 +428,10 @@ export function withSavedLine<L extends Pick<EstimateLine, "id" | "sort">>(lines
   return rest.some((l) => l.id === saved.id) ? rest : [...rest, saved].sort((a, b) => a.sort - b.sort);
 }
 
-/** A quote's totals after its lines change on screen, the way the database will work them out. */
+/**
+ * A quote's totals after its lines change on screen, the way the database will work them out: the
+ * option shown and the shared lines (another option's lines are kept unselected, so they don't count).
+ */
 export function withLines<Q extends Pick<EstimateQuote, "lines" | "tax_rate" | "discount_amount" | "promo_code_id" | "subtotal" | "tax_amount" | "total">>(quote: Q, lines: EstimateLine[]): Q {
   // A promo code's discount is worked out from the lines in the database: wait for it.
   if (quote.promo_code_id) return { ...quote, lines };
@@ -495,9 +517,16 @@ export interface EstimateFigures {
   pricedAt: string | null;
 }
 
-/** The estimate's cost, profit and margin; null when nothing's known about its cost. */
-export function estimateFigures(quote: Pick<EstimateQuote, "subtotal" | "discount_amount" | "lines">): EstimateFigures | null {
-  const counted = quote.lines.filter(counts);
+/** What estimateFigures reads: the quote's saved totals, and what an option's own are worked out with. */
+export type FiguresQuote = Pick<EstimateQuote, "subtotal" | "discount_amount" | "lines"> & { option_id?: string | null; tax_rate?: Amount; promo?: TotalsPromo | null };
+
+/**
+ * The estimate's cost, profit and margin, for the option being looked at (`optionId`; the one shown,
+ * else none): its lines and the shared ones, priced as the database will price it once that option
+ * is shown (core optionTotals). Null when nothing's known about its cost.
+ */
+export function estimateFigures(quote: FiguresQuote, optionId: string | null = quote.option_id ?? null): EstimateFigures | null {
+  const counted = quote.lines.filter((l) => counts(l, optionId));
   let cost = 0;
   let known = 0;
   let unknown = 0;
@@ -523,8 +552,7 @@ export function estimateFigures(quote: Pick<EstimateQuote, "subtotal" | "discoun
     }
   }
   if (!known && !withMaterials) return null;
-  const subtotal = toCents(quote.subtotal);
-  const price = subtotal - Math.min(toCents(quote.discount_amount), Math.max(subtotal, 0));
+  const price = toCents(beforeTax(quote, optionId));
   return {
     materials: withMaterials ? materials / 100 : null,
     materialsPartial,
@@ -537,8 +565,72 @@ export function estimateFigures(quote: Pick<EstimateQuote, "subtotal" | "discoun
   };
 }
 
+/**
+ * The price before tax, after any discount, of the option being looked at: the saved totals for the
+ * one shown (and an estimate without options), else that option's as the database will work it out.
+ */
+export function beforeTax(quote: FiguresQuote, optionId: string | null): number {
+  if (optionId === (quote.option_id ?? null)) {
+    const subtotal = toCents(quote.subtotal);
+    return (subtotal - Math.min(toCents(quote.discount_amount), Math.max(subtotal, 0))) / 100;
+  }
+  const totals = optionTotals(quote.lines, optionId, quote.option_id, { taxRate: quote.tax_rate ?? 0, discountAmount: quote.discount_amount, promo: quote.promo ?? null });
+  return (toCents(totals.subtotal) - toCents(totals.discount)) / 100;
+}
+
 /** A margin to look twice at. */
 export const LOW_MARGIN = 25;
+
+// ---------------------------------------------------------------------------------------------
+// Where a line goes on an estimate with options
+// ---------------------------------------------------------------------------------------------
+
+/** A package's own services: its main one and what's always on it (not its quick adds). */
+export function packageServices(pkg: { roof_service_id: string | null; items: ReadonlyArray<{ service_id: string; kind: string }> } | null | undefined): Set<string> {
+  if (!pkg) return new Set();
+  return new Set([pkg.roof_service_id, ...pkg.items.filter((i) => i.kind === "included").map((i) => i.service_id)].filter((id): id is string => Boolean(id)));
+}
+
+/**
+ * An option's own services: its package's (packageServices), and any it's had a line of its own for
+ * (`had`: the lines the range was made from, and the ones taken off on this screen), so one put on
+ * again goes back on it even while its package is loading, or after it was deleted.
+ */
+export function ownServices(own: ReadonlySet<string>, optionId: string | null, had: ReadonlyArray<{ option_id?: string | null; service_id: string | null }>): ReadonlySet<string> {
+  if (!optionId) return own;
+  const mine = had.flatMap((l) => (l.option_id === optionId && l.service_id ? [l.service_id] : []));
+  return mine.length ? new Set([...own, ...mine]) : own;
+}
+
+/** Where a line added on an estimate with options goes: on every option, or only on the one looked at. */
+export type LinePlace = "every" | "only";
+
+/** What lineDestination reads besides the service and the option looked at. */
+export interface LineWhere {
+  /** The option's own services (ownServices): they go on it alone. */
+  own?: ReadonlySet<string>;
+  /** The quote's lines, every option's: a service another option has a line of its own for goes on this one alone. */
+  lines?: ReadonlyArray<{ option_id: string | null; service_id: string | null }>;
+  /** Where the person chose it goes; "every" when they haven't. */
+  place?: LinePlace;
+}
+
+/**
+ * The option a line added on screen goes on, or null for every option (and for an estimate without
+ * options). Some services can only go on the option looked at: its own (its package's main or
+ * always-included one, `own`), a roof by the square (each option is a roof of its own), and one
+ * another option already has a line of its own for, which on every option that option would have
+ * twice and charge for twice. Anything else goes where the person chose (`place`): on every option
+ * unless they say otherwise, since what turns up on the job is there whichever option they pick.
+ */
+export function lineDestination(service: { id: string; name?: string; formula?: string | null } | null, optionId: string | null, { own, lines, place = "every" }: LineWhere = {}): string | null {
+  if (!optionId) return null;
+  if (service && (own?.has(service.id) || roofServiceKind(service.formula ?? null, service.name) === "roof" || lines?.some((l) => l.option_id !== null && l.option_id !== optionId && l.service_id === service.id))) return optionId;
+  return place === "only" ? optionId : null;
+}
+
+/** Where a line goes, in words beside the add control: "On every option", "Only on Better". */
+export const destinationText = (optionId: string | null, optionLabel: string) => (optionId ? `Only on ${optionLabel}` : "On every option");
 
 // ---------------------------------------------------------------------------------------------
 // Notes and photos

@@ -1,24 +1,24 @@
 /**
  * Signed (/roofing/:id/signed): the estimate is signed and saved on the project with both
  * signatures. From here the salesperson prints the homeowner a copy (AirPrint, from the iPad), sees
- * that the copy was emailed (or emails it), or texts them a link. It reads everything from the
- * estimate itself, so it works after a reload too.
+ * that the copy was emailed (or emails it), or texts them a link: email and texting only when this
+ * Crewtavo can send them (config features), never as a button that can't. It reads everything from the
+ * estimate itself, so it works after a reload too. The copy prints the option they chose and the
+ * contract as they signed it (with their initials), kept with the signature.
  */
 import { useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { Spinner } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { dateIn, todayIn } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/session";
-import { documentCompany, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
+import { documentCompany, quoteDate, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
 import { PrintableDocument, printDocument } from "../../documents/EstimateDocument";
-import type { TakeoffRow } from "../../paving/data";
 import { useEstimateQuote } from "../estimate/data";
 import { firstName } from "../estimate/rows";
 import { isEditableQuote, type EstimateQuote } from "../estimate/types";
-import { isSignedQuote, signingOutcome, useCanSell, useSendCopy, useSignedCopies, useVisitDetails, visitPath } from "./data";
-import { roofFacts, signedSentence } from "./price";
+import { isSignedQuote, linesWithOptions, signingOutcome, useCanSell, useSendCopy, useSignedCopies, useVisitDetails, visitPath } from "./data";
+import { signedSentence } from "./price";
 import { VisitError, VisitFrame, VisitLoading, VisitNoAccess, whoAndWhere } from "./VisitFrame";
 import styles from "./visit.module.css";
 
@@ -31,16 +31,16 @@ export function RoofSignedPage() {
   // A refresh that fails while the estimate is showing keeps it on screen (with a toast): nothing
   // drawn or typed here is lost to a moment without signal.
   if (!estimate.data) return estimate.error ? <VisitError error={estimate.error} onRetry={() => void estimate.refetch()} /> : <VisitLoading kind="signed" />;
-  const { quote, takeoff } = estimate.data;
+  const { quote } = estimate.data;
   if (!isSignedQuote(quote)) {
     // Just signed: the estimate may still be on its way.
     if (estimate.isFetching) return <VisitLoading kind="signed" />;
     return <Navigate to={isEditableQuote(quote) ? visitPath(quote.id, "visit") : `/roofing/${quote.id}`} replace />;
   }
-  return <SignedScreen quote={quote} takeoff={takeoff} />;
+  return <SignedScreen quote={quote} />;
 }
 
-function SignedScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: TakeoffRow | null }) {
+function SignedScreen({ quote }: { quote: EstimateQuote }) {
   const session = useSession();
   const location = useLocation();
   const tz = session.company.timezone;
@@ -76,19 +76,29 @@ function SignedScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeo
     byMe: approval?.company?.user_id === session.userId,
   });
 
-  // The signed estimate, as it prints: hidden on screen, and what the iPad prints.
-  const docReady = !templatePending && !details.isPending;
+  // The signed estimate, as it prints: hidden on screen, and what the iPad prints. It prints the
+  // option it was signed for and the contract kept with it (build.ts quoteDocument and signedTemplate),
+  // so it waits for the details that say which option each line is on.
+  const docReady = !templatePending && Boolean(details.data);
+  // A moment without signal: tapping Print loads them again.
+  const copyFailed = !details.data && Boolean(details.error);
   const data = quoteDocument(
     {
       ...quote,
+      option_id: details.data?.optionId ?? null,
       message: details.data?.message ?? null,
       valid_until: details.data?.valid_until ?? null,
       deposit_amount: details.data?.deposit_amount ?? 0,
       sent_at: details.data?.sent_at ?? null,
       created_at: details.data?.created_at ?? null,
     },
-    quote.lines,
-    { date: details.data?.sent_at ? dateIn(details.data.sent_at, tz) : todayIn(tz), facts: roofFacts(details.data?.packageName, takeoff) },
+    linesWithOptions(quote.lines, details.data?.lineOptions),
+    {
+      // The day it was sent, else the day it was made, as its {Date} says it.
+      date: quoteDate({ sent_at: details.data?.sent_at, created_at: details.data?.created_at }, tz),
+      // An approval kept from before the option was kept with it: the option shown.
+      choice: details.data?.options.find((o) => o.id === details.data?.optionId) ?? null,
+    },
   );
   const print = async () => {
     setPrinting(true);
@@ -125,38 +135,41 @@ function SignedScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeo
         <div className={styles.actions}>
           <ActionCard
             icon="printer"
-            busy={printing}
-            disabled={!docReady}
+            busy={printing || (copyFailed && details.isFetching)}
+            disabled={!docReady && !copyFailed}
             title={printing ? "Getting it ready…" : "Print a copy"}
             text={`For ${them} to keep. Prints to any AirPrint printer nearby.`}
-            onClick={() => void print()}
+            problem={copyFailed ? "The copy didn't load. Check the connection, then tap to try again." : null}
+            onClick={() => (copyFailed ? void details.refetch() : void print())}
           />
-          {emailed ? (
-            <DoneCard icon="mail" title={`Emailed to ${them}`} text={`A copy with ${bothSigned ? "both signatures" : "the signature"} went to ${email ?? "their email"}.`} />
-          ) : (
-            <ActionCard
-              icon="mail"
-              busy={emailCopy.isPending}
-              disabled={!features.email || !email}
-              title={emailCopy.isPending ? "Sending…" : `Email ${them} a copy`}
-              text={!features.email ? "Email isn't set up yet. An admin can connect it in Settings → Email." : !email ? `There's no email address for ${them}. Add one on their client page.` : `To ${email}.`}
-              problem={emailProblem}
-              onClick={() => emailCopy.mutate()}
-            />
-          )}
-          {texted ? (
-            <DoneCard icon="messages" title={`Texted ${them} a link`} text={`It went to ${phone ?? "their phone"}.`} />
-          ) : (
-            <ActionCard
-              icon="messages"
-              busy={textCopy.isPending}
-              disabled={!features.sms || !phone}
-              title={textCopy.isPending ? "Sending…" : `Text ${them} a link`}
-              text={!features.sms ? "Texting isn't set up on this Crewtavo yet." : !phone ? `There's no phone number for ${them}. Add one on their client page.` : `To ${phone}. ${first || "They"} can open it any time.`}
-              problem={textProblem}
-              onClick={() => textCopy.mutate()}
-            />
-          )}
+          {features.email &&
+            (emailed ? (
+              <DoneCard icon="mail" title={`Emailed to ${them}`} text={`A copy with ${bothSigned ? "both signatures" : "the signature"} went to ${email ?? "their email"}.`} />
+            ) : (
+              <ActionCard
+                icon="mail"
+                busy={emailCopy.isPending}
+                disabled={!email}
+                title={emailCopy.isPending ? "Sending…" : `Email ${them} a copy`}
+                text={!email ? `There's no email address for ${them}. Add one on their client page.` : `To ${email}.`}
+                problem={emailProblem}
+                onClick={() => emailCopy.mutate()}
+              />
+            ))}
+          {features.sms &&
+            (texted ? (
+              <DoneCard icon="messages" title={`Texted ${them} a link`} text={`It went to ${phone ?? "their phone"}.`} />
+            ) : (
+              <ActionCard
+                icon="messages"
+                busy={textCopy.isPending}
+                disabled={!phone}
+                title={textCopy.isPending ? "Sending…" : `Text ${them} a link`}
+                text={!phone ? `There's no phone number for ${them}. Add one on their client page.` : `To ${phone}. ${first || "They"} can open it any time.`}
+                problem={textProblem}
+                onClick={() => textCopy.mutate()}
+              />
+            ))}
         </div>
 
         <div className={styles.officeKnows}>

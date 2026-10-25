@@ -1,4 +1,5 @@
 /** Write or edit an SOP (office and up). Every save is a new revision; nothing is lost. */
+import { STAFF } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -17,7 +18,8 @@ import { ROLE_LABELS, useCategories, useIsEditor } from "./kbData";
 
 interface Draft { title: string; category_id: string; status: "draft" | "published"; required: boolean; audience: string[]; tags: string[]; html: string }
 
-const ROLES = ["office", "estimator", "crew_lead", "field_crew"] as const;
+// Required reading is for the team below admin; a sub never reads guides.
+const ROLES = STAFF.filter((r) => r !== "owner" && r !== "admin");
 
 export function SopEditorPage() {
   const { pageId } = useParams();

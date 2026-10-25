@@ -1,6 +1,7 @@
 /**
  * The crew's day on a phone: the running clock, my visits today in order, one-tap status changes,
- * and the whole route in a maps app.
+ * and the whole route in a maps app. A sub sees the same for the visits they're on, without a clock
+ * unless the office keeps their hours.
  */
 import { onlineManager, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -14,11 +15,12 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
-import { hasRole, useSession } from "@/lib/session";
+import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
 import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
 import { dayRoute } from "../schedule/dayRoute";
 import { useSchedulingRights } from "../schedule/myCrews";
 import { ClockCard } from "./ClockCard";
+import { visitContact, type VisitContact } from "./contact";
 import { CrewClockCard } from "./CrewClockCard";
 import { pendingVisitStatus, showVisitStatus, statusSaved, type VisitStatusChange } from "./fieldActions";
 import { useStatusTap } from "./fieldData";
@@ -43,7 +45,11 @@ interface Visit {
   assignees: Array<{ user_id: string }>;
   series_day: number | null;
   series_total: number | null;
+  /** For a sub, who can't read clients: the client's name (visit_contact()). */
+  contact?: VisitContact | null;
 }
+
+const clientName = (v: Visit) => visitContact(v.job?.client, v.contact).name;
 
 const NEXT: Record<string, { status: string; label: string; icon: "navigation" | "play" | "check"; primary: boolean } | null> = {
   scheduled: { status: "en_route", label: "On my way", icon: "navigation", primary: false },
@@ -127,7 +133,7 @@ export function FieldTodayPage() {
 
       <OfflineNote />
       {!hasRole(session, "admin", "office", "estimator") && <InstallAppCard />}
-      <ClockCard visits={open.filter((v) => v.status === "in_progress").map((v) => ({ id: v.id, title: v.title, job_id: v.job?.id ?? null }))} />
+      {keepsTime(session) && <ClockCard visits={open.filter((v) => v.status === "in_progress").map((v) => ({ id: v.id, title: v.title, job_id: v.job?.id ?? null }))} />}
       {session.role === "crew_lead" && <CrewClockCard visits={data.data?.today ?? []} />}
 
       {data.isPending && <Loading label="Loading your visits"><div className="stack">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={2} />)}</div></Loading>}
@@ -165,7 +171,7 @@ export function FieldTodayPage() {
               </div>
               <Link to={`/field/visits/${v.id}`} style={{ color: "var(--ink)" }}>
                 <strong style={{ fontSize: 17, display: "block" }}>{v.title}</strong>
-                <span className="muted">{[v.job?.client?.display_name, v.property?.line1].filter(Boolean).join(" · ")}</span>
+                <span className="muted">{[clientName(v), v.property?.line1].filter(Boolean).join(" · ")}</span>
               </Link>
               {v.hold_reason && <div className="small" style={{ color: "var(--warning)", fontWeight: 700 }}><Icon name="cloud" size={14} /> Weather: {v.hold_reason}</div>}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
@@ -191,7 +197,7 @@ export function FieldTodayPage() {
               {done.map((v) => (
                 <Link key={v.id} to={`/field/visits/${v.id}`} className="card-row">
                   <Icon name="check" size={16} />
-                  <span className="grow"><strong>{v.title}</strong><span className="muted small" style={{ display: "block" }}>{v.job?.client?.display_name}</span></span>
+                  <span className="grow"><strong>{v.title}</strong><span className="muted small" style={{ display: "block" }}>{clientName(v)}</span></span>
                 </Link>
               ))}
             </div>
@@ -206,7 +212,7 @@ export function FieldTodayPage() {
             {[...data.data.tomorrow].sort(order).map((v) => (
               <Link key={v.id} to={`/field/visits/${v.id}`} className="card-row">
                 <span className="tabular strong small" style={{ width: 64 }}>{v.starts_at ? time(v.starts_at) : "Anytime"}</span>
-                <span className="grow"><strong>{v.title}</strong><span className="muted small" style={{ display: "block" }}>{[v.job?.client?.display_name, v.property?.line1].filter(Boolean).join(" · ")}</span></span>
+                <span className="grow"><strong>{v.title}</strong><span className="muted small" style={{ display: "block" }}>{[clientName(v), v.property?.line1].filter(Boolean).join(" · ")}</span></span>
                 <Icon name="chevronRight" size={16} />
               </Link>
             ))}
@@ -214,7 +220,7 @@ export function FieldTodayPage() {
         </section>
       )}
 
-      <CrewEquipmentCard />
+      {!isSub(session) && <CrewEquipmentCard />}
     </>
   );
 }

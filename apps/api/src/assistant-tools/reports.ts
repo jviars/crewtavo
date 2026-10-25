@@ -86,7 +86,7 @@ export const reportTools = {
     },
   }),
   job_profit: tool({
-    description: "Profit on jobs finished in a period (default this month): each job's revenue, labor (approved time at its rate, the rest at the person's current rate), expenses and materials at cost, profit and margin, and which are below the company's target margin.",
+    description: "Profit on jobs finished in a period (default this month): each job's revenue, labor (approved time at its rate, the rest at the person's current rate), sub and crew pay (agreed, done or paid), expenses and materials at cost (without the labor estimate in a line's cost once the job has labor of its own), profit and margin, and which are below the company's target margin.",
     input: z.object({ ...rangeInput, limit: z.number().int().min(1).max(300).default(100), ...companyArg }),
     run: async (ctx, a) => {
       requireRole(ctx, OFFICE, "reports");
@@ -95,7 +95,7 @@ export const reportTools = {
       const jobs = await all((f, t) =>
         ctx.db
           .from("jobs")
-          .select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost)")
+          .select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost, unit_labor_cost)")
           .eq("company_id", ctx.companyId)
           .in("status", ["requires_invoicing", "completed"])
           .gte("updated_at", range.start)
@@ -103,16 +103,18 @@ export const reportTools = {
           .range(f, t),
       );
       const ids = jobs.slice(0, a.limit).map((j) => j.id);
-      const [time, expenses, rates, company] = ids.length
+      const [time, expenses, rates, company, crewPay] = ids.length
         ? await Promise.all([
             all((f, t) => ctx.db.from("time_entries").select("id, job_id, user_id, started_at, ended_at, approved_at").in("job_id", ids).range(f, t)),
             all((f, t) => ctx.db.from("expenses").select("job_id, amount").in("job_id", ids).range(f, t)),
             timeRates(adminClient(ctx.env), ctx.companyId, { job_ids: ids }),
             rows(ctx.db.from("companies").select("settings").eq("id", ctx.companyId)),
+            // Sub and crew pay (job pay agreed, done or paid), for the office with job costs.
+            rows(ctx.db.rpc("job_pay_costs", { p_jobs: ids })),
           ])
-        : [[], [], {} as Record<string, number>, []];
+        : [[], [], {} as Record<string, number>, [], []];
       const target = Number(((company[0]?.settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
-      const result = jobProfit(jobs.slice(0, a.limit) as never, time, expenses, (e) => rates[e.id] ?? 0, target);
+      const result = jobProfit(jobs.slice(0, a.limit) as never, time, expenses, (e) => rates[e.id] ?? 0, target, crewPay);
       return { period: range, ...result, jobs: result.jobs.sort((x, y) => (x.margin_percent ?? 0) - (y.margin_percent ?? 0)) };
     },
   }),

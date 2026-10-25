@@ -4,8 +4,10 @@
  * takeoff, estimate, proposal, schedule, invoice, like a paving app's job record. Roofing projects
  * (features/roofing) are the same records with a roof for the takeoff, so they share these.
  */
+import { marginPct } from "@crewtavo/core/estimates";
 import { evaluateFormula, formulaVariables, type FormulaVariable } from "@crewtavo/core/formulas";
 import { drawingPitchFactor, edgeLengths, type Section } from "@crewtavo/core/geo";
+import { countsOn, lineTotal, optionTotals, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { isPavingTakeoff, pavingQuantities } from "@crewtavo/core/paving";
 import { savedRoofingQuantities } from "@crewtavo/core/roofing";
 import type { IconName } from "@/components/ui/Icon";
@@ -140,4 +142,78 @@ export function stageLabel(q: { status: string; lines?: unknown[]; jobs?: Array<
   const job = q.jobs?.[0];
   if (job?.status === "completed") return { label: "Done", tone: "good" };
   return { label: "Job", tone: "good" };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The estimate's money
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The lines the option looked at (`optionId`) is made of: its own and the ones on every option, and
+ * every line without options. What's ticked, taken off and listed on the estimate step.
+ */
+export const viewedLines = <L extends { option_id: string | null }>(lines: readonly L[], optionId: string | null): L[] =>
+  lines.filter((l) => l.option_id === null || l.option_id === optionId);
+
+/** A quote line as the estimate's money reads it. */
+export interface SumsLine extends OptionLine {
+  unit_cost: Amount;
+  material_cost: Amount;
+  /** Materials priced at the supplier: one the branch hasn't priced has no total. */
+  materials: { items: ReadonlyArray<{ total: number | null; quantity: number }> } | null;
+}
+
+/** The quote as the estimate's money reads it; its saved totals are the option shown's. */
+export interface SumsQuote {
+  option_id: string | null;
+  subtotal: Amount;
+  total: Amount;
+  tax_rate: Amount;
+  discount_amount: Amount;
+  promo: TotalsPromo | null;
+  lines: readonly SumsLine[];
+}
+
+export interface EstimateSums {
+  cost: number;
+  /** Every line that counts has a cost, so the profit and margin are real. */
+  costKnown: boolean;
+  /** Before tax and any discount. */
+  price: number;
+  profit: number;
+  margin: number | null;
+  /** With tax, after any discount. */
+  total: number;
+  /** What the supplier priced the materials at, for the lines that count; null when none were. */
+  materials: number | null;
+  /** Something the branch hasn't priced: the materials cost at least this much. */
+  materialsPartial: boolean;
+}
+
+/**
+ * The estimate's cost, price, profit and margin for the option looked at (`optionId`; null for an
+ * estimate without options): the lines that count on it (core countsOn: its own and the shared ones,
+ * not add-ons left off), priced as the quote's saved totals for the option shown and, for another,
+ * as the database will work them out once it's shown (core optionTotals).
+ */
+export function estimateSums(quote: SumsQuote, optionId: string | null): EstimateSums {
+  const counted = quote.lines.filter((l) => countsOn(l, optionId));
+  const cost = counted.reduce((t, l) => t + (l.unit_cost == null ? 0 : toCents(lineTotal(l.quantity, l.unit_cost))), 0);
+  const costKnown = counted.every((l) => l.unit_cost != null);
+  const totals =
+    optionId !== null && optionId !== quote.option_id
+      ? optionTotals(quote.lines, optionId, quote.option_id, { taxRate: quote.tax_rate, discountAmount: quote.discount_amount, promo: quote.promo })
+      : { subtotal: Number(quote.subtotal), total: Number(quote.total) };
+  const price = toCents(totals.subtotal);
+  const priced = counted.filter((l) => l.material_cost != null);
+  return {
+    cost: cost / 100,
+    costKnown,
+    price: price / 100,
+    profit: (price - cost) / 100,
+    margin: costKnown ? marginPct(price / 100, cost / 100) : null,
+    total: Number(totals.total),
+    materials: priced.length ? priced.reduce((t, l) => t + toCents(l.material_cost), 0) / 100 : null,
+    materialsPartial: priced.some((l) => l.materials?.items.some((i) => i.total === null && i.quantity > 0)),
+  };
 }

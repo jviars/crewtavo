@@ -111,7 +111,15 @@ function RoofProject() {
   const measureLink = measureLinkFor(ROOFING, quote, takeoff);
   // Who goes out: the one booked, else whoever signed for the business.
   const salesperson = personName(team.data, quote.salesperson_id) ?? readApproval(quote.approval)?.company?.name ?? null;
-  const lineCount = quote.lines.filter(counts).length;
+  // The lines the option shown is made of (with options), else the estimate's.
+  const lineCount = quote.lines.filter((l) => counts(l, quote.option_id)).length;
+  const estimateStatus = quote.options.length
+    ? `${quote.options.length} options`
+    : lineCount
+      ? `${lineCount} ${lineCount === 1 ? "line" : "lines"} · ${formatMoney(quote.subtotal)}`
+      : reached("estimate")
+        ? "Not priced yet"
+        : ROOFING.takeoff.after;
   const send = (mode: SendMode, startWith?: SendChannel) => setSending({ mode, startWith });
 
   return (
@@ -141,12 +149,12 @@ function RoofProject() {
           id="estimate"
           n={2}
           title={label("estimate")}
-          status={lineCount ? `${lineCount} ${lineCount === 1 ? "line" : "lines"} · ${formatMoney(quote.subtotal)}` : reached("estimate") ? "Not priced yet" : ROOFING.takeoff.after}
+          status={estimateStatus}
           done={done("estimate")}
           current={step === "estimate"}
         >
           {!takeoff && !quote.lines.length ? (
-            <span className="muted small">{ROOFING.takeoff.first}</span>
+            <span className="muted small">{quote.options.length ? `Measure the roof first; each of the ${quote.options.length} options is priced from its package once it's measured.` : ROOFING.takeoff.first}</span>
           ) : (
             <EstimateStep
               quote={quote}
@@ -166,7 +174,7 @@ function RoofProject() {
         </StepCard>
 
         <StepCard id="visit" n={4} title={label("visit")} status={visitStepStatus({ ...quote, sent_at: extras.sent_at, approval: readApproval(quote.approval) }, quote.client?.display_name, tz)} done={done("visit")} current={step === "visit"}>
-          <VisitStep quote={quote} extras={extras} takeoff={takeoff} salesperson={salesperson} current={step === "visit"} canSell onSend={send} />
+          <VisitStep quote={quote} extras={extras} salesperson={salesperson} current={step === "visit"} canSell onSend={send} />
         </StepCard>
 
         <StepCard id="schedule" n={5} title={label("schedule")} status={job ? `Job #${job.number}` : quote.status === "approved" ? "Ready to schedule" : "After it's signed"} done={Boolean(job)} current={step === "schedule"}>

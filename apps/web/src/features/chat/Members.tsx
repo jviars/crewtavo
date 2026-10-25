@@ -3,6 +3,7 @@
  * else online is under Online, and the rest under Offline. Opening someone shows their role, crews
  * and phone, with a button to @mention them.
  */
+import { STAFF } from "@crewtavo/core/roles";
 import { useQuery } from "@tanstack/react-query";
 import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -14,7 +15,8 @@ import { useLive, type ChatMember } from "./data";
 import { Avatar, roleColor } from "./ui";
 import s from "./chat.module.css";
 
-const LEVEL_ORDER = ["owner", "admin", "office", "estimator", "crew_lead", "field_crew"];
+// The team's levels, top down (a sub is never in chat).
+const LEVEL_ORDER: readonly string[] = STAFF;
 
 export function groupMembers(members: ChatMember[], online: Set<string>) {
   const isOn = (m: ChatMember) => m.online || online.has(m.id);

@@ -7,19 +7,25 @@
  * A retried run skips actions that already succeeded, so nobody gets the same email twice.
  */
 import {
+  actionsForTrigger,
   addDays,
   evaluateConditions,
   localDate,
+  memberPermissions,
   renderTemplate,
   STATUS_ACTION_CHOICES,
   statusChoices,
+  taskVars,
+  triggerDef,
   type Action,
   type Condition,
   type Facts,
   type SubjectKind,
+  type Role,
   type TemplateVars,
 } from "@crewtavo/core";
 import { hidesExactPrice } from "@crewtavo/core/estimates";
+import { countsOn } from "@crewtavo/core/money";
 import type { Env } from "../env";
 import { firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink } from "../lib/links";
@@ -27,6 +33,8 @@ import { sendEmail, sendSms } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 import { logoImage } from "./logo";
 import { sendReviewRequest } from "./reviews";
+import { isRoofWork } from "./roofPackages";
+import { optionsFrom } from "./sales";
 
 export interface ActionResult {
   type: string;
@@ -42,6 +50,7 @@ interface CompanyInfo {
   website: string | null;
   timezone: string;
   currency: string;
+  trade_preset: string | null;
   settings: Record<string, unknown>;
   address: Record<string, string | undefined>;
 }
@@ -57,6 +66,8 @@ export interface RunContext {
   appPath: string;
   jobId: string | null;
   propertyId: string | null;
+  /** What started the rule (its trigger), once it's running: some keep to their own rules (sub_offer.*). */
+  trigger?: string;
 }
 
 const SUBJECTS: SubjectKind[] = ["client", "request", "quote", "job", "visit", "invoice"];
@@ -81,12 +92,22 @@ export function companyAddress(address: Record<string, string | undefined> | nul
 type Property = { line1: string; city: string | null; region: string | null } | null;
 const addressOf = (p: Property) => (p ? [p.line1, [p.city, p.region].filter(Boolean).join(", ")].filter(Boolean).join(", ") : "");
 
+/**
+ * Whether a quote is roof work (roofPackages.ts isRoofWork): the business is a roofer or its newest
+ * measurement is a roof, or the quote went out as a price range (only Roofing sends those).
+ */
+async function roofWork(admin: Db, company: CompanyInfo, quoteId: string, sentAsRange: boolean): Promise<boolean> {
+  if (sentAsRange || isRoofWork(company.trade_preset, null)) return true;
+  const { data } = await admin.from("measurements").select("sections, roof_pitch, roofing_squares").eq("company_id", company.id).eq("quote_id", quoteId).order("updated_at", { ascending: false }).limit(1);
+  return isRoofWork(company.trade_preset, data?.[0] ?? null);
+}
+
 /** Everything a rule can know about the record it runs on. Null when the record is gone. */
 export async function loadContext(admin: Db, companyId: string, subjectType: string, subjectId: string): Promise<RunContext | null> {
   if (!SUBJECTS.includes(subjectType as SubjectKind)) return null;
   const subject = subjectType as SubjectKind;
 
-  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, settings, address").eq("id", companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, trade_preset, settings, address").eq("id", companyId).maybeSingle();
   if (!company) return null;
   const co = company as unknown as CompanyInfo;
   const fmt = (n: number | string | null | undefined) => money(n, co.currency || "USD");
@@ -119,21 +140,35 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
     case "quote": {
       const { data } = await admin
         .from("quotes")
-        .select("number, title, status, total, range_low, range_high, priced_on_site_at, exact_sent_at, roof_package_id, client_id, property_id, property:properties(line1, city, region), lines:quote_line_items(name)")
+        .select(
+          "number, title, status, total, tax_rate, discount_amount, range_low, range_high, priced_on_site_at, exact_sent_at, roof_package_id, option_id, client_id, property_id, property:properties(line1, city, region), promo:promo_codes(kind, value), lines:quote_line_items(name, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)",
+        )
         .eq("company_id", companyId)
         .eq("id", subjectId)
         .maybeSingle();
       if (!data) return null;
       clientId = data.client_id;
       propertyId = data.property_id;
-      facts = { status: data.status, amount: Number(data.total), line_items: (data.lines as Array<{ name: string }>).map((l) => l.name) };
+      // Before the client answers, what's offered: the shared lines and the shown option's, add-ons
+      // included (not picked isn't turned down yet). Once they've signed, what they're getting: the
+      // shared lines and the option they chose, without the add-ons they left off, as the job has them.
+      const answered = data.status === "approved" || data.status === "converted";
+      const lines = data.lines.filter((l) => (answered ? countsOn(l, data.option_id) : l.option_id === null || l.option_id === data.option_id));
+      facts = { status: data.status, amount: Number(data.total), line_items: lines.map((l) => l.name) };
       // Sent as a price range, the client hasn't seen the exact price (lost or archived since included),
-      // so an email about it doesn't show it either.
-      const total = hidesExactPrice(data) ? moneyRange(data.range_low, data.range_high, co.currency || "USD") : fmt(data.total);
+      // so an email about it doesn't show it either. With options and no answer yet, the quote's total is
+      // only the option shown, so it says how many there are and the lowest, as the quote's email did.
+      const offer = optionsFrom(data);
+      const total = hidesExactPrice(data)
+        ? moneyRange(data.range_low, data.range_high, co.currency || "USD")
+        : offer
+          ? `${offer.count} options from ${fmt(offer.from)}`
+          : fmt(data.total);
       vars = { number: data.number, title: data.title, total, address: addressOf(data.property as Property) };
       label = `Quote #${data.number}`;
-      // A roof package's estimate is worked on in Roofing, where the office books the visit.
-      appPath = data.roof_package_id ? `/roofing/${subjectId}` : `/quotes/${subjectId}`;
+      // A roof package's estimate is worked on in Roofing, where the office books the visit. Every
+      // trade has packages now, so a package alone doesn't make it a roof.
+      appPath = data.roof_package_id && (await roofWork(admin, co, subjectId, data.range_low !== null)) ? `/roofing/${subjectId}` : `/quotes/${subjectId}`;
       break;
     }
     case "job": {
@@ -235,6 +270,24 @@ async function withLink(env: Env, ctx: RunContext, baseUrl: string | null): Prom
   return { ...ctx, vars: { ...ctx.vars, link } };
 }
 
+/**
+ * Adds what the event itself says, for the triggers that carry it: a sub's offer gives {{sub.name}},
+ * {{sub.price}} (the price offered) and, turned down, {{sub.reason}}.
+ */
+export async function withEvent(admin: Db, ctx: RunContext, trigger: string, activityId: number | null | undefined): Promise<RunContext> {
+  if (!triggerDef(trigger)?.variables?.length || activityId == null) return ctx;
+  const { data } = await admin.from("activity").select("data").eq("company_id", ctx.company.id).eq("id", activityId).maybeSingle();
+  const event = (data?.data ?? {}) as Record<string, unknown>;
+  const text = (v: unknown) => (v == null ? "" : String(v));
+  return {
+    ...ctx,
+    vars: {
+      ...ctx.vars,
+      sub: { name: text(event.sub_name), price: event.total == null ? "" : money(event.total as number, ctx.company.currency || "USD"), reason: text(event.reason) },
+    },
+  };
+}
+
 export async function buildContext(env: Env, admin: Db, companyId: string, subjectType: string, subjectId: string, baseUrl: string | null) {
   const ctx = await loadContext(admin, companyId, subjectType, subjectId);
   return ctx ? withLink(env, ctx, baseUrl) : null;
@@ -246,12 +299,34 @@ function companyFooter(company: CompanyInfo) {
   return [company.name, companyAddress(company.address)].filter(Boolean).join(" · ");
 }
 
+/**
+ * Whoever of these the trigger lets hear about it: for a sub's offer (its price), only the office with
+ * the Subcontractors area (private.subs_office), whatever levels or people the rule names, so neither
+ * a rule saved before someone lost the area nor one written straight to the database tells anyone else.
+ */
+async function mayHear(admin: Db, ctx: RunContext, people: Array<{ user_id: string; role: string; role_id?: string | null }>) {
+  const trigger = ctx.trigger ? triggerDef(ctx.trigger) : undefined;
+  if (!trigger?.area && !trigger?.notifyRoles) return people;
+  const roleIds = [...new Set(people.map((p) => p.role_id).filter((id): id is string => Boolean(id)))];
+  const { data: roles, error } = roleIds.length ? await admin.from("company_roles").select("id, permissions").eq("company_id", ctx.company.id).in("id", roleIds) : { data: [], error: null };
+  if (error) throw new Error(error.message);
+  const custom = new Map((roles ?? []).map((r) => [r.id, r.permissions as string[]]));
+  return people.filter((p) => {
+    if (trigger.notifyRoles && !trigger.notifyRoles.includes(p.role)) return false;
+    if (!trigger.area) return true;
+    // A custom role whose row can't be read counts as having no areas.
+    const areas = memberPermissions(p.role as Role, p.role_id ? (custom.get(p.role_id) ?? []) : null);
+    return areas.includes(trigger.area);
+  });
+}
+
 /** Performs one action. Returns a short description of what happened, or throws with the reason. */
 export async function performAction(env: Env, admin: Db, ctx: RunContext, action: Action, ruleName: string, baseUrl: string | null): Promise<string> {
   const client = ctx.client;
   switch (action.type) {
     case "notify": {
-      let query = admin.from("memberships").select("user_id, role").eq("company_id", ctx.company.id).eq("active", true);
+      // The team only: a sub isn't sent the office's notices, even on their own visit.
+      let query = admin.from("memberships").select("user_id, role, role_id").eq("company_id", ctx.company.id).eq("active", true).neq("role", "subcontractor");
       if (action.user_ids?.length && !action.roles?.length) query = query.in("user_id", action.user_ids);
       const { data, error } = await query;
       if (error) throw new Error(error.message);
@@ -264,8 +339,10 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
         const { data: assigned } = visits.length ? await admin.from("visit_assignees").select("user_id").in("visit_id", visits) : { data: [] };
         for (const a of assigned ?? []) onIt.add(a.user_id);
       }
-      const people = (data ?? []).filter((m) => action.roles?.includes(m.role) || action.user_ids?.includes(m.user_id) || onIt.has(m.user_id));
-      if (!people.length) throw new Error("No one on the team matches who this rule notifies.");
+      const named = (data ?? []).filter((m) => action.roles?.includes(m.role) || action.user_ids?.includes(m.user_id) || onIt.has(m.user_id));
+      if (!named.length) throw new Error("No one on the team matches who this rule notifies.");
+      const people = await mayHear(admin, ctx, named);
+      if (!people.length) throw new Error("Only the office with the Subcontractors area hears about subs' offers, and nobody this rule notifies has it.");
       const title = render(action.title, ctx) || ruleName;
       const { error: insertError } = await admin.from("notifications").insert(
         people.map((p) => ({ company_id: ctx.company.id, user_id: p.user_id, kind: ctx.subject, title: title.slice(0, 300), body: render(action.body, ctx) || null, link: ctx.appPath })),
@@ -324,8 +401,10 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
     case "create_task": {
       const today = localDate(new Date(), ctx.company.timezone || "UTC");
       const due = addDays(today, Math.max(0, Math.min(365, Math.round(Number(action.days_from_now) || 0))));
+      // A task is on the schedule, where the crew sees it: never a sub's price or reason in it.
+      const title = renderTemplate(action.title ?? "", ctx.trigger ? taskVars(ctx.trigger, ctx.vars) : ctx.vars).trim();
       const { error } = await admin.from("visits").insert({
-        company_id: ctx.company.id, kind: "task", title: (render(action.title, ctx) || ruleName).slice(0, 200), scheduled_on: due, status: "scheduled",
+        company_id: ctx.company.id, kind: "task", title: (title || ruleName).slice(0, 200), scheduled_on: due, status: "scheduled",
         job_id: ctx.subject === "job" || ctx.subject === "visit" || ctx.subject === "invoice" ? ctx.jobId : null,
         property_id: ctx.propertyId, notes: `Created by the automation “${ruleName}”.`,
       });
@@ -358,6 +437,8 @@ interface RunRow {
   rule_id: string;
   subject_type: string | null;
   subject_id: string | null;
+  /** The event that queued it (public.activity). */
+  activity_id?: number | null;
   result: unknown;
   /** The batch's claim (claim_automation_runs): this worker holds the run while it still matches. */
   claim_token: string | null;
@@ -383,11 +464,18 @@ async function renew(admin: Db, run: RunRow, results: ActionResult[]) {
 
 export async function executeRun(env: Env, admin: Db, run: RunRow, baseUrl: string | null): Promise<"done" | "skipped" | "failed" | "lost"> {
   try {
-    const { data: rule } = await admin.from("automation_rules").select("id, name, enabled, conditions, actions, run_count").eq("id", run.rule_id).maybeSingle();
+    const { data: rule } = await admin.from("automation_rules").select("id, name, trigger, enabled, conditions, actions, run_count").eq("id", run.rule_id).maybeSingle();
     if (!rule || !rule.enabled) return finish(admin, run, "skipped", [], "The rule was turned off or deleted.");
     if (!run.subject_type || !run.subject_id) return finish(admin, run, "skipped", [], "There was nothing to act on.");
-    const ctx = await buildContext(env, admin, run.company_id, run.subject_type, run.subject_id, baseUrl);
-    if (!ctx) return finish(admin, run, "skipped", [], "The record was deleted.");
+    const loaded = await buildContext(env, admin, run.company_id, run.subject_type, run.subject_id, baseUrl);
+    if (!loaded) return finish(admin, run, "skipped", [], "The record was deleted.");
+    const ctx = { ...(await withEvent(admin, loaded, rule.trigger, run.activity_id)), trigger: rule.trigger };
+    // The actions this trigger takes (a sub's offer: notices to the office and tasks), whatever the
+    // rule says: a rule written straight to the database doesn't get to text the client a sub's price.
+    // A status change is checked by the action itself, as the rule screen checks it.
+    const def = triggerDef(rule.trigger);
+    const fits = new Set<string>(actionsForTrigger(rule.trigger).map((a) => a.type));
+    const fitsTrigger = (action: Action) => (action.type === "update_status" ? !def?.actions || def.actions.includes("update_status") : fits.has(action.type));
 
     const check = evaluateConditions((rule.conditions ?? []) as unknown as Condition[], ctx.facts, ctx.subject);
     if (!check.pass) return finish(admin, run, "skipped", [], `Conditions not met: ${(check.failed ?? "").charAt(0).toLowerCase()}${(check.failed ?? "").slice(1)}.`);
@@ -404,6 +492,10 @@ export async function executeRun(env: Env, admin: Db, run: RunRow, baseUrl: stri
       // An email can take a few minutes (lib/smtp.ts), so the claim is renewed before each action
       // after the first, with what's done so far. If another worker has the run by then, this one
       // stops there: that worker does the rest, skipping what this one did.
+      if (!fitsTrigger(action)) {
+        results.push({ type: action.type, ok: false, detail: "This action doesn't fit what starts this rule." });
+        continue;
+      }
       if (acted && !(await renew(admin, run, results))) return "lost";
       acted = true;
       try {

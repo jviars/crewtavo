@@ -237,20 +237,43 @@ export function laborRate(entry: CostedTime, approvedRates: Readonly<Record<stri
   return approvedRates[entry.id] ?? (entry.user_id ? currentRates[entry.user_id] : undefined) ?? 0;
 }
 
-/** Each job's revenue (contract total), costs (labor, expenses and materials at cost) and profit. */
+/** A job line as job costs read it: unit_labor_cost is the labor estimate in its unit_cost. */
+export interface CostedLine { quantity: number | string; unit_cost: number | string | null; unit_labor_cost?: number | string | null }
+
+/**
+ * A job's line costs. Once the job has labor of its own that costs something (time on it at a rate,
+ * or sub and crew pay), each line counts without the labor estimate its cost has in it, so that labor
+ * isn't counted twice. Time that costs nothing yet (no rate, or a clock still running) doesn't count.
+ */
+export function lineCosts(lines: readonly CostedLine[], actualLabor: boolean) {
+  const full = sum(lines, (l) => Number(l.quantity) * Number(l.unit_cost ?? 0));
+  const labor = actualLabor ? sum(lines, (l) => Number(l.quantity) * Math.min(Math.max(0, Number(l.unit_cost ?? 0)), Number(l.unit_labor_cost ?? 0))) : 0;
+  return { materials: full - labor, left_out: labor };
+}
+
+/**
+ * Each job's revenue (contract total), costs and profit. Costs: labor (time at its rates), sub and
+ * crew pay (`crewPay`: job pay that's agreed, done or paid, from public.job_pay_costs), expenses, and
+ * the lines at cost, without their labor estimate when the job has labor of its own.
+ */
 export function jobProfit(
-  jobs: ReadonlyArray<{ id: string; number?: number | null; title: string; client?: { display_name: string } | null; financials?: { contract_total: number | string | null } | null; lines: ReadonlyArray<{ quantity: number | string; unit_cost: number | string | null }> }>,
+  jobs: ReadonlyArray<{ id: string; number?: number | null; title: string; client?: { display_name: string } | null; financials?: { contract_total: number | string | null } | null; lines: readonly CostedLine[] }>,
   time: readonly CostedTime[],
   expenses: ReadonlyArray<{ job_id: string | null; amount: number | string }>,
   rateOf: (entry: CostedTime) => number,
   marginTarget: number | null = null,
+  crewPay: ReadonlyArray<{ job_id: string; amount: number | string | null }> = [],
 ) {
   const costed = jobs.map((j) => {
-    const labor = sum(time.filter((t) => t.job_id === j.id), (t) => hoursBetween(t.started_at, t.ended_at) * rateOf(t));
+    const mine = time.filter((t) => t.job_id === j.id);
+    const pay = crewPay.filter((p) => p.job_id === j.id);
+    const labor = sum(mine, (t) => hoursBetween(t.started_at, t.ended_at) * rateOf(t));
+    const crew = sum(pay, (p) => Number(p.amount ?? 0));
     const spent = sum(expenses.filter((e) => e.job_id === j.id), (e) => Number(e.amount));
-    const materials = sum(j.lines, (l) => Number(l.quantity) * Number(l.unit_cost ?? 0));
+    const actualLabor = labor > 0 || pay.length > 0;
+    const lines = lineCosts(j.lines, actualLabor);
     const revenue = Number(j.financials?.contract_total ?? 0);
-    const cost = labor + spent + materials;
+    const cost = labor + crew + spent + lines.materials;
     return {
       id: j.id,
       number: j.number ?? null,
@@ -258,8 +281,12 @@ export function jobProfit(
       client: j.client?.display_name ?? "",
       revenue: cents(revenue),
       labor: cents(labor),
+      crew_pay: cents(crew),
       expenses: cents(spent),
-      materials: cents(materials),
+      materials: cents(lines.materials),
+      /** The lines' labor estimate, left out because the job has labor of its own (0 when it hasn't). */
+      line_labor_left_out: cents(lines.left_out),
+      actual_labor: actualLabor,
       cost: cents(cost),
       profit: cents(revenue - cost),
       margin_percent: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : null,

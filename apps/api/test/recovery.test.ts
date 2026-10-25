@@ -21,6 +21,8 @@ describe("who can make a reset link for whom", () => {
       estimator: [],
       crew_lead: [],
       field_crew: [],
+      // A sub signs in with a link from their page under Subs, never a reset link.
+      subcontractor: [],
     });
   });
 });

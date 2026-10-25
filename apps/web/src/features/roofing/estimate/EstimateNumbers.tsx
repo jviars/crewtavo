@@ -1,14 +1,14 @@
 /**
  * "Your numbers": what the estimate costs the business (ABC Supply materials, labor and the rest),
- * the profit and the margin, with where the material prices came from. Only the team sees it; the
- * homeowner never does. Hidden when nothing is known about the cost.
+ * the profit and the margin, with where the material prices came from, for the option being looked
+ * at when it offers options. Only the team sees it; the homeowner never does. Hidden when nothing is
+ * known about the cost.
  */
 import { useId } from "react";
 import { formatMoney } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { useSupplier, type Supplier } from "../../materials/data";
-import { estimateFigures, firstName, LOW_MARGIN, whenText } from "./rows";
-import type { EstimateQuote } from "./types";
+import { estimateFigures, firstName, LOW_MARGIN, whenText, type FiguresQuote } from "./rows";
 import styles from "./estimate.module.css";
 
 /** The branch, as ABC names it ("ABC Supply - Lexington, KY"), with a note for sandbox test prices. */
@@ -23,18 +23,27 @@ export function AbcBadge() {
   return <span className={styles.abcBadge} aria-hidden="true">ABC</span>;
 }
 
-export function EstimateNumbers({ quote, clientName }: { quote: Pick<EstimateQuote, "subtotal" | "discount_amount" | "lines">; clientName?: string | null }) {
+export function EstimateNumbers({ quote, clientName, optionId, optionLabel }: {
+  quote: FiguresQuote;
+  clientName?: string | null;
+  /** The option looked at (rows.ts estimateFigures); the one shown when left out. */
+  optionId?: string | null;
+  /** Its name in the heading ("Better"), when the estimate offers options. */
+  optionLabel?: string | null;
+}) {
   const { company } = useSession();
   const supplier = useSupplier();
   const id = useId();
-  const figures = estimateFigures(quote);
+  const figures = estimateFigures(quote, optionId === undefined ? (quote.option_id ?? null) : optionId);
   if (!figures) return null;
   const first = firstName(clientName);
   const branch = branchLabel(supplier.data);
   const low = figures.margin !== null && figures.margin < LOW_MARGIN;
   return (
     <section className={styles.numbers} aria-labelledby={id}>
-      <h3 id={id} className={styles.numbersTitle}>Your numbers · {first ? `${first} never sees these` : "only your team sees these"}</h3>
+      <h3 id={id} className={styles.numbersTitle}>
+        Your numbers{optionLabel ? ` for ${optionLabel}` : ""} · {first ? `${first} never sees these` : "only your team sees these"}
+      </h3>
       <dl className={styles.figures}>
         {figures.materials !== null && (
           <>

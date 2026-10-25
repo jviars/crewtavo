@@ -6,9 +6,11 @@
  *
  * Everything runs with the person's own client, so row-level security applies: only people who sell
  * (SALES with the sales area) change quotes, and a person only ever reads or writes their own saved
- * signature.
+ * signature. The contract signed with it (the option chosen, the sections and the homeowner's
+ * initials) is checked and kept the same way as online, by services/contracts.ts.
  */
 import { pickTemplate } from "@crewtavo/core/documents";
+import { countsOn } from "@crewtavo/core/money";
 import { z } from "zod";
 import type { Env } from "../env";
 import { firstName, isEmail, renderEmail } from "../lib/email";
@@ -18,7 +20,8 @@ import { reportError } from "../lib/monitoring";
 import { sendEmail, sendSms } from "../lib/notify";
 import type { Db } from "../lib/supabase";
 import { companyAddress } from "./automations";
-import { logoImage } from "./logo";
+import { checkContract, contractInput, freezeContract, freezeOption, initialsImage, isPriced, loadOptions, optionTiers, packageFill, postedId, resolveContract, sectionsHashSchema, type OptionRow } from "./contracts";
+import { isDrawnPng, logoImage } from "./logo";
 
 /** Who's signing, where: the person's client, their company and user, and the address links use. */
 export interface SigningScope {
@@ -29,8 +32,11 @@ export interface SigningScope {
   baseUrl: string;
 }
 
-/** A drawn signature: a PNG data URL, as SignaturePad makes it (a few to a few hundred KB). */
-export const signatureImage = z.string().max(300_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
+/**
+ * A drawn signature: a PNG data URL, as SignaturePad makes it (a few to a few hundred KB), of a size a
+ * signature pad makes (logo.ts isDrawnPng). Online (routes/public.ts) and on the iPad alike.
+ */
+export const signatureImage = z.string().max(300_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/).refine(isDrawnPng);
 
 export const saveSignatureSchema = z.object({ image: signatureImage });
 
@@ -44,6 +50,13 @@ export const signSchema = z.object({
   email_copy: z.boolean().optional(),
   /** Where to email the copy; the client's email when left out. */
   to: z.string().trim().max(200).optional(),
+  /** The option they chose (the one shown on the visit page): required when the quote offers options. */
+  option_id: postedId.optional(),
+  /** The total on the paper they signed: it's only signed while the quote still comes to it. */
+  expected_total: z.number().min(0).max(100_000_000).optional(),
+  /** The terms on the paper (core sectionsHash), and the homeowner's initials for the sections that ask. */
+  sections_hash: sectionsHashSchema.optional(),
+  initials: initialsImage.optional(),
 });
 export type SignBody = z.infer<typeof signSchema>;
 
@@ -59,8 +72,11 @@ const SIGNED = ["approved", "converted"];
 /** How long the link in the signed copy works: a year, so the client can find it again. */
 const COPY_DAYS = 365;
 
+/** What changed when the database won't sign: the option shown, or the total, isn't what was on the paper. */
+const CHANGED = "The option or the price changed. Check it again.";
+
 const QUOTE_FIELDS =
-  "id, number, status, title, client_id, template_id, salesperson_id, subtotal, discount_amount, tax_amount, total, approval, client:clients(display_name, email, phone), lines:quote_line_items(id, optional, selected)";
+  "id, number, status, title, client_id, template_id, salesperson_id, option_id, section_ids, roof_package_id, sent_at, created_at, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, approval, promo:promo_codes(kind, value), client:clients(display_name, email, phone, billing_address), property:properties(line1, city, region, postal_code), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected)";
 
 // ---------------------------------------------------------------------------------------------
 // Saved signatures
@@ -104,7 +120,7 @@ async function loadQuote(s: SigningScope, id: string) {
 type Quote = Awaited<ReturnType<typeof loadQuote>>;
 
 async function loadCompany(s: SigningScope) {
-  return must(await s.db.from("companies").select("name, email, phone, address, settings").eq("id", s.companyId).maybeSingle(), "Company not found.");
+  return must(await s.db.from("companies").select("name, email, phone, timezone, address, settings").eq("id", s.companyId).maybeSingle(), "Company not found.");
 }
 
 type Company = Awaited<ReturnType<typeof loadCompany>>;
@@ -125,48 +141,73 @@ function notOpen(status: string): HttpError {
 
 /**
  * The homeowner signs on the salesperson's iPad: the quote is approved with both signatures (the
- * business's drawn now or the salesperson's saved one), the salesperson becomes its salesperson if
- * it had none, and the client can be emailed a copy.
+ * business's drawn now or the salesperson's saved one), for the option they chose and the contract
+ * on the paper, initialed where it asks. The salesperson becomes its salesperson if it had none, and
+ * the client can be emailed a copy.
  */
 export async function signQuote(s: SigningScope, id: string, body: SignBody) {
   const quote = await loadQuote(s, id);
   if (!OPEN.includes(quote.status)) throw notOpen(quote.status);
-  const [company, templates, saved, signer] = await Promise.all([
+  const [company, templates, saved, signer, options] = await Promise.all([
     loadCompany(s),
     s.db.from("document_templates").select("id, is_default, settings").eq("company_id", s.companyId),
     savedSignature(s.db, s.companyId, s.userId),
     signerName(s),
+    loadOptions(s.db, s.companyId, id),
   ]);
   if (templates.error) throw dbError(templates.error);
   const template = pickTemplate(templates.data ?? [], quote.template_id);
   const companySignature = body.company_signature ?? saved;
   if (!companySignature && template.company_signs) throw new HttpError(400, `Sign for ${company.name} too.`);
 
+  // The option they chose is the one shown on the visit page, and it has to be the one on the paper.
+  let option: OptionRow | null = null;
+  if (options.length || body.option_id) {
+    if (!body.option_id) throw new HttpError(400, "Pick one of the options first.");
+    option = options.find((o) => o.id === body.option_id && o.id === quote.option_id) ?? null;
+    if (!option) throw new HttpError(409, CHANGED);
+    if (!isPriced(option, quote.lines ?? [])) throw new HttpError(409, "This option isn't priced yet. Add its lines, or pick another one.");
+  }
+  // The contract for that option, from the business's own library, filled in as the paper showed it
+  // (the fingerprint it sent says so); then those words are kept with the approval, with the
+  // homeowner's initials.
+  const contract = await resolveContract(s.db, s.companyId, { template, option, quoteSectionIds: quote.section_ids });
+  const lines = quote.lines ?? [];
+  const money = { taxRate: quote.tax_rate, discountAmount: quote.discount_amount, promo: quote.promo };
+  // Without options, {Option} and {Warranty} say the package it was priced from.
+  const fill = option ?? (options.length ? null : await packageFill(s.db, s.companyId, quote.roof_package_id));
+  const facts = contractInput({ ...quote, total: body.expected_total ?? quote.total }, quote.client, quote.property, company, template, fill);
+  const tier = option ? optionTiers(options, lines, money).get(option.id) : null;
+  checkContract(contract, body, { facts, option: option && freezeOption(option, tier) });
   const now = new Date().toISOString();
+  const kept = freezeContract({ contract, facts, option, tier, initials: body.initials ?? null, signedAt: now });
+
   const approval = {
     name: body.name,
     signature: body.signature,
     signed_at: now,
     method: "in_person" as const,
-    selected_line_ids: (quote.lines ?? []).filter((l) => l.optional && l.selected).map((l) => l.id),
+    selected_line_ids: lines.filter((l) => l.optional && countsOn(l, quote.option_id)).map((l) => l.id),
     company: companySignature ? { name: signer || company.name, user_id: s.userId, signature: companySignature, signed_at: now } : null,
     // The template as it was signed, so later changes to it (or another default) don't change the terms above the signatures.
     template,
-    subtotal: Number(quote.subtotal),
-    discount_amount: Number(quote.discount_amount),
-    tax_amount: Number(quote.tax_amount),
-    total: Number(quote.total),
+    ...kept,
   };
-  // Only while it's still open: two people signing at once can't both win.
-  const updated = await s.db
-    .from("quotes")
-    .update({ status: "approved", approved_at: now, salesperson_id: quote.salesperson_id ?? s.userId, approval: asJson(approval) })
-    .eq("id", id)
-    .eq("company_id", s.companyId)
-    .in("status", OPEN)
-    .select("id");
-  if (updated.error) throw dbError(updated.error);
-  if (!updated.data?.length) throw new HttpError(409, "This estimate was already signed.");
+  // One step in the database (sign_quote): it claims the quote while it's still open, still shows
+  // the option they chose and still comes to the total on the paper, then approves it with the
+  // amounts. So two people signing at once can't both win, and an office change in between isn't
+  // signed by mistake.
+  const { data: amounts, error } = await s.db.rpc("sign_quote", {
+    p_quote: id,
+    p_approval: asJson(approval),
+    ...(option ? { p_option: option.id } : {}),
+    ...(body.expected_total !== undefined ? { p_expected_total: body.expected_total } : {}),
+  });
+  if (error) throw dbError(error);
+  if (!amounts) {
+    const current = must(await s.db.from("quotes").select("status").eq("id", id).eq("company_id", s.companyId).maybeSingle(), "We couldn't find that estimate. It may have been deleted.");
+    throw OPEN.includes(current.status) ? new HttpError(409, CHANGED) : notOpen(current.status);
+  }
   if (body.save_signature && body.company_signature) await keepSignature(s, body.company_signature);
 
   const link = await clientLink(s.env, s.baseUrl, { c: s.companyId, t: "quote", id }, COPY_DAYS);

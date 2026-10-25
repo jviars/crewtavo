@@ -3,7 +3,7 @@
  * from the picture chosen, kept at <company>/logo/<uuid>.png in the files bucket, with its path in
  * companies.settings.branding.logo and its size in branding.logo_size. Clients see it on the Client
  * Hub and in emails, from /api/public/logo/<company>/<uuid>.png. Replacing or removing it deletes
- * the old file.
+ * the old file. The PNG checks here also check drawn signatures and initials (isDrawnPng).
  */
 import { dbError, HttpError } from "../lib/http";
 import type { Db } from "../lib/supabase";
@@ -18,10 +18,35 @@ export const isLogoPath = (path: string, companyId: string) => new RegExp(`^${co
 export const isPng = (bytes: Uint8Array) => bytes.length > 24 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => bytes[i] === b);
 
 /** Width and height from a PNG's header (IHDR, right after the signature). */
-const pngSize = (bytes: Uint8Array): [number, number] => {
+export const pngSize = (bytes: Uint8Array): [number, number] => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return [view.getUint32(16), view.getUint32(20)];
 };
+
+/**
+ * The most a drawn signature or initials can measure. The pad is as wide as the screen at up to three
+ * times its pixel density, so a full-width one on a big iPad is under 3,000 pixels across and a few
+ * hundred tall. A picture that claims far more (a few KB can say 20,000 × 20,000) would take the
+ * browser of everyone who opens the signed copy gigabytes to draw.
+ */
+export const DRAWN_MAX_SIDE = 8000;
+export const DRAWN_MAX_PIXELS = 8_000_000;
+
+const DRAWN_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+const DRAWN_PREFIX = "data:image/png;base64,";
+
+/**
+ * Whether a value is a drawn signature or initials as SignaturePad makes it: a PNG data URL whose
+ * header (IHDR, always the first chunk) gives a size a pad makes (DRAWN_MAX_SIDE, DRAWN_MAX_PIXELS).
+ * Only the header is decoded: the signature and IHDR are the first 33 bytes, 44 characters of base64.
+ */
+export function isDrawnPng(value: unknown): value is string {
+  if (typeof value !== "string" || !DRAWN_DATA_URL.test(value)) return false;
+  const head = Buffer.from(value.slice(DRAWN_PREFIX.length, DRAWN_PREFIX.length + 44), "base64");
+  if (!isPng(head) || head.toString("latin1", 12, 16) !== "IHDR") return false;
+  const [width, height] = pngSize(head);
+  return width > 0 && height > 0 && width <= DRAWN_MAX_SIDE && height <= DRAWN_MAX_SIDE && width * height <= DRAWN_MAX_PIXELS;
+}
 
 type Settings = Record<string, unknown> & { branding?: Record<string, unknown> };
 

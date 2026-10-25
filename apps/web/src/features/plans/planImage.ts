@@ -3,6 +3,7 @@
  * a plan goes on the map), or a picture of a plan, scaled to fit a map texture. Also a "lines only"
  * copy with the white paper taken out, so the drawing sits on the aerial instead of covering it.
  */
+import { loadPdfJs, type PdfModule } from "@/lib/pdf";
 import { isPdf, type PlanFile } from "./plans";
 
 export interface PlanImage {
@@ -20,20 +21,8 @@ export interface PlanImage {
 /** Bigger than this is more than many phones' graphics can take as one picture. */
 const MAX_SIDE = 4096;
 
-type PdfModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 type PdfTask = ReturnType<PdfModule["getDocument"]>;
 type PdfDocument = Awaited<PdfTask["promise"]>;
-let pdfjs: Promise<PdfModule> | null = null;
-function loadPdfJs(): Promise<PdfModule> {
-  pdfjs ??= Promise.all([import("pdfjs-dist/legacy/build/pdf.mjs"), import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url")]).then(([lib, worker]) => {
-    lib.GlobalWorkerOptions.workerSrc = worker.default;
-    return lib;
-  }).catch((error) => {
-    pdfjs = null;
-    throw error;
-  });
-  return pdfjs;
-}
 
 // The PDF stays open while its pages are looked through (by storage path: links change).
 const open = new Map<string, Promise<PdfTask>>();

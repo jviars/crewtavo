@@ -15,7 +15,7 @@ import { CATEGORY_LABELS } from "../field/fieldData";
 import { leadSource } from "../marketing/website";
 import { HBars, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart } from "../finance/Charts";
 import { bucketize, bucketsFor, hoursBetween, type Range } from "../finance/range";
-import { fetchAll, hrs, pct, plural, RangeHeader, sum, TabBody, timeRates, useRangeParams, useTeam } from "../finance/shared";
+import { fetchAll, hrs, memberName, pct, plural, RangeHeader, sum, TabBody, timeRates, useRangeParams, useTeam } from "../finance/shared";
 
 const TABS = [
   { key: "sales", label: "Sales" },
@@ -63,7 +63,7 @@ function Sales({ range }: { range: Range }) {
     },
   });
   const buckets = bucketsFor(range);
-  const nameOf = (id: string | null) => (id ? team.data?.find((m) => m.user_id === id)?.profile?.full_name ?? "Former team member" : "Unassigned");
+  const nameOf = (id: string | null) => (id ? memberName(team.data?.find((m) => m.user_id === id)) : "Unassigned");
   return (
     <TabBody query={query}>
       {(d) => {
@@ -232,7 +232,7 @@ function Team({ range }: { range: Range }) {
         const people = new Map<string, { id: string; name: string; total: number; visit: number; drive: number; other: number; approved: number; cost: number; running: boolean }>();
         for (const e of entries) {
           const h = e.paid;
-          const row = people.get(e.user_id) ?? { id: e.user_id, name: member(e.user_id)?.profile?.full_name ?? "Former team member", total: 0, visit: 0, drive: 0, other: 0, approved: 0, cost: 0, running: false };
+          const row = people.get(e.user_id) ?? { id: e.user_id, name: memberName(member(e.user_id)), total: 0, visit: 0, drive: 0, other: 0, approved: 0, cost: 0, running: false };
           row.total += h;
           if (e.category === "visit" || e.category === "assessment") row.visit += h;
           else if (e.category === "drive") row.drive += h;

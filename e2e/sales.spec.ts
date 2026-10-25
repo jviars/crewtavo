@@ -58,22 +58,29 @@ test("new client → request → quote → approved in the portal → job", asyn
   expect(token, "the client link").toBeTruthy();
   await sent.getByRole("button", { name: "Done" }).click();
 
-  // The client approves in the customer portal, without an account.
+  // The client approves in the customer portal, without an account. The page is #root: the copy
+  // that prints (and the one measured for its pages) sits beside it, hidden, with the same words.
   const portal = await (await browser.newContext()).newPage();
   await portal.goto(`/hub/${token}`);
-  await expect(portal.getByText("Sealcoat and crack fill")).toBeVisible();
+  const hub = portal.locator("#root");
+  await expect(hub.getByText("Sealcoat and crack fill").first()).toBeVisible();
+  // The agreement first (the template's terms), on the paper it prints on, then signing.
+  await expect(hub.getByRole("heading", { name: "Review the agreement" })).toBeVisible();
   await expectAccessible(portal, "the customer portal quote");
-  await portal.getByLabel("Your full name").fill("Pat Client");
+  await hub.getByRole("button", { name: "Continue to sign" }).click();
+  await hub.getByLabel("Your full name").fill("Pat Client");
   // Sign on the pad: a short stroke with the mouse.
-  const pad = await portal.getByRole("img", { name: /Sign with your finger or mouse/ }).boundingBox();
+  const signaturePad = hub.getByRole("img", { name: /Sign with your finger or mouse/ });
+  await signaturePad.scrollIntoViewIfNeeded();
+  const pad = await signaturePad.boundingBox();
   await portal.mouse.move(pad!.x + 30, pad!.y + 80);
   await portal.mouse.down();
   await portal.mouse.move(pad!.x + 90, pad!.y + 50, { steps: 5 });
   await portal.mouse.move(pad!.x + 160, pad!.y + 90, { steps: 5 });
   await portal.mouse.up();
-  await portal.getByRole("checkbox", { name: /I approve this quote/ }).check();
-  await portal.getByRole("button", { name: "Approve quote" }).click();
-  await expect(portal.getByText(/^Signed on/)).toBeVisible();
+  await hub.getByRole("checkbox", { name: /I approve this quote/ }).check();
+  await hub.getByRole("button", { name: "Approve quote" }).click();
+  await expect(hub.getByText(/^Signed on/)).toBeVisible();
   await portal.context().close();
 
   // Back in the office the quote shows as approved and becomes a job.

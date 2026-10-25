@@ -50,12 +50,16 @@ test("invoice a job, send it, and record the payment", async ({ as, browser, dat
   expect(Number(invoice.balance_due)).toBe(0);
   expect(Number(invoice.total)).toBe(1250);
 
-  // The client's portal shows it paid, with nothing left to pay.
+  // The client's portal shows it paid, with nothing left to pay. The page is #root: the copy that
+  // prints (and the one measured for its pages) sits beside it, hidden, with the same words.
   const portal = await (await browser.newContext()).newPage();
   await portal.goto(`/hub/${token}`);
-  await expect(portal.getByText("Driveway sealcoat")).toBeVisible();
-  await expect(portal.getByText(/paid/i).first()).toBeVisible();
-  await expect(portal.getByRole("button", { name: /^Pay / })).toHaveCount(0);
+  const hub = portal.locator("#root");
+  await expect(hub.getByText("Driveway sealcoat").first()).toBeVisible();
+  await expect(hub.getByText(/paid/i).first()).toBeVisible();
+  // The invoice itself, on the paper it prints on.
+  await expect(hub.getByRole("region", { name: /as it prints/ })).toContainText("Driveway sealcoat");
+  await expect(hub.getByRole("button", { name: /^Pay / })).toHaveCount(0);
   await expectAccessible(portal, "a paid invoice in the customer portal");
   await portal.context().close();
 });

@@ -1,7 +1,8 @@
 /** Photo and receipt uploads to the private "files" bucket, under the company's folder. */
 import { supabase } from "./api";
 
-const MAX_BYTES = 15 * 1024 * 1024;
+/** The largest file an upload sends (a photo once it's shrunk). */
+export const MAX_BYTES = 15 * 1024 * 1024;
 
 /** Shrink a photo to at most `max` pixels on its long side (phones take huge pictures). */
 export async function compressImage(file: File, max = 2000, quality = 0.82): Promise<Blob> {
@@ -89,6 +90,48 @@ export async function logoPicture(file: File, maxWidth = 720, maxHeight = 240): 
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, sx, sy, sw, sh, 0, 0, out.width, out.height);
     return await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
+  } catch {
+    return null; // HEIC in a browser that can't decode it, or not a picture at all
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** The server takes a package picture up to 1.4 MB (apps/api/src/services/packagePictures.ts); a little under it. */
+const PACKAGE_PICTURE_BYTES = 1_300_000;
+
+/**
+ * A package's picture: the photo as a JPEG of at most 1600 pixels on its long side, with white
+ * behind anything see-through. A detailed photo that's still too large comes out a little smaller.
+ * An SVG is drawn as large as fits. Null when the browser can't open it.
+ */
+export async function packagePicture(file: File): Promise<Blob | null> {
+  const url = URL.createObjectURL(file);
+  try {
+    // An <img> opens SVGs too, which createImageBitmap doesn't.
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const vector = file.type === "image/svg+xml" || /\.svg$/i.test(file.name);
+    const width = image.naturalWidth || 1600;
+    const height = image.naturalHeight || 1200;
+    let blob: Blob | null = null;
+    for (const [max, quality] of [[1600, 0.85], [1600, 0.7], [1200, 0.7]] as const) {
+      const scale = Math.min(max / Math.max(width, height), vector ? Infinity : 1);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      const ctx = canvas.getContext("2d")!;
+      // A transparent picture would turn black as a JPEG.
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      canvas.width = canvas.height = 0; // hand the memory back
+      if (!blob || blob.size <= PACKAGE_PICTURE_BYTES) break;
+    }
+    return blob;
   } catch {
     return null; // HEIC in a browser that can't decode it, or not a picture at all
   } finally {

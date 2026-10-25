@@ -8,9 +8,13 @@
  * (measure, estimate, range, site visit, schedule, invoice) and builds its page from the pieces
  * exported here (the progress pills, the step cards, the invoices), with the roof estimate's own
  * data (features/roofing/RoofingProjectPage.tsx).
+ *
+ * A quote can offer two or three options (quotes/options.ts): the estimate shows one at a time with
+ * the shared lines, its cost and margin counted the way the database counts it (core countsOn and
+ * optionTotals), and it becomes a job once it's approved for the option chosen.
  */
 import type { LineMaterials } from "@crewtavo/core/materials";
-import { optionLabels, toCents } from "@crewtavo/core/money";
+import { countsOn, optionLabels, type TotalsPromo } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -24,10 +28,11 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { addressLine, formatDate, formatMoney, formatMoneyCents, formatNumber, timeAgo } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { usePictures } from "../measure/drawings";
+import { QUOTE_OPTIONS_EMBED, sortOptions, type QuoteOptionRow } from "../quotes/options";
 import { SendDialog } from "../quotes/SendDialog";
-import { currentStep, TAKEOFF_FIELDS, type FlowStep, type StepId, type TakeoffRow } from "./data";
+import { currentStep, estimateSums, TAKEOFF_FIELDS, viewedLines, type FlowStep, type StepId, type TakeoffRow } from "./data";
 
-export interface Line { id: string; name: string; quantity: number; unit: string; unit_price: number; unit_cost: number | null; formula: string | null; service_id: string | null; optional: boolean; selected: boolean; option_group: string | null; sort: number; materials: LineMaterials | null; material_cost: number | null }
+export interface Line { id: string; option_id: string | null; name: string; quantity: number; unit: string; unit_price: number; unit_cost: number | null; taxable: boolean; formula: string | null; service_id: string | null; optional: boolean; selected: boolean; option_group: string | null; sort: number; materials: LineMaterials | null; material_cost: number | null }
 export interface Quote {
   id: string;
   number: number | null;
@@ -35,14 +40,23 @@ export interface Quote {
   status: string;
   subtotal: number;
   discount_amount: number;
+  tax_rate: number;
   tax_amount: number;
   total: number;
+  promo: TotalsPromo | null;
+  /** The option shown first (once signed, the one chosen); null without options. */
+  option_id: string | null;
+  /** The package of the option shown, or of the estimate. */
+  roof_package_id: string | null;
+  priced_on_site_at: string | null;
   sent_at: string | null;
   approved_at: string | null;
   approval: { name?: string; signature?: string | null } | null;
   client: { id: string; display_name: string; email: string | null; phone: string | null } | null;
   property: { id: string; line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
   lines: Line[];
+  /** The options it offers, in order; none for a single estimate. */
+  options: QuoteOptionRow[];
   jobs: Array<{ id: string; number: number | null; status: string }>;
 }
 export interface Service { id: string; name: string; unit: string; unit_price: number; unit_cost: number | null; taxable: boolean; formula: string | null; formula_target: string; category: string | null }
@@ -122,7 +136,9 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
       const [quote, takeoff] = await Promise.all([
         db
           .from("quotes")
-          .select("id, number, title, status, subtotal, discount_amount, tax_amount, total, sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(id, name, quantity, unit, unit_price, unit_cost, formula, service_id, optional, selected, option_group, sort, materials, material_cost), jobs!jobs_company_id_quote_id_fkey(id, number, status)")
+          .select(
+            `id, number, title, status, subtotal, discount_amount, tax_rate, tax_amount, total, promo:promo_codes(kind, value), option_id, roof_package_id, priced_on_site_at, sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(id, option_id, name, quantity, unit, unit_price, unit_cost, taxable, formula, service_id, optional, selected, option_group, sort, materials, material_cost), ${QUOTE_OPTIONS_EMBED}, jobs!jobs_company_id_quote_id_fkey(id, number, status)`,
+          )
           .eq("id", id)
           .maybeSingle(),
         db.from("measurements").select(TAKEOFF_FIELDS).eq("quote_id", id).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
@@ -130,7 +146,7 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
       const q = unwrap(quote) as unknown as Quote | null;
       if (!q) throw new Error(trade.notFound);
       q.lines.sort((a, b) => a.sort - b.sort);
-      return { quote: q, takeoff: (unwrap(takeoff) ?? null) as TakeoffRow | null };
+      return { quote: { ...q, options: sortOptions(q.options ?? []) }, takeoff: (unwrap(takeoff) ?? null) as TakeoffRow | null };
     },
   });
   const job = project.data?.quote.jobs[0] ?? null;
@@ -178,7 +194,13 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
           )}
         </StepCard>
 
-        <StepCard id="estimate" n={2} title={label("estimate")} status={q.lines.length ? `${q.lines.length} ${q.lines.length === 1 ? "line" : "lines"} · ${formatMoney(q.subtotal)}` : reached("estimate") ? "Not priced yet" : trade.takeoff.after} done={q.lines.length > 0}>
+        <StepCard
+          id="estimate"
+          n={2}
+          title={label("estimate")}
+          status={q.options.length ? `${q.options.length} options` : q.lines.length ? `${q.lines.length} ${q.lines.length === 1 ? "line" : "lines"} · ${formatMoney(q.subtotal)}` : reached("estimate") ? "Not priced yet" : trade.takeoff.after}
+          done={q.lines.length > 0}
+        >
           {!takeoff ? (
             <span className="muted small">{trade.takeoff.first}</span>
           ) : (
@@ -276,18 +298,19 @@ export function StepCard({ id, n, title, status, done, current, children }: { id
   );
 }
 
-/** The estimate's lines with their cost, price and margin, the totals, and on to the proposal. */
-export function EstimateLines({ quote }: { quote: Quote }) {
-  const cost = quote.lines.reduce((t, l) => t + (l.unit_cost != null && (!l.optional || l.selected) ? Number(l.unit_cost) * Number(l.quantity) : 0), 0);
-  const costKnown = quote.lines.every((l) => l.unit_cost != null);
-  const price = Number(quote.subtotal);
-  const profit = price - cost;
+/**
+ * The estimate's lines with their cost, price and margin, the totals, and on to the proposal. With
+ * options, the option looked at (`optionId`, called `optionLabel`) and the shared lines, priced as
+ * that option (data.ts estimateSums).
+ */
+export function EstimateLines({ quote, optionId = null, optionLabel = null }: { quote: Quote; optionId?: string | null; optionLabel?: string | null }) {
+  const lines = viewedLines(quote.lines, optionId);
+  const counted = (l: Line) => countsOn(l, optionId);
   // Materials priced at the supplier (Roofing → Materials), for the lines that count.
-  const priced = quote.lines.filter((l) => l.material_cost != null);
-  const materials = priced.reduce((t, l) => t + (!l.optional || l.selected ? toCents(l.material_cost) : 0), 0) / 100;
-  // Something the branch hasn't priced: the materials cost at least this much.
-  const unpriced = priced.some((l) => (!l.optional || l.selected) && l.materials?.items.some((i) => i.total === null && i.quantity > 0));
-  const choices = optionLabels(quote.lines);
+  const { cost, costKnown, price, profit, margin, total, materials, materialsPartial } = estimateSums(quote, optionId);
+  // With options, the tiers are the options' own: a group of lines is just one to pick.
+  const groups = optionLabels(lines);
+  const choices = quote.options.length ? new Map([...groups.keys()].map((id) => [id, "Pick one"])) : groups;
   const signed = quote.status === "approved" || quote.status === "converted";
   const choiceNote = (selected: boolean) => (signed ? (selected ? "the client's pick" : "not picked") : selected ? "shown first" : "the client can pick it");
   return (
@@ -295,12 +318,12 @@ export function EstimateLines({ quote }: { quote: Quote }) {
       <table className="table paving-estimate">
         <thead><tr><th>On the estimate</th><th className="num">Qty</th><th className="num">Price</th><th className="num">Cost</th><th className="num">Total</th><th className="num">Margin</th></tr></thead>
         <tbody>
-          {quote.lines.map((l) => {
+          {lines.map((l) => {
             const total = Number(l.quantity) * Number(l.unit_price);
             const lineCost = l.unit_cost != null ? Number(l.quantity) * Number(l.unit_cost) : null;
             const choice = choices.get(l.id);
             return (
-              <tr key={l.id} data-optional={(l.optional && !l.selected) || undefined}>
+              <tr key={l.id} data-optional={!counted(l) || undefined}>
                 <td>
                   {choice && <span className="chip chip-blue estimate-choice">{choice}</span>}
                   {l.name}
@@ -317,14 +340,20 @@ export function EstimateLines({ quote }: { quote: Quote }) {
         </tbody>
       </table>
       <dl className="paving-totals">
-        {priced.length > 0 && <div><dt>Materials</dt><dd>{formatMoney(materials)}{unpriced ? "+" : ""}</dd></div>}
+        {materials !== null && <div><dt>Materials</dt><dd>{formatMoney(materials)}{materialsPartial ? "+" : ""}</dd></div>}
         <div><dt>Cost</dt><dd>{costKnown ? formatMoney(cost) : `${formatMoney(cost)}+`}</dd></div>
         <div><dt>Price</dt><dd>{formatMoney(price)}</dd></div>
         <div><dt>Profit</dt><dd data-good={profit > 0 || undefined}>{costKnown ? formatMoney(profit) : "—"}</dd></div>
-        <div><dt>Margin</dt><dd>{costKnown && price ? `${Math.round((profit / price) * 100)}%` : "—"}</dd></div>
-        <div><dt>Total with tax</dt><dd>{formatMoney(quote.total)}</dd></div>
+        <div><dt>Margin</dt><dd>{margin === null ? "—" : `${margin}%`}</dd></div>
+        <div><dt>Total with tax</dt><dd>{formatMoney(total)}</dd></div>
       </dl>
-      {choices.size > 0 && !signed && <span className="muted small">The totals are for the choice shown first. The client picks one on the proposal, and the total follows.</span>}
+      {!signed && quote.options.length > 0 && optionLabel ? (
+        <span className="muted small">
+          The totals are for {optionLabel}{choices.size > 0 ? ", with the choices shown first" : ""}. The client chooses one of the options on the proposal, and the total follows.
+        </span>
+      ) : (
+        choices.size > 0 && !signed && <span className="muted small">The totals are for the choice shown first. The client picks one on the proposal, and the total follows.</span>
+      )}
       {!costKnown && <span className="muted small">Add costs to your services in the price list to see the profit on every line.</span>}
       <div className="row wrap" style={{ gap: 8 }}>
         <Link className="btn" to={`/quotes/${quote.id}`}>Adjust on the quote</Link>
@@ -362,7 +391,11 @@ function Proposal({ quote, takeoff, sheet, canSell, onChanged }: { quote: Quote;
         <Button icon="eye" loading={preview.isPending} onClick={() => preview.mutate()}>Preview what the client sees</Button>
         {canSell && !signed && quote.status !== "lost" && <Button variant="primary" icon="send" onClick={() => setSending(true)}>{quote.status === "draft" ? "Send the proposal" : "Send it again"}</Button>}
       </div>
-      <span className="muted small">{signed ? "Signed online: schedule the job next." : "The client opens it on any phone or computer, picks any optional items and signs. No account needed."}</span>
+      <span className="muted small">
+        {signed
+          ? "Signed online: schedule the job next."
+          : `The client opens it on any phone or computer, ${quote.options.length ? `chooses one of the ${quote.options.length} options, ` : ""}picks any optional items and signs. No account needed.`}
+      </span>
       {sending && <SendDialog kind="quote" id={quote.id} number={quote.number} email={quote.client?.email ?? null} phone={quote.client?.phone ?? null} onClose={() => setSending(false)} onSent={() => { setSending(false); onChanged(); }} />}
     </div>
   );
@@ -393,6 +426,14 @@ function Schedule({ quote, job, canSell, onChanged }: { quote: Quote; job: Quote
   }
   if (!canSell) return <span className="muted small">The office turns it into a job once it's signed.</span>;
   const signed = quote.status === "approved";
+  // An estimate with options becomes the job of the one they chose, so that's marked first (the quote's Mark approved asks which).
+  if (!signed && quote.options.length) {
+    return (
+      <span className="muted small">
+        Usually once the client signs for the option they chose. If they said yes another way, <Link to={`/quotes/${quote.id}`}>mark it approved on the quote</Link> with their option, then create the job here.
+      </span>
+    );
+  }
   return (
     <div className="stack-sm">
       <Button variant={signed ? "primary" : undefined} icon="job" loading={convert.isPending} disabled={!quote.lines.length || quote.status === "lost"} onClick={() => convert.mutate()} style={{ justifySelf: "start" }}>

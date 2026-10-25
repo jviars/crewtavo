@@ -23,6 +23,12 @@ import {
   renderTemplate,
   validateRule,
   PRESETS,
+  PACKAGE_LIMITS,
+  isExampleWarranty,
+  isPackagePicturePath,
+  isServicePicturePath,
+  packagePictureSrc,
+  servicePictureSrc,
   addDays,
   evaluateFormula,
   formulaVariables,
@@ -275,6 +281,58 @@ describe("presets", () => {
     for (const s of preset.services) if (s.formula_name) expect(formulaNames.has(s.formula_name), s.name).toBe(true);
     for (const form of preset.intake_forms) expect(form.slug).toMatch(/^[a-z0-9][a-z0-9-]{1,62}$/);
     expect(preset.sop_categories.length).toBeGreaterThan(0);
+    // What roof_packages allows for a package's card.
+    for (const p of preset.packages ?? []) {
+      expect(p.name.trim().length, p.name).toBeGreaterThanOrEqual(1);
+      expect(p.name.length, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.name);
+      if (p.tier !== undefined) expect(p.tier.trim().length, p.name).toBeGreaterThanOrEqual(1);
+      expect(p.tier?.length ?? 0, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.tier);
+      expect(p.highlights?.length ?? 0, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.highlights);
+      expect((p.highlights ?? []).join("").length, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.highlightChars);
+      expect(p.warranty?.length ?? 0, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.warranty);
+    }
+  });
+
+  it("offers the roofing packages as Good, Better and Best, each with highlights and a warranty", () => {
+    const packages = PRESETS.roofing_exteriors.packages ?? [];
+    expect(packages.map((p) => [p.name, p.tier])).toEqual([
+      ["Architectural shingle", "Good"],
+      ["Designer shingle", "Better"],
+      ["Standing-seam metal", "Best"],
+    ]);
+    for (const p of packages) {
+      expect(p.highlights?.length, p.name).toBeGreaterThanOrEqual(3);
+      expect(p.highlights?.length, p.name).toBeLessThanOrEqual(4);
+      expect(p.warranty, p.name).toMatch(/^\d+-year manufacturer warranty on .+, \d+ years on our workmanship\.$/);
+    }
+  });
+
+  it("marks a warranty that's still a preset's example wording", () => {
+    const warranty = PRESETS.roofing_exteriors.packages![0]!.warranty!;
+    expect(isExampleWarranty(warranty)).toBe(true);
+    expect(isExampleWarranty(` ${warranty}\n`)).toBe(true);
+    expect(isExampleWarranty(warranty.replace("10 years", "5 years"))).toBe(false);
+    expect(isExampleWarranty("")).toBe(false);
+    expect(isExampleWarranty(null)).toBe(false);
+  });
+
+  it("loads a package's picture from the business's packages folder", () => {
+    const path = "00000000-0000-4000-8000-000000000001/packages/11111111-1111-4111-8111-111111111111.jpg";
+    expect(isPackagePicturePath(path)).toBe(true);
+    expect(isPackagePicturePath(path.replace("/packages/", "/letterhead/"))).toBe(false);
+    expect(isPackagePicturePath(path.replace(".jpg", ".png"))).toBe(false);
+    expect(isPackagePicturePath(`../${path}`)).toBe(false);
+    expect(packagePictureSrc(path)).toBe("/api/public/package/00000000-0000-4000-8000-000000000001/11111111-1111-4111-8111-111111111111.jpg");
+    expect(packagePictureSrc(path, "https://app.crewtavo.com")).toBe("https://app.crewtavo.com/api/public/package/00000000-0000-4000-8000-000000000001/11111111-1111-4111-8111-111111111111.jpg");
+  });
+
+  it("loads a price list item's picture from the business's services folder", () => {
+    const path = "00000000-0000-4000-8000-000000000001/services/11111111-1111-4111-8111-111111111111.jpg";
+    expect(isServicePicturePath(path)).toBe(true);
+    expect(isServicePicturePath(path.replace("/services/", "/packages/"))).toBe(false);
+    expect(isPackagePicturePath(path)).toBe(false);
+    expect(isServicePicturePath(`../${path}`)).toBe(false);
+    expect(servicePictureSrc(path)).toBe("/api/public/service/00000000-0000-4000-8000-000000000001/11111111-1111-4111-8111-111111111111.jpg");
   });
 });
 

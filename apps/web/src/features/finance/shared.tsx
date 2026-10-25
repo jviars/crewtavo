@@ -14,7 +14,8 @@ import { formatNumber, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { PRESETS, resolveRange, shortDate, type PresetKey, type Range } from "./range";
 
-export interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null } | null }
+export interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null } | null; sub?: { id: string; name: string } }
+export { memberName } from "../subs/memberName";
 
 /** Supabase returns at most 1,000 rows per request; page through larger result sets. */
 export async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
@@ -39,7 +40,8 @@ export const plural = (n: number, one: string, many = `${one}s`) => `${formatNum
 
 export function useTeam() {
   const session = useSession();
-  return useQuery({ queryKey: ["team", session.company.id], staleTime: 5 * 60_000, queryFn: () => api.get<TeamMember[]>("/team") });
+  // Subs too: one the office keeps hours for has time in these reports (GET /team?with_subs=1).
+  return useQuery({ queryKey: ["team", session.company.id, "with-subs"], staleTime: 5 * 60_000, queryFn: () => api.get<TeamMember[]>("/team?with_subs=1") });
 }
 
 /** The date range (and tab) kept in the address bar, so a view can be bookmarked or shared. */

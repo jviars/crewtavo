@@ -20,7 +20,11 @@ vi.mock("../src/lib/supabase", () => {
       from: () => ({
         upload: async (path: string, body: Uint8Array, options: { contentType?: string }) => ((state.files[path] = body), state.uploads.push({ path, contentType: options.contentType }), { data: { path }, error: null }),
         remove: async (paths: string[]) => (paths.forEach((p) => delete state.files[p]), state.removed.push(...paths), { data: [], error: null }),
-        download: async (path: string) => (state.files[path] ? { data: new Blob([state.files[path]]), error: null } : { data: null, error: { message: "Not found" } }),
+        // Whole, or as a stream (the public routes read it that way, up to a picture's size).
+        download: (path: string) => {
+          const found = () => (state.files[path] ? { data: new Blob([state.files[path]]), error: null } : { data: null, error: { message: "Not found" } });
+          return Object.assign(Promise.resolve(found()), { asStream: async () => (state.files[path] ? { data: new Blob([state.files[path]]).stream(), error: null } : found()) });
+        },
       }),
     },
     from: (table: string) => {

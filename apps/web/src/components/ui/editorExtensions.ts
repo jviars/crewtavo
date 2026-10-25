@@ -2,12 +2,14 @@
  * What the guide editor (Tiptap) can hold, and the pieces Tiptap doesn't have: headings from "# "
  * and "## ", YouTube and Vimeo players, and callouts (Tip, Important, Warning). The HTML they make
  * is what guides store and what the page sanitiser (lib/html.ts) lets through.
+ * A contract section (Settings → Contract terms) holds less: contractExtensions, kept to what
+ * sanitizeContractHtml lets print on an estimate.
  */
 import { videoAttributes, videoEmbed, videoFromPaste } from "@crewtavo/core/video";
-import { Node, textblockTypeInputRule, type Extensions } from "@tiptap/core";
+import { mergeAttributes, Node, textblockTypeInputRule, wrappingInputRule, type Extensions } from "@tiptap/core";
 import Heading from "@tiptap/extension-heading";
 import Image from "@tiptap/extension-image";
-import { TaskItem, TaskList } from "@tiptap/extension-list";
+import { OrderedList, orderedListInputRegex, TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Placeholder } from "@tiptap/extensions";
 import { Plugin } from "@tiptap/pm/state";
@@ -151,6 +153,55 @@ export function guideExtensions(placeholder: string): Extensions {
     Image.configure({ allowBase64: false }),
     Video,
     Callout,
+    Placeholder.configure({ placeholder }),
+  ];
+}
+
+/**
+ * A contract section's title prints above its words, so "# " makes an h3 and "## " an h4. Pasted
+ * headings become these too, the way sanitizeContractHtml reads them: big ones (h1-h3) as h3,
+ * small ones (h4-h6) as h4.
+ */
+const ContractHeading = Heading.extend({
+  parseHTML() {
+    return [1, 2, 3, 4, 5, 6].map((n) => ({ tag: `h${n}`, attrs: { level: n <= 3 ? 3 : 4 } }));
+  },
+  addInputRules() {
+    return [3, 4].map((level) => textblockTypeInputRule({ find: new RegExp(`^(#{${level - 2}})\\s$`), type: this.type, getAttributes: { level } }));
+  },
+}).configure({ levels: [3, 4] });
+
+/**
+ * A contract's numbered list numbers from 1 in numbers, as it prints (contractBlocks numbers each
+ * list from 1, and sanitizeContractHtml keeps no "start" or "type"): a list typed as "2. " under a
+ * paragraph, or pasted from Word starting at 3 or lettered a, b, c, shows as it will print. Typing
+ * the next number under a list ("3. " under two items) carries it on.
+ */
+const ContractOrderedList = OrderedList.extend({
+  addAttributes() {
+    return {};
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["ol", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes), 0];
+  },
+  addInputRules() {
+    return [wrappingInputRule({ find: orderedListInputRegex, type: this.type, joinPredicate: (match, list) => list.childCount + 1 === Number(match[1]) })];
+  },
+});
+
+/**
+ * What a contract section can hold: words in bold, italic or underline, headings, numbered and
+ * bulleted lists, quotes, dividers and tables. No links, pictures, video, callouts or checklists,
+ * which a printed contract can't use (sanitizeContractHtml drops them). A pasted contract keeps its
+ * headings and formatting, including the bold and italics Google Docs and Word write as styles,
+ * and loses the rest.
+ */
+export function contractExtensions(placeholder: string): Extensions {
+  return [
+    StarterKit.configure({ heading: false, link: false, code: false, codeBlock: false, orderedList: false }),
+    ContractOrderedList,
+    ContractHeading,
+    TableKit.configure({ table: { resizable: false } }),
     Placeholder.configure({ placeholder }),
   ];
 }

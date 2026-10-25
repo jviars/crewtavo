@@ -1,7 +1,7 @@
 import type { TablesUpdate } from "@crewtavo/core/database";
 import { paymentProblem, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -11,7 +11,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
-import { DetailSkeleton } from "@/components/ui/Skeleton";
+import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
@@ -19,6 +19,8 @@ import { copyText } from "@/lib/clipboard";
 import { addDaysIso, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
+import { contractTemplate, documentCompany, invoiceDocument, invoiceFill, NO_CONTRACT, useDocumentTemplate, useInvoiceContract, useLetterhead, type DocumentInvoice, type InvoiceQuote } from "../documents/data";
+import { DocumentSheet } from "../documents/EstimateDocument";
 import { InvoiceDrawings } from "../measure/drawings";
 import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
@@ -48,7 +50,7 @@ function InvoicePageScreen() {
       unwrapOne(
         await supabase()
           .from("invoices")
-          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone), job:jobs(id, number, title, po_number), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at, detached_at, processing_at)")
+          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone, billing_address), job:jobs(id, number, title, po_number, property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, option:quote_options!quotes_option_fkey(name, warranty), package:roof_packages!quotes_roof_package_fkey(name, warranty))), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id), payments(id, amount, tip_amount, method, received_at, processor, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at, detached_at, processing_at)")
           .eq("id", id)
           .order("sort", { referencedTable: "invoice_line_items" })
           .order("received_at", { referencedTable: "payments" })
@@ -246,6 +248,7 @@ function InvoicePageScreen() {
               })}
             </div>
           </section>
+          <InvoicePaper invoice={inv} />
         </div>
         <aside className="narrow stack">
           <div className="card card-pad totals">
@@ -302,6 +305,49 @@ function InvoicePageScreen() {
       {dialog === "payment" && <PaymentDialog invoice={{ id: inv.id, client_id: inv.client_id, balance, draft }} bank={bankNote} onClose={() => setDialog(null)} onSaved={refresh} />}
       {refunding && <RefundDialog invoice={{ id: inv.id, client_id: inv.client_id }} payment={refunding} left={refundable(refunding, inv.payments)} onClose={() => setRefunding(null)} onSaved={refresh} />}
     </>
+  );
+}
+
+/**
+ * The invoice as it prints, and as the client's link shows it: letter pages on the business's
+ * template (its default, as the link uses), with the template's terms and its invoice sections filled
+ * in for this invoice. It follows the edits above as they're saved.
+ */
+function InvoicePaper({ invoice }: { invoice: DocumentInvoice & { client: { display_name: string; billing_address: unknown } | null; job: { property: unknown; quote?: InvoiceQuote | null } | null } }) {
+  const session = useSession();
+  const id = useId();
+  const { template, isPending } = useDocumentTemplate(null);
+  const letterhead = useLetterhead();
+  const terms = useInvoiceContract(
+    isPending
+      ? null
+      : // {Option} and {Warranty} say what the client chose on the quote the job came from, as the client's link says them.
+        { invoice: { number: invoice.number, issued_on: invoice.issued_on, total: invoice.total }, template, client: invoice.client, property: invoice.job?.property ?? null, fill: invoiceFill(invoice.job?.quote) },
+  );
+  const ready = !isPending && !terms.isPending;
+  // Without the contract, the terms are left off too: the template's own would print with their fill-ins unfilled.
+  const contract = terms.contract ?? (terms.error ? NO_CONTRACT : null);
+  return (
+    <section className="stack" aria-labelledby={id}>
+      <h2 id={id} className="section-title">As it prints</h2>
+      {ready ? (
+        <>
+          {terms.error && (
+            <p className="muted small" style={{ margin: 0 }}>
+              The terms didn't load, so they're not on the pages below. The client's copy has them.{" "}
+              <button type="button" className="btn btn-sm btn-ghost" onClick={terms.refetch}>Try again</button>
+            </p>
+          )}
+          <DocumentSheet
+            template={contractTemplate(template, contract)}
+            company={letterhead.data ?? documentCompany(session.company)}
+            data={invoiceDocument(invoice, { timeZone: session.company.timezone, contract })}
+          />
+        </>
+      ) : (
+        <Skeleton height="auto" radius={4} style={{ aspectRatio: "8.5 / 11" }} />
+      )}
+    </section>
   );
 }
 

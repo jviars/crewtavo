@@ -1,15 +1,19 @@
+import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigation, useViewTransitionState } from "react-router-dom";
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useNavigation, useViewTransitionState } from "react-router-dom";
 import { supabase } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { isSub, useSession } from "@/lib/session";
 import { prefetchScreens } from "@/routes";
 import { Face, initials } from "../ui/Avatar";
 import { Icon } from "../ui/Icon";
+import { confirm } from "../ui/Confirm";
 import { Menu } from "../ui/Menu";
 import { CommandPalette, openPalette } from "./CommandPalette";
 import { useChatBadge, useChatLive } from "@/features/chat/data";
-import { createItems, featureOn, MOBILE_TABS, NAV_GROUPS, navVisible, SETTINGS_ITEM, type NavItem } from "./nav";
+import { useMyJobs, waitingCount } from "@/features/field/myJobsData";
+import { signOutNote, subCodeWays } from "@/features/auth/textCode";
+import { createItems, mobileTabs, NAV_GROUPS, navVisible, settingsItem, subCanOpen, type NavItem } from "./nav";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
 
@@ -18,11 +22,13 @@ function useVisibleGroups(): NavItem[][] {
   return NAV_GROUPS.map((group) => group.filter((item) => navVisible(session, item))).filter((g) => g.length);
 }
 
-/** New requests waiting, shown beside Requests in the sidebar. */
+/** New requests waiting, shown beside Requests in the sidebar (which a sub doesn't have). */
 function useNewRequests() {
-  const { company } = useSession();
+  const session = useSession();
+  const { company } = session;
   return useQuery({
     queryKey: ["nav-counts", company.id],
+    enabled: !isSub(session),
     queryFn: async () => {
       const { count } = await supabase().from("requests").select("id", { count: "exact", head: true }).eq("company_id", company.id).eq("status", "new");
       return { requests: count ?? 0 };
@@ -90,7 +96,28 @@ export function AppShell() {
   const counts = useNewRequests();
   const chat = useChatBadge();
   useChatLive();
-  const tabs = MOBILE_TABS.filter((item) => !item.feature || featureOn(session.company.settings, item.feature));
+  // A sub's job offers waiting for their answer, beside My jobs.
+  const offers = waitingCount(useMyJobs(session).data);
+  const tabs = mobileTabs(session);
+  // A sub has My day, My jobs, My paperwork and their profile: no search, Create, messages or More.
+  const sub = isSub(session);
+  // A sub on a sign-in Crewtavo made for them has no password: to get back in they ask for a code by
+  // text or email, or, when neither goes out or their record has nothing to send it to, a new link
+  // from the office. So they're asked first, and told how. (Someone's own account has its password.)
+  const signOut = async () => {
+    if (sub && session.subcontractor?.own_sign_in !== false) {
+      const ok = await confirm({
+        title: "Sign out?",
+        body: signOutNote(session.company.name, subCodeWays(session.config.features, session.subcontractor)),
+        confirmLabel: "Sign out",
+        cancelLabel: "Stay signed in",
+      });
+      if (!ok) return;
+    }
+    await session.signOut();
+  };
+  const settings = settingsItem(session);
+  const shownEmail = isPlaceholderEmail(session.profile.email) ? null : session.profile.email;
 
   useEffect(() => {
     prefetchScreens();
@@ -115,14 +142,19 @@ export function AppShell() {
   }, [location.pathname]);
 
   const badge = (item: NavItem) => {
+    if (item.to === "/field/jobs" && offers) return <span className="badge badge-green nav-badge" aria-label={`${offers} waiting for your answer`}>{offers}</span>;
     if (item.to === "/requests" && counts.data?.requests) return <span className="badge badge-green nav-badge">{counts.data.requests}</span>;
     if (item.to === "/chat" && chat.mentions) return <span className="badge badge-red nav-badge" aria-label={`${chat.mentions} ${chat.mentions === 1 ? "mention" : "mentions"}`}>{chat.mentions}</span>;
     if (item.to === "/chat" && chat.unread) return <span className="nav-badge nav-dot" aria-label="New messages" />;
     return null;
   };
   // A section stays highlighted on its related screens (Settings while in Automations, and so on).
-  const within = (item: NavItem) => (item.also ?? []).some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
-  const navClass = (item: NavItem) => ({ isActive }: { isActive: boolean }) => `nav-link${isActive || within(item) ? " active" : ""}`;
+  const under = (paths: string[] | undefined) => (paths ?? []).some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
+  const within = (item: NavItem) => under(item.also);
+  // ...and steps aside for a screen under it that has its own link (My paperwork under My day).
+  const active = (item: NavItem, isActive: boolean) => (isActive && !under(item.except)) || within(item);
+  const navClass = (item: NavItem) => ({ isActive }: { isActive: boolean }) => `nav-link${active(item, isActive) ? " active" : ""}`;
+  const current = (item: NavItem) => (under(item.except) ? "false" : "page");
 
   return (
     <div className="shell">
@@ -135,7 +167,7 @@ export function AppShell() {
       )}
 
       <aside className="sidebar" aria-label="Primary">
-        <Link to="/" className="brand" aria-label="Crewtavo home" viewTransition>
+        <Link to={sub ? "/field" : "/"} className="brand" aria-label="Crewtavo home" viewTransition>
           <BrandLockup size={30} />
         </Link>
         <nav className="nav">
@@ -144,7 +176,7 @@ export function AppShell() {
             <div key={i} className="nav">
               {i > 0 && <span className="nav-divider" />}
               {group.map((item) => (
-                <NavLink key={item.to} to={item.to} end={item.to === "/"} className={navClass(item)} viewTransition>
+                <NavLink key={item.to} to={item.to} end={item.to === "/"} className={navClass(item)} aria-current={current(item)} viewTransition>
                   <Icon name={item.icon} />
                   {item.label}
                   {badge(item)}
@@ -154,9 +186,9 @@ export function AppShell() {
           ))}
         </nav>
         <nav className="nav nav-bottom" aria-label="Settings">
-          <NavLink to={SETTINGS_ITEM.to} className={navClass(SETTINGS_ITEM)} viewTransition>
-            <Icon name={SETTINGS_ITEM.icon} />
-            {SETTINGS_ITEM.label}
+          <NavLink to={settings.to} className={navClass(settings)} viewTransition>
+            <Icon name={settings.icon} />
+            {settings.label}
           </NavLink>
         </nav>
       </aside>
@@ -175,24 +207,28 @@ export function AppShell() {
               <span className="business-name">{session.company.name}</span>
             )}
           </div>
-          <button type="button" className="search" onClick={openPalette} aria-label="Search (⌘K)">
-            <Icon name="search" size={16} />
-            <span>Search</span>
-            <kbd className="kbd">{navigator.platform.toLowerCase().includes("mac") ? "⌘K" : "Ctrl K"}</kbd>
-          </button>
-          <button type="button" className="icon-btn mobile-only" onClick={openPalette} aria-label="Search"><Icon name="search" size={20} /></button>
-          <Link className="icon-btn hide-mobile" to="/messages" aria-label="Messages" title="Messages"><Icon name="messages" size={20} /></Link>
+          {!sub && (
+            <>
+              <button type="button" className="search" onClick={openPalette} aria-label="Search (⌘K)">
+                <Icon name="search" size={16} />
+                <span>Search</span>
+                <kbd className="kbd">{navigator.platform.toLowerCase().includes("mac") ? "⌘K" : "Ctrl K"}</kbd>
+              </button>
+              <button type="button" className="icon-btn mobile-only" onClick={openPalette} aria-label="Search"><Icon name="search" size={20} /></button>
+              <Link className="icon-btn hide-mobile" to="/messages" aria-label="Messages" title="Messages"><Icon name="messages" size={20} /></Link>
+            </>
+          )}
           <NotificationsButton />
           <Menu
             label="Account"
             triggerClassName="icon-btn"
-            trigger={<span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: session.profile.color || "var(--avatar)" }}><Face name={session.profile.full_name || session.profile.email} photo={session.profile.avatar_url} /></span>}
+            trigger={<span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: session.profile.color || "var(--avatar)" }}><Face name={session.profile.full_name || shownEmail} photo={session.profile.avatar_url} /></span>}
             items={[
-              { heading: session.profile.full_name || session.profile.email || "Account" },
+              { heading: session.profile.full_name || shownEmail || "Account" },
               { label: "Your profile", icon: "user", onSelect: () => navigate("/settings?tab=profile") },
-              { label: "Settings", icon: "settings", onSelect: () => navigate("/settings") },
+              { label: "Settings", icon: "settings", hidden: sub, onSelect: () => navigate("/settings") },
               { separator: true },
-              { label: "Sign out", icon: "logout", onSelect: () => session.signOut() },
+              { label: "Sign out", icon: "logout", onSelect: () => void signOut() },
             ]}
           />
         </header>
@@ -200,29 +236,32 @@ export function AppShell() {
         <Screen key={location.pathname} />
       </div>
 
-      <nav className="mobile-nav" aria-label="Primary" data-typing={typing || undefined} style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, 1fr)` }}>
+      <nav className="mobile-nav" aria-label="Primary" data-typing={typing || undefined} style={{ gridTemplateColumns: `repeat(${tabs.length + (sub ? 0 : 1)}, 1fr)` }}>
         {tabs.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.to === "/"} viewTransition>
+          <NavLink key={item.to} to={item.to} end={item.to === "/"} className={({ isActive }) => (active(item, isActive) ? "active" : "")} aria-current={current(item)} viewTransition>
             <span className="mobile-tab-icon">
               <Icon name={item.icon} size={22} />
+              {item.to === "/field/jobs" && offers > 0 && <span className="badge badge-green mobile-tab-badge" aria-label={`${offers} waiting for your answer`}>{offers}</span>}
               {item.to === "/chat" && (chat.mentions ? <span className="badge badge-red mobile-tab-badge">{chat.mentions}</span> : chat.unread ? <span className="nav-dot mobile-tab-badge" /> : null)}
             </span>
             {item.label}
           </NavLink>
         ))}
-        <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}>
-          <Icon name="menu" size={22} />
-          More
-        </button>
+        {!sub && (
+          <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}>
+            <Icon name="menu" size={22} />
+            More
+          </button>
+        )}
       </nav>
 
-      {moreOpen && (
+      {moreOpen && !sub && (
         <>
           <div className="sheet-backdrop" onClick={() => setMoreOpen(false)} />
           <div className="sheet" role="dialog" aria-label="All sections">
             <MobileCreate onDone={() => setMoreOpen(false)} />
             <nav className="nav">
-              {[...groups.flat(), SETTINGS_ITEM].map((item) => (
+              {[...groups.flat(), settings].map((item) => (
                 <NavLink key={item.to} to={item.to} end={item.to === "/"} className={navClass(item)} onClick={() => setMoreOpen(false)} viewTransition>
                   <Icon name={item.icon} />
                   {item.label}
@@ -234,7 +273,7 @@ export function AppShell() {
         </>
       )}
 
-      <CommandPalette />
+      {!sub && <CommandPalette />}
     </div>
   );
 }
@@ -246,6 +285,7 @@ export function AppShell() {
  */
 function Screen() {
   const location = useLocation();
+  const session = useSession();
   const transitioning = useViewTransitionState(location.pathname);
   const [crossFaded] = useState(transitioning);
   // Team chat fills the screen edge to edge, like a messaging app (its settings are a normal page),
@@ -254,7 +294,8 @@ function Screen() {
   const flush = (/^\/chat(\/|$)/.test(location.pathname) && !location.pathname.startsWith("/chat/settings")) || /^\/(website|measure)\/?$/.test(location.pathname);
   return (
     <main className={flush ? "content content-flush" : "content"} data-crossfade={crossFaded || undefined}>
-      <Outlet />
+      {/* A sub opening any other screen by its address (or Home) lands on My day. */}
+      {isSub(session) && !subCanOpen(location.pathname) ? <Navigate to="/field" replace /> : <Outlet />}
     </main>
   );
 }

@@ -51,7 +51,10 @@ signing.delete("/me/signature", requireUser, requireCompany(), async (c) => {
 // Signed estimates
 // ---------------------------------------------------------------------------------------------
 
-/** The homeowner signs on the salesperson's iPad; the quote is approved with both signatures. */
+/**
+ * The homeowner signs on the salesperson's iPad, for the option they chose and the contract on the
+ * paper; the quote is approved with both signatures.
+ */
 signing.post("/quotes/:id/sign", requireUser, requireCompany(SALES, "sales"), async (c) => {
   const id = param(c, "id");
   const result = await signQuote(scope(c), id, await readJson(c, signSchema));

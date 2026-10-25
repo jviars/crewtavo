@@ -1,0 +1,43 @@
+/* The options bar above an estimate's lines (QuoteOptions): a tab per option, what can be done with
+   the one being looked at, the invitation to offer options when there are none yet, and adding them. */
+
+.bar { display: grid; gap: 10px; min-width: 0; }
+
+.tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 8px; }
+.tab {
+  display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 64px; padding: 8px 12px 8px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink);
+  font: inherit; font-weight: 400; text-align: left; cursor: pointer;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast), background var(--dur-fast);
+}
+.tab:hover { border-color: var(--border-strong); }
+.tab:focus-visible { outline: none; box-shadow: var(--ring); }
+.tab[aria-selected="true"] { border-color: var(--green); box-shadow: var(--ring); }
+.tabPicture { width: 64px; border-radius: 7px; }
+.tabText { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; justify-items: start; }
+.tabChips { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
+/* A long tier word stops at the tab's edge. */
+.tabChips :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
+.tabName { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 700; }
+.tabTotal { font-size: 13.5px; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* An option still on setup's example warranty (office only), as the package pickers flag it. */
+.tabFlag { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--warning); }
+
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.note { margin: 0; font-size: 13px; color: var(--text-2); }
+
+/* No options yet */
+.offer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-card); color: var(--text-2); font-size: 13.5px;
+}
+.offer > svg { flex: none; color: var(--text-3); }
+
+/* Adding options: the estimate's lines that stay on every option as it becomes option 1 */
+.keep { list-style: none; margin: 0; padding: 2px 0; display: grid; gap: 8px; max-height: 220px; overflow-y: auto; }
+.keep :global(.checkbox) { font-weight: 500; overflow-wrap: anywhere; }
+
+/* Editing an option */
+.nameRow { display: flex; flex-wrap: wrap; gap: 12px 14px; }
+.nameField { flex: 1 1 240px; }
+.tierField { flex: 0 1 160px; min-width: 120px; }

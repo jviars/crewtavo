@@ -15,12 +15,14 @@
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .controls { display: grid; gap: 12px; min-width: 0; }
 .preview { display: grid; gap: 12px; min-width: 0; padding: 16px; border-radius: var(--radius-card); background: var(--fill-2); }
-.previewHead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; font-size: 13px; color: var(--text-2); }
+.previewHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: 13px; color: var(--text-2); }
 .previewHead span { display: inline-flex; align-items: center; gap: 6px; }
 
 @container (min-width: 820px) {
   .layout { grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); }
   .preview { position: sticky; top: calc(var(--topbar-height) + 16px); padding: 20px; }
+  /* A document of more than one page scrolls in place, so every page can be reached beside the choices. */
+  .preview:has([data-pages]:not([data-pages="1"])) { max-height: calc(100dvh - var(--topbar-height) - 32px); overflow: auto; overscroll-behavior: contain; }
 }
 
 /* ---- Accordion sections ------------------------------------------------------------------ */
@@ -97,6 +99,11 @@
 .readonly a { margin-top: 6px; font-size: 13px; font-weight: 700; }
 .note { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--fill); font-size: 13px; line-height: 1.5; color: var(--text-2); }
 .note a { font-weight: 700; }
+
+/* ---- Contract: the library's sections each template prints ---------------------------------- */
+.picks { display: grid; gap: 8px; }
+.pick { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.pickMeta { font-size: 12px; font-weight: 400; color: var(--text-3); }
 
 /* Phones: everything one column; the tools wrap under the picker. */
 @media (max-width: 600px) {

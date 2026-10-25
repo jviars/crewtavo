@@ -1,10 +1,14 @@
 /**
  * Starting a paving takeoff or a roof estimate: who it's for and where (and, for a roof, which
- * package prices it), then straight onto the map. The project is a draft quote, so the takeoff,
- * estimate and proposal all live on one record.
+ * package prices it, or two or three to offer as options), then straight onto the map. The project
+ * is a draft quote, so the takeoff, estimate and proposal all live on one record. A roof's package
+ * is remembered on the quote and its options are made now, without lines: they're priced once the
+ * roof is measured (the estimate step's POST /quotes/:id/options/fill). When the options can't be
+ * made, trying again uses the quote already made (with who, where and the name as they are then),
+ * and cancelling deletes it, so no empty draft is left behind.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -15,10 +19,12 @@ import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
 import { ClientPicker, PropertySelect, type PickedClient } from "../clients/ClientForm";
 import { PropertyDialog } from "../clients/PropertyDialog";
+import { addOptions } from "../quotes/options";
+import { PackagePicker } from "../roofing/PackageCards";
 import { canEditPackages, canSetUpRoofing, packagesKey, setUpRoofing, setupMessage, useRoofPackages } from "../roofing/packages";
-import { PackagePicker } from "../roofing/RoofPackagesPage";
 
 const WORDS = {
   paving: { title: "New takeoff", description: "Who it's for and where. The map opens next, at the property.", name: "Lot sealcoat and restripe", at: "Paving at", untitled: "Paving takeoff", start: "Start the takeoff" },
@@ -35,23 +41,27 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
   const [client, setClient] = useState<PickedClient>(null);
   const [propertyId, setPropertyId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [packageId, setPackageId] = useState<string | null>(null);
+  const [packageIds, setPackageIds] = useState<string[] | null>(null);
   const [addingAddress, setAddingAddress] = useState(false);
+  // The quote made by a try that then couldn't offer the options: trying again offers them on it.
+  const made = useRef<string | null>(null);
   const kindId = useId();
   useEffect(() => {
     if (open) {
       setClient(null);
       setPropertyId(null);
       setTitle("");
-      setPackageId(null);
+      setPackageIds(null);
+      made.current = null;
     }
   }, [open]);
   useEffect(() => setPropertyId(null), [client?.id]);
 
-  // A roof estimate starts from a package: the default one unless another is picked.
+  // A roof estimate starts from a package (the default one unless another is picked), or two or three offered as options.
   const packages = useRoofPackages({ enabled: roofing && open });
   const list = packages.data ?? [];
-  const chosen = list.find((p) => p.id === packageId) ?? list.find((p) => p.is_default) ?? list[0] ?? null;
+  const fallback = list.find((p) => p.is_default) ?? list[0] ?? null;
+  const chosen = (packageIds ?? (fallback ? [fallback.id] : [])).flatMap((id) => list.filter((p) => p.id === id));
   const setup = useMutation({
     meta: { success: setupMessage },
     mutationFn: setUpRoofing,
@@ -64,27 +74,40 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
   const create = useMutation({
     meta: { inline: true },
     mutationFn: async () => {
-      const settings = company.settings as { default_tax_rate?: number; quote_valid_days?: number };
+      const picked = roofing ? chosen.map((p) => p.id) : [];
       const db = supabase();
       const street = propertyId ? unwrap(await db.from("properties").select("line1").eq("id", propertyId).maybeSingle())?.line1 : null;
-      const quote = unwrap(
-        await db
-          .from("quotes")
-          .insert({
-            company_id: company.id,
-            client_id: client!.id,
-            property_id: propertyId,
-            title: title.trim() || (street ? `${words.at} ${street}` : words.untitled),
-            tax_rate: Number(settings.default_tax_rate ?? 0),
-            valid_until: addDaysIso(todayIn(company.timezone), Number(settings.quote_valid_days ?? 30)),
-            ...(roofing && chosen ? { roof_package_id: chosen.id } : {}),
-          })
-          .select("id")
-          .single(),
-      );
-      return quote.id;
+      const about = { client_id: client!.id, property_id: propertyId, title: title.trim() || (street ? `${words.at} ${street}` : words.untitled) };
+      // One package is remembered on the quote; two or three become its options next.
+      const one = picked.length === 1 ? { roof_package_id: picked[0] } : {};
+      let id = made.current;
+      if (id) {
+        // Trying again on the quote made, as the form says now.
+        unwrap(await db.from("quotes").update({ ...about, ...one }).eq("id", id));
+      } else {
+        const settings = company.settings as { default_tax_rate?: number; quote_valid_days?: number };
+        const quote = unwrap(
+          await db
+            .from("quotes")
+            .insert({
+              company_id: company.id,
+              ...about,
+              tax_rate: Number(settings.default_tax_rate ?? 0),
+              valid_until: addDaysIso(todayIn(company.timezone), Number(settings.quote_valid_days ?? 30)),
+              ...one,
+            })
+            .select("id")
+            .single(),
+        );
+        id = quote.id;
+      }
+      if (picked.length < 2) return id;
+      made.current = id;
+      await addOptions(id, picked, "add");
+      return id;
     },
     onSuccess: (id) => {
+      made.current = null;
       queryClient.invalidateQueries({ queryKey: ["quotes", company.id] });
       queryClient.invalidateQueries({ queryKey: [`${trade}-projects`, company.id] });
       const at = new URLSearchParams({ quote: id, [trade]: "1", ...(propertyId ? { property: propertyId } : {}) });
@@ -92,10 +115,28 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
     },
   });
 
+  // Cancelled after the options couldn't be made: the empty draft made for them goes.
+  const close = () => {
+    const draft = made.current;
+    made.current = null;
+    if (draft) {
+      void supabase()
+        .from("quotes")
+        .delete()
+        .eq("id", draft)
+        .eq("status", "draft")
+        .then(({ error }) => {
+          if (error) toast.info("The draft made for this estimate was kept. Delete it from Quotes if you don't need it.");
+          queryClient.invalidateQueries({ queryKey: ["quotes", company.id] });
+        });
+    }
+    onClose();
+  };
+
   return (
     <>
       {/* Adding an address opens over this one: closing a native dialog would close the takeoff too. */}
-      <Dialog open={open} onClose={onClose} title={words.title} description={words.description} size={roofing ? "lg" : "md"}>
+      <Dialog open={open} onClose={close} title={words.title} description={words.description} size={roofing ? "lg" : "md"}>
         <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client) create.mutate(); }}>
           <Field label={roofing ? "Who's it for?" : "Client"}><ClientPicker value={client} onChange={setClient} /></Field>
           {client && (
@@ -119,9 +160,9 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
                 <ErrorState compact error={packages.error} onRetry={() => packages.refetch()} />
               ) : list.length ? (
                 <div className="stack-sm">
-                  <PackagePicker packages={list} value={chosen?.id ?? null} onChange={setPackageId} />
+                  <PackagePicker packages={list} value={chosen.map((p) => p.id)} onChange={setPackageIds} flagExamples />
                   <span className="hint">
-                    You can switch packages later.{" "}
+                    Pick one, or offer two or three as options. You can change them later.{" "}
                     {canEditPackages(session) && <Link to="/roofing/packages">Edit packages</Link>}
                   </span>
                 </div>
@@ -151,7 +192,7 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
                 <span className="spacer" />
               </>
             )}
-            <Button onClick={onClose}>Cancel</Button>
+            <Button onClick={close}>Cancel</Button>
             <Button type="submit" variant="primary" icon="area" loading={create.isPending} disabled={!client || (roofing && setup.isPending)}>{words.start}</Button>
           </div>
         </form>

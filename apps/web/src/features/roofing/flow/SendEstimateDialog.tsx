@@ -6,6 +6,9 @@
  * - "exact": the exact price, to sign online (POST /quotes/:id/send). When a range is out, the
  *   estimate leaves range mode first (exact_sent_at: sent from the office, not priced on site), so
  *   the link shows the exact price; if the send fails, it goes back.
+ * An estimate that offers options goes out with the server's words for them (from the lowest option
+ * to the highest, or how many there are and the lowest price), shown here as they'll be sent. From
+ * the quote page the options aren't on the quote, so they're loaded first (quotes/options.ts).
  */
 import { inRangeMode, rangeSettings } from "@crewtavo/core/estimates";
 import { useMutation } from "@tanstack/react-query";
@@ -14,17 +17,25 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Loading, Skeleton } from "@/components/ui/Skeleton";
+import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { useQuoteOptions } from "../../quotes/options";
 import type { EstimateQuote } from "../estimate";
-import { capital, estimateSubject, homeownerName, OPEN, rangeIntro, rangeNow, rangeWords } from "./model";
+import { capital, estimateSubject, homeownerName, OPEN, rangeWords, sendWords, type RangeEstimate } from "./model";
 import styles from "./flow.module.css";
 
 type Channel = "email" | "sms" | "link";
 
-export type SendQuote = Pick<EstimateQuote, "id" | "number" | "status" | "total" | "range_low" | "priced_on_site_at" | "exact_sent_at" | "client">;
+/**
+ * The quote being sent. Its options, lines (with their option_id), tax, discount and promo say what
+ * the server's words will be for an estimate that offers options. Left without `options`, the
+ * dialog loads them before it words anything.
+ */
+export type SendQuote = Pick<EstimateQuote, "id" | "number" | "status" | "total" | "range_low" | "priced_on_site_at" | "exact_sent_at" | "client"> & Omit<RangeEstimate, "total">;
 
 interface Sent {
   link: string;
@@ -32,20 +43,52 @@ interface Sent {
   reason?: string;
 }
 
-export function SendEstimateDialog({ quote, mode, startWith, onClose, onSent }: {
+interface SendProps {
   quote: SendQuote;
   mode: "range" | "exact";
   /** Open on this tab ("link" for Copy link). */
   startWith?: Channel;
   onClose: () => void;
   onSent: () => void;
-}) {
+}
+
+const titleFor = (mode: SendProps["mode"], who: string) => (mode === "range" ? `Send the range to ${who}` : `Send ${who} the exact price`);
+
+export function SendEstimateDialog(props: SendProps) {
+  const { quote, mode, onClose } = props;
+  const { company } = useSession();
+  // From the quote page the options aren't on the quote: the words wait for them, so an estimate
+  // that offers options never goes out worded (and ranged) as one.
+  const loaded = useQuoteOptions(quote.id, { enabled: !quote.options });
+  const known = quote.options ? quote : loaded.data ? { ...quote, options: loaded.data } : null;
+  const words = known ? sendWords(known, mode, rangeSettings(company.settings), company.currency) : null;
+  if (!known || !words) {
+    return (
+      <Dialog open onClose={onClose} title={titleFor(mode, homeownerName(quote.client?.display_name))}>
+        {loaded.error ? (
+          <ErrorState compact error={loaded.error} onRetry={() => void loaded.refetch()} />
+        ) : (
+          <Loading label="Loading the estimate">
+            <div className="stack-sm">
+              <Skeleton height={34} radius={10} />
+              <Skeleton height={40} radius={8} />
+              <Skeleton height={120} radius={8} />
+            </div>
+          </Loading>
+        )}
+      </Dialog>
+    );
+  }
+  return <SendForm {...props} quote={known} words={words} />;
+}
+
+function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps & { words: NonNullable<ReturnType<typeof sendWords>> }) {
   const { company, config } = useSession();
   const email = quote.client?.email ?? null;
   const phone = quote.client?.phone ?? null;
   const who = homeownerName(quote.client?.display_name);
-  const range = rangeNow(quote, rangeSettings(company.settings));
-  const defaultMessage = mode === "range" ? rangeIntro(range) : "";
+  // The options with a price: the server's words count the same ones.
+  const { range, prices, message: defaultMessage } = words;
   const defaultSubject = estimateSubject(company.name);
   const [channel, setChannel] = useState<Channel>(startWith ?? (email ? "email" : phone ? "sms" : "link"));
   const [to, setTo] = useState("");
@@ -84,12 +127,18 @@ export function SendEstimateDialog({ quote, mode, startWith, onClose, onSent }: 
 
   const unavailable = (channel === "email" && !config.features.email) || (channel === "sms" && !config.features.sms);
   const done = send.data;
-  const title = done ? (done.sent ? "Sent" : "Link ready") : mode === "range" ? `Send the range to ${who}` : `Send ${who} the exact price`;
+  const title = done ? (done.sent ? "Sent" : "Link ready") : titleFor(mode, who);
+  const many = prices.length >= 2;
+  const lowest = many ? Math.min(...prices.map((p) => p.total)) : 0;
   const description = done
     ? undefined
     : mode === "range"
-      ? `${capital(who)} sees ${rangeWords(range)}, what's included, and a button to ask for a visit.`
-      : `The link shows the estimate at its exact price, ${formatMoneyCents(quote.total)}, ready to sign online.`;
+      ? many
+        ? `${capital(who)} sees ${rangeWords(range)} across the ${prices.length} options, each with its own range, and a button to ask for a visit.`
+        : `${capital(who)} sees ${rangeWords(range)}, what's included, and a button to ask for a visit.`
+      : many
+        ? `The link shows the ${prices.length} options, from ${formatMoneyCents(lowest)}, for ${who} to choose one and sign online.`
+        : `The link shows the estimate at its exact price, ${formatMoneyCents(quote.total)}, ready to sign online.`;
 
   return (
     <Dialog open onClose={onClose} title={title} description={description}>
@@ -142,7 +191,7 @@ export function SendEstimateDialog({ quote, mode, startWith, onClose, onSent }: 
           )}
           {channel === "email" && <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} required /></Field>}
           {channel !== "link" && (
-            <Field label="Message" optional={mode === "exact"} hint="The link is added at the end.">
+            <Field label="Message" optional={mode === "exact" && !defaultMessage} hint="The link is added at the end.">
               <textarea
                 className={`textarea ${styles.message}`}
                 value={message}

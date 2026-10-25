@@ -88,17 +88,52 @@ describe("hourly upkeep", () => {
       if (call.path === "rpc/mark_overdue_invoices") return Response.json({ code: "22023", message: 'time zone "Not/AZone" not recognized', details: null, hint: null }, { status: 400 });
       if (call.path === "rpc/emit_visit_reminders") return 2;
       if (call.path === "rpc/emit_equipment_alerts") return 1;
+      if (call.path === "rpc/expire_sub_offers") return 3;
+      // Two certificates running out; the subs have no email or phone to remind.
+      if (call.path === "rpc/emit_sub_document_alerts") return [{ remind_sub: false }, { remind_sub: false }];
       if (call.path === "rpc/clock_upkeep") return { reminded: 1, stopped: 0 };
+      if (call.path === "rpc/tidy_sign_in_codes") return 4;
       throw new Error(`unexpected ${call.path}`);
     });
     expect(await runTask("followups", env)).toEqual({
       overdue: 0,
       reminders: 2,
       equipment: 1,
+      offers: 3,
+      subs: { alerts: 2, reminded: { subs: 0, email: 0, sms: 0, failed: 0 } },
       clocks: { reminded: 1, stopped: 0 },
+      codes: 4,
       problems: ['mark_overdue_invoices: time zone "Not/AZone" not recognized'],
     });
-    expect(calls.map((c) => c.path)).toEqual(["rpc/mark_overdue_invoices", "rpc/emit_visit_reminders", "rpc/emit_equipment_alerts", "rpc/clock_upkeep"]);
+    expect(calls.map((c) => c.path)).toEqual([
+      "rpc/mark_overdue_invoices", "rpc/emit_visit_reminders", "rpc/emit_equipment_alerts", "rpc/expire_sub_offers", "rpc/emit_sub_document_alerts", "rpc/clock_upkeep",
+      "rpc/tidy_sign_in_codes",
+    ]);
     expect(error).toHaveBeenCalled();
+  });
+
+  it("only promises subs a link the server can send, and keeps going when reminding them fails", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const alert = { company_id: "co-1", subcontractor_id: "sub-1", document_id: "doc-1", kind: "liability", expires_on: "2026-11-24", days_left: 30, alert: "d30", remind_sub: true };
+    const calls = serve((call) => {
+      if (call.path === "rpc/emit_sub_document_alerts") return [alert];
+      if (call.path === "subcontractors") return Response.json({ code: "57014", message: "canceling statement due to statement timeout", details: null, hint: null }, { status: 500 });
+      if (call.path === "companies") return [];
+      if (call.path === "rpc/clock_upkeep") return { reminded: 0, stopped: 0 };
+      if (call.path.startsWith("rpc/")) return 0;
+      throw new Error(`unexpected ${call.path}`);
+    });
+    const texting = { ...env, APP_URL: "https://ops.example.com", TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "t", TWILIO_FROM_NUMBER: "+15405550000" };
+    const out = (await runTask("followups", texting)) as { subs: unknown; problems: string[] };
+    expect(calls.find((c) => c.path === "rpc/emit_sub_document_alerts")?.body).toEqual({ p_can_text: true, p_can_email: false });
+    expect(out.subs).toEqual({ alerts: 1, reminded: null });
+    expect(out.problems).toEqual([expect.stringMatching(/^remind_subs: canceling statement/)]);
+    expect(calls.slice(-2).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes"]);
+    expect(error).not.toHaveBeenCalledWith(expect.stringContaining("clock_upkeep"), expect.anything());
+
+    // Without the app's address there's no link to send, so nothing is promised.
+    const quiet = serve((call) => (call.path === "rpc/emit_sub_document_alerts" ? [] : call.path === "rpc/clock_upkeep" ? { reminded: 0, stopped: 0 } : 0));
+    await runTask("followups", { ...texting, APP_URL: undefined });
+    expect(quiet.find((c) => c.path === "rpc/emit_sub_document_alerts")?.body).toEqual({ p_can_text: false, p_can_email: false });
   });
 });

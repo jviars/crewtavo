@@ -16,6 +16,7 @@
     "./materials": "./src/materials.ts",
     "./estimates": "./src/estimates.ts",
     "./documents": "./src/documents.ts",
+    "./contracts": "./src/contracts.ts",
     "./formulas": "./src/formulas.ts",
     "./roles": "./src/roles.ts",
     "./chat": "./src/chat.ts",
@@ -42,7 +43,11 @@
     "./analytics": "./src/analytics.ts",
     "./pay": "./src/pay.ts",
     "./video": "./src/video.ts",
-    "./website": "./src/website.ts"
+    "./website": "./src/website.ts",
+    "./subs": "./src/subs.ts",
+    "./jobPay": "./src/jobPay.ts",
+    "./subOffers": "./src/subOffers.ts",
+    "./phone": "./src/phone.ts"
   },
   "scripts": {
     "test": "vitest run",

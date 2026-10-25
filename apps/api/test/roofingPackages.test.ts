@@ -1,21 +1,35 @@
 import { getPreset, savedRoofingQuantities, type Section } from "@crewtavo/core";
-import { followPrice, SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
+import { followPrice, optionsRange, priceRange, SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
+import { optionTotals, quoteTotals } from "@crewtavo/core/money";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { encryptJson } from "../src/lib/crypto";
 import { packageLines, type PackageService } from "../src/services/roofPackages";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
-// that eq, in and order filter, with insert (and insert().select().single()), update and delete.
-// A quote row comes back with its lines and client, the way the routes embed them. accept_hub_range
-// is the database's step as the migration writes it (only for the service role), and every call is
-// kept in `rpcs`.
+// that eq, in and order filter, with insert (and insert().select().single()), update (returning what
+// it changed) and delete. A quote row comes back with its lines, options, client and promo code, the
+// way the routes embed them. accept_hub_range is the database's step as the migration writes it
+// (only for the service role), as is put_quote_package, and every call is kept in `rpcs`; `meanwhile`
+// runs once before the next one, for something that happens meanwhile on another screen. `afterInsert[table]` runs once a
+// row goes into that table, for something that happens meanwhile on another screen.
 type Row = Record<string, unknown>;
-const state = vi.hoisted(() => ({ tables: {} as Record<string, Row[]>, rpcs: [] as Array<{ by: string; name: string; args: Record<string, unknown> }> }));
+const state = vi.hoisted(() => ({
+  tables: {} as Record<string, Row[]>,
+  rpcs: [] as Array<{ by: string; name: string; args: Record<string, unknown> }>,
+  afterInsert: {} as Record<string, () => void>,
+  meanwhile: null as (() => void) | null,
+}));
 vi.mock("../src/lib/supabase", () => {
   const embed = (table: string, row: Row): Row =>
     table === "quotes"
-      ? { ...row, lines: (state.tables.quote_line_items ?? []).filter((l) => l.quote_id === row.id), client: (state.tables.clients ?? []).find((c) => c.id === row.client_id) ?? null }
+      ? {
+          ...row,
+          lines: (state.tables.quote_line_items ?? []).filter((l) => l.quote_id === row.id),
+          options: (state.tables.quote_options ?? []).filter((o) => o.quote_id === row.id),
+          client: (state.tables.clients ?? []).find((c) => c.id === row.client_id) ?? null,
+          promo: null,
+        }
       : row;
   const acceptHubRange = (args: Record<string, unknown>) => {
     const q = (state.tables.quotes ?? []).find(
@@ -24,14 +38,40 @@ vi.mock("../src/lib/supabase", () => {
         row.range_low != null && row.range_accepted_at == null && row.priced_on_site_at == null && row.exact_sent_at == null,
     );
     if (!q) return null;
+    if (args.p_option && !(state.tables.quote_options ?? []).some((o) => o.quote_id === q.id && o.id === args.p_option)) return null;
     q.range_accepted_at = "2026-10-23T15:00:00.000Z";
+    if (args.p_option) q.option_id = args.p_option;
     return q.range_accepted_at;
+  };
+  const putQuotePackage = (args: Record<string, any>) => {
+    const t = (name: string) => (state.tables[name] ??= []);
+    const q = t("quotes").find((row) => row.id === args.p_quote)!;
+    const had = t("quote_options").some((o) => o.quote_id === q.id);
+    if (args.p_replace) {
+      state.tables.quote_line_items = t("quote_line_items").filter((l) => l.quote_id !== q.id);
+      state.tables.quote_options = t("quote_options").filter((o) => o.quote_id !== q.id);
+      Object.assign(q, { priced_on_site_at: null, exact_sent_at: null, ...(q.promo_code_id ? {} : { discount_amount: 0 }) });
+    }
+    // The package's contract sections, as the database swaps them: the old package's come off
+    // (unless this one brings them too; nothing comes off a quote that had options), this one's go on.
+    const sectionsOf = (id: unknown) => (t("roof_packages").find((p) => p.id === id && p.company_id === q.company_id)?.section_ids as string[] | undefined) ?? [];
+    const before = had ? [] : sectionsOf(q.roof_package_id);
+    const after = sectionsOf(args.p_package);
+    const kept = ((q.section_ids as string[] | undefined) ?? []).filter((id) => after.includes(id) || !before.includes(id));
+    Object.assign(q, { roof_package_id: args.p_package, section_ids: [...new Set([...kept, ...after])].slice(0, 50) });
+    if (t("quote_line_items").some((l) => l.quote_id === q.id)) return false;
+    t("quote_line_items").push(...args.p_lines.map((l: Row) => ({ id: crypto.randomUUID(), company_id: q.company_id, quote_id: q.id, option_id: null, optional: false, selected: true, ...l })));
+    return true;
   };
   const client = (by: string) => ({
     auth: { getClaims: async () => ({ data: { claims: { sub: "viewer" } }, error: null }) },
     rpc: async (name: string, args: Record<string, unknown> = {}) => {
+      const meanwhile = state.meanwhile;
+      state.meanwhile = null;
+      meanwhile?.();
       state.rpcs.push({ by, name, args });
       if (name === "accept_hub_range") return by === "admin" ? { data: acceptHubRange(args), error: null } : { data: null, error: { message: "permission denied for function accept_hub_range", code: "42501" } };
+      if (name === "put_quote_package") return { data: putQuotePackage(args), error: null };
       return { data: true, error: null };
     },
     from: (table: string) => {
@@ -44,8 +84,9 @@ vi.mock("../src/lib/supabase", () => {
       const run = () => {
         if (inserted) return { data: inserted, error: null };
         if (change?.kind === "update") {
-          for (const row of matching()) Object.assign(row, change.values);
-          return { data: null, error: null };
+          const hit = matching();
+          for (const row of hit) Object.assign(row, change.values);
+          return { data: hit, error: null };
         }
         if (change?.kind === "delete") {
           state.tables[table] = (state.tables[table] ?? []).filter((row) => !filters.every((keep) => keep(row)));
@@ -73,6 +114,7 @@ vi.mock("../src/lib/supabase", () => {
         insert: (values: Row | Row[]) => {
           inserted = [values].flat().map((row) => ({ id: crypto.randomUUID(), ...row }));
           state.tables[table] = [...(state.tables[table] ?? []), ...inserted];
+          state.afterInsert[table]?.();
           return builder;
         },
         // Secrets are keyed by company and provider: a new one replaces the old.
@@ -95,6 +137,8 @@ vi.mock("../src/lib/supabase", () => {
   return { userClient: () => user, adminClient: () => admin, publishableKey: () => "key" };
 });
 const { app } = await import("../src/app");
+const { loadContext } = await import("../src/services/automations");
+const { adminClient } = await import("../src/lib/supabase");
 
 const env = {
   SUPABASE_URL: "https://example.supabase.co",
@@ -113,6 +157,8 @@ const STEEP = "00000000-0000-4000-8000-0000000000e4";
 const BOOT = "00000000-0000-4000-8000-0000000000e5";
 const OFF = "00000000-0000-4000-8000-0000000000e6";
 const CLIENT = "00000000-0000-4000-8000-0000000000f1";
+const GOOD = "00000000-0000-4000-8000-0000000000c1";
+const BEST = "00000000-0000-4000-8000-0000000000c2";
 
 const send = (path: string, body?: unknown, method = body === undefined ? "GET" : "POST") =>
   app.request(`/api${path}`, { method, headers: { Authorization: "Bearer token", "X-Company-Id": ROOFER, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }, env);
@@ -134,10 +180,10 @@ const service = (id: string, name: string, unit: string, unit_price: number, for
 function roofer({ role = "owner", lines = [] as Row[], status = "draft", measured = true } = {}) {
   state.tables = {
     memberships: [{ company_id: ROOFER, user_id: "viewer", active: true, role, role_id: null }],
-    companies: [{ id: ROOFER, name: "Peak Roofing", email: "office@peak.example", phone: "555-0100", address: {}, currency: "USD", settings: {} }],
+    companies: [{ id: ROOFER, name: "Peak Roofing", email: "office@peak.example", phone: "555-0100", address: {}, currency: "USD", trade_preset: "roofing_exteriors", settings: {} }],
     clients: [{ id: CLIENT, company_id: ROOFER, display_name: "Dana Whitfield", email: "dana@example.com", phone: "555-0142" }],
-    quotes: [{ id: QUOTE, company_id: ROOFER, number: 1042, status, total: 18304, client_id: CLIENT, promo_code_id: null, roof_package_id: null, discount_amount: 0, subtotal: 18304, tax_amount: 0 }],
-    quote_line_items: lines.map((l) => ({ quote_id: QUOTE, company_id: ROOFER, ...l })),
+    quotes: [{ id: QUOTE, company_id: ROOFER, number: 1042, status, total: 18304, client_id: CLIENT, promo_code_id: null, roof_package_id: null, option_id: null, discount_amount: 0, tax_rate: 0, subtotal: 18304, tax_amount: 0 }],
+    quote_line_items: lines.map((l) => ({ quote_id: QUOTE, company_id: ROOFER, option_id: null, optional: false, ...l })),
     services: [
       service(ROOF, "Architectural shingle roof", "square", 560, "squares"),
       service(TEAR, "Tear-off and disposal", "square", 85, "roof_squares"),
@@ -178,6 +224,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   state.tables = {};
   state.rpcs = [];
+  state.afterInsert = {};
+  state.meanwhile = null;
 });
 
 describe("setting up roofing", () => {
@@ -202,6 +250,9 @@ describe("setting up roofing", () => {
     expect(items("included").map((i) => nameOf(i.service_id))).toEqual(preset.packages![0]!.included.map((i) => i.service));
     expect(items("included").find((i) => nameOf(i.service_id) === "Pipe boot")?.quantity).toBe(3);
     expect(items("quick").map((i) => nameOf(i.service_id))).toEqual(preset.packages![0]!.quick);
+    // Each is offered as Good, Better or Best, with its highlights and warranty.
+    expect(packages.map((p) => p.tier)).toEqual(["Good", "Better", "Best"]);
+    expect(packages.map((p) => [p.highlights, p.warranty])).toEqual(preset.packages!.map((p) => [p.highlights, p.warranty]));
 
     const again = await (await send("/roofing/setup", {})).json();
     expect(again).toEqual({ services_added: [], packages_created: 0 });
@@ -247,6 +298,20 @@ describe("a package on an estimate", () => {
     expect(rows("quote_line_items").some((l) => l.id === "keep")).toBe(false);
   });
 
+  it("leaves its contract sections to the database, which swaps the old package's for this one's", async () => {
+    roofer();
+    const METAL = "00000000-0000-4000-8000-0000000000b9";
+    const [shingle] = rows("roof_packages");
+    shingle!.section_ids = ["shingle-warranty"];
+    state.tables.roof_packages!.push({ ...shingle!, id: METAL, name: "Standing-seam metal", is_default: false, section_ids: ["metal-warranty"] });
+    Object.assign(quote(), { roof_package_id: METAL, section_ids: ["picked", "metal-warranty"] });
+    expect((await send(`/roofing/${QUOTE}/package`, { package_id: PKG })).status).toBe(200);
+    // put_quote_package works the sections out on the locked quote; the API sends none.
+    const call = state.rpcs.find((r) => r.name === "put_quote_package")!;
+    expect(Object.keys(call.args).sort()).toEqual(["p_lines", "p_package", "p_quote", "p_replace"]);
+    expect(quote().section_ids).toEqual(["picked", "shingle-warranty"]);
+  });
+
   it("starts the price over too when it starts over from a package", async () => {
     const repair = [{ id: "keep", name: "Roof repair", quantity: 1, unit_price: 650, sort: 0 }];
     // A price set on site (a discount) and an exact price sent instead of the range were for the old lines.
@@ -279,6 +344,43 @@ describe("a package on an estimate", () => {
     const signed = await send(`/roofing/${QUOTE}/package`, { package_id: PKG });
     expect(signed.status).toBe(409);
     expect((await signed.json()).error).toBe("This estimate was already signed, so it can't change.");
+  });
+
+  it("leaves an estimate that offers options to the options bar", async () => {
+    roofer({ lines: [{ id: "keep", name: "Architectural shingle roof", quantity: 30, unit_price: 560, sort: 0, option_id: GOOD }] });
+    state.tables.quote_options = [{ id: GOOD, company_id: ROOFER, quote_id: QUOTE, name: "Architectural shingle", sort: 0 }, { id: BEST, company_id: ROOFER, quote_id: QUOTE, name: "Standing-seam metal", sort: 1 }];
+    for (const replace of [false, true]) {
+      const res = await send(`/roofing/${QUOTE}/package`, { package_id: PKG, replace });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("This estimate offers options; change them from the options bar.");
+    }
+    expect(quote().roof_package_id).toBeNull();
+    expect(rows("quote_line_items").map((l) => l.id)).toEqual(["keep"]);
+  });
+
+  it("needs a roof's package to have its roof, and lets other trades' packages go without a main service", async () => {
+    roofer();
+    rows("roof_packages")[0]!.roof_service_id = null;
+    const roof = await send(`/roofing/${QUOTE}/package`, { package_id: PKG });
+    expect(roof.status).toBe(409);
+    expect((await roof.json()).error).toBe("Pick the roof for the Architectural shingle package first, in Roofing → Packages.");
+
+    // A gutter business's package: what's always included, counted, with no main service and nothing measured.
+    roofer({ measured: false });
+    rows("companies")[0]!.trade_preset = "general";
+    Object.assign(rows("roof_packages")[0]!, { roof_service_id: null, name: "Gutter tune-up" });
+    state.tables.roof_package_items = [{ id: "g1", company_id: ROOFER, package_id: PKG, service_id: BOOT, kind: "included", quantity: 3, sort: 0 }];
+    const res = await send(`/roofing/${QUOTE}/package`, { package_id: PKG });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ applied: true, lines: 1, skipped: [] });
+    expect(rows("quote_line_items").map((l) => [l.name, l.quantity])).toEqual([["Pipe boot", 3]]);
+
+    // Measured services outside roofing wait for the job's measurement, in the job's words.
+    roofer({ measured: false });
+    rows("companies")[0]!.trade_preset = "paving";
+    const unmeasured = await send(`/roofing/${QUOTE}/package`, { package_id: PKG });
+    expect(unmeasured.status).toBe(409);
+    expect((await unmeasured.json()).error).toBe("Measure the job first.");
   });
 
   it("prices a package that follows ABC at today's materials, and the price list follows", async () => {
@@ -337,8 +439,8 @@ describe("the price range", () => {
     expect(quote()).toMatchObject({ range_low: 18300, range_high: 21050, range_accepted_at: null, priced_on_site_at: null, exact_sent_at: null, status: "sent" });
     expect(quote().range_sent_at).toEqual(expect.any(String));
     expect(quote().range_lines).toEqual([
-      { id: "l1", service_id: ROOF, name: "Architectural shingle roof", quantity: 30, unit: "square", unit_price: 560, unit_cost: 330, taxable: true, formula: "squares", total: 16800 },
-      { id: "l2", service_id: BOOT, name: "Pipe boot", quantity: 3, unit: "ea", unit_price: 45, unit_cost: 15, taxable: true, formula: null, total: 135 },
+      { id: "l1", option_id: null, service_id: ROOF, name: "Architectural shingle roof", quantity: 30, unit: "square", unit_price: 560, unit_cost: 330, taxable: true, formula: "squares", total: 16800 },
+      { id: "l2", option_id: null, service_id: BOOT, name: "Pipe boot", quantity: 3, unit: "ea", unit_price: 45, unit_cost: 15, taxable: true, formula: null, total: 135 },
     ]);
   });
 
@@ -359,6 +461,52 @@ describe("the price range", () => {
     expect(mail.Text).toContain("your new roof will cost between $18,300 and $20,200.");
     expect(rows("messages")[0]).toMatchObject({ channel: "email", subject: "Your roof estimate from Peak Roofing", related_type: "quote", related_id: QUOTE });
     expect(quote().status).toBe("sent");
+  });
+
+  it("runs from the cheapest option to the priciest, before add-ons, whichever option is shown", async () => {
+    const tiers = [
+      { id: "s1", option_id: null, service_id: null, name: "Dumpster", quantity: 1, unit: "ea", unit_price: 500, unit_cost: 300, taxable: true, formula: null, optional: false, selected: true, sort: 0 },
+      { id: "g1", option_id: GOOD, service_id: ROOF, name: "Architectural shingle roof", quantity: 30, unit: "square", unit_price: 560, unit_cost: 330, taxable: true, formula: "squares", optional: false, selected: true, sort: 1 },
+      { id: "g2", option_id: GOOD, service_id: null, name: "Gutter guards", quantity: 1, unit: "ea", unit_price: 900, unit_cost: 400, taxable: true, formula: null, optional: true, selected: true, sort: 2 },
+      { id: "b1", option_id: BEST, service_id: null, name: "Standing-seam metal roof", quantity: 30, unit: "square", unit_price: 1285, unit_cost: 700, taxable: true, formula: "squares", optional: false, selected: false, sort: 3 },
+    ];
+    roofer({ lines: tiers });
+    Object.assign(quote(), { option_id: GOOD, tax_rate: 0.05 });
+    state.tables.quote_options = [
+      { id: GOOD, company_id: ROOFER, quote_id: QUOTE, name: "Architectural shingle", sort: 0 },
+      { id: BEST, company_id: ROOFER, quote_id: QUOTE, name: "Standing-seam metal", sort: 1 },
+      // Offered before it was measured: no lines yet, so it's left out.
+      { id: "00000000-0000-4000-8000-0000000000c3", company_id: ROOFER, quote_id: QUOTE, name: "Designer shingle", sort: 2 },
+    ];
+    env.MAILPIT_URL = "http://mailpit.local";
+    let body;
+    try {
+      body = await (await send(`/roofing/${QUOTE}/send-range`, { channel: "email" })).json();
+    } finally {
+      delete env.MAILPIT_URL;
+    }
+    // Each option before add-ons: the dumpster and its own roof, with tax; the picked gutter guards don't move it.
+    const good = quoteTotals([{ quantity: 1, unit_price: 500 }, { quantity: 30, unit_price: 560 }], { taxRate: 0.05 }).total;
+    const best = quoteTotals([{ quantity: 1, unit_price: 500 }, { quantity: 30, unit_price: 1285 }], { taxRate: 0.05 }).total;
+    const range = optionsRange([good, best]);
+    expect(range).toEqual({ low: priceRange(good).low, high: priceRange(best).high });
+    expect(body).toMatchObject({ sent: true, range });
+    expect(quote()).toMatchObject({ range_low: range.low, range_high: range.high });
+    // What the range was priced from: every option's required lines, not the add-on.
+    expect((quote().range_lines as Row[]).map((l) => [l.id, l.option_id])).toEqual([["s1", null], ["g1", GOOD], ["b1", BEST]]);
+    const mail = JSON.parse(String(fetcher.mock.calls.find(([url]) => String(url).includes("mailpit"))![1]!.body));
+    const money = (n: number) => `$${n.toLocaleString("en-US")}`;
+    expect(mail.Text).toContain(`your new roof will cost between ${money(range.low)} and ${money(range.high)}, depending on the option you pick. You can see the options`);
+  });
+
+  it("waits for an option to be priced before sending its range", async () => {
+    roofer({ lines: [{ id: "s1", service_id: null, name: "Dumpster", quantity: 1, unit: "ea", unit_price: 500, optional: false, selected: true, sort: 0 }] });
+    quote().option_id = GOOD;
+    state.tables.quote_options = [{ id: GOOD, company_id: ROOFER, quote_id: QUOTE, name: "Architectural shingle", sort: 0 }, { id: BEST, company_id: ROOFER, quote_id: QUOTE, name: "Standing-seam metal", sort: 1 }];
+    const res = await send(`/roofing/${QUOTE}/send-range`, { channel: "link" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Price the options before sending the range: none of them has any lines yet.");
+    expect(quote().range_low).toBeUndefined();
   });
 
   it("checks where it's going before changing anything", async () => {
@@ -390,7 +538,7 @@ describe("a yes to the range, marked by the office", () => {
     waiting();
     const res = await mark({ note: "  Called the office Tuesday " });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ accepted_at: "2026-10-23T15:00:00.000Z" });
+    expect(await res.json()).toEqual({ accepted_at: "2026-10-23T15:00:00.000Z", range: { low: 18300, high: 21050 }, option_id: null });
     expect(accepts()).toEqual([{ by: "admin", name: "accept_hub_range", args: { p_company: ROOFER, p_quote: QUOTE } }]);
     expect(quote().range_accepted_at).toBe("2026-10-23T15:00:00.000Z");
     expect(rows("messages")).toEqual([
@@ -434,13 +582,64 @@ describe("a yes to the range, marked by the office", () => {
   });
 
   it("takes no for an answer from the database too", async () => {
-    // A range saved on a draft (its email didn't go): the homeowner was never sent it, so the step refuses.
-    waiting({ status: "draft" });
+    // They tapped Yes on their link while the office was marking it.
+    waiting();
+    state.meanwhile = () => void (quote().range_accepted_at = "2026-10-23T14:59:00Z");
     const res = await mark();
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("This price range isn't waiting for an answer.");
     expect(accepts()).toHaveLength(1);
-    expect(quote().range_accepted_at).toBeNull();
+    expect(rows("messages")).toEqual([]);
+  });
+
+  it("marks a yes heard on the phone before the range went out, saving the range they were told", async () => {
+    // Never sent, or saved on a draft whose email didn't go: the range is worked out now, as sending would.
+    for (const saved of [{}, { range_low: 15000, range_high: 17250, range_sent_at: "2026-10-22T13:20:00Z" }]) {
+      roofer({ lines });
+      Object.assign(quote(), saved);
+      state.tables.profiles = [{ user_id: "viewer", full_name: "Sarah Lopez" }];
+      const res = await mark({ note: "Called the office" });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ accepted_at: "2026-10-23T15:00:00.000Z", range: { low: 18300, high: 21050 }, option_id: null });
+      expect(quote()).toMatchObject({ status: "sent", range_low: 18300, range_high: 21050, range_accepted_at: "2026-10-23T15:00:00.000Z", priced_on_site_at: null, exact_sent_at: null });
+      expect(quote().range_sent_at).not.toBe("2026-10-22T13:20:00Z");
+      expect(quote().range_lines).toEqual([expect.objectContaining({ name: "Architectural shingle roof", quantity: 30, unit_price: 560 })]);
+      // Nothing went to them: no email, no text, only the note.
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(rows("messages").map((m) => [m.channel, m.body])).toEqual([["note", "Dana Whitfield said yes to the range ($18,300 to $21,050), marked by Sarah Lopez.\nCalled the office"]]);
+    }
+  });
+
+  it("can't mark a yes to a range before there's a price", async () => {
+    roofer();
+    const res = await mark();
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Add at least one line item before sending.");
+    expect(quote()).toMatchObject({ status: "draft" });
+    expect(quote().range_low).toBeUndefined();
+    expect(accepts()).toEqual([]);
+  });
+
+  it("notes the option they're leaning toward, which is shown first from then on", async () => {
+    waiting({ option_id: GOOD });
+    state.tables.quote_options = [
+      { id: GOOD, company_id: ROOFER, quote_id: QUOTE, name: "Architectural shingle", sort: 0 },
+      { id: BEST, company_id: ROOFER, quote_id: QUOTE, name: "Standing-seam metal", sort: 1 },
+    ];
+    const res = await mark({ option_id: BEST.toUpperCase() });
+    expect(res.status).toBe(200);
+    expect((await res.json()).option_id).toBe(BEST);
+    expect(accepts()).toEqual([{ by: "admin", name: "accept_hub_range", args: { p_company: ROOFER, p_quote: QUOTE, p_option: BEST } }]);
+    expect(quote().option_id).toBe(BEST);
+    expect(rows("messages")[0]!.body).toBe("Dana Whitfield said yes to the range ($18,300 to $21,050), leaning toward Standing-seam metal, marked by Sarah Lopez.");
+
+    // An option that isn't on this estimate (anymore): nothing changes.
+    waiting({ option_id: GOOD });
+    state.tables.quote_options = [{ id: GOOD, company_id: ROOFER, quote_id: QUOTE, name: "Architectural shingle", sort: 0 }];
+    const gone = await mark({ option_id: BEST });
+    expect(gone.status).toBe(409);
+    expect((await gone.json()).error).toBe("The options on this estimate changed. Look them over and try again.");
+    expect(quote()).toMatchObject({ option_id: GOOD, range_accepted_at: null });
     expect(rows("messages")).toEqual([]);
   });
 
@@ -485,6 +684,52 @@ describe("sending a roof estimate the usual way", () => {
     expect(mail.Text).not.toContain("19,768");
     expect(rows("messages")[0]).toMatchObject({ subject: "Your roof estimate from Peak Roofing", related_type: "quote", related_id: QUOTE });
     expect(String(rows("messages")[0]!.body)).not.toContain("19,768");
+  });
+
+  it("says how many options there are and the lowest price, not the total of the one shown", async () => {
+    roofer({
+      status: "sent",
+      lines: [
+        { id: "g1", option_id: GOOD, service_id: ROOF, name: "Architectural shingle roof", quantity: 30, unit_price: 560, taxable: true, optional: false, selected: false, sort: 0 },
+        { id: "g2", option_id: GOOD, service_id: null, name: "Gutter guards", quantity: 1, unit_price: 900, taxable: true, optional: true, selected: false, sort: 1 },
+        { id: "b1", option_id: BEST, service_id: null, name: "Standing-seam metal roof", quantity: 30, unit_price: 1285, taxable: true, optional: false, selected: true, sort: 2 },
+      ],
+    });
+    Object.assign(quote(), { option_id: BEST, total: 38550, tax_rate: 0 });
+    state.tables.quote_options = [{ id: GOOD, company_id: ROOFER, quote_id: QUOTE, name: "Architectural shingle", sort: 0 }, { id: BEST, company_id: ROOFER, quote_id: QUOTE, name: "Standing-seam metal", sort: 1 }];
+    const mail = await emailed();
+    expect(optionTotals(rows("quote_line_items") as never, GOOD, null, { taxRate: 0 }).total).toBe(16800);
+    expect(mail.Subject).toBe("Quote #1042 from Peak Roofing");
+    expect(mail.Text).toContain("Here's your quote, with 2 options from $16,800.00. You can compare them, choose the one you want and approve it online:");
+    expect(mail.Text).not.toContain("38,550");
+
+    // An option with only an add-on has no price of its own, as the Client Hub shows it: it isn't
+    // counted or quoted, and one priced option is the quote's own total.
+    fetcher.mockClear();
+    rows("quote_line_items").find((l) => l.id === "g1")!.option_id = null;
+    const one = await emailed();
+    expect(one.Text).toContain("Here's your quote ($38,550.00).");
+    expect(one.Text).not.toContain("options from");
+  });
+
+  it("says the range across the options while it's out as a range", async () => {
+    roofer({
+      status: "sent",
+      lines: [
+        { id: "g1", option_id: GOOD, service_id: ROOF, name: "Architectural shingle roof", quantity: 30, unit_price: 560, taxable: true, optional: false, selected: true, sort: 0 },
+        { id: "b1", option_id: BEST, service_id: null, name: "Standing-seam metal roof", quantity: 30, unit_price: 1285, taxable: true, optional: false, selected: false, sort: 1 },
+      ],
+    });
+    Object.assign(quote(), { range_low: 16800, range_high: 44350, priced_on_site_at: null, exact_sent_at: null, option_id: GOOD });
+    state.tables.quote_options = [{ id: GOOD, company_id: ROOFER, quote_id: QUOTE, name: "Architectural shingle", sort: 0 }, { id: BEST, company_id: ROOFER, quote_id: QUOTE, name: "Standing-seam metal", sort: 1 }];
+    const mail = await emailed();
+    expect(mail.Subject).toBe("Your roof estimate from Peak Roofing");
+    expect(mail.Text).toContain("your new roof will cost between $16,800 and $44,350, depending on the option you pick.");
+
+    // Only one of them priced yet: it's that option's range, in the words for one estimate.
+    fetcher.mockClear();
+    state.tables.quote_line_items = rows("quote_line_items").filter((l) => l.option_id === GOOD);
+    expect(await emailed().then((m) => m.Text)).toContain("your new roof will cost between $16,800 and $44,350. You can see what's included");
   });
 
   it("gives the exact total once it's priced on site or sent at the exact price", async () => {
@@ -535,6 +780,94 @@ describe("the price set on site", () => {
     expect(rows("quote_line_items").some((l) => l.name === SITE_ADJUSTMENT_NAME)).toBe(false);
   });
 
+  it("puts the price on the option shown, up or down, and leaves the other options and the office's discount alone", async () => {
+    const tiers = [
+      { id: "s1", option_id: null, service_id: null, name: "Dumpster", formula: null, quantity: 1, unit_price: 500, optional: false, selected: true, sort: 0 },
+      { id: "g1", option_id: GOOD, service_id: ROOF, name: "Architectural shingle roof", formula: "squares", quantity: 30, unit_price: 560, optional: false, selected: true, sort: 1 },
+      { id: "g2", option_id: GOOD, service_id: null, name: "Gutter guards", formula: null, quantity: 1, unit_price: 900, optional: true, selected: false, sort: 2 },
+      { id: "g3", option_id: GOOD, service_id: null, name: SITE_ADJUSTMENT_NAME, formula: null, quantity: 1, unit_price: 250, optional: false, selected: true, sort: 3 },
+      { id: "b1", option_id: BEST, service_id: null, name: "Standing-seam metal roof", formula: "squares", quantity: 30, unit_price: 1285, optional: false, selected: false, sort: 4 },
+    ];
+    roofer({ lines: tiers });
+    Object.assign(quote(), { option_id: GOOD, discount_amount: 300, tax_rate: 0.07 });
+    const money = { taxRate: 0.07, discountAmount: 300 };
+    const beforeTax = (optionId: string) => {
+      const t = optionTotals(rows("quote_line_items") as never, optionId, GOOD, money);
+      return Math.round((t.subtotal - t.discount) * 100) / 100;
+    };
+    const best = beforeTax(BEST);
+    // $500 + $16,800 for Good, less the office's $300: a price of $16,000 is a $1,000 line off Good's
+    // own lines, and the $300 still comes off after it.
+    const res = await send(`/roofing/${QUOTE}/site-price`, { price: 16000, note: "Matched their other bid" }, "PUT");
+    expect(res.status).toBe(200);
+    const adjustments = rows("quote_line_items").filter((l) => l.name === SITE_ADJUSTMENT_NAME);
+    expect(adjustments).toHaveLength(1);
+    expect(adjustments[0]).toMatchObject({ option_id: GOOD, service_id: null, formula: null, quantity: 1, unit_price: -1000, taxable: true, description: "Matched their other bid", sort: 5 });
+    expect(rows("quote_line_items").some((l) => l.id === "g3")).toBe(false);
+    expect(quote()).toMatchObject({ discount_amount: 300, priced_on_site_at: expect.any(String) });
+    expect(beforeTax(GOOD)).toBe(16000);
+    expect(beforeTax(BEST)).toBe(best);
+
+    // Above the estimate it's a line on that option too.
+    await send(`/roofing/${QUOTE}/site-price`, { price: 17500.25 }, "PUT");
+    expect(rows("quote_line_items").filter((l) => l.name === SITE_ADJUSTMENT_NAME).map((l) => [l.option_id, l.unit_price])).toEqual([[GOOD, 500.25]]);
+    expect(rows("quote_line_items").filter((l) => l.option_id === BEST).map((l) => l.id)).toEqual(["b1"]);
+    expect(beforeTax(GOOD)).toBe(17500.25);
+
+    // An office discount bigger than the lines still leaves the option at the price agreed.
+    quote().discount_amount = 20000;
+    await send(`/roofing/${QUOTE}/site-price`, { price: 15000 }, "PUT");
+    expect(optionTotals(rows("quote_line_items") as never, GOOD, GOOD, { taxRate: 0, discountAmount: 20000 })).toMatchObject({ discount: 20000, total: 15000 });
+  });
+
+  it("takes a lower price off an option's taxed and untaxed work as a discount would, so the tax comes off the same", async () => {
+    const tiers = [
+      { id: "s1", option_id: null, service_id: null, name: "Permit", formula: null, quantity: 1, unit_price: 500, taxable: false, optional: false, selected: true, sort: 0 },
+      { id: "g1", option_id: GOOD, service_id: ROOF, name: "Architectural shingle roof", formula: "squares", quantity: 1, unit_price: 10000, taxable: true, optional: false, selected: true, sort: 1 },
+      { id: "b1", option_id: BEST, service_id: null, name: "Standing-seam metal roof", formula: "squares", quantity: 1, unit_price: 20000, taxable: true, optional: false, selected: false, sort: 2 },
+    ];
+    roofer({ lines: tiers });
+    Object.assign(quote(), { option_id: GOOD, tax_rate: 0.08 });
+    expect((await send(`/roofing/${QUOTE}/site-price`, { price: 9500 }, "PUT")).status).toBe(200);
+    const adjustments = () => rows("quote_line_items").filter((l) => l.name === SITE_ADJUSTMENT_NAME).map((l) => [l.option_id, l.unit_price, l.taxable, l.sort]);
+    expect(adjustments()).toEqual([[GOOD, -952.38, true, 3], [GOOD, -47.62, false, 4]]);
+    // What the price would come to as a discount without options, tax and all.
+    const total = optionTotals(rows("quote_line_items") as never, GOOD, GOOD, { taxRate: 0.08 }).total;
+    expect(total).toBe(10223.81);
+    expect(total).toBe(quoteTotals(tiers.slice(0, 2), { taxRate: 0.08, discountAmount: 1000 }).total);
+    // Setting it again replaces both; above the estimate it's one taxed line.
+    await send(`/roofing/${QUOTE}/site-price`, { price: 11000 }, "PUT");
+    expect(adjustments()).toEqual([[GOOD, 500, true, 5]]);
+  });
+
+  it("needs the option shown to have lines of its own, and to still be shown once the price is saved", async () => {
+    const tiers = [
+      { id: "s1", option_id: null, service_id: null, name: "Dumpster", formula: null, quantity: 1, unit_price: 500, optional: false, selected: true, sort: 0 },
+      { id: "g2", option_id: GOOD, service_id: null, name: "Gutter guards", formula: null, quantity: 1, unit_price: 900, optional: true, selected: true, sort: 1 },
+      { id: "b1", option_id: BEST, service_id: null, name: "Standing-seam metal roof", formula: "squares", quantity: 30, unit_price: 1285, optional: false, selected: false, sort: 2 },
+    ];
+    // Good was offered before the roof was measured: it has an add-on, and nothing to price against.
+    roofer({ lines: tiers });
+    quote().option_id = GOOD;
+    const empty = await send(`/roofing/${QUOTE}/site-price`, { price: 16000 }, "PUT");
+    expect(empty.status).toBe(409);
+    expect((await empty.json()).error).toBe("This option has no lines of its own yet, so there's nothing to set its price against.");
+    expect(rows("quote_line_items")).toHaveLength(3);
+    expect(quote().priced_on_site_at).toBeUndefined();
+    // Going back to the estimate as it is still works.
+    expect((await send(`/roofing/${QUOTE}/site-price`, { price: null }, "PUT")).status).toBe(200);
+
+    // "They chose this one" on another screen while the price is saved: it was Best's price, so it isn't kept.
+    roofer({ lines: tiers });
+    quote().option_id = BEST;
+    state.afterInsert.quote_line_items = () => (quote().option_id = GOOD);
+    const moved = await send(`/roofing/${QUOTE}/site-price`, { price: 38000 }, "PUT");
+    expect(moved.status).toBe(409);
+    expect((await moved.json()).error).toBe("The option changed. Check it again.");
+    expect(rows("quote_line_items").map((l) => l.id)).toEqual(["s1", "g2", "b1"]);
+    expect(quote().priced_on_site_at).toBeUndefined();
+  });
+
   it("won't fight a promo code or change a signed estimate", async () => {
     roofer({ lines });
     quote().promo_code_id = "00000000-0000-4000-8000-0000000000a9";
@@ -546,6 +879,35 @@ describe("the price set on site", () => {
     roofer({ lines, status: "converted" });
     expect((await send(`/roofing/${QUOTE}/site-price`, { price: 16000 }, "PUT")).status).toBe(409);
     expect((await send(`/roofing/${QUOTE}/site-price`, { price: -1 }, "PUT")).status).toBe(400);
+  });
+
+  it("keeps a promo code off a price set on site the other way round too, until it's back to the estimate's", async () => {
+    const promo = () => send(`/quotes/${QUOTE}/promo`, { code: "SPRING" });
+    const promoted = () => state.rpcs.some((r) => r.name === "apply_promo_code");
+    const tiers = [
+      { id: "s1", option_id: null, service_id: null, name: "Dumpster", formula: null, quantity: 1, unit_price: 500, optional: false, selected: true, sort: 0 },
+      { id: "g1", option_id: GOOD, service_id: ROOF, name: "Architectural shingle roof", formula: "squares", quantity: 30, unit_price: 560, optional: false, selected: true, sort: 1 },
+      { id: "b1", option_id: BEST, service_id: null, name: "Standing-seam metal roof", formula: "squares", quantity: 30, unit_price: 1285, optional: false, selected: false, sort: 2 },
+    ];
+    // On an option the price is a line of its own: a 10% code would come off the $1,000 agreed off it too.
+    roofer({ lines: tiers });
+    quote().option_id = GOOD;
+    expect((await send(`/roofing/${QUOTE}/site-price`, { price: 16000 }, "PUT")).status).toBe(200);
+    const refused = await promo();
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error).toBe("A price was set on site for this estimate, so a promo code can't go on it too. Set the price back to the estimate's first.");
+    expect(promoted()).toBe(false);
+    // Back to the estimate's price, it goes on.
+    await send(`/roofing/${QUOTE}/site-price`, { price: null }, "PUT");
+    expect((await promo()).status).toBe(200);
+    expect(promoted()).toBe(true);
+
+    // Without options the price is a discount, which the code would replace.
+    roofer({ lines });
+    state.rpcs = [];
+    await send(`/roofing/${QUOTE}/site-price`, { price: 16000 }, "PUT");
+    expect((await promo()).status).toBe(409);
+    expect(promoted()).toBe(false);
   });
 });
 
@@ -573,5 +935,54 @@ describe("the packages' ABC prices", () => {
     const roof = rows("services").find((s) => s.id === ROOF)!;
     expect(roof.unit_cost).toBe(127.5 + 182);
     expect(roof.unit_price).toBe(followPrice(127.5, 182, 70));
+  });
+});
+
+describe("automations about an estimate", () => {
+  it("link to Roofing only for roof work, not for every estimate with a package", async () => {
+    roofer();
+    Object.assign(quote(), { roof_package_id: PKG, range_low: null, range_high: null });
+    const appPath = async () => (await loadContext(adminClient(env), ROOFER, "quote", QUOTE))?.appPath;
+    expect(await appPath()).toBe(`/roofing/${QUOTE}`);
+
+    // A paving business's package: its estimate is worked on as a quote, unless what's measured is a roof.
+    rows("companies")[0]!.trade_preset = "paving";
+    state.tables.measurements = [{ id: "m-lot", company_id: ROOFER, quote_id: QUOTE, sections: [{ kind: "Area", value: 4000 }], roof_pitch: null, roofing_squares: null, updated_at: "2026-10-20T00:00:00Z" }];
+    expect(await appPath()).toBe(`/quotes/${QUOTE}`);
+    rows("measurements")[0]!.roof_pitch = "6/12";
+    expect(await appPath()).toBe(`/roofing/${QUOTE}`);
+    state.tables.measurements = [];
+    quote().range_low = 18300;
+    expect(await appPath()).toBe(`/roofing/${QUOTE}`);
+
+    quote().roof_package_id = null;
+    expect(await appPath()).toBe(`/quotes/${QUOTE}`);
+  });
+
+  it("know the lines the client is offered before they answer, and the lines they're getting once they've signed", async () => {
+    roofer({
+      lines: [
+        { id: "s1", option_id: null, name: "Dumpster", quantity: 1, unit_price: 500, optional: false, selected: true, sort: 0 },
+        { id: "s2", option_id: null, name: "Gutter guards", quantity: 1, unit_price: 900, optional: true, selected: false, sort: 1 },
+        { id: "g1", option_id: GOOD, name: "Architectural shingle roof", quantity: 30, unit_price: 560, optional: false, selected: true, sort: 2 },
+        { id: "g2", option_id: GOOD, name: "Ridge vent", quantity: 1, unit_price: 400, optional: true, selected: true, sort: 3 },
+        { id: "b1", option_id: BEST, name: "Standing-seam metal roof", quantity: 30, unit_price: 1285, optional: false, selected: false, sort: 4 },
+      ],
+    });
+    quote().option_id = GOOD;
+    const facts = async () => (await loadContext(adminClient(env), ROOFER, "quote", QUOTE))?.facts;
+    // Before they answer: the shared lines and the shown option's, add-ons not picked yet included
+    // ("Line items contains Gutter guards" on a quote that's sent), and never another option's.
+    expect((await facts())?.line_items).toEqual(["Dumpster", "Gutter guards", "Architectural shingle roof", "Ridge vent"]);
+    // Signed: what they're getting, without the add-ons they left off.
+    quote().status = "approved";
+    expect((await facts())?.line_items).toEqual(["Dumpster", "Architectural shingle roof", "Ridge vent"]);
+
+    // A quote without options the same way.
+    state.tables.quote_line_items = rows("quote_line_items").filter((l) => l.option_id === null);
+    quote().option_id = null;
+    expect((await facts())?.line_items).toEqual(["Dumpster"]);
+    quote().status = "sent";
+    expect((await facts())?.line_items).toEqual(["Dumpster", "Gutter guards"]);
   });
 });

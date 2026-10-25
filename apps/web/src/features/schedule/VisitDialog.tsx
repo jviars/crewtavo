@@ -17,6 +17,7 @@ import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { useSubSignIns } from "../subs/subsData";
 import { useSchedulingRights } from "./myCrews";
 
 export interface VisitInput {
@@ -155,6 +156,11 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
     ...(options.data?.crews ?? []).filter((c) => rights.myCrews.includes(c.id) && c.lead_user_id).map((c) => c.lead_user_id!),
   ]);
   const people = (options.data?.team ?? []).filter((m) => !rights.ownCrew || crewmates.has(m.user_id) || assignees.includes(m.user_id));
+  // Subs who can sign in, for whoever schedules the whole team: they see the visit on their own My day.
+  // One who can't sign in now (removed, or turned off) shows only while still on this visit, to take off.
+  const subSignIns = useSubSignIns(session.company.id, canDispatch && rights.wholeTeam);
+  const subs = (subSignIns.data ?? []).filter((x) => x.active || assignees.includes(x.user_id));
+  const toggle = (id: string) => setAssignees(assignees.includes(id) ? assignees.filter((x) => x !== id) : [...assignees, id]);
   // Once the crews are known, a crew lead's new visit starts on their crew, with its people.
   useEffect(() => {
     if (rights.ownCrew && isNew && !crewId && rights.myCrews.length && options.data) chooseCrew(rights.myCrews[0]!);
@@ -363,7 +369,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                       aria-pressed={on}
                       disabled={locked}
                       title={locked ? "Added by the office" : undefined}
-                      onClick={() => setAssignees(on ? assignees.filter((x) => x !== m.user_id) : [...assignees, m.user_id])}
+                      onClick={() => toggle(m.user_id)}
                       style={{ paddingLeft: 4 }}
                     >
                       <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
@@ -374,6 +380,29 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                 })}
               </div>
             )}
+          </div>
+        )}
+        {canDispatch && subs.length > 0 && (
+          <div className="field">
+            <span>Subcontractors</span>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {subs.map((x) => {
+                const on = assignees.includes(x.user_id);
+                // Can't sign in now: it can come off the visit, not go back on.
+                const off = !x.active;
+                return (
+                  <button key={x.user_id} type="button" className="tab" aria-pressed={on} disabled={off && !on}
+                    title={off ? "Can't sign in now. Tap to take them off this visit." : [x.contact_name, x.trade].filter(Boolean).join(" · ") || undefined}
+                    onClick={() => toggle(x.user_id)} style={{ paddingLeft: 4 }}>
+                    <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: "var(--text-3)" }}><Face name={x.name} /></span>
+                    {x.name}
+                    {off && <span className="muted small">Can't sign in now</span>}
+                    {on && <Icon name="check" size={12} strokeWidth={3} />}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="muted small">It shows on their phone with the address and the work. Not your prices, and not your client's phone or email unless you allow it on their page.</span>
           </div>
         )}
 

@@ -1,0 +1,146 @@
+/*
+ * "Add items" on the iPad (VisitPicks): a search, the kinds of work as pills, and a grid of tiles,
+ * each a drawing of the item, its name and price, and how many are on (− and +), sized for a finger.
+ * The drawings (pictures.ts) take their colors from the --pk tokens here, which dark mode changes.
+ */
+.picks { display: grid; gap: 12px; align-content: start; }
+.note { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text-3); }
+.caption { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text-3); }
+
+.search { position: relative; }
+.searchIcon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); display: grid; color: var(--text-3); pointer-events: none; }
+/* 16px and up keeps iPad Safari from zooming in when it's tapped. */
+.picks .searchInput { width: 100%; height: 48px; padding: 0 14px 0 42px; border-radius: 12px; font-size: 16px; }
+
+.groups { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -4px; padding: 2px 4px 4px; }
+.groups::-webkit-scrollbar { display: none; }
+.group {
+  flex: none; height: 40px; padding: 0 14px; display: inline-flex; align-items: center; gap: 7px;
+  border: 1.5px solid var(--border); border-radius: var(--radius-pill); background: var(--surface);
+  font: inherit; font-size: 14.5px; font-weight: 600; color: var(--ink); white-space: nowrap; cursor: pointer; touch-action: manipulation;
+}
+.group:hover { border-color: var(--border-strong); }
+.group:focus-visible { outline: none; box-shadow: var(--ring); }
+.group[aria-pressed="true"] { border-color: var(--solid); background: var(--solid); color: var(--on-solid); }
+.groupCount {
+  min-width: 20px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: var(--radius-pill);
+  background: var(--green-solid); color: #fff; font-size: 12px; font-weight: 800;
+}
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+
+/* ---------- A tile ---------- */
+.tile {
+  display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+  border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface);
+  -webkit-user-select: none; user-select: none;
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.tile[data-on] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.pic {
+  position: relative; display: block; width: 100%; max-width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 0;
+  background: var(--pk-bg); cursor: pointer; touch-action: manipulation;
+}
+.pic:focus-visible { outline: none; box-shadow: inset var(--ring); }
+.pic:disabled { cursor: progress; }
+.pic:active:not(:disabled) .picture, .pic:active:not(:disabled) .photo { transform: scale(0.96); }
+/* The business's own picture of it, cropped to fill the box. */
+.photo { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform var(--dur-fast); -webkit-user-drag: none; }
+.badge {
+  position: absolute; top: 8px; right: 8px; min-width: 30px; height: 30px; padding: 0 9px;
+  display: grid; place-items: center; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff;
+  font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; box-shadow: 0 2px 6px rgba(15, 42, 53, 0.25);
+}
+.body { flex: 1; display: grid; gap: 10px; align-content: space-between; padding: 10px 10px 10px 12px; }
+.text { display: grid; gap: 1px; min-width: 0; }
+.name { font-size: 15px; font-weight: 700; line-height: 1.25; text-wrap: balance; overflow-wrap: anywhere; }
+.price { font-size: 13.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.add {
+  width: 100%; height: 46px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1.5px dashed var(--border-strong); border-radius: 10px; background: var(--surface);
+  font: inherit; font-size: 14.5px; font-weight: 700; color: var(--ink); white-space: nowrap; cursor: pointer; touch-action: manipulation;
+}
+.add > svg { color: var(--green); }
+.add:hover:not(:disabled) { border-style: solid; border-color: var(--green); background: var(--green-tint); }
+.add:active:not(:disabled) { transform: scale(0.97); }
+.add:focus-visible { outline: none; box-shadow: var(--ring); }
+.add:disabled { cursor: progress; }
+
+.stepper, .onIt { height: 46px; display: grid; align-items: center; border-radius: 10px; background: var(--green-tint); }
+.stepper { grid-template-columns: 46px minmax(0, 1fr) 46px; }
+.onIt { grid-template-columns: minmax(0, 1fr) auto; padding-left: 10px; }
+.onIt:not(:has(.step)) { padding-right: 10px; }
+.step {
+  width: 46px; height: 46px; display: grid; place-items: center; border: 0; border-radius: 10px; background: none;
+  color: var(--green-dark); cursor: pointer; touch-action: manipulation;
+}
+.step:hover:not(:disabled) { background: var(--green-tint-2); }
+.step:active:not(:disabled) { transform: scale(0.92); }
+.step:focus-visible { outline: none; box-shadow: var(--ring); }
+.step:disabled { opacity: 0.35; cursor: default; }
+.count { text-align: center; font-size: 18px; font-weight: 800; color: var(--green-dark); font-variant-numeric: tabular-nums; }
+.onText { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 15px; font-weight: 700; color: var(--green-dark); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- The drawings ---------- */
+.picture {
+  --pk-line: #24414c; --pk-text: #24414c; --pk-ground: #b9b6ad;
+  --pk-roof: #6f7d83; --pk-roof-2: #98a4a9; --pk-roof-3: #4c5a60; --pk-roof-line: #56646a;
+  --pk-metal: #cfd7da; --pk-metal-2: #eef1f2; --pk-dark: #34444b; --pk-dark-2: #4b5c63; --pk-white: #fbfbf9;
+  --pk-wood: #dcbb88; --pk-grain: #b48f58; --pk-rot: #6b4a2a; --pk-glass: #a9d0e6;
+  --pk-brick: #b45a3c; --pk-brick-2: #8f4630; --pk-brick-3: #c9765a; --pk-mortar: #e3c2b1;
+  --pk-hi: #d98a3a; --pk-wall: #ebe7dd; --pk-siding: #d3cec1; --pk-solar: #2f5d8a; --pk-solar-line: #8fb4d6;
+  --pk-dump: #47708f; --pk-dump-2: #375a75; --pk-spark: #e3a21a;
+  display: block; width: 100%; height: 100%; transition: transform var(--dur-fast);
+}
+.pic { --pk-bg: #edf1f2; }
+:global(.dark) .pic { --pk-bg: var(--fill-3); }
+:global(.dark) .picture {
+  --pk-line: #141c20; --pk-text: var(--text-2); --pk-ground: var(--border-strong);
+  --pk-white: #dfe2df; --pk-wall: #c9c4b8; --pk-metal: #b9c3c7; --pk-metal-2: #d3d9db; --pk-siding: #aba699;
+}
+.picture :global(.o) { stroke: var(--pk-line); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.picture :global(.rf) { fill: var(--pk-roof); }
+.picture :global(.rf2) { fill: var(--pk-roof-2); }
+.picture :global(.rf3) { fill: var(--pk-roof-3); }
+.picture :global(.rl) { fill: none; stroke: var(--pk-roof-line); stroke-width: 1.6; stroke-linecap: round; }
+.picture :global(.mt) { fill: var(--pk-metal); }
+.picture :global(.mt2) { fill: var(--pk-metal-2); }
+.picture :global(.dk) { fill: var(--pk-dark); }
+.picture :global(.dk2) { fill: var(--pk-dark-2); }
+.picture :global(.wh) { fill: var(--pk-white); }
+.picture :global(.wd) { fill: var(--pk-wood); }
+.picture :global(.wg) { fill: none; stroke: var(--pk-grain); stroke-width: 1.5; stroke-linecap: round; }
+.picture :global(.rot) { fill: var(--pk-rot); }
+.picture :global(.crack) { fill: none; stroke: #3a2614; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.picture :global(.gl) { fill: var(--pk-glass); }
+.picture :global(.glare) { fill: none; stroke: #fff; stroke-opacity: 0.75; stroke-width: 3; stroke-linecap: round; }
+.picture :global(.faint) { stroke-opacity: 0.35; }
+.picture :global(.br) { fill: var(--pk-brick); }
+.picture :global(.br2) { fill: var(--pk-brick-2); }
+.picture :global(.br3) { fill: var(--pk-brick-3); }
+.picture :global(.mo) { fill: none; stroke: var(--pk-mortar); stroke-width: 1.3; }
+.picture :global(.hi) { fill: var(--pk-hi); }
+.picture :global(.wall) { fill: var(--pk-wall); }
+.picture :global(.sl) { fill: none; stroke: var(--pk-siding); stroke-width: 1.5; }
+.picture :global(.sol) { fill: var(--pk-solar); }
+.picture :global(.soll) { fill: none; stroke: var(--pk-solar-line); stroke-width: 1.4; }
+.picture :global(.dump) { fill: var(--pk-dump); }
+.picture :global(.dump2) { fill: var(--pk-dump-2); }
+.picture :global(.ln) { fill: none; stroke: var(--pk-line); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.picture :global(.dl) { fill: none; stroke: var(--pk-line); stroke-width: 1.5; stroke-linecap: round; opacity: 0.5; }
+.picture :global(.ml) { fill: none; stroke: var(--pk-metal); stroke-width: 1.4; opacity: 0.55; }
+.picture :global(.slot) { fill: none; stroke: var(--pk-metal); stroke-width: 2; stroke-linecap: round; }
+.picture :global(.mesh) { fill: none; stroke: var(--pk-line); stroke-width: 1; opacity: 0.45; }
+.picture :global(.arw) { fill: none; stroke: var(--green); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+.picture :global(.lad) { fill: none; stroke: var(--pk-hi); stroke-width: 2.6; stroke-linecap: round; }
+.picture :global(.handle) { fill: none; stroke: var(--pk-grain); stroke-width: 4.5; stroke-linecap: round; }
+.picture :global(.spark) { fill: var(--pk-spark); }
+.picture :global(.gnd) { fill: none; stroke: var(--pk-ground); stroke-width: 2; }
+.picture :global(.stamp) { fill: none; stroke: var(--green); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.picture text { font: 800 10px var(--font); fill: var(--pk-text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .picture, .photo, .tile { transition: none; }
+  .pic:active:not(:disabled) .picture, .pic:active:not(:disabled) .photo { transform: none; }
+}

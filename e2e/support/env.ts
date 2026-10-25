@@ -18,14 +18,23 @@ export const SUPABASE_URL = read("SUPABASE_URL");
 export const SUPABASE_KEY = read("SUPABASE_PUBLISHABLE_KEY") || read("SUPABASE_ANON_KEY");
 export const SUPABASE_SECRET = read("SUPABASE_SECRET_KEY") || read("SUPABASE_SERVICE_ROLE_KEY");
 
-/** The demo accounts from scripts/seed-demo.mjs. */
+/** The demo sub from scripts/seed-demo.mjs (Precision Striping), whose id is fixed. */
+export const DEMO_SUB_ID = "5ab00000-0000-4000-8000-000000000001";
+
+/**
+ * The demo accounts from scripts/seed-demo.mjs. The sub's sign-in has no password, as a sub's
+ * doesn't: it's on the sub's stand-in address, and auth.setup.ts signs in with a one-time link.
+ */
 export const PASSWORD = process.env.CREWTAVO_DEMO_PASSWORD ?? "crewtavo-demo";
 export const PEOPLE = {
   owner: { email: "demo@crewtavo.test", name: "Dana Hale" },
   foreman: { email: "marcus@crewtavo.test", name: "Marcus Hale" },
   employee: { email: "luis@crewtavo.test", name: "Luis Ortega" },
+  sub: { email: `sub-${DEMO_SUB_ID}@subs.invalid`, name: "Ray Lines" },
 } as const;
 export type Person = keyof typeof PEOPLE;
+/** Who signs in with a password (everyone but the sub). */
+export const withPassword = (who: Person) => who !== "sub";
 
 /** Signed-in browser state for each person, written by auth.setup.ts. */
 export const authFile = (who: Person) => fileURLToPath(new URL(`../.auth/${who}.json`, import.meta.url));

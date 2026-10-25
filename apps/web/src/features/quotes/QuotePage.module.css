@@ -1,0 +1,35 @@
+/* The quote page (QuotePage.tsx): what its totals are for when it offers options, and "Which option
+   did they choose?", one card per option to pick from. */
+
+.totalsFor { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text-2); overflow-wrap: anywhere; }
+.note { margin: 2px 0 6px; font-size: 12.5px; color: var(--text-3); }
+.warn { margin: 2px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--warning); }
+
+/* Which option did they choose? */
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 12px; }
+.choice {
+  position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink);
+  font-weight: 400; cursor: pointer; transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.choice:hover { border-color: var(--border-strong); }
+.choice:focus-within, .choice[data-on] { border-color: var(--green); box-shadow: var(--ring); }
+.choice[data-disabled] { cursor: default; opacity: 0.6; }
+.choice[data-disabled]:hover { border-color: var(--border); }
+.choice input {
+  position: absolute; z-index: 1; top: 10px; right: 10px; width: 20px; height: 20px; margin: 0;
+  accent-color: var(--green); border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 3px var(--surface);
+}
+.choicePicture { width: 100%; border-radius: 0; }
+.choiceText { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: start; min-width: 0; padding: 12px 14px 14px; }
+.choiceChips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; }
+/* A long tier word stops at the card's edge. */
+.choiceText :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
+.choiceName { font-size: 15px; overflow-wrap: anywhere; }
+.choiceTotal { font-size: 13.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* On a phone the cards stack, so the picture moves to the side. */
+@media (max-width: 600px) {
+  .choice { flex-direction: row; align-items: stretch; }
+  .choicePicture { width: 96px; aspect-ratio: auto; min-height: 72px; }
+  .choiceText { padding: 12px 44px 12px 14px; }
+}

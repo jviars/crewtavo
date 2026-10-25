@@ -4,8 +4,11 @@ import { useSyncExternalStore } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { OFFLINE_MUTATIONS } from "@/lib/offline";
 
+/** Whether there's signal, as the app knows it: no signal, or requests that don't get through. */
+export const useSignal = () => useSyncExternalStore(onlineManager.subscribe.bind(onlineManager), () => onlineManager.isOnline());
+
 export function OfflineNote() {
-  const online = useSyncExternalStore(onlineManager.subscribe.bind(onlineManager), () => onlineManager.isOnline());
+  const online = useSignal();
   const waiting = useMutationState({ filters: { predicate: (m) => m.state.isPaused && OFFLINE_MUTATIONS.has(String(m.options.mutationKey?.[0])) } }).length;
   if (online && !waiting) return null;
   return (

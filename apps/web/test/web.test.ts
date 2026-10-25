@@ -83,4 +83,9 @@ describe("what's on for a business", () => {
     expect(companyFeatures(off, { email_connected: true })).toMatchObject({ email: true, devMail: false });
     expect(companyFeatures(off, {})).toMatchObject({ email: false, devMail: true });
   });
+
+  it("keeps whether a sub can get a sign-in code by email, which is for the whole Crewtavo", () => {
+    expect(companyFeatures({ ...off, emailCodes: true }, {}).emailCodes).toBe(true);
+    expect(companyFeatures({ ...off, emailCodes: false }, { email_connected: true })).toMatchObject({ emailCodes: false, email: true });
+  });
 });

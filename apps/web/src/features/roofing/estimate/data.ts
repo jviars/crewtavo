@@ -1,8 +1,9 @@
 /**
  * A roof estimate's records and the changes made to it, shared by the office's project page and the
- * salesperson's iPad: the quote with its lines and newest measurement, the price list and a package's
- * quick adds, the edits behind − and + (saved straight to the quote's lines, one after another so fast
- * taps land in order), and the team's notes and photos on the quote.
+ * salesperson's iPad: the quote with its lines, options and newest measurement, the price list and a
+ * package's quick adds, the edits behind − and + (saved straight to the quote's lines, one after
+ * another so fast taps land in order, on the option being looked at), and the team's notes and
+ * photos on the quote.
  */
 import type { SnapshotLine } from "@crewtavo/core/estimates";
 import { useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -12,6 +13,7 @@ import { signedUrls, uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { TAKEOFF_FIELDS, type TakeoffRow } from "../../paving/data";
+import { sortOptions } from "../../quotes/options";
 import { layersFormula, layersName, layersOf } from "../data";
 import {
   baseFormula,
@@ -19,11 +21,13 @@ import {
   counts,
   isPendingLine,
   lessOf,
+  lineDestination,
   lineKind,
   MAX_LAYERS,
   measuredInto,
   moreOf,
   nothingToMeasure,
+  ownServices,
   removedLine,
   threadItems,
   withLines,
@@ -95,6 +99,9 @@ export function useEstimateQuote(quoteId: string | null | undefined) {
       return {
         quote: {
           ...q,
+          promo: q.promo ? { code: q.promo.code, kind: q.promo.kind, value: Number(q.promo.value) } : null,
+          section_ids: q.section_ids ?? [],
+          options: sortOptions(q.options ?? []).map((o) => ({ ...o, highlights: o.highlights ?? [], section_ids: o.section_ids ?? [] })),
           subtotal: Number(q.subtotal),
           discount_amount: Number(q.discount_amount),
           tax_rate: Number(q.tax_rate),
@@ -155,6 +162,8 @@ export function usePackageQuickAdds(packageId: string | null | undefined) {
 interface NewLine {
   company_id: string;
   quote_id: string;
+  /** The option it goes on; null on every option. */
+  option_id: string | null;
   service_id: string | null;
   name: string;
   description: string | null;
@@ -167,8 +176,16 @@ interface NewLine {
   sort: number;
 }
 
+/** What can be set on a line by hand: how many, its price for one, and the words printed under its name. */
+export interface LinePatch {
+  quantity?: number;
+  unit_price?: number;
+  description?: string | null;
+}
+
 type Edit =
   | { op: "quantity"; lineId: string; quantity: number }
+  | { op: "line"; lineId: string; patch: LinePatch }
   | { op: "delete"; lineId: string }
   | { op: "layers"; lineId: string; formula: string; name: string }
   | { op: "insert"; row: NewLine; serviceId: string | null; putBack?: RemovedLine; pendingId: string | null };
@@ -187,10 +204,16 @@ export interface EstimateEditor {
   /** − on a line: one fewer (taking it off at one), a layer fewer, or take a measured line off. */
   dec: (line: EstimateLine) => void;
   remove: (line: EstimateLine) => void;
+  /** Set a line's quantity, price for one or description by hand. */
+  setLine: (line: EstimateLine, patch: LinePatch) => void;
   /** Put a line that was taken off back, as it was. */
   putBack: (snapshot: SnapshotLine) => void;
-  /** Add a service (a quick add, or from the price list); a count already on the estimate gets more. */
-  addService: (service: EstimateService, quantity?: number | null) => void;
+  /**
+   * Add a service (a quick add, or from the price list); a count already on the estimate gets more.
+   * `to` is the option a new line goes on (null: every option), as the add control shows it (rows.ts
+   * lineDestination); left out, it goes where lineDestination puts it by default.
+   */
+  addService: (service: EstimateService, quantity?: number | null, to?: string | null) => void;
   /** Tear off this many layers (0 takes the tear-off off). */
   setLayers: (line: EstimateLine, layers: number) => void;
   /** Changes are still saving. */
@@ -204,10 +227,15 @@ export interface EstimateEditor {
 }
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
+const NO_SERVICES: ReadonlySet<string> = new Set();
 
-/** A line to show while it's being saved. */
-const pendingLine = (id: string, row: NewLine): EstimateLine => ({
+/**
+ * A line to show while it's being saved. On an option that isn't the one shown it's unselected, as
+ * the database keeps it, so the quote's total doesn't count it.
+ */
+const pendingLine = (id: string, row: NewLine, shownOptionId: string | null): EstimateLine => ({
   id,
+  option_id: row.option_id,
   service_id: row.service_id,
   name: row.name,
   description: row.description,
@@ -217,7 +245,7 @@ const pendingLine = (id: string, row: NewLine): EstimateLine => ({
   unit_cost: row.unit_cost,
   taxable: row.taxable,
   optional: false,
-  selected: true,
+  selected: row.option_id === null || row.option_id === shownOptionId,
   option_group: null,
   formula: row.formula,
   sort: row.sort,
@@ -231,9 +259,12 @@ const pendingLine = (id: string, row: NewLine): EstimateLine => ({
  * saves 4, 5 and 6, not 4 three times. A line worked out from the roof is measured on the server
  * after it's added or its layers change (apply-measurement for that line only, so the rest keep what
  * was set by hand). The estimate loads again once everything has saved.
+ * On an estimate with options, `optionId` is the option being looked at: a service already on it or
+ * on every option gets more, and a new line goes where the add control says (rows.ts
+ * lineDestination, with `own`, that option's package's own services).
  * Pass the quote from useEstimateQuote: its cached copy is where edits show before they save.
  */
-export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuote; measurementId: string | null }): EstimateEditor {
+export function useEstimateEditor({ quote, measurementId, optionId = null, own = NO_SERVICES }: { quote: EstimateQuote; measurementId: string | null; optionId?: string | null; own?: ReadonlySet<string> }): EstimateEditor {
   const { company } = useSession();
   const queryClient = useQueryClient();
   const quoteId = quote.id;
@@ -286,6 +317,10 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
         unwrap(await db.from("quote_line_items").update({ quantity: e.quantity }).eq("id", e.lineId));
         return null;
       }
+      if (e.op === "line") {
+        unwrap(await db.from("quote_line_items").update(e.patch).eq("id", e.lineId));
+        return null;
+      }
       if (e.op === "delete") {
         unwrap(await db.from("quote_line_items").delete().eq("id", e.lineId));
         return null;
@@ -317,9 +352,9 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
       if (e.op === "insert" && saved) {
         // On screen as saved, with its amount from the roof, before its button turns back on: the
         // estimate may not load again until later edits have saved.
-        show((lines) => withSavedLine(lines, measuredInto(pendingLine(saved.id, e.row), saved.measured), e.pendingId));
+        show((lines) => withSavedLine(lines, measuredInto(pendingLine(saved.id, e.row, quote.option_id), saved.measured), e.pendingId));
         if (!e.putBack || added.includes(e.putBack.id)) setAdded((a) => [...a, saved.id]);
-      } else if (e.op === "quantity" || e.op === "layers") {
+      } else if (e.op === "quantity" || e.op === "layers" || e.op === "line") {
         setChanged((c) => (c.includes(e.lineId) ? c : [...c, e.lineId]));
       }
     },
@@ -343,6 +378,12 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
     if (isPendingLine(line)) return;
     show((lines) => lines.map((l) => (l.id === line.id ? { ...l, quantity } : l)));
     run({ op: "quantity", lineId: line.id, quantity });
+  };
+  const setLine = (line: EstimateLine, patch: LinePatch) => {
+    const now = lineNow(line.id);
+    if (!now || isPendingLine(now)) return;
+    show((lines) => lines.map((l) => (l.id === now.id ? { ...l, ...patch } : l)));
+    run({ op: "line", lineId: now.id, patch });
   };
   const remove = (line: EstimateLine) => {
     // Already gone (a second tap), or still being saved.
@@ -373,8 +414,8 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
     else remove(line);
   };
 
-  const addService = (service: EstimateService, quantity?: number | null) => {
-    const existing = linesNow().find((l) => counts(l) && l.service_id === service.id);
+  const addService = (service: EstimateService, quantity?: number | null, to?: string | null) => {
+    const existing = linesNow().find((l) => counts(l, optionId) && l.service_id === service.id);
     if (existing && isPendingLine(existing)) return;
     if (existing) {
       if (lineKind(existing) === "count") return setQuantity(existing, round3(Number(existing.quantity) + (quantity && quantity > 0 ? quantity : 1)));
@@ -386,6 +427,7 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
     const row: NewLine = {
       company_id: company.id,
       quote_id: quoteId,
+      option_id: to !== undefined ? (optionId ? to : null) : lineDestination(service, optionId, { own: ownServices(own, optionId, [...(quote.range_lines ?? []), ...removed]), lines: linesNow() }),
       service_id: service.id,
       name: service.name,
       description: null,
@@ -404,7 +446,7 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
     // A count shows at once; a measured line once the roof has measured it.
     const pendingId = service.formula ? null : `pending:${service.id}`;
     if (pendingId) {
-      show((lines) => [...lines, pendingLine(pendingId, row)]);
+      show((lines) => [...lines, pendingLine(pendingId, row, quote.option_id)]);
       setAdded((a) => [...a, pendingId]);
     } else {
       measuring.current.add(service.id);
@@ -420,6 +462,8 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
     const row: NewLine = {
       company_id: company.id,
       quote_id: quoteId,
+      // Back where it was: on every option, or on its own.
+      option_id: snapshot.option_id ?? null,
       service_id: snapshot.service_id,
       name: snapshot.name,
       description: own?.description ?? null,
@@ -433,7 +477,7 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
     };
     // It's back on screen at once, as it was.
     setRemoved((r) => r.filter((x) => x.id !== snapshot.id));
-    show((lines) => [...lines, pendingLine(id, row)].sort((a, b) => a.sort - b.sort));
+    show((lines) => [...lines, pendingLine(id, row, quote.option_id)].sort((a, b) => a.sort - b.sort));
     run({ op: "insert", serviceId: null, putBack: back, row, pendingId: id });
   };
 
@@ -447,6 +491,7 @@ export function useEstimateEditor({ quote, measurementId }: { quote: EstimateQuo
       if (now) step(now, lessOf(now));
     },
     remove,
+    setLine,
     putBack,
     addService,
     setLayers,

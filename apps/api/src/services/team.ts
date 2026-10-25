@@ -4,7 +4,7 @@
  * rules hold (only owners make owners, nobody gives more than they have); the account itself, and
  * the one-time link to set it up, are made with the server's key.
  */
-import { isRole, type Role } from "@crewtavo/core";
+import { isPlaceholderEmail, isRole, isSubLogin, SUB_LOGIN_MARK, type Role } from "@crewtavo/core";
 import type { Env } from "../env";
 import { emailAuthLink } from "../lib/auth";
 import { renderEmail } from "../lib/email";
@@ -26,7 +26,8 @@ export interface TeamScope {
  * Where an invite stands for someone on the team: "pending" until they first sign in, so a new link
  * to set up their account can go out; "joined" after (someone locked out gets Reset password). And
  * "elsewhere" when another business has them too: the link sets their password, and it would come
- * back to this admin.
+ * back to this admin. A sign-in another business made for its sub (services/subAccess.ts) counts as
+ * that business's, even before it's used.
  */
 export async function inviteStatus(env: Env, companyId: string, userId: string): Promise<{ status: "pending"; email: string } | { status: "joined" | "elsewhere" }> {
   const admin = adminClient(env);
@@ -39,7 +40,8 @@ export async function inviteStatus(env: Env, companyId: string, userId: string):
     throw new HttpError(500, "Couldn't look up their account. Try again in a moment.");
   }
   if (account.user.last_sign_in_at) return { status: "joined" };
-  return elsewhere?.length ? { status: "elsewhere" } : { status: "pending", email: account.user.email };
+  const othersSub = isSubLogin(account.user.app_metadata) && !String(account.user.app_metadata[SUB_LOGIN_MARK]).startsWith(`${companyId.toLowerCase()}:`);
+  return elsewhere?.length || othersSub ? { status: "elsewhere" } : { status: "pending", email: account.user.email };
 }
 
 /** A fresh one-time link to set up the account of someone who was invited but never signed in. */
@@ -79,6 +81,9 @@ export async function sendInvite(s: TeamScope, to: { email: string; name?: strin
  */
 export async function invitePerson(s: TeamScope, body: { email: string; full_name?: string; role: Role; role_id?: string | null }) {
   if (!isRole(body.role)) throw new HttpError(400, "Pick a role.");
+  // A sub isn't on the team: they sign in from their page under Subs (services/subAccess.ts).
+  if (body.role === "subcontractor") throw new HttpError(400, "A sub isn't invited to the team. Give them a sign-in from their page under Subs.");
+  if (isPlaceholderEmail(body.email)) throw new HttpError(400, "Enter their own email address.");
   // Checked before an account is made: the database would refuse the membership, but only after.
   if (body.role === "owner" && s.role !== "owner") throw new HttpError(403, "Only an owner can make someone an owner.");
   if (body.role_id) must(await s.db.from("company_roles").select("id").eq("id", body.role_id).eq("company_id", s.companyId).maybeSingle(), "That role no longer exists.");
@@ -90,6 +95,11 @@ export async function invitePerson(s: TeamScope, body: { email: string; full_nam
   const { data: existing } = await admin.rpc("user_id_for_email", { p_email: email });
   let userId = existing ?? undefined;
   let link: string | null = null;
+  // A sign-in another business made for its sub is that business's: joining it to a team here would
+  // stop its sign-in codes and links working there (they're only for a sign-in nobody else has).
+  if (userId) await notAnotherBusinessSub(s, userId);
+  // Someone who was this company's sub: their old sign-in gives way to the team's (formerSub).
+  const wasSub = userId ? await formerSub(s, userId) : false;
   if (!userId) {
     const { data, error } = await admin.auth.admin.generateLink({ type: "invite", email, options: { data: { full_name: body.full_name ?? "" }, redirectTo: `${s.baseUrl}/` } });
     if (error || !data.user) {
@@ -104,10 +114,41 @@ export async function invitePerson(s: TeamScope, body: { email: string; full_nam
     link = await welcomeLink(s.env, s.baseUrl, email);
   }
 
+  if (wasSub) {
+    const { error: removed } = await adminClient(s.env).from("memberships").delete().eq("company_id", s.companyId).eq("user_id", userId).eq("role", "subcontractor").eq("active", false);
+    if (removed) throw dbError(removed);
+  }
   // Inserted as the inviting person, so RLS checks they may grant this role.
   const { error } = await s.db.from("memberships").upsert({ company_id: s.companyId, user_id: userId, role: body.role, role_id: body.role_id ?? null, active: true });
   if (error) throw dbError(error);
 
   const sent = await sendInvite(s, { email, name: body.full_name }, link);
   return { user_id: userId, invited: !existing, emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link };
+}
+
+/** Refuses an account another business made for its sub (services/subAccess.ts): it's theirs alone. */
+async function notAnotherBusinessSub(s: TeamScope, userId: string) {
+  const { data, error } = await adminClient(s.env).auth.admin.getUserById(userId);
+  if (error || !data.user) {
+    console.error("Couldn't look up an account to invite", error);
+    throw new HttpError(500, "Couldn't look up their account. Try again in a moment.");
+  }
+  const mark = data.user.app_metadata?.[SUB_LOGIN_MARK];
+  if (isSubLogin(data.user.app_metadata) && !String(mark).startsWith(`${s.companyId.toLowerCase()}:`)) {
+    throw new HttpError(409, "That email is a sign-in another business made for its subcontractor. Invite them with another email address.");
+  }
+}
+
+/**
+ * Whether someone being invited signs in here as a sub. One membership per person per company: while
+ * their sub sign-in is on, the office removes it first, on their page under Subs; once it's off, the
+ * old sub sign-in gives way to the team's (invitePerson removes it with the server's key, since from
+ * a browser nobody turns a sub's sign-in into the team's: membership_sub_guard).
+ */
+async function formerSub(s: TeamScope, userId: string): Promise<boolean> {
+  const { data: here, error } = await adminClient(s.env).from("memberships").select("role, active").eq("company_id", s.companyId).eq("user_id", userId).maybeSingle();
+  if (error) throw dbError(error);
+  if (here?.role !== "subcontractor") return false;
+  if (here.active) throw new HttpError(409, "They sign in as your sub. Remove their sign-in on their page under Subs first.");
+  return true;
 }

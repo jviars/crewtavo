@@ -2,10 +2,16 @@
  * Quotes: made, changed, sent and turned into jobs the way the quote screens do it
  * (apps/web/src/features/quotes), with the totals worked out by the database (quote_totals) and
  * sending through services/sales.ts. Quotes are money: "Full access, no money" doesn't change them.
+ * A quote can offer two or three options made from packages (quote_options): assistants read them,
+ * and say which one the client chose, but the options themselves are made and edited in Crewtavo.
+ * A quote an assistant marks approved keeps the contract it was sent with, as the office's "Mark
+ * approved" does (services/contracts.ts manualApproval).
  */
-import { addDays, localDate, taxRateFromPercent } from "@crewtavo/core";
+import { addDays, localDate, optionTotals, taxRateFromPercent } from "@crewtavo/core";
 import { z } from "zod";
-import { quoteFromRequest, sendQuote, sendSchema } from "../services/sales";
+import { asJson } from "../lib/http";
+import { isPriced, manualApproval, OPTION_FIELDS, type ManualApproval, type OptionRow } from "../services/contracts";
+import { convertQuote, keepDepositInCap, quoteFromRequest, sendQuote, sendSchema } from "../services/sales";
 import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
 
 const quoteLine = z.object({
@@ -17,7 +23,13 @@ const quoteLine = z.object({
   unit: z.string().trim().min(1).max(20).optional(),
   taxable: z.boolean().optional(),
   optional: z.boolean().default(false).describe("An add-on the client can choose."),
-  option_group: z.string().trim().max(40).nullable().optional().describe('"Good", "Better", "Best": the client picks one line in the group.'),
+  option_group: z
+    .string()
+    .trim()
+    .max(40)
+    .nullable()
+    .optional()
+    .describe("Lines that share a group are one choice: the client picks one of them, and the first starts picked. For Good, Better and Best versions of the whole job, offer options from packages in Crewtavo instead."),
 });
 
 async function quoteLines(ctx: ToolContext, quoteId: string, lines: ReadonlyArray<z.infer<typeof quoteLine>>) {
@@ -39,15 +51,17 @@ async function quoteLines(ctx: ToolContext, quoteId: string, lines: ReadonlyArra
       unit_price: l.unit_price ?? Number(s!.unit_price),
       unit_cost: s?.unit_cost ?? null,
       taxable: l.taxable ?? s?.taxable ?? true,
-      optional: l.optional,
-      // An option the client picks starts out not chosen, except the first of its group.
-      selected: !l.optional && !(l.option_group && lines.findIndex((x) => x.option_group === l.option_group) !== i),
+      // A group's lines are add-ons the client picks one of (the Client Hub's choice), with the first
+      // picked; an add-on of its own starts out not chosen.
+      optional: l.optional || Boolean(l.option_group),
+      selected: l.option_group ? lines.findIndex((x) => x.option_group === l.option_group) === i : !l.optional,
       option_group: l.option_group ?? null,
       sort: i + 1,
     };
   });
 }
 
+/** Lines are replaced whole; a quote that offers options keeps its lines on them, so it's edited in Crewtavo. */
 async function replaceLines(ctx: ToolContext, quoteId: string, lines: ReadonlyArray<z.infer<typeof quoteLine>>) {
   const made = await quoteLines(ctx, quoteId, lines);
   const { error } = await ctx.db.from("quote_line_items").delete().eq("quote_id", quoteId);
@@ -59,6 +73,24 @@ async function replaceLines(ctx: ToolContext, quoteId: string, lines: ReadonlyAr
 }
 
 const salesScope = (ctx: ToolContext) => ({ db: ctx.db, env: ctx.env, companyId: ctx.companyId, baseUrl: (ctx.env.APP_URL ?? ctx.origin).replace(/\/$/, "") });
+
+const OFFERS_OPTIONS = "This quote offers options; edit its lines in Crewtavo.";
+/** Approving a quote that's signed (or a job) already: its approval stays the client's. */
+const ALREADY_ANSWERED = "The client has already answered this quote";
+
+/** The quote's options, in order (none for a quote without them), with the lines and amounts that price them. */
+async function optionsOf(ctx: ToolContext, quoteId: string) {
+  const quote = await one(
+    ctx.db
+      .from("quotes")
+      .select(`id, status, option_id, tax_rate, discount_amount, promo:promo_codes(kind, value), lines:quote_line_items(option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(${OPTION_FIELDS})`)
+      .eq("id", quoteId)
+      .eq("company_id", ctx.companyId)
+      .maybeSingle(),
+    "That quote",
+  );
+  return { ...quote, options: ([...quote.options] as OptionRow[]).sort((a, b) => a.sort - b.sort) };
+}
 
 export const quoteTools = {
   list_quotes: tool({
@@ -82,19 +114,26 @@ export const quoteTools = {
     },
   }),
   get_quote: tool({
-    description: "A quote in full: client, property, its lines and options, totals, tax, discount and deposit, and status.",
+    description:
+      "A quote in full: client, property, its lines and add-ons, totals, tax, discount and deposit, and status. A quote can offer two or three options (Good, Better, Best), each with its own lines and total: option_id is the one shown (once approved, the one the client chose), its totals are the quote's, and a line with an option_id is only on that option (lines without one are on every option).",
     input: z.object({ quote_id: z.uuid(), ...companyArg }),
     run: async (ctx, a) => {
-      const quote = await one(
+      const { promo, ...quote } = await one(
         ctx.db
           .from("quotes")
-          .select("id, number, title, message, status, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, approved_at, lost_reason, client:clients(id, display_name, email), property:properties(id, line1, city), lines:quote_line_items(id, service_id, name, description, quantity, unit, unit_price, taxable, optional, selected, option_group, sort)")
+          .select(
+            "id, number, title, message, status, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, approved_at, lost_reason, option_id, client:clients(id, display_name, email), property:properties(id, line1, city), promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, service_id, name, description, quantity, unit, unit_price, taxable, optional, selected, option_group, sort), options:quote_options!quote_options_quote_fkey(id, name, tier, highlights, warranty, sort)",
+          )
           .eq("id", a.quote_id)
           .eq("company_id", ctx.companyId)
           .maybeSingle(),
         "That quote",
       );
-      return { ...quote, lines: [...(quote.lines as Array<{ sort: number }>)].sort((x, y) => x.sort - y.sort) };
+      const opts = { taxRate: quote.tax_rate, discountAmount: quote.discount_amount, promo };
+      const options = [...quote.options]
+        .sort((x, y) => x.sort - y.sort)
+        .map(({ sort: _, ...o }) => ({ ...o, shown: o.id === quote.option_id, total: optionTotals(quote.lines, o.id, quote.option_id, opts).total }));
+      return { ...quote, options, lines: [...quote.lines].sort((x, y) => x.sort - y.sort) };
     },
   }),
   create_quote: tool({
@@ -142,7 +181,8 @@ export const quoteTools = {
     },
   }),
   update_quote: tool({
-    description: "Change a quote: title, message, how long it's valid, sales tax, discount, deposit asked for, or its lines (lines replaces them all). Send only what changes.",
+    description:
+      "Change a quote: title, message, how long it's valid, sales tax, discount, deposit asked for, or its lines (lines replaces them all; not on a quote that offers options, whose lines are edited in Crewtavo). Send only what changes. The deposit is never more than the quote's total (with options, its cheapest option's price): a larger one is lowered to it, and the answer says so.",
     input: z.object({
       quote_id: z.uuid(),
       title: z.string().trim().min(1).max(200).optional(),
@@ -156,6 +196,7 @@ export const quoteTools = {
     }),
     area: "quotes",
     run: async (ctx, a) => {
+      if (a.lines && (await optionsOf(ctx, a.quote_id)).options.length) throw new Error(OFFERS_OPTIONS);
       const patch = {
         ...(a.title !== undefined && { title: a.title }),
         ...(a.message !== undefined && { message: a.message }),
@@ -166,7 +207,10 @@ export const quoteTools = {
       };
       if (Object.keys(patch).length) await changed(ctx.db.from("quotes").update(patch).eq("id", a.quote_id).eq("company_id", ctx.companyId).select("id"), "That quote");
       if (a.lines) await replaceLines(ctx, a.quote_id, a.lines);
-      return one(ctx.db.from("quotes").select("id, number, status, subtotal, discount_amount, tax_amount, total").eq("id", a.quote_id).maybeSingle(), "That quote");
+      // The deposit, the discount, the tax or the lines can leave the deposit more than the price.
+      const lowered = Object.keys(patch).length || a.lines ? await keepDepositInCap(ctx.db, ctx.companyId, a.quote_id) : null;
+      const quote = await one(ctx.db.from("quotes").select("id, number, status, subtotal, discount_amount, tax_amount, total, deposit_amount").eq("id", a.quote_id).maybeSingle(), "That quote");
+      return lowered === null ? quote : { ...quote, deposit_amount: lowered, note: `The deposit was lowered to ${lowered}: it can't be more than the quote's total (with options, its cheapest option's price).` };
     },
   }),
   send_quote: tool({
@@ -176,29 +220,73 @@ export const quoteTools = {
     run: async (ctx, { quote_id, company_id: _, ...body }) => sendQuote(salesScope(ctx), quote_id, body),
   }),
   convert_quote_to_job: tool({
-    description: "Turn an approved (or sent) quote into a job with its chosen lines and any discount; the client becomes active. To make it a recurring service or schedule it, follow with update_job or create_visit.",
+    description:
+      "Turn an approved (or sent) quote into a job with its chosen lines and any discount; the client becomes active. A sent quote is approved by the assistant as it becomes a job, keeping the contract it was sent with. A quote that offers options is marked approved with the option the client chose first (mark_quote). To make it a recurring service or schedule it, follow with update_job or create_visit.",
     input: z.object({ quote_id: z.uuid(), ...companyArg }),
     area: "quotes",
     run: async (ctx, a) => {
-      const { data, error } = await ctx.db.rpc("convert_quote_to_job", { p_quote: a.quote_id });
-      if (error) throw new Error(friendly(error.message));
-      return { job_id: data };
+      const quote = await optionsOf(ctx, a.quote_id);
+      if (quote.options.length && quote.status !== "approved") throw new Error("This quote offers options. Mark it approved with the option the client chose first (mark_quote with option_id).");
+      return { job_id: await convertQuote(ctx, a.quote_id, "Assistant") };
     },
   }),
   mark_quote: tool({
-    description: "Mark a quote approved (the client said yes another way), lost (with the reason), archived, or back to draft.",
-    input: z.object({ quote_id: z.uuid(), status: z.enum(["approved", "lost", "archived", "draft"]), lost_reason: z.string().trim().max(200).optional(), ...companyArg }),
+    description:
+      "Mark a quote approved (the client said yes another way), lost (with the reason), archived, or back to draft. Approving a quote that offers options needs the option the client chose (option_id, from get_quote).",
+    input: z.object({
+      quote_id: z.uuid(),
+      status: z.enum(["approved", "lost", "archived", "draft"]),
+      lost_reason: z.string().trim().max(200).optional(),
+      option_id: z.uuid().optional().describe("For approving a quote that offers options: the one the client chose."),
+      ...companyArg,
+    }),
     area: "quotes",
     run: async (ctx, a) => {
-      await changed(
-        ctx.db
+      // The approval keeps what the client said yes to as the office's "Mark approved" does: the
+      // template, the contract they were sent filled in, and with options the option chosen as it was
+      // offered, so the signed copy shows them as they were even when they change later. Nobody
+      // signed: no initials. A quote signed already keeps its own (the database won't replace it).
+      let approval: ManualApproval | null = null;
+      let before: string | null = null;
+      if (a.status === "approved") {
+        const quote = await optionsOf(ctx, a.quote_id);
+        if (quote.status === "approved" || quote.status === "converted") throw new Error(`${ALREADY_ANSWERED}: it's ${quote.status === "converted" ? "a job" : "approved"} already.`);
+        if (quote.options.length) {
+          if (!a.option_id) throw new Error(`This quote offers options (${quote.options.map((o) => o.name).join(", ")}). Say which one the client chose with option_id, from get_quote.`);
+          const chosen = quote.options.find((o) => o.id === a.option_id);
+          if (!chosen) throw new Error("That option isn't on this quote. get_quote lists its options.");
+          if (!isPriced(chosen, quote.lines)) throw new Error("That option isn't priced yet: it has no lines of its own. Add them in Crewtavo, or pick another one.");
+          approval = await manualApproval(ctx.db, ctx.companyId, a.quote_id, { name: "Assistant", optionId: chosen.id });
+          // The option first, on its own, so the approval sees that option's lines.
+          if (quote.option_id !== chosen.id) {
+            await changed(ctx.db.from("quotes").update({ option_id: chosen.id }).eq("id", a.quote_id).eq("company_id", ctx.companyId).select("id"), "That quote");
+            before = quote.option_id;
+          }
+        } else if (a.option_id) {
+          throw new Error("This quote doesn't offer options, so leave out option_id.");
+        } else {
+          approval = await manualApproval(ctx.db, ctx.companyId, a.quote_id, { name: "Assistant", optionId: null });
+        }
+      }
+      try {
+        const update = ctx.db
           .from("quotes")
-          .update({ status: a.status, ...(a.status === "approved" && { approved_at: new Date().toISOString() }), ...(a.status === "lost" && { lost_reason: a.lost_reason ?? null }) })
+          .update({
+            status: a.status,
+            ...(a.status === "approved" && { approved_at: new Date().toISOString() }),
+            ...(approval && { approval: asJson(approval) }),
+            ...(a.status === "lost" && { lost_reason: a.lost_reason ?? null }),
+          })
           .eq("id", a.quote_id)
-          .eq("company_id", ctx.companyId)
-          .select("id"),
-        "That quote",
-      );
+          .eq("company_id", ctx.companyId);
+        // The approval goes on only while the quote is unsigned, so a signature that came in meanwhile keeps its own.
+        const saved = await rows((approval ? update.not("status", "in", "(approved,converted)") : update).select("id"));
+        if (!saved.length) throw new Error(approval ? `${ALREADY_ANSWERED}: they signed it meanwhile, so it keeps their signature.` : "That quote not found (or you can't change it).");
+      } catch (error) {
+        // Not approved after all: the option shown goes back to the one before.
+        if (before) await ctx.db.from("quotes").update({ option_id: before }).eq("id", a.quote_id).eq("company_id", ctx.companyId);
+        throw error;
+      }
       return { saved: true };
     },
   }),

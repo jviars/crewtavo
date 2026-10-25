@@ -5,11 +5,12 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { hasRole, useSession } from "@/lib/session";
+import { hasRole, isSub, useSession } from "@/lib/session";
 import { AssistantSettings } from "./AssistantSettings";
 import { CalendarSettings } from "./CalendarSettings";
 import { ChecklistSettings } from "./ChecklistSettings";
 import { CompanySettings } from "./CompanySettings";
+import { ContractSettings } from "./ContractSettings";
 import { CrewSettings } from "./CrewSettings";
 import { EmailSettings } from "./EmailSettings";
 import { HostingSettings } from "./HostingSettings";
@@ -29,6 +30,8 @@ export function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const isAdmin = hasRole(session, "admin");
   const groups = settingsGroups(session);
+  // A sub has only their profile here.
+  const sub = isSub(session);
 
   const tabs = groups.flatMap((g) => g.items).flatMap((i) => ("tab" in i ? [i.tab] : []));
   const requested = params.get("tab") as SettingsTab | null;
@@ -36,9 +39,9 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" />
-      <div className="settings-layout">
-        <nav className="settings-nav" aria-label="Settings sections">
+      <PageHeader title={sub ? "Profile" : "Settings"} />
+      <div className={sub ? undefined : "settings-layout"}>
+        {!sub && <nav className="settings-nav" aria-label="Settings sections">
           {groups.map((g) => (
             <div key={g.title} className="settings-group">
               <span className="settings-group-title">{g.title}</span>
@@ -58,7 +61,7 @@ export function SettingsPage() {
               )}
             </div>
           ))}
-        </nav>
+        </nav>}
         <div className="settings-body">
           {tab === "profile" && <ProfileSettings />}
           {tab === "company" && <CompanySettings />}
@@ -70,6 +73,7 @@ export function SettingsPage() {
           {tab === "crews" && <CrewSettings />}
           {tab === "prices" && <PriceList />}
           {tab === "templates" && <TemplateSettings />}
+          {tab === "contracts" && <ContractSettings />}
           {tab === "checklists" && <ChecklistSettings />}
           {tab === "email" && <EmailSettings />}
           {tab === "calendars" && <CalendarSettings />}

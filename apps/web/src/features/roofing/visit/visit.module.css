@@ -73,15 +73,32 @@
 .pad :global(.btn-sm) { height: 44px; padding: 0 14px; font-size: 14.5px; }
 
 /* ---------- Check the estimate (visit) ---------- */
-.visit {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 390px;
-  grid-template-rows: auto 1fr;
-  grid-template-areas: "top aside" "bottom aside";
+/*
+ * Landscape: what to change on the left, in its own scroll and kept in view, and the estimate as it
+ * prints on the right, with the price and Review and sign along its top. Portrait and phones: the
+ * paper, with the left side as a sheet over it and the price along the bottom.
+ */
+.visit { flex: 1; display: grid; grid-template-columns: minmax(380px, 40%) minmax(0, 1fr); align-items: start; }
+
+.panel {
+  position: sticky; top: var(--head); z-index: 5; align-self: start;
+  height: calc(100vh - var(--head)); height: calc(100dvh - var(--head));
+  display: flex; flex-direction: column; min-width: 0;
+  border-right: 1px solid var(--divider); background: var(--fill);
 }
-.top { grid-area: top; min-width: 0; display: grid; gap: 16px; align-content: start; padding: 18px var(--gutter) 0; }
-.bottom { grid-area: bottom; min-width: 0; display: grid; align-content: start; padding: 16px var(--gutter) calc(32px + env(safe-area-inset-bottom)); scroll-margin-top: calc(var(--head) + 12px); }
+.grab, .panelFoot, .scrim { display: none; }
+.panelTabs { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin: 14px 20px 0; padding: 4px; border-radius: 13px; background: var(--fill-2); }
+.panelTab {
+  min-width: 0; height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 6px;
+  border: 0; border-radius: 10px; background: none; font: inherit; font-size: 15px; font-weight: 700; color: var(--text-2);
+  white-space: nowrap; cursor: pointer; touch-action: manipulation;
+}
+.panelTab[aria-selected="true"] { background: var(--raised); color: var(--ink); box-shadow: var(--shadow-xs), 0 0 0 1px var(--border); }
+.panelTab:focus-visible { outline: none; box-shadow: var(--ring); }
+.tabCount { min-width: 20px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: var(--radius-pill); background: var(--info-tint); color: var(--info); font-size: 12px; font-weight: 800; }
+/* Each part as tall as it needs, however short the panel: it scrolls. */
+.panelBody { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; grid-auto-rows: max-content; gap: 16px; align-content: start; padding: 16px 20px calc(28px + env(safe-area-inset-bottom)); }
+.notes { scroll-margin-top: 12px; }
 
 .strip { margin: 0; align-items: center; gap: 10px; font-size: 15px; line-height: 1.45; }
 .strip > svg { margin-top: 0; flex: none; }
@@ -105,18 +122,9 @@
 .matchText { display: grid; gap: 2px; min-width: 0; font-size: 15px; }
 .matchText span { font-size: 13.5px; color: var(--text-3); }
 
-/* The price, on the right in landscape. */
-.aside {
-  grid-area: aside; position: sticky; top: var(--head); align-self: start;
-  height: calc(100vh - var(--head)); height: calc(100dvh - var(--head));
-  display: flex; flex-direction: column; min-width: 0;
-  border-left: 1px solid var(--divider); background: var(--fill);
-}
-.asideScroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 14px; align-content: start; padding: 20px 22px; }
-.asideFoot { flex: none; display: grid; gap: 10px; padding: 12px 22px calc(18px + env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); }
-
+/* The price, on "Price". */
 .priceHead { display: grid; gap: 4px; }
-.priceLabel { font-size: 13.5px; font-weight: 600; color: var(--text-3); }
+.priceLabel { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--text-3); }
 .price { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .withTax { font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .rangeNote { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 14.5px; font-weight: 600; line-height: 1.4; color: var(--green-dark); }
@@ -132,6 +140,15 @@
 .priceHint { font-size: 13px; line-height: 1.4; color: var(--text-3); }
 .priceError { font-size: 13px; line-height: 1.4; font-weight: 600; color: var(--danger); }
 
+.nudges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.nudge {
+  height: 48px; border: 1px solid var(--button-border); border-radius: 12px; background: var(--surface);
+  font: inherit; font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; cursor: pointer; touch-action: manipulation;
+  transition: background var(--dur-fast), transform var(--dur-fast);
+}
+.nudge:hover { background: var(--fill); }
+.nudge:active { transform: scale(0.96); background: var(--fill-2); }
+.nudge:focus-visible { outline: none; box-shadow: var(--ring); }
 .priceChips { display: flex; flex-wrap: wrap; gap: 8px; }
 .priceChip {
   min-height: 44px; padding: 0 16px; border: 1px solid var(--button-border); border-radius: var(--radius-pill); background: var(--surface);
@@ -143,24 +160,103 @@
 .priceChip[aria-pressed="true"] { border-color: var(--green); background: var(--green-tint); color: var(--green-dark); }
 
 .margin {
-  display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px;
   border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 14px;
 }
-.margin strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.margin strong { margin-left: auto; font-size: 16px; font-variant-numeric: tabular-nums; }
+.margin .textButton { margin: 0; padding: 8px 10px; }
 .margin[data-low] { border-color: transparent; background: var(--warning-tint); color: var(--warning); }
 .marginLabel { display: inline-flex; align-items: center; gap: 8px; }
+.marginShow {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; width: 100%; height: auto; min-height: 48px; padding: 12px 14px;
+  border: 1px dashed var(--border-strong); border-radius: 12px; background: none; font: inherit; color: var(--ink); text-align: left; cursor: pointer; touch-action: manipulation;
+}
+.marginShow > svg { margin-top: 2px; flex: none; color: var(--text-3); }
+.marginShow > span { display: grid; gap: 2px; }
+.marginShow strong { font-size: 15px; }
+.marginShow span span { font-size: 13.5px; color: var(--text-3); }
+.marginShow:focus-visible { outline: none; box-shadow: var(--ring); }
 
 .changed { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .changedTitle { font-size: 13.5px; font-weight: 600; color: var(--text-3); }
+
+/* The estimate as it prints, on a desk, on the right. */
+.paperSide {
+  min-width: 0; min-height: calc(100vh - var(--head)); min-height: calc(100dvh - var(--head));
+  display: grid; gap: 12px; align-content: start;
+  padding: 0 var(--gutter) calc(40px + env(safe-area-inset-bottom)); background: var(--fill-2);
+}
+.paperBar {
+  position: sticky; top: var(--head); z-index: 4;
+  display: flex; align-items: center; gap: 16px; margin: 0 calc(-1 * var(--gutter)); padding: 12px var(--gutter);
+  border-bottom: 1px solid var(--divider);
+  background: color-mix(in srgb, var(--page) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.paperPrice {
+  flex: 1; min-width: 0; display: grid; justify-items: start; gap: 1px; padding: 6px 10px; margin: -6px -10px;
+  border: 0; border-radius: 12px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; touch-action: manipulation;
+}
+.paperPrice:hover { background: var(--fill-2); }
+.paperPrice:focus-visible { outline: none; box-shadow: var(--ring); }
+.paperPriceRow { display: flex; align-items: baseline; gap: 10px; }
+.paperPrice .priceFigure { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.setHint { display: inline-flex; align-items: center; gap: 4px; font-size: 13.5px; font-weight: 700; color: var(--info); }
+.changeChip { height: 21px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: var(--radius-pill); background: var(--info-tint); color: var(--info); font-size: 12px; font-weight: 700; }
+.paperGo { flex: none; display: grid; gap: 8px; justify-items: end; }
+.page .paperGo .bigButton { width: auto; min-width: 240px; }
+.paperNote { margin: 0; align-items: center; gap: 10px; font-size: 15px; }
+.paperHint { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text-3); text-align: center; }
+.paperHint > svg { flex: none; }
+.paper { min-width: 0; }
+/* The page is paper in every theme, so its highlights are too. */
+.paper :global(section[data-page] tr[data-mark]) { cursor: pointer; scroll-margin: calc(var(--head) + 120px) 0 32px; }
+.paper :global(section[data-page] tr[data-mark]:hover > td) { background: #f6f5f1; }
+.paperFlash > td { animation: paper-flash 1600ms var(--ease-out); }
+@keyframes paper-flash { 0%, 30% { background: #dcefd2; } 100% { background: transparent; } }
+
+/* Changing a line by hand (LineEditor). */
+.lineForm .lineField { display: grid; gap: 6px; }
+.lineField > label { font-size: 14px; font-weight: 600; }
+.qtyRow { display: grid; grid-template-columns: 48px minmax(0, 1fr) 48px; gap: 8px; align-items: center; }
+.qtyStep {
+  width: 48px; height: 48px; display: grid; place-items: center; border: 1.5px solid var(--button-border); border-radius: 999px;
+  background: var(--surface); color: var(--ink); cursor: pointer; touch-action: manipulation;
+}
+.qtyStep:active { transform: scale(0.92); }
+.qtyStep:focus-visible { outline: none; box-shadow: var(--ring); }
+.page .qtyInput { height: 48px; text-align: center; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.page .lineWords { min-height: 72px; font-size: 16px; }
+.lineAmount { display: flex; justify-content: space-between; align-items: baseline; margin: 0; padding-top: 10px; border-top: 1px solid var(--divider); font-size: 15px; color: var(--text-2); }
+.lineAmount strong { font-size: 20px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.page .takeOff { color: var(--danger); }
 
 /* Portrait and phones only: the price and Review and sign along the bottom. */
 .bottomBar { display: none; }
 
 @media (max-width: 999px) {
-  .visit { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "top" "aside" "bottom"; }
-  .aside { position: static; height: auto; padding: 16px var(--gutter) 0; border-left: 0; background: none; }
-  .asideScroll { overflow: visible; padding: 18px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--fill); }
-  .asideFoot { display: none; }
+  .visit { grid-template-columns: minmax(0, 1fr); }
+  .panel {
+    position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 40;
+    height: calc(100dvh - var(--head) - 12px);
+    border-right: 0; border-radius: 20px 20px 0 0; background: var(--page); box-shadow: var(--shadow-lg);
+    transform: translateY(105%); visibility: hidden;
+    transition: transform var(--dur-slow) var(--ease-out), visibility 0s linear var(--dur-slow);
+  }
+  .panel[data-open] { transform: none; visibility: visible; transition: transform var(--dur-slow) var(--ease-out); }
+  .grab { display: block; flex: none; width: 44px; height: 5px; margin: 8px auto 0; border-radius: var(--radius-pill); background: var(--fill-3); }
+  .panelTabs { margin: 10px var(--gutter) 0; }
+  .panelBody { padding: 16px var(--gutter) 20px; }
+  .panelFoot {
+    flex: none; display: flex; align-items: center; gap: 16px;
+    padding: 12px max(var(--gutter), env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
+    border-top: 1px solid var(--divider); background: var(--fill);
+  }
+  .scrim { display: block; position: fixed; inset: 0; z-index: 35; background: var(--overlay); }
+  .paperSide { min-height: 0; padding-top: 16px; }
+  .paperBar { display: none; }
+
   .bottomBar {
     position: sticky; bottom: 0; z-index: 10; display: grid; gap: 8px;
     padding: 12px max(var(--gutter), env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
@@ -170,12 +266,20 @@
     -webkit-backdrop-filter: blur(12px);
   }
   .bottomRow { display: flex; align-items: center; gap: 16px; }
+  .page .changeButton { height: 56px; padding: 0 16px; border-radius: 12px; font-size: 15px; font-weight: 700; gap: 8px; flex: none; }
   .bottomPrice { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
   .bottomLabel { font-size: 13px; font-weight: 600; color: var(--text-3); }
   .bottomPrice strong { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
   .bottomNote { font-size: 13.5px; font-weight: 600; color: var(--green-dark); }
   .bottomNote[data-where="above"] { color: var(--warning); }
   .bottomBar .bigButton { width: auto; height: 56px; flex: none; }
+}
+.bottomNote { font-size: 13.5px; font-weight: 600; color: var(--green-dark); }
+.bottomNote[data-where="above"] { color: var(--warning); }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel, .panel[data-open] { transition: none; }
+  .paperFlash > td { animation: none; }
 }
 
 /* ---------- Sign together ---------- */
@@ -202,6 +306,17 @@
 .field label, .padLabel { font-size: 14px; font-weight: 600; }
 .page .bigInput { height: 48px; padding: 0 14px; border-radius: 10px; font-size: 17px; }
 .padBlock { display: grid; gap: 6px; }
+
+/* The homeowner's initials: drawn once on a small pad, then added to each section that asks. */
+.initialsPad { max-width: 340px; }
+.initialsList { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--divider); }
+.initialsRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 64px; padding: 8px 0; border-bottom: 1px solid var(--divider); }
+.initialsText { flex: 1 1 180px; min-width: 0; display: grid; gap: 2px; }
+.initialsText strong { font-size: 15px; overflow-wrap: anywhere; }
+.initialsText span { font-size: 13px; color: var(--text-3); }
+/* Dark ink on clear, on paper white in both themes. */
+.initialsMark { width: 72px; height: 36px; flex: none; object-fit: contain; border-radius: 6px; background: #fff; }
+.initialsRow .textButton { margin: 0; }
 
 .companyRow { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
 /* The signature is dark ink on clear: it sits on paper white in both themes. */
@@ -242,7 +357,10 @@
 .doneHead p { margin: 0; max-width: 640px; font-size: 17px; line-height: 1.5; color: var(--text-2); }
 .doneHead p strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 
-.actions { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+/* A column for each card: print, and email and text when this Crewtavo can send them. */
+.actions { width: 100%; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; }
+/* Print alone keeps a card's width, centered under the heading. */
+.actions:has(> .actCell:only-child) { grid-auto-columns: minmax(0, 330px); justify-content: center; }
 .actCell { display: grid; grid-template-rows: 1fr auto; gap: 8px; min-width: 0; }
 .act {
   display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-height: 150px; padding: 18px;
@@ -275,7 +393,7 @@ button.act[aria-busy="true"] { cursor: progress; }
 
 /* ---------- Phones ---------- */
 @media (max-width: 760px) {
-  .actions { grid-template-columns: minmax(0, 1fr); }
+  .actions, .actions:has(> .actCell:only-child) { grid-auto-flow: row; grid-auto-columns: minmax(0, 1fr); }
   .act { min-height: 0; }
   .done { padding: 28px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); gap: 22px; }
   .doneHead h1 { font-size: 26px; }

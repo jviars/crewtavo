@@ -15,8 +15,13 @@ grant usage on schema auth to authenticated, service_role;
 create table auth.users (
   id uuid primary key default gen_random_uuid(),
   email text,
-  raw_user_meta_data jsonb not null default '{}'
+  raw_user_meta_data jsonb not null default '{}',
+  raw_app_meta_data jsonb not null default '{}'
 );
+
+-- A signed-in device: its refresh tokens go with it (the real tables have more columns).
+create table auth.sessions (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users (id) on delete cascade);
+create table auth.refresh_tokens (id bigserial primary key, session_id uuid references auth.sessions (id) on delete cascade, user_id text, token text);
 
 -- Same contract as Supabase's auth.uid(): the "sub" claim of the request's JWT.
 create function auth.uid() returns uuid language sql stable as $$
@@ -41,7 +46,8 @@ create table storage.objects (
   id uuid primary key default gen_random_uuid(),
   bucket_id text references storage.buckets (id),
   name text not null,
-  owner uuid
+  owner uuid,
+  metadata jsonb -- Storage fills it in once the file is stored: mimetype, size and so on
 );
 alter table storage.objects enable row level security;
 grant usage on schema storage to authenticated, service_role;
