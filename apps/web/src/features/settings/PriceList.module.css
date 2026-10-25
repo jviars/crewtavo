@@ -1,0 +1,17 @@
+/* An item's picture in the price list: as it shows on the iPad's site visit, tapped to change. */
+.pictureCell { display: grid; gap: 4px; justify-items: start; }
+.thumb {
+  position: relative; display: block; width: 80px; aspect-ratio: 4 / 3; padding: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--fill-2); cursor: pointer;
+}
+.thumb:disabled { cursor: default; }
+.thumb:hover:not(:disabled) { border-color: var(--border-strong); }
+.thumb:focus-visible { outline: none; box-shadow: var(--ring); }
+.thumbHint {
+  position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 3px 0; background: color-mix(in srgb, #0f2a35 72%, transparent); color: #fff; font-size: 11px; font-weight: 700;
+  opacity: 0; transition: opacity var(--dur-fast);
+}
+.thumb:hover .thumbHint, .thumb:focus-visible .thumbHint { opacity: 1; }
+@media (hover: none) { .thumbHint { opacity: 1; } }
+.thumbBusy { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--surface) 70%, transparent); }

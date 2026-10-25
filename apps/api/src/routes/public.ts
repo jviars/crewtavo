@@ -1086,6 +1086,17 @@ publicRoutes.get("/public/package/:company/:file", async (c) => {
   return c.body(bytes, 200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" });
 });
 
+// A price list item's picture on the iPad's site visit, as a package's is: kept for good under a
+// name never reused, and only as large as the server saves one.
+publicRoutes.get("/public/service/:company/:file", async (c) => {
+  const companyId = c.req.param("company");
+  const file = (c.req.param("file") ?? "").replace(/\.jpg$/i, "");
+  if (!z.uuid().safeParse(companyId).success || !z.uuid().safeParse(file).success) throw new HttpError(404, "Picture not found.");
+  const bytes = await storedFile(adminClient(c.env), `${companyId}/services/${file}.jpg`, PACKAGE_PICTURE_MAX_BYTES);
+  if (!bytes || !isJpeg(bytes)) throw new HttpError(404, "Picture not found.");
+  return c.body(bytes, 200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" });
+});
+
 // "Add to calendar" for one of the client's visits.
 publicRoutes.get("/hub/:token/visits/:file", async (c) => {
   const l = await link(c, ["client"]);

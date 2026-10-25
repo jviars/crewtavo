@@ -1,6 +1,7 @@
 /**
  * "Add items" on the iPad's site visit (VisitPage): the package's quick adds and the price list by
- * category, each a drawing of what it is (pictures.ts) with its price, to tap onto the estimate.
+ * category, each with its picture (the business's own, else a drawing: ServicePicture) and its
+ * price, to tap onto the estimate.
  * One already on it shows how many, with − and +, or − to take a measured line off; the paper beside
  * shows each change as it lands. On an estimate with options they go where the line list's quick
  * adds go (rows.ts lineDestination): on every option, unless they're the option's own.
@@ -15,22 +16,8 @@ import type { EstimateEditor } from "../estimate/data";
 import type { EstimateView } from "../estimate/EstimateList";
 import { countText, estimateRows, isPendingLine, lineDestination, money, ownServices, quickAddPrice, searchServices, type EstimateRow } from "../estimate/rows";
 import type { EstimateLine, EstimateQuote, EstimateService, QuickAddService } from "../estimate/types";
-import { drawingFor } from "./pictures";
+import { ServicePicture } from "./ServicePicture";
 import styles from "./picks.module.css";
-
-/** The drawing of a price list item, filling its box (4:3). */
-function ServicePicture({ name }: { name: string }) {
-  return (
-    <svg
-      className={styles.picture}
-      viewBox="0 0 120 90"
-      preserveAspectRatio="xMidYMid slice"
-      aria-hidden="true"
-      // Static drawings from pictures.ts, never anything typed in.
-      dangerouslySetInnerHTML={{ __html: drawingFor(name) }}
-    />
-  );
-}
 
 export interface VisitPicksProps {
   quote: EstimateQuote;
@@ -159,7 +146,7 @@ function Tile({ service, row, start, price, editor, onAdd, onShow }: { service: 
   return (
     <article className={styles.tile} data-on={line ? "" : undefined}>
       <button type="button" className={styles.pic} aria-label={tapLabel} disabled={adding} onClick={tap}>
-        <ServicePicture name={service.name} />
+        <ServicePicture name={service.name} picture={service.picture} />
         {line && <span className={styles.badge}>{howMany ?? <Icon name="check" size={16} strokeWidth={3.2} />}</span>}
       </button>
       <div className={styles.body}>

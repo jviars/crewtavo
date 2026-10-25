@@ -1,10 +1,13 @@
-/** Products and services: prices and costs that fill quotes, with optional measurement formulas. */
+/**
+ * Products and services: prices and costs that fill quotes, with optional measurement formulas, and
+ * a picture of each for the iPad's site visit (the business's own photo, else a drawing of it).
+ */
 import { PAVING_SAMPLE, PAVING_VARIABLE_NAMES, PAVING_VARIABLES } from "@crewtavo/core/paving";
 import { ROOFING_SAMPLE, ROOFING_VARIABLE_NAMES, ROOFING_VARIABLES } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, Spinner } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
@@ -12,9 +15,12 @@ import { TableSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { base64Of, packagePicture } from "@/lib/files";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { ServicePicture } from "../roofing/visit/ServicePicture";
 import { ImportPriceListDialog } from "./ImportPriceList";
+import styles from "./PriceList.module.css";
 
 const SAMPLE = { area_sqft: 1000, area_sqyd: 111.1, length_ft: 100, count: 4, depth_in: 2, pitch_factor: 1.12, waste: 0.1, waste_pct: 10, eave_ft: 120, rake_ft: 80, ridge_ft: 40, hip_ft: 0, valley_ft: 20, ...ROOFING_SAMPLE, ...PAVING_SAMPLE };
 
@@ -31,7 +37,7 @@ export function PriceList() {
   const key = ["services", session.company.id, "all"];
   const services = useQuery({
     queryKey: key,
-    queryFn: async () => unwrap(await supabase().from("services").select("id, name, category, description, unit, unit_price, unit_cost, taxable, formula, formula_target, active, sort").eq("company_id", session.company.id).order("sort").order("name")),
+    queryFn: async () => unwrap(await supabase().from("services").select("id, name, category, description, unit, unit_price, unit_cost, taxable, formula, formula_target, active, sort, picture").eq("company_id", session.company.id).order("sort").order("name")),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["services", session.company.id] });
   const add = useMutation({
@@ -102,12 +108,13 @@ export function PriceList() {
       ) : (
         <div className="card table-scroll">
           <table className="table table-stack">
-            <thead><tr><th style={{ minWidth: 220 }}>Service</th><th style={{ width: 90 }}>Unit</th><th className="num" style={{ width: 130 }}>Price</th><th className="num" style={{ width: 130 }}>Cost</th><th style={{ width: 230 }}>Formula</th><th style={{ width: 120 }} /></tr></thead>
+            <thead><tr><th style={{ width: 96 }}>Picture</th><th style={{ minWidth: 220 }}>Service</th><th style={{ width: 90 }}>Unit</th><th className="num" style={{ width: 130 }}>Price</th><th className="num" style={{ width: 130 }}>Cost</th><th style={{ width: 230 }}>Formula</th><th style={{ width: 120 }} /></tr></thead>
             <tbody>
               {rows.map((s) => {
                 const margin = Number(s.unit_price) > 0 && s.unit_cost != null ? Math.round(((Number(s.unit_price) - Number(s.unit_cost)) / Number(s.unit_price)) * 100) : null;
                 return (
                   <tr key={s.id} style={s.active ? undefined : { opacity: 0.55 }}>
+                    <td><PictureCell service={s} canEdit={canEdit} /></td>
                     <td>
                       <input className="input input-sm" defaultValue={s.name} disabled={!canEdit} maxLength={200} onBlur={(e) => { const v = e.target.value.trim(); if (!v) { e.target.value = s.name; toast.error("A service needs a name."); } else if (v !== s.name) update.mutate({ id: s.id, patch: { name: v } }); }} aria-label="Service name" style={{ fontWeight: 700 }} />
                       <input className="input input-sm" defaultValue={s.category ?? ""} disabled={!canEdit} maxLength={60} placeholder="Category" onBlur={(e) => (e.target.value.trim() || null) !== s.category && update.mutate({ id: s.id, patch: { category: e.target.value.trim() || null } })} aria-label="Category" style={{ marginTop: 4, fontSize: 12 }} />
@@ -141,6 +148,67 @@ export function PriceList() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * An item's picture, as the salesperson sees it on the iPad's site visit: tapped to add or change it
+ * (a JPEG made here from the photo, as a package's is), and Remove to go back to the drawing.
+ */
+function PictureCell({ service, canEdit }: { service: { id: string; name: string; picture: string | null }; canEdit: boolean }) {
+  const { company } = useSession();
+  const queryClient = useQueryClient();
+  const input = useRef<HTMLInputElement>(null);
+  // The price list, the visit's price list and the packages' quick adds all show it.
+  const saved = () => Promise.all([queryClient.invalidateQueries({ queryKey: ["services", company.id] }), queryClient.invalidateQueries({ queryKey: ["roof-packages", company.id] })]);
+  const set = useMutation({
+    meta: { success: "Picture saved" },
+    mutationFn: async (file: File) => {
+      const jpeg = await packagePicture(file);
+      if (!jpeg) throw new Error("Crewtavo can't open that picture here. Try a JPEG or PNG.");
+      return api.put<{ path: string; width: number; height: number }>(`/services/${service.id}/picture`, { picture: await base64Of(jpeg) });
+    },
+    onSuccess: saved,
+  });
+  const remove = useMutation({
+    meta: { success: "Picture removed" },
+    mutationFn: () => api.delete<{ ok: true }>(`/services/${service.id}/picture`),
+    onSuccess: saved,
+  });
+  return (
+    <div className={styles.pictureCell}>
+      <button
+        type="button"
+        className={styles.thumb}
+        disabled={!canEdit || set.isPending || remove.isPending}
+        aria-label={service.picture ? `Change the picture of ${service.name}` : `Add a picture of ${service.name}`}
+        title={canEdit ? (service.picture ? "Change the picture" : "Add a picture") : undefined}
+        onClick={() => input.current?.click()}
+      >
+        <ServicePicture name={service.name} picture={service.picture} />
+        {set.isPending ? (
+          <span className={styles.thumbBusy}><Spinner size={16} /></span>
+        ) : (
+          canEdit && <span className={styles.thumbHint}><Icon name="camera" size={13} />{service.picture ? "Change" : "Add"}</span>
+        )}
+      </button>
+      {canEdit && service.picture && (
+        <button type="button" className="link-btn small" disabled={remove.isPending || set.isPending} onClick={() => remove.mutate()}>
+          Remove
+        </button>
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept="image/*,.heic,.heif"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) set.mutate(file);
+        }}
+      />
     </div>
   );
 }

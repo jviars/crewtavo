@@ -26,7 +26,9 @@ import {
   PACKAGE_LIMITS,
   isExampleWarranty,
   isPackagePicturePath,
+  isServicePicturePath,
   packagePictureSrc,
+  servicePictureSrc,
   addDays,
   evaluateFormula,
   formulaVariables,
@@ -322,6 +324,15 @@ describe("presets", () => {
     expect(isPackagePicturePath(`../${path}`)).toBe(false);
     expect(packagePictureSrc(path)).toBe("/api/public/package/00000000-0000-4000-8000-000000000001/11111111-1111-4111-8111-111111111111.jpg");
     expect(packagePictureSrc(path, "https://app.crewtavo.com")).toBe("https://app.crewtavo.com/api/public/package/00000000-0000-4000-8000-000000000001/11111111-1111-4111-8111-111111111111.jpg");
+  });
+
+  it("loads a price list item's picture from the business's services folder", () => {
+    const path = "00000000-0000-4000-8000-000000000001/services/11111111-1111-4111-8111-111111111111.jpg";
+    expect(isServicePicturePath(path)).toBe(true);
+    expect(isServicePicturePath(path.replace("/services/", "/packages/"))).toBe(false);
+    expect(isPackagePicturePath(path)).toBe(false);
+    expect(isServicePicturePath(`../${path}`)).toBe(false);
+    expect(servicePictureSrc(path)).toBe("/api/public/service/00000000-0000-4000-8000-000000000001/11111111-1111-4111-8111-111111111111.jpg");
   });
 });
 

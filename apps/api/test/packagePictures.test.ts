@@ -1,4 +1,4 @@
-import { isPackagePicturePath } from "@crewtavo/core/presets";
+import { isPackagePicturePath, isServicePicturePath } from "@crewtavo/core/presets";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 
@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   limited: false,
   gone: false,
   packages: [] as Row[],
+  services: [] as Row[],
   uploads: [] as Array<{ path: string; contentType?: string; cacheControl?: string; upsert?: boolean }>,
   removed: [] as string[],
 }));
@@ -30,7 +31,7 @@ vi.mock("../src/lib/supabase", () => {
     from: (table: string) => {
       const filters: Array<(row: Row) => boolean> = [];
       let change: Row | null = null;
-      const matching = () => (table === "roof_packages" ? state.packages : []).filter((row) => filters.every((keep) => keep(row)));
+      const matching = () => (table === "roof_packages" ? state.packages : table === "services" ? state.services : []).filter((row) => filters.every((keep) => keep(row)));
       const run = () => {
         const hit = change && state.gone ? [] : matching();
         if (change) for (const row of hit) Object.assign(row, change);
@@ -79,6 +80,11 @@ function jpeg(width: number, height: number, { size = 400, frame = 0xc0 } = {}) 
 const put = (picture = jpeg(1600, 1000).toString("base64"), id = PACKAGE) => app.request(`/api/packages/${id}/picture`, { method: "PUT", headers, body: JSON.stringify({ picture }) }, env);
 const remove = (id = PACKAGE) => app.request(`/api/packages/${id}/picture`, { method: "DELETE", headers }, env);
 const ours = () => state.packages.find((p) => p.id === PACKAGE)!;
+const SERVICE = "00000000-0000-4000-8000-0000000000d1";
+const THEIR_SERVICE = "00000000-0000-4000-8000-0000000000d2";
+const putItem = (picture = jpeg(1200, 900).toString("base64"), id = SERVICE) => app.request(`/api/services/${id}/picture`, { method: "PUT", headers, body: JSON.stringify({ picture }) }, env);
+const removeItem = (id = SERVICE) => app.request(`/api/services/${id}/picture`, { method: "DELETE", headers }, env);
+const item = () => state.services.find((s) => s.id === SERVICE)!;
 
 beforeEach(() => {
   state.role = "office";
@@ -87,6 +93,10 @@ beforeEach(() => {
   state.packages = [
     { id: PACKAGE, company_id: COMPANY, name: "Architectural shingle", picture: null, picture_width: null, picture_height: null },
     { id: THEIRS, company_id: OTHER, name: "Their shingle", picture: null, picture_width: null, picture_height: null },
+  ];
+  state.services = [
+    { id: SERVICE, company_id: COMPANY, name: "Pipe boot", picture: null, picture_width: null, picture_height: null },
+    { id: THEIR_SERVICE, company_id: OTHER, name: "Their pipe boot", picture: null, picture_width: null, picture_height: null },
   ];
   state.uploads = [];
   state.removed = [];
@@ -186,5 +196,50 @@ describe("package pictures", () => {
     expect(res.status).toBe(429);
     expect((await res.json()).error).toBe("Too many picture changes. Wait a while and try again.");
     expect(state.uploads).toEqual([]);
+  });
+});
+
+describe("price list pictures", () => {
+  it("saves a JPEG as the item's picture in the business's services folder, and takes it off again", async () => {
+    const res = await putItem();
+    expect(res.status).toBe(200);
+    const picture = (await res.json()) as { path: string; width: number; height: number };
+    expect(picture).toMatchObject({ width: 1200, height: 900 });
+    expect(picture.path.startsWith(`${COMPANY}/services/`)).toBe(true);
+    expect(isServicePicturePath(picture.path)).toBe(true);
+    expect(state.uploads).toEqual([{ path: picture.path, contentType: "image/jpeg", cacheControl: "31536000", upsert: false }]);
+    expect(item()).toMatchObject({ picture: picture.path, picture_width: 1200, picture_height: 900 });
+
+    const off = await removeItem();
+    expect(off.status).toBe(200);
+    expect(item()).toMatchObject({ picture: null, picture_width: null, picture_height: null });
+    expect(state.removed).toEqual([]);
+  });
+
+  it("checks the picture as a package's is", async () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200, 7)]).toString("base64");
+    expect((await putItem(png)).status).toBe(400);
+    expect((await putItem(jpeg(1600, 1000, { size: 1_450_000 }).toString("base64"))).status).toBe(413);
+    expect(state.uploads).toEqual([]);
+    expect(item().picture).toBeNull();
+  });
+
+  it("is only for the business's own price list, and those who keep it", async () => {
+    for (const res of [await putItem(undefined, THEIR_SERVICE), await removeItem(THEIR_SERVICE)]) {
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe("That item isn't in your price list anymore. It may have been deleted.");
+    }
+    for (const role of ["estimator", "crew_lead", "field_crew"]) {
+      state.role = role;
+      expect((await putItem()).status, role).toBe(403);
+      expect((await removeItem()).status, role).toBe(403);
+    }
+    expect(state.uploads).toEqual([]);
+  });
+
+  it("takes the file back off when the item went while it was saving", async () => {
+    state.gone = true;
+    expect((await putItem()).status).toBe(404);
+    expect(state.removed).toEqual([state.uploads[0]!.path]);
   });
 });

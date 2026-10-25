@@ -43,7 +43,9 @@
 }
 .pic:focus-visible { outline: none; box-shadow: inset var(--ring); }
 .pic:disabled { cursor: progress; }
-.pic:active:not(:disabled) .picture { transform: scale(0.96); }
+.pic:active:not(:disabled) .picture, .pic:active:not(:disabled) .photo { transform: scale(0.96); }
+/* The business's own picture of it, cropped to fill the box. */
+.photo { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform var(--dur-fast); -webkit-user-drag: none; }
 .badge {
   position: absolute; top: 8px; right: 8px; min-width: 30px; height: 30px; padding: 0 9px;
   display: grid; place-items: center; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff;
@@ -139,6 +141,6 @@
 .picture text { font: 800 10px var(--font); fill: var(--pk-text); }
 
 @media (prefers-reduced-motion: reduce) {
-  .picture, .tile { transition: none; }
-  .pic:active:not(:disabled) .picture { transform: none; }
+  .picture, .photo, .tile { transition: none; }
+  .pic:active:not(:disabled) .picture, .pic:active:not(:disabled) .photo { transform: none; }
 }

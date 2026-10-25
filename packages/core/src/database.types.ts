@@ -1798,14 +1798,14 @@ isOneToOne: false
                   ]
                 },"services": {
                   Row: {
-                    "active": boolean,"category": string | null,"company_id": string,"created_at": string,"description": string | null,"formula": string | null,"formula_target": string,"id": string,"labor_cost": number | null,"name": string,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number,"updated_at": string
+                    "active": boolean,"category": string | null,"company_id": string,"created_at": string,"description": string | null,"formula": string | null,"formula_target": string,"id": string,"labor_cost": number | null,"name": string,"picture": string | null,"picture_height": number | null,"picture_width": number | null,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "active"?: boolean,"category"?: string | null,"company_id": string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"labor_cost"?: number | null,"name": string,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
+                    "active"?: boolean,"category"?: string | null,"company_id": string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"labor_cost"?: number | null,"name": string,"picture"?: string | null,"picture_height"?: number | null,"picture_width"?: number | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
                   }
                   Update: {
-                    "active"?: boolean,"category"?: string | null,"company_id"?: string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"labor_cost"?: number | null,"name"?: string,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
+                    "active"?: boolean,"category"?: string | null,"company_id"?: string,"created_at"?: string,"description"?: string | null,"formula"?: string | null,"formula_target"?: string,"id"?: string,"labor_cost"?: number | null,"name"?: string,"picture"?: string | null,"picture_height"?: number | null,"picture_width"?: number | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number,"updated_at"?: string
                   }
                   Relationships: [
                     {

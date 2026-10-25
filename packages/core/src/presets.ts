@@ -66,6 +66,14 @@ export const isPackagePicturePath = (path: string) => PACKAGE_PICTURE.test(path)
 /** Where a package picture loads from (`base` is the app's address, or "" on its own pages). */
 export const packagePictureSrc = (path: string, base = "") => `${base}/api/public/package/${path.replace("/packages/", "/")}`;
 
+const SERVICE_PICTURE = /^[0-9a-f-]{36}\/services\/[0-9a-f-]{36}\.jpg$/;
+
+/** A price list item's picture in the files bucket (<company>/services/<uuid>.jpg), as packages keep theirs. */
+export const isServicePicturePath = (path: string) => SERVICE_PICTURE.test(path);
+
+/** Where a price list item's picture loads from (`base` is the app's address, or "" on its own pages). */
+export const servicePictureSrc = (path: string, base = "") => `${base}/api/public/service/${path.replace("/services/", "/")}`;
+
 /**
  * A roof package to start a roofing business with (roof_packages): the service that prices the roof
  * by the square, what's always on it and the one-tap quick adds, all by service name, and what the

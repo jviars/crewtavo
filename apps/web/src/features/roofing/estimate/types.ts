@@ -108,6 +108,8 @@ export interface EstimateService {
   /** What the formula fills in: the line's "quantity" (most) or its "unit_price". */
   formula_target: string;
   category: string | null;
+  /** Its picture for the iPad's site visit (<company>/services/<uuid>.jpg, core servicePictureSrc); null draws it instead. */
+  picture?: string | null;
 }
 
 /** A package's one-tap add, with how many to start with (6 sheets of decking), if it says. */
@@ -119,7 +121,7 @@ export const ESTIMATE_LINE_FIELDS = "id, option_id, service_id, name, descriptio
 
 export const ESTIMATE_QUOTE_FIELDS = `id, number, title, status, subtotal, discount_amount, tax_rate, tax_amount, total, promo_code_id, promo:promo_codes(code, kind, value), roof_package_id, option_id, section_ids, template_id, salesperson_id, range_low, range_high, range_sent_at, range_accepted_at, range_lines, priced_on_site_at, exact_sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(${ESTIMATE_LINE_FIELDS}), ${QUOTE_OPTIONS_EMBED}`;
 
-export const ESTIMATE_SERVICE_FIELDS = "id, name, unit, unit_price, unit_cost, labor_cost, taxable, formula, formula_target, category";
+export const ESTIMATE_SERVICE_FIELDS = "id, name, unit, unit_price, unit_cost, labor_cost, taxable, formula, formula_target, category, picture";
 
 /** Quotes whose lines can still change: once signed, the lines are locked (quote_lines_guard). */
 export const EDITABLE_STATUSES = ["draft", "sent", "changes_requested"];

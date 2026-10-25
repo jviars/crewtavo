@@ -1,8 +1,9 @@
 /**
  * Packages on estimates, for every trade: the two or three options an estimate offers, each from a
- * package (services/quoteOptions.ts), a quote copied with its options, and a package's picture
- * (services/packagePictures.ts). Editing a package, renaming an option and showing another option
- * first are plain writes from the browser; a roof estimate's single package is routes/roofing.ts.
+ * package (services/quoteOptions.ts), a quote copied with its options, a package's picture and a
+ * price list item's picture for the iPad's site visit (services/packagePictures.ts). Editing a
+ * package, renaming an option and showing another option first are plain writes from the browser;
+ * a roof estimate's single package is routes/roofing.ts.
  */
 import { SALES } from "@crewtavo/core";
 import { Hono } from "hono";
@@ -12,7 +13,7 @@ import { requireCompany, requireUser } from "../lib/auth";
 import { HttpError, param, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { adminClient } from "../lib/supabase";
-import { removePackagePicture, setPackagePicture } from "../services/packagePictures";
+import { removePackagePicture, removeServicePicture, setPackagePicture, setServicePicture } from "../services/packagePictures";
 import { addOptions, duplicateQuote, fillOptions, removeOption } from "../services/quoteOptions";
 
 export const packages = new Hono<AppEnv>();
@@ -61,5 +62,22 @@ packages.put("/packages/:id/picture", requireUser, requireCompany(SALES, "settin
 /** Back to the package's drawing. */
 packages.delete("/packages/:id/picture", requireUser, requireCompany(SALES, "settings"), async (c) => {
   await removePackagePicture(c.var.db, c.var.companyId, param(c, "id"));
+  return c.json({ ok: true });
+});
+
+/**
+ * A price list item's picture, as a JPEG, base64, for the iPad's site visit (Settings → Price list,
+ * by those who keep the price list). Sent and kept as a package's is, and slowed down with them.
+ */
+packages.put("/services/:id/picture", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  const id = param(c, "id");
+  const body = await readJson(c, z.object({ picture: z.string().min(100).regex(/^[A-Za-z0-9+/]+={0,2}$/) }));
+  if (!(await allow(c.env, `package-picture:${c.var.companyId}`, 60, 3600))) throw new HttpError(429, "Too many picture changes. Wait a while and try again.");
+  return c.json(await setServicePicture(c.var.db, adminClient(c.env), c.var.companyId, id, body.picture));
+});
+
+/** Back to the item's drawing. */
+packages.delete("/services/:id/picture", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  await removeServicePicture(c.var.db, c.var.companyId, param(c, "id"));
   return c.json({ ok: true });
 });
