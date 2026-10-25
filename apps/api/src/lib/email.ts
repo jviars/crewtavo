@@ -18,8 +18,11 @@ function buttonLabel(url: string): string {
   return "Open";
 }
 
-function paragraph(p: string): string {
+function paragraph(p: string, code?: string | null): string {
   const trimmed = p.trim();
+  if (code && trimmed === code) {
+    return `<p style="margin:0 0 20px;font-size:32px;font-weight:800;letter-spacing:0.2em;font-variant-numeric:tabular-nums">${escape(code)}</p>`;
+  }
   if (/^https?:\/\/\S+$/.test(trimmed)) {
     const url = escape(trimmed);
     return `<p style="margin:0 0 20px"><a href="${url}" style="display:inline-block;background:#3b7d23;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:8px">${buttonLabel(trimmed)}</a></p>`;
@@ -35,10 +38,12 @@ export interface EmailParts {
   /** Shown under the message, e.g. the company's postal address (required for marketing email). */
   footer?: string | null;
   unsubscribeUrl?: string | null;
+  /** A one-time code (signing in by email): the paragraph that is just this code is shown large. */
+  code?: string | null;
 }
 
-export function renderEmail({ companyName, logo, text, footer, unsubscribeUrl }: EmailParts): { html: string; text: string } {
-  const paragraphs = text.trim().split(/\n{2,}/).map(paragraph).join("");
+export function renderEmail({ companyName, logo, text, footer, unsubscribeUrl, code }: EmailParts): { html: string; text: string } {
+  const paragraphs = text.trim().split(/\n{2,}/).map((p) => paragraph(p, code)).join("");
   const foot = [footer ? escape(footer) : null, unsubscribeUrl ? `<a href="${escape(unsubscribeUrl)}" style="color:#5f6f76">Unsubscribe</a>` : null].filter(Boolean).join(" · ");
   const html = `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f6f5f1;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f2a35">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">

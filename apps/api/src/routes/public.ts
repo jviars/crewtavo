@@ -680,12 +680,26 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
         admin.from("visits").select(visitFields).eq("company_id", companyId).in("job_id", jobIds).eq("status", "completed").order("completed_at", { ascending: false, nullsFirst: false }).limit(5),
       ])
     : [{ data: [] }, { data: [] }];
-  // Crews by first name only.
+  // Crews by first name only. A sub is named from the office's record (their contact's first name),
+  // never their profile, which they keep themselves; a sub with no contact name isn't named.
   const people = [...new Set([...(upcoming.data ?? []), ...(done.data ?? [])].flatMap((v) => (v.assignees as Array<{ user_id: string }>).map((a) => a.user_id)))];
   const names = new Map<string, string>();
   if (people.length) {
-    const { data } = await admin.from("profiles").select("user_id, full_name").in("user_id", people);
-    for (const p of data ?? []) if (p.full_name) names.set(p.user_id, firstName(p.full_name));
+    const [profiles, subLogins] = await Promise.all([
+      admin.from("profiles").select("user_id, full_name").in("user_id", people),
+      admin.from("memberships").select("user_id, subcontractor_id").eq("company_id", companyId).in("user_id", people).not("subcontractor_id", "is", null),
+    ]);
+    const subOf = new Map((subLogins.data ?? []).map((m) => [m.user_id, m.subcontractor_id as string]));
+    const subs = subOf.size
+      ? (await admin.from("subcontractors").select("id, contact_name").eq("company_id", companyId).in("id", [...new Set(subOf.values())])).data ?? []
+      : [];
+    const contactOf = new Map(subs.map((x) => [x.id, x.contact_name]));
+    for (const id of people) {
+      const sub = subOf.get(id);
+      const name = sub ? contactOf.get(sub) : (profiles.data ?? []).find((p) => p.user_id === id)?.full_name;
+      const first = name?.trim().split(/\s+/)[0];
+      if (first) names.set(id, first);
+    }
   }
   const visit = (v: NonNullable<typeof upcoming.data>[number]) => ({
     id: v.id, title: v.title, scheduled_on: v.scheduled_on, starts_at: v.starts_at, ends_at: v.ends_at, status: v.status, completed_at: v.completed_at,

@@ -2,7 +2,7 @@
  * Automations: rules are edited straight from the browser (row-level security limits that to the
  * office). These routes run the engine, preview a rule against a real record, and retry or cancel runs.
  */
-import { evaluateConditions, OFFICE, renderTemplate, triggerDef, validateRule, type Action, type Condition, type RuleShape } from "@crewtavo/core";
+import { evaluateConditions, OFFICE, renderTemplate, triggerAllowed, triggerDef, validateRule, type Action, type Condition, type RuleShape } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -35,6 +35,8 @@ const ruleSchema = z.object({
 /** Preview what a rule would do on the most recent matching record, without doing it. */
 automations.post("/automations/preview", requireUser, requireCompany(OFFICE, "automations"), async (c) => {
   const rule = (await readJson(c, ruleSchema)) as unknown as RuleShape;
+  // Rules about subs' job offers (their prices) are for the office with the Subcontractors area.
+  if (!triggerAllowed(rule.trigger, (area) => c.var.permissions.includes(area))) throw new HttpError(403, "Rules about subs' job offers need the Subcontractors area. Ask an owner or admin.");
   const problems = validateRule(rule);
   if (problems.length) throw new HttpError(400, problems[0]);
   const trigger = triggerDef(rule.trigger)!;

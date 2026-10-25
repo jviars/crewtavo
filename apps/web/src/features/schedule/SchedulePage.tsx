@@ -25,7 +25,7 @@ import { ErrorState } from "@/components/ui/States";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatTime, todayIn } from "@/lib/format";
-import { useSession } from "@/lib/session";
+import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
 import { dayRoute } from "./dayRoute";
@@ -65,7 +65,8 @@ interface ScheduleData {
 }
 type View = "day" | "week" | "month";
 /** Someone on the team, from GET /api/team (former members too, so old visits keep their names). */
-interface Person { user_id: string; active: boolean; profile: { full_name: string | null; email: string | null; color: string | null; avatar_url?: string | null } | null }
+/** Someone on visits (GET /team?with_subs=1): the team, and subs, with their business as `sub`. */
+interface Person { user_id: string; active: boolean; profile: { full_name: string | null; email: string | null; color: string | null; avatar_url?: string | null } | null; sub?: { id: string; name: string } }
 type Patch = Partial<Pick<Visit, "scheduled_on" | "starts_at" | "ends_at" | "crew_id" | "status">>;
 
 /** Monday of the week containing `date`. */
@@ -175,16 +176,18 @@ export function SchedulePage() {
 
   // Names and colors for the initials on each visit. Field crew see only their own visits, so they
   // have nobody else's to pick.
-  const team = useQuery({ queryKey: ["team", session.company.id], staleTime: 5 * 60_000, queryFn: () => api.get<Person[]>("/team") });
+  // Subs on visits aren't on the team: they come too, named by their business (also once they
+  // can't sign in, so old visits keep their names).
+  const team = useQuery({ queryKey: ["team", session.company.id, "with-subs"], staleTime: 5 * 60_000, queryFn: () => api.get<Person[]>("/team?with_subs=1") });
   const personById = new Map((team.data ?? []).map((p) => [p.user_id, p]));
   const nameOf = (id: string) => {
     const p = personById.get(id);
-    return id === session.userId ? "You" : p?.profile?.full_name || p?.profile?.email || "Someone";
+    return id === session.userId ? "You" : p?.sub?.name || p?.profile?.full_name || p?.profile?.email || "Someone";
   };
   const pickable = (team.data ?? [])
-    .filter((p) => p.active && p.user_id !== session.userId)
+    .filter((p) => p.active && !p.sub && p.user_id !== session.userId)
     .sort((a, b) => nameOf(a.user_id).localeCompare(nameOf(b.user_id)));
-  const canPickPerson = session.role !== "field_crew" && pickable.length > 0;
+  const canPickPerson = hasRole(session, "admin", "office", "estimator", "crew_lead") && pickable.length > 0;
   // A remembered person who has since left the team shows everyone again.
   const shownPerson = !canPickPerson || (team.data && person && person !== "none" && person !== session.userId && !pickable.some((p) => p.user_id === person)) ? "" : person;
   const forPerson = (v: Visit) => !shownPerson || (shownPerson === "none" ? v.assignees.length === 0 : v.assignees.some((a) => a.user_id === shownPerson));
@@ -358,7 +361,7 @@ export function SchedulePage() {
       <span className="tg-people" title={names}>
         {v.assignees.slice(0, 3).map(({ user_id: id }) => {
           const p = personById.get(id);
-          return <i key={id} data-me={id === session.userId || undefined} style={{ "--p": p?.profile?.color ?? undefined } as CSSProperties} aria-hidden="true"><Face name={p?.profile?.full_name || p?.profile?.email} photo={p?.profile?.avatar_url} /></i>;
+          return <i key={id} data-me={id === session.userId || undefined} style={{ "--p": p?.profile?.color ?? undefined } as CSSProperties} aria-hidden="true"><Face name={p?.sub?.name || p?.profile?.full_name || p?.profile?.email} photo={p?.profile?.avatar_url} /></i>;
         })}
         {v.assignees.length > 3 && <i data-more aria-hidden="true">+{v.assignees.length - 3}</i>}
         <span className="sr-only">With {names.replace(/^You\b/, "you")}</span>

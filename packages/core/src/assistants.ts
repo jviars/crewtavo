@@ -23,7 +23,8 @@ export const ASSISTANT_AREAS = [
   { key: "jobs", label: "Jobs and recurring services", group: "Customers and work", money: false, roles: SALES_ROLES, permission: null },
   // Crew leads schedule their own crew; the database holds them to it.
   { key: "schedule", label: "Schedule", group: "Schedule and time", money: false, roles: ["owner", "admin", "office", "estimator", "crew_lead"], permission: null },
-  // Everyone has their own clock; the database decides whose time they can change.
+  // Everyone on the team has their own clock; the database decides whose time they can change. A sub
+  // never connects an assistant (apps/api/src/mcp.ts), so no area lists Subcontractor.
   { key: "time", label: "Clocks and timesheets", group: "Schedule and time", money: false, roles: ["owner", "admin", "office", "estimator", "crew_lead", "field_crew"], permission: null },
   { key: "quotes", label: "Quotes", group: "Money", money: true, roles: SALES_ROLES, permission: "sales" },
   { key: "invoices", label: "Invoices and payments", group: "Money", money: true, roles: OFFICE_ROLES, permission: "invoices" },

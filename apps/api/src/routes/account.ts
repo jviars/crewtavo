@@ -1,5 +1,5 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
-import { ADMINS, getPreset, isTimeZoneName, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, TERMS_VERSION, type Role, type TradePreset } from "@crewtavo/core";
+import { ADMINS, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, signInPhone, subSettings, TERMS_VERSION, WITH_SUBS, type Role, type TradePreset } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -11,6 +11,7 @@ import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
 import { timeRates } from "../services/payRates";
+import { emailCodesOffered } from "../services/signInCodes";
 import { removeLogo, setLogo } from "../services/logo";
 import { removePhoto, setPhoto } from "../services/photos";
 import { invitePerson, inviteStatus, sendInvite, welcomeLink, type TeamScope } from "../services/team";
@@ -23,7 +24,7 @@ export const account = new Hono<AppEnv>();
 const teamScope = (c: Context<AppEnv>): TeamScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, userId: c.var.userId, role: c.var.role, baseUrl: appUrl(c) });
 
 /** Everything the SPA needs at startup, so it has no build-time environment variables. */
-account.get("/config", (c) =>
+account.get("/config", async (c) =>
   c.json(
     {
       // In a Crewtavo instance this server is the gateway, so the browser uses its own address ("").
@@ -46,6 +47,9 @@ account.get("/config", (c) =>
         payments: Boolean(c.env.STRIPE_SECRET_KEY),
         email: emailConfigured(c.env),
         sms: smsConfigured(c.env),
+        // Whether the sign-in page offers a sub a sign-in code by email (services/signInCodes.ts): the
+        // way in when this Crewtavo can't text, and the one for a sub with no phone on file when it can.
+        emailCodes: await emailCodesOffered(c.env),
         devMail: Boolean(c.env.MAILPIT_URL && !c.env.RESEND_API_KEY),
         roofInsights: Boolean(c.env.GOOGLE_MAPS_SERVER_KEY),
       },
@@ -59,23 +63,41 @@ account.get("/health", (c) => c.json({ ok: true }));
 
 account.get("/presets", (c) => c.json(presetSummaries()));
 
+/**
+ * The signed-in person and their companies. A sub's company is company_basics() (the companies row
+ * is closed to them), and their membership says which sub they sign in as and what the office lets
+ * them do. can_create_company is false for a sign-in an office made for its sub (unless they're on
+ * a team somewhere too); someone's own account can always start a business.
+ */
 account.get("/me", requireUser, async (c) => {
   const { db, userId } = c.var;
-  const [profile, memberships] = await Promise.all([
+  const [profile, memberships, everyRole] = await Promise.all([
     db.from("profiles").select("user_id, email, full_name, phone, avatar_url, color").eq("user_id", userId).maybeSingle(),
     db
       .from("memberships")
-      .select("role, role_id, company:companies(id, name, slug, trade_preset, timezone, currency, address, settings)")
+      .select("company_id, role, role_id, subcontractor_id, company:companies(id, name, slug, trade_preset, timezone, currency, address, settings)")
       .eq("user_id", userId)
       .eq("active", true),
+    adminClient(c.env).from("memberships").select("company_id, role").eq("user_id", userId),
   ]);
   const rows = must(memberships);
   const roleIds = rows.map((m) => m.role_id).filter((id): id is string => Boolean(id));
   const roles = roleIds.length ? must(await db.from("company_roles").select("id, name, permissions").in("id", roleIds)) : [];
   const byId = new Map(roles.map((r) => [r.id, r]));
+  // A sub's company and sub record: what the field app needs, read for them. And the countries whose
+  // numbers get sign-in codes, for whether theirs does (the companies row is closed to them).
+  const subRows = rows.filter((m) => m.role === "subcontractor" && m.subcontractor_id);
+  const [basics, subRecords, subCompanies] = subRows.length
+    ? await Promise.all([
+        Promise.all(subRows.map(async (m) => (await db.rpc("company_basics", { p_company: m.company_id })).data?.[0] ?? null)),
+        adminClient(c.env).from("subcontractors").select("id, company_id, name, can_contact_clients, uses_clock, phone, email").in("id", subRows.map((m) => m.subcontractor_id!)).then((r) => must(r)),
+        adminClient(c.env).from("companies").select("id, settings").in("id", subRows.map((m) => m.company_id)).then((r) => must(r)),
+      ])
+    : [[], [], []];
+  const basicsOf = new Map(basics.filter((b) => b).map((b) => [b!.id, b!]));
   // Which companies send email from their own mailbox (Settings → Email) and which added their own
   // Anthropic or fal.ai key (Apps), so email and AI are on for them; integrations is admin-only.
-  const companyIds = rows.map((m) => (m.company as { id: string } | null)?.id).filter((id): id is string => Boolean(id));
+  const companyIds = rows.map((m) => m.company_id);
   // ...and which have agreed to the current license (only owners and admins can read agreements).
   // ...and, on Railway, whether the owner still has to connect it (services/railway.ts).
   const [connected, agreements, railways] = companyIds.length
@@ -89,28 +111,66 @@ account.get("/me", requireUser, async (c) => {
   const withClaudeKey = new Set(connected.filter((r) => r.provider === "anthropic").map((r) => r.company_id));
   const withFal = new Set(connected.filter((r) => r.provider === "fal").map((r) => r.company_id));
   const agreed = new Set(agreements.map((r) => r.company_id));
+  const all = must(everyRole);
   return c.json({
     profile: must(profile, "Profile not found."),
-    memberships: rows.map((m) => {
+    can_create_company: !isSubLogin(c.var.appMetadata) || all.some((m) => m.role !== "subcontractor"),
+    memberships: rows.flatMap((m) => {
       const custom = m.role_id ? byId.get(m.role_id) : undefined;
-      return {
+      const sub = m.role === "subcontractor" ? subRecords.find((x) => x.id === m.subcontractor_id) : undefined;
+      const company = m.role === "subcontractor" ? basicsOf.get(m.company_id) : m.company;
+      // A sub's sign-in whose sub the office turned off reaches nothing, so it isn't offered.
+      if (!company || (m.role === "subcontractor" && !sub)) return [];
+      const staff = m.role !== "subcontractor";
+      return [{
         role: m.role,
-        company: m.company,
+        company,
         role_name: custom?.name ?? ROLE_LABELS[m.role as Role],
         permissions: memberPermissions(m.role as Role, custom ? custom.permissions : null),
-        email_connected: withMailbox.has((m.company as { id: string } | null)?.id ?? ""),
-        ai_connected: withClaudeKey.has((m.company as { id: string } | null)?.id ?? ""),
+        subcontractor: sub
+          ? {
+              id: sub.id, name: sub.name, can_contact_clients: sub.can_contact_clients, uses_clock: sub.uses_clock,
+              ...codeWaysOf(sub, subCompanies.find((x) => x.id === m.company_id)?.settings, ownSignIn(c.var.appMetadata, m.company_id, sub.id, all)),
+            }
+          : null,
+        // Whether email goes out for this company (its own mailbox): for a sub too, whose notices it sends.
+        email_connected: withMailbox.has(m.company_id),
+        ai_connected: staff && withClaudeKey.has(m.company_id),
         // Apps → fal.ai: Find paving on the measuring map.
-        fal_connected: withFal.has((m.company as { id: string } | null)?.id ?? ""),
-        terms_accepted: agreed.has((m.company as { id: string } | null)?.id ?? ""),
+        fal_connected: staff && withFal.has(m.company_id),
+        terms_accepted: agreed.has(m.company_id),
         // Only the owner is asked to connect Railway at sign-in.
         railway_needed:
           m.role === "owner" &&
-          railwayNeeded(c.env, railways.find((r) => r.company_id === (m.company as { id: string } | null)?.id) ?? null, (m.company as { settings?: unknown } | null)?.settings ?? null),
-      };
+          railwayNeeded(c.env, railways.find((r) => r.company_id === m.company_id) ?? null, (m.company as { settings?: unknown } | null)?.settings ?? null),
+      }];
     }),
   });
 });
+
+/**
+ * Whether this is a sign-in Crewtavo made for this sub, and nobody's sign-in elsewhere (`ours` in
+ * services/subAccess.ts): codes go only to those, and notices go to the office's record for them.
+ */
+const ownSignIn = (appMetadata: unknown, companyId: string, subId: string, memberships: ReadonlyArray<{ company_id: string }>) =>
+  isSubLogin(appMetadata, companyId, subId) && memberships.every((x) => x.company_id === companyId);
+
+/**
+ * For a sub's own sign-in (own_sign_in), what's on the office's record for them: a number sign-in
+ * codes are texted to (an area the company texts codes to), and an email that isn't a placeholder,
+ * which codes and notices go to; and whether there's a phone for texts at all (phone_on_file). Their
+ * Profile, notification settings and the sign-out question say how to get back in and where notices
+ * go by these, never showing the number or address themselves. Someone's own account gets none: it
+ * signs in, and is told, as it always has.
+ */
+function codeWaysOf(sub: { phone: string | null; email: string | null }, settings: unknown, own: boolean) {
+  return {
+    own_sign_in: own,
+    has_phone: own && Boolean(signInPhone(sub.phone, subSettings(settings).sign_in_countries)),
+    has_email: own && Boolean(emailKey(sub.email) && !isPlaceholderEmail(sub.email)),
+    phone_on_file: own && Boolean(sub.phone?.trim()),
+  };
+}
 
 account.patch("/me", requireUser, async (c) => {
   const body = await readJson(c, z.object({ full_name: z.string().trim().min(1).max(120).optional(), phone: z.string().max(40).nullable().optional() }));
@@ -130,6 +190,13 @@ account.post("/companies", requireUser, async (c) => {
     }),
   );
   checkTermsVersion(body.terms_version);
+  // A sign-in an office made for its sub is for their work with that business (the database
+  // refuses it too); someone's own account the office gave sub access to isn't stopped.
+  const { data: mine, error: mineError } = await adminClient(c.env).from("memberships").select("role").eq("user_id", c.var.userId);
+  if (mineError) throw dbError(mineError);
+  if (isSubLogin(c.var.appMetadata) && !mine?.some((m) => m.role !== "subcontractor")) {
+    throw new HttpError(403, "This sign-in is for your work with another business. To run your own business on Crewtavo, use a different email address.");
+  }
   // A Crewtavo instance belongs to one business; everyone after the owner joins it by invite.
   if (c.env.CREWTAVO_SINGLE_COMPANY === "1") {
     const { data: existing } = await adminClient(c.env).from("companies").select("id").limit(1);
@@ -233,20 +300,44 @@ async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
   }
 }
 
+/**
+ * The team: everyone but subs, whose sign-ins are on their page under Subs. With ?with_subs=1, for
+ * naming people on Timesheets, reports and the schedule, subs' sign-ins too (on or off), each with
+ * `sub`: their business's id and name, and their name and photo but not their phone or email.
+ */
 account.get("/team", requireUser, requireCompany(), async (c) => {
   const { db, companyId } = c.var;
-  const members = must(await db.from("memberships").select("user_id, role, role_id, active").eq("company_id", companyId));
+  const withSubs = c.req.query("with_subs") === "1";
+  let query = db.from("memberships").select("user_id, role, role_id, active, subcontractor_id").eq("company_id", companyId);
+  if (!withSubs) query = query.neq("role", "subcontractor");
+  const members = must(await query);
   const profiles = must(
     await db.from("profiles").select("user_id, full_name, email, phone, color, avatar_url").in("user_id", members.map((m) => m.user_id)),
   );
   const byId = new Map(profiles.map((p) => [p.user_id, p]));
+  // Subs' business names: the subs list is the office's, so just the names, read with the server's key.
+  const subIds = members.map((m) => m.subcontractor_id).filter((id): id is string => Boolean(id));
+  const subNames = new Map(
+    subIds.length ? must(await adminClient(c.env).from("subcontractors").select("id, name").eq("company_id", companyId).in("id", subIds)).map((x) => [x.id, x.name]) : [],
+  );
   // Pay rates are for the office (the column isn't readable by members directly); crews see names and roles.
   const rates = new Map<string, number | null>();
   if (["owner", "admin", "office"].includes(c.var.role)) {
     const rows = must(await adminClient(c.env).from("memberships").select("user_id, labor_rate").eq("company_id", companyId));
     for (const r of rows) rates.set(r.user_id, r.labor_rate);
   }
-  return c.json(members.map((m) => ({ ...m, labor_rate: rates.get(m.user_id) ?? null, profile: byId.get(m.user_id) ?? null })));
+  return c.json(
+    members.map(({ subcontractor_id, ...m }) => {
+      const profile = byId.get(m.user_id) ?? null;
+      if (!subcontractor_id) return { ...m, labor_rate: rates.get(m.user_id) ?? null, profile };
+      return {
+        ...m,
+        labor_rate: null,
+        profile: profile && { ...profile, email: null, phone: null },
+        sub: { id: subcontractor_id, name: subNames.get(subcontractor_id) ?? "Subcontractor" },
+      };
+    }),
+  );
 });
 
 /**
@@ -285,7 +376,7 @@ account.post("/team/invite", requireUser, requireCompany(ADMINS, "team"), async 
 
 /** Who on the team hasn't set up their account yet, and when their latest link went out. */
 account.get("/team/invites", requireUser, requireCompany(ADMINS, "team"), async (c) => {
-  const members = must(await c.var.db.from("memberships").select("user_id").eq("company_id", c.var.companyId).eq("active", true).neq("user_id", c.var.userId));
+  const members = must(await c.var.db.from("memberships").select("user_id").eq("company_id", c.var.companyId).eq("active", true).neq("role", "subcontractor").neq("user_id", c.var.userId));
   const admin = adminClient(c.env);
   // One lookup per person: a team is a handful of people, and only Settings → People asks.
   const accounts = await Promise.all(members.map((m) => admin.auth.admin.getUserById(m.user_id)));
@@ -302,16 +393,16 @@ account.get("/team/invites", requireUser, requireCompany(ADMINS, "team"), async 
 /**
  * Someone's photo, shown in place of their initials (services/photos.ts). The browser sends it as a
  * small square JPEG, base64. People set their own; owners and admins who manage the team set anyone's
- * on it, and as with roles, only an owner sets another owner's.
+ * on it, and as with roles, only an owner sets another owner's. A sub sets their own.
  */
-account.put("/team/:userId/photo", requireUser, requireCompany(), async (c) => {
+account.put("/team/:userId/photo", requireUser, requireCompany(WITH_SUBS), async (c) => {
   const targetId = await photoTarget(c);
   const body = await readJson(c, z.object({ photo: z.string().min(100).max(1_400_000).regex(/^[A-Za-z0-9+/]+={0,2}$/) }));
   if (!(await allow(c.env, `photo:${c.var.userId}`, 30, 3600))) throw new HttpError(429, "Too many photo changes. Wait a while and try again.");
   return c.json({ avatar_url: await setPhoto(adminClient(c.env), c.var.companyId, targetId, body.photo) });
 });
 
-account.delete("/team/:userId/photo", requireUser, requireCompany(), async (c) => {
+account.delete("/team/:userId/photo", requireUser, requireCompany(WITH_SUBS), async (c) => {
   await removePhoto(adminClient(c.env), await photoTarget(c));
   return c.json({ ok: true });
 });
@@ -359,6 +450,7 @@ account.post("/team/:userId/invite-link", requireUser, requireCompany(ADMINS, "t
   const { data: member, error } = await c.var.db.from("memberships").select("role, active").eq("company_id", companyId).eq("user_id", targetId).maybeSingle();
   if (error) throw dbError(error);
   if (!member?.active) throw new HttpError(404, "That person isn't on your team.");
+  if (member.role === "subcontractor") throw new HttpError(400, "A sub signs in with a link from their page under Subs.");
   // As with changing their role, only an owner acts for an owner.
   if (member.role === "owner" && role !== "owner") throw new HttpError(403, "Only an owner can do that for another owner.");
   const invite = await inviteStatus(c.env, companyId, targetId);
@@ -387,6 +479,8 @@ account.post("/auth/email-link", async (c) => {
   if (!(await allow(c.env, `auth-link:ip:${ip}`, 20, 3600)) || !(await allow(c.env, `auth-link:email:${email}`, 4, 900))) {
     throw new HttpError(429, "Too many requests. Wait a few minutes and try again.");
   }
+  // A sub's stand-in address (no email of their own) is never sent anything.
+  if (isPlaceholderEmail(email)) return c.json({ sent: true });
   const admin = adminClient(c.env);
   // A one-business instance that can't send email says so instead of pretending a link went out.
   // The answer is the same for every address, so it doesn't reveal who has an account.

@@ -9,7 +9,7 @@ import { isEmail, renderEmail } from "../src/lib/email";
 import { friendlyIssue } from "../src/lib/http";
 import { cronMatches } from "../src/lib/cron";
 import { buildCalendar } from "../src/lib/ics";
-import { allow } from "../src/lib/limit";
+import { allow, allowStrict } from "../src/lib/limit";
 import { clientLink, readClientLink } from "../src/lib/links";
 import { buildMime } from "../src/lib/smtp";
 import { twilioSignature } from "../src/routes/messages";
@@ -81,6 +81,10 @@ describe("stripe webhook signatures", () => {
 });
 
 describe("routes", () => {
+  // The config asks the database whether any company has its own mailbox (features.emailCodes): none.
+  beforeEach(() => vi.stubGlobal("fetch", async () => Response.json([])));
+  afterEach(() => vi.unstubAllGlobals());
+
   it("serves public config without secrets", async () => {
     const res = await request("/api/config");
     expect(res.status).toBe(200);
@@ -263,6 +267,14 @@ describe("email rendering", () => {
     expect(html).toContain('href="https://ops.example.com/u/t?a=1&amp;b=2"');
     expect(text).toContain("Unsubscribe: https://ops.example.com/u/t?a=1&b=2");
     expect(text).toContain("1 Main St, Radford, VA");
+  });
+
+  it("shows a one-time code large, on its own, and leaves the plain text as it is", () => {
+    const { html, text } = renderEmail({ companyName: "Oscar Roofing", text: "Your code:\n\n042517\n\nNot 042517 here.", code: "042517" });
+    expect(html.match(/font-size:32px[^>]*>042517<\/p>/g)).toHaveLength(1);
+    expect(html).toContain("Not 042517 here.");
+    expect(text).toBe("Your code:\n\n042517\n\nNot 042517 here.");
+    expect(renderEmail({ companyName: "Oscar Roofing", text: "042517" }).html).not.toContain("font-size:32px");
   });
 
   it("greets people by first name and organizations in full", () => {
@@ -469,6 +481,22 @@ describe("rate limits", () => {
   it("lets the request through if the check itself fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     rpc(() => Response.json({ message: "connection refused" }, { status: 503 }));
+    expect(await allow(env, "promo:203.0.113.9", 10, 600)).toBe(true);
+  });
+
+  it("refuses instead, where letting a flood through costs money (allowStrict)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const calls = rpc(() => Response.json(true));
+    expect(await allowStrict(env, "text-code:all", 200, 3600)).toBe(true);
+    expect(calls).toEqual([{ url: "https://example.supabase.co/rest/v1/rpc/rate_limit_hit", body: { p_key: "text-code:all", p_max: 200, p_window_seconds: 3600 }, auth: "sb_secret_test" }]);
+    rpc(() => Response.json(false));
+    expect(await allowStrict(env, "text-code:all", 200, 3600)).toBe(false);
+    rpc(() => Response.json({ message: "connection refused" }, { status: 503 }));
+    expect(await allowStrict(env, "text-code:all", 200, 3600)).toBe(false);
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("fetch failed");
+    });
+    expect(await allowStrict(env, "text-code:all", 200, 3600)).toBe(false);
     expect(await allow(env, "promo:203.0.113.9", 10, 600)).toBe(true);
   });
 });

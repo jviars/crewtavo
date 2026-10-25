@@ -1,6 +1,6 @@
 /**
  * ⌘K / Ctrl+K: search every client, address, request, quote, job, invoice, measurement, guide, campaign,
- * automation, price list service and piece of equipment, jump to any screen or section of Settings, or
+ * automation, price list service, piece of equipment and subcontractor, jump to any screen or section of Settings, or
  * start something new. "/" also opens it when you're not typing in a field.
  */
 import { kindLabel } from "@crewtavo/core/equipment";
@@ -9,6 +9,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { settingsGroups } from "@/features/settings/sections";
+import { managesSubs } from "@/features/subs/subsData";
 import { getRecents } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { Spinner } from "../ui/Button";
@@ -30,7 +31,7 @@ interface Item {
 
 const KIND_ICON: Record<string, IconName> = {
   client: "clients", property: "pin", request: "requests", quote: "quote", job: "job", invoice: "invoice", equipment: "truck",
-  measurement: "area", kb: "book", campaign: "marketing", rule: "bolt", service: "list",
+  measurement: "area", kb: "book", campaign: "marketing", rule: "bolt", service: "list", sub: "users",
 };
 const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; title: string }) => string> = {
   client: (r) => `/clients/${r.id}`,
@@ -45,10 +46,11 @@ const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; titl
   campaign: (r) => `/marketing/campaigns/${r.id}`,
   rule: (r) => `/automations/${r.id}`,
   service: (r) => `/settings?tab=prices&q=${encodeURIComponent(r.title)}`,
+  sub: (r) => `/subs/${r.id}`,
 };
 const KIND_LABEL: Record<string, string> = {
   client: "Client", property: "Property", request: "Request", quote: "Quote", job: "Job", invoice: "Invoice", equipment: "Equipment",
-  measurement: "Measurement", kb: "Guide", campaign: "Campaign", rule: "Automation", service: "Price list",
+  measurement: "Measurement", kb: "Guide", campaign: "Campaign", rule: "Automation", service: "Price list", sub: "Subcontractor",
 };
 
 export function CommandPalette() {
@@ -102,15 +104,20 @@ export function CommandPalette() {
     staleTime: 15_000,
     meta: { silent: true },
     queryFn: async () => {
-      const [found, gear] = await Promise.all([
+      const [found, gear, subs] = await Promise.all([
         supabase().rpc("global_search", { p_company_id: session.company.id, p_query: term, p_limit: 5 }),
         supabase().from("equipment").select("id, name, kind, make, model").eq("company_id", session.company.id).neq("status", "retired").ilike("name", `%${term}%`).limit(3),
+        // Only the office with the Subcontractors area can read subs at all.
+        managesSubs(session)
+          ? supabase().from("subcontractors").select("id, name, trade").eq("company_id", session.company.id).eq("active", true).ilike("name", `%${term}%`).limit(3)
+          : Promise.resolve({ data: [], error: null }),
       ]);
       const records = unwrap(found);
       const equipment: Array<Omit<(typeof records)[number], "number" | "client_id"> & { number: number | null; client_id: string | null }> = unwrap(gear).map((g) => ({
         kind: "equipment", id: g.id, title: g.name, subtitle: [kindLabel(g.kind), g.make, g.model].filter(Boolean).join(" "), status: "", number: null, client_id: null,
       }));
-      return [...records.filter((r) => KIND_PATH[r.kind]), ...equipment];
+      const subcontractors: typeof equipment = unwrap(subs).map((s) => ({ kind: "sub", id: s.id, title: s.name, subtitle: s.trade ?? "", status: "", number: null, client_id: null }));
+      return [...records.filter((r) => KIND_PATH[r.kind]), ...equipment, ...subcontractors];
     },
   });
 
@@ -126,6 +133,7 @@ export function CommandPalette() {
       ...creates,
       ...(isOffice && can(session, "kb_edit") ? [{ id: "new-guide", group: "Create", icon: "book" as IconName, title: "New guide", keywords: "add knowledge base sop procedure page", run: () => go("/kb/new") }] : []),
       ...(isOffice && can(session, "automations") ? [{ id: "new-rule", group: "Create", icon: "bolt" as IconName, title: "New automation", keywords: "add rule reminder follow up", run: () => go("/automations/new") }] : []),
+      ...(managesSubs(session) ? [{ id: "new-sub", group: "Create", icon: "users" as IconName, title: "New subcontractor", keywords: "add sub contractor vendor", run: () => go("/subs?new=1") }] : []),
     ];
     const screens: Item[] = [...NAV_GROUPS.flat(), ...OTHER_SCREENS]
       .filter((n) => navVisible(session, n))

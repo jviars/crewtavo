@@ -16,6 +16,8 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { can, useSession } from "@/lib/session";
+import { RatesCard } from "../subs/RatesCard";
+import { handlesTeamPay, useTeamRateCounts } from "../subs/payData";
 import { PhotoButtons } from "./ProfilePhoto";
 import { choiceFor, patchFor, roleChoices, roleName, useCompanyRoles } from "./roles";
 
@@ -32,6 +34,11 @@ export function TeamSettings() {
   const [resetting, setResetting] = useState<Member | null>(null);
   const [resending, setResending] = useState<Member | null>(null);
   const [photoFor, setPhotoFor] = useState<string | null>(null);
+  const [ratesFor, setRatesFor] = useState<Member | null>(null);
+  // Piece rates (per square, per job, per day) are pay, for the office with job costs, as hourly pay is.
+  const pieceRates = handlesTeamPay(session);
+  const rateCounts = useTeamRateCounts(session.company.id, pieceRates);
+  // The team only: a sub's sign-in is on their page under Subcontractors (GET /team leaves them out).
   const team = useQuery({ queryKey: ["team", session.company.id], queryFn: () => api.get<Member[]>("/team") });
   const invites = useQuery({ queryKey: ["team-invites", session.company.id], queryFn: () => api.get<PendingInvite[]>("/team/invites") });
   const pending = new Map((invites.data ?? []).map((i) => [i.user_id, i.sent_at]));
@@ -105,6 +112,13 @@ export function TeamSettings() {
                     </td>
                     <td className="num">
                       <MoneyInput value={Number(m.labor_rate ?? 0)} max={1000} width={110} label={`Labor cost for ${name}`} onSave={(v) => update.mutate({ userId: m.user_id, patch: { labor_rate: v || null } })} />
+                      {pieceRates && (
+                        <div>
+                          <button type="button" className="link-btn small" onClick={() => setRatesFor(m)}>
+                            {rateCounts.data?.[m.user_id] ? `${rateCounts.data[m.user_id]} piece ${rateCounts.data[m.user_id] === 1 ? "rate" : "rates"}` : "Piece rates"}
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td>
                       {locked ? <StatusPill label={m.active ? "Active" : "Removed"} tone={m.active ? "good" : "muted"} /> : (
@@ -131,6 +145,14 @@ export function TeamSettings() {
       {resetting && <ResetPasswordDialog member={resetting} onClose={() => setResetting(null)} />}
       {resending && <ResendInviteDialog member={resending} onClose={() => setResending(null)} />}
       {photoMember && <PhotoDialog member={photoMember} onClose={() => setPhotoFor(null)} />}
+      {ratesFor && (
+        <Dialog open onClose={() => setRatesFor(null)} title={ratesFor.profile?.full_name ? `Piece rates for ${ratesFor.profile.full_name}` : "Piece rates"} size="lg" description="Pay per square, per job or per day, on top of or instead of their hourly cost. Pay on a job is filled in from these, and goes into their pay period once the work is done.">
+          <div className="dialog-body">
+            <RatesCard payee={{ user_id: ratesFor.user_id }} bare />
+            <div className="form-actions"><Button variant="primary" onClick={() => setRatesFor(null)}>Done</Button></div>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

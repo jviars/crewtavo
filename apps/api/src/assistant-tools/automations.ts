@@ -10,18 +10,22 @@ import {
   STATUS_ACTION_CHOICES,
   TEMPLATE_VARIABLES,
   TRIGGERS,
-  actionsFor,
+  actionsForTrigger,
   describeRuleSentence,
   fieldsFor,
+  triggerAllowed,
   triggerDef,
   validateRule,
   type Action,
   type Condition,
 } from "@crewtavo/core";
 import { z } from "zod";
-import { changed, companyArg, one, rows, tool } from "./tool";
+import { changed, companyArg, one, roleAllows, rows, tool, type ToolContext } from "./tool";
 
 const COLUMNS = "id, name, description, trigger, delay_minutes, conditions, actions, enabled, run_count, last_run_at";
+
+/** Rules about subs' offers (their prices) are for people with the Subcontractors area, as on the rule screen. */
+const mayUse = (ctx: ToolContext, verb: string) => triggerAllowed(verb, (area) => roleAllows(ctx, undefined, area));
 
 const condition = z.object({
   field: z.string().max(60),
@@ -47,8 +51,16 @@ export const automationTools = {
     description:
       "What automations can be built from: triggers (what starts a rule, and whether it can wait first), the conditions each kind of record has, the actions, and the {{tokens}} messages can use. Read this before save_automation.",
     input: z.object({}),
-    run: async () => ({
-      triggers: TRIGGERS.map(({ verb, label, subject, delayable }) => ({ trigger: verb, label, record: subject, can_wait: delayable })),
+    run: async (ctx) => ({
+      triggers: TRIGGERS.filter((t) => mayUse(ctx, t.verb)).map(({ verb, label, subject, delayable, actions, variables, hides, notifyRoles }) => ({
+        trigger: verb, label, record: subject, can_wait: delayable,
+        // Some triggers take fewer actions than their record (a sub's offer has no client), or carry tokens of their own.
+        ...(actions ? { only_actions: actions } : {}),
+        ...(variables ? { extra_tokens: variables.map((v) => ({ token: `{{${v.token}}}`, label: v.label, ...(v.officeOnly ? { not_in_tasks: true } : {}) })) } : {}),
+        ...(hides ? { not_tokens: hides.map((t) => `{{${t}}}`) } : {}),
+        // Who can be told about it: a sub's offer, only the office.
+        ...(notifyRoles ? { only_notify_roles: notifyRoles } : {}),
+      })),
       conditions: CONDITION_FIELDS.map(({ field, label, ops, subjects, choices }) => ({ field, label, ops, records: subjects, choices })),
       actions: ACTIONS.map(({ type, label, description, subjects }) => ({ type, label, description, records: subjects })),
       status_choices: STATUS_ACTION_CHOICES,
@@ -81,9 +93,10 @@ export const automationTools = {
     area: "automations",
     run: async (ctx, a) => {
       const trigger = triggerDef(a.trigger)!;
+      if (!mayUse(ctx, trigger.verb)) throw new Error("Rules about subs' job offers need the Subcontractors area. Ask an owner or admin.");
       const rule = { name: a.name.trim(), trigger: a.trigger, delay_minutes: trigger.delayable ? a.delay_minutes : 0, conditions: a.conditions as Condition[], actions: a.actions as Action[] };
       const fields = new Set(fieldsFor(trigger.subject).map((f) => f.field));
-      const types = new Set(actionsFor(trigger.subject).map((t) => t.type));
+      const types = new Set(actionsForTrigger(trigger.verb).map((t) => t.type));
       const problems = [
         ...validateRule(rule),
         ...rule.conditions.filter((c) => !fields.has(c.field)).map((c) => `"${c.field}" isn't a condition for this trigger.`),

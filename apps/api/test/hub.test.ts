@@ -296,6 +296,38 @@ describe("a price range in the Client Hub", () => {
   });
 });
 
+describe("the crew on the client's home page", () => {
+  it("is first names only, and a sub is named from the office's record, never their own profile", async () => {
+    const visit = (id: string, assignees: string[]) => ({
+      id, company_id: ROOFER, job_id: "job-1", title: "Tear off", scheduled_on: "2099-01-01", starts_at: null, ends_at: null, status: "scheduled", completed_at: null,
+      property: null, assignees: assignees.map((user_id) => ({ user_id })),
+    });
+    Object.assign(state.tables, {
+      jobs: [{ id: "job-1", company_id: ROOFER, client_id: CLIENT }],
+      visits: [visit("v1", ["cy", "al", "bo"])],
+      profiles: [
+        { user_id: "cy", full_name: "Cy Q. Crewman" },
+        // What subs typed on their own profiles.
+        { user_id: "al", full_name: "Al - text me 540 555 0101 for 20% off" },
+        { user_id: "bo", full_name: "Birch Gutters LLC" },
+      ],
+      memberships: [
+        { company_id: ROOFER, user_id: "cy", role: "field_crew", subcontractor_id: null },
+        { company_id: ROOFER, user_id: "al", role: "subcontractor", subcontractor_id: "apex" },
+        { company_id: ROOFER, user_id: "bo", role: "subcontractor", subcontractor_id: "birch" },
+      ],
+      subcontractors: [
+        { id: "apex", company_id: ROOFER, name: "Apex Roofing LLC", contact_name: "Albert Apex" },
+        { id: "birch", company_id: ROOFER, name: "Birch Gutters LLC", contact_name: null },
+      ],
+    });
+    const home = await (await hub({ t: "client", id: CLIENT })).json();
+    // Birch has no contact name on file, so isn't named at all.
+    expect(home.visits[0].crew).toEqual(["Cy", "Albert"]);
+    expect(JSON.stringify(home)).not.toMatch(/540 555|20% off|Birch|LLC/);
+  });
+});
+
 describe("signing online", () => {
   beforeEach(() => roofer({ range_low: null, range_high: null, range_sent_at: null }));
 

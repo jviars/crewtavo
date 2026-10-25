@@ -24,6 +24,7 @@ vi.mock("../src/lib/session", () => ({
   useSession: () => session.current,
   hasRole: (s: { role: string }, ...roles: string[]) => s.role === "owner" || roles.includes(s.role),
   can: (s: { role: string; permissions: string[] }, p: string) => s.role === "owner" || s.permissions.includes(p),
+  isSub: (s: { role: string }) => s.role === "subcontractor",
 }));
 // The rest of the profile page, which needs a browser or other data.
 vi.mock("../src/lib/theme", () => ({ useTheme: () => "system", setTheme: () => undefined }));

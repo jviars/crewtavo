@@ -5,6 +5,8 @@ const CONTROL = 'input:not([type="hidden"]):not([type="checkbox"]):not([type="ra
 /**
  * A labelled form field. The label is tied to the field's first text control by id rather than by
  * wrapping, so buttons inside the field (tag chips, pickers, show-password) never steal label clicks.
+ * A set of radio buttons in it becomes a radio group named by the label, so each choice is heard
+ * with the question it answers.
  */
 export function Field({ label, hint, error, optional, children, className }: { label: ReactNode; hint?: ReactNode; error?: string | null; optional?: boolean; children: ReactNode; className?: string }) {
   const id = useId();
@@ -13,6 +15,13 @@ export function Field({ label, hint, error, optional, children, className }: { l
   const noteId = `${id}-note`;
   const hasNote = Boolean(error || hint);
   useEffect(() => {
+    const radio = ref.current?.querySelector<HTMLInputElement>('input[type="radio"]');
+    const group = radio ? (radio.closest("label")?.parentElement ?? radio.parentElement) : null;
+    if (group && ref.current?.contains(group) && group !== ref.current && (!group.hasAttribute("aria-labelledby") || group.dataset.fieldLabel)) {
+      group.setAttribute("role", "radiogroup");
+      group.setAttribute("aria-labelledby", labelId);
+      group.dataset.fieldLabel = "1";
+    }
     const control = ref.current?.querySelector<HTMLElement>(CONTROL);
     if (!control) return;
     if (!control.hasAttribute("aria-label") && (!control.hasAttribute("aria-labelledby") || control.dataset.fieldLabel)) {

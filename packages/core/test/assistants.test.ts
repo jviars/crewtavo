@@ -290,10 +290,10 @@ describe("time and pay", () => {
     ];
     const pay = paySummary(entries, () => 20, (id) => (id === "u1" ? "Ana" : "Bo"), tz, "short_paid");
     expect(pay.people).toEqual([
-      { user_id: "u1", name: "Ana", hours: 45, break_hours: 0.5, overtime_hours: 5, amount: 900, unapproved_hours: 0, running: false },
-      { user_id: "u2", name: "Bo", hours: 0, break_hours: 0, overtime_hours: 0, amount: 0, unapproved_hours: 2, running: true },
+      { user_id: "u1", name: "Ana", hours: 45, break_hours: 0.5, overtime_hours: 5, hourly_amount: 900, piece_amount: 0, amount: 900, unapproved_hours: 0, running: false },
+      { user_id: "u2", name: "Bo", hours: 0, break_hours: 0, overtime_hours: 0, hourly_amount: 0, piece_amount: 0, amount: 0, unapproved_hours: 2, running: true },
     ]);
-    expect(pay).toMatchObject({ hours: 45, amount: 900, overtime_hours: 5, unapproved_hours: 2, running_clocks: 1 });
+    expect(pay).toMatchObject({ hours: 45, amount: 900, piece_amount: 0, overtime_hours: 5, unapproved_hours: 2, running_clocks: 1, overtime_note: null });
   });
 
   it("pays breaks as the company pays them: short ones under the federal rule, all, or none", () => {

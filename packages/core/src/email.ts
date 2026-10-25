@@ -189,3 +189,19 @@ const PERSONAL_MAIL = new Set([
 export const isPersonalMailDomain = (domain: string) => PERSONAL_MAIL.has(domain.trim().toLowerCase());
 /** The part after the @, lowercased ("" when there isn't one). */
 export const emailDomain = (email: string) => (email.includes("@") ? email.slice(email.lastIndexOf("@") + 1).trim().toLowerCase() : "");
+
+/**
+ * An address nothing ever emails: the stand-in a sub's sign-in gets when the office has no email for
+ * them (subLoginEmail in subs.ts), on the .invalid domain set aside for exactly this (RFC 2606).
+ */
+export const isPlaceholderEmail = (email: string | null | undefined) => typeof email === "string" && /\.invalid$/i.test(email.trim());
+
+/**
+ * An email address in one spelling, trimmed and lower-cased, as signing in with a code by email
+ * compares them (private.email_key in supabase/migrations/20261025006001_email_sign_in_codes.sql
+ * spells the office's addresses the same way); null when it isn't a whole address.
+ */
+export function emailKey(input: string | null | undefined): string | null {
+  const key = (input ?? "").trim().toLowerCase();
+  return key.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(key) ? key : null;
+}

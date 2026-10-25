@@ -5,7 +5,7 @@
  * nobody changes their own role. The owners hear about every change an assistant makes (the
  * assistant_more_areas migration). An invite's link is emailed, never handed to the assistant.
  */
-import { ADMINS, OFFICE, PERMISSIONS, ROLE_LABELS, ROLES, type Role } from "@crewtavo/core";
+import { ADMINS, OFFICE, PERMISSIONS, ROLE_LABELS, STAFF, type Role } from "@crewtavo/core";
 import { z } from "zod";
 import { adminClient } from "../lib/supabase";
 import { currentRates } from "../services/payRates";
@@ -14,9 +14,12 @@ import { changed, companyArg, friendly, one, requireRole, roleAllows, rows, tool
 
 const permissionKeys = PERMISSIONS.map((p) => p.key) as [string, ...string[]];
 
-/** Everyone on the team, with their role and, for the office with job costs, their pay rate. */
+/** The team's levels (not Subcontractor: subs' sign-ins are given on their page under Subs). */
+const LEVELS = STAFF as [Role, ...Role[]];
+
+/** Everyone on the team, with their role and, for the office with job costs, their pay rate. Not subs. */
 export async function teamList(ctx: ToolContext, includeInactive = false) {
-  let q = ctx.db.from("memberships").select("user_id, role, role_id, active").eq("company_id", ctx.companyId);
+  let q = ctx.db.from("memberships").select("user_id, role, role_id, active").eq("company_id", ctx.companyId).neq("role", "subcontractor");
   if (!includeInactive) q = q.eq("active", true);
   const members = await rows(q);
   const [profiles, roles, rates] = await Promise.all([
@@ -46,7 +49,7 @@ export const teamTools = {
     run: async (ctx, a) => ({
       people: await teamList(ctx, a.include_inactive),
       custom_roles: await rows(ctx.db.from("company_roles").select("id, name, base_role, permissions").eq("company_id", ctx.companyId).order("name")),
-      levels: ROLES.map((r) => ({ level: r, label: ROLE_LABELS[r] })),
+      levels: LEVELS.map((r) => ({ level: r, label: ROLE_LABELS[r] })),
     }),
   }),
   invite_person: tool({
@@ -55,7 +58,7 @@ export const teamTools = {
     input: z.object({
       email: z.email(),
       full_name: z.string().trim().max(120).optional(),
-      role: z.enum(ROLES).default("field_crew"),
+      role: z.enum(LEVELS).default("field_crew"),
       role_id: z.uuid().nullable().optional(),
       ...companyArg,
     }),
@@ -71,7 +74,7 @@ export const teamTools = {
   }),
   change_role: tool({
     description: "Change someone's role: a level (owner, admin, office, estimator, crew_lead, field_crew) or a custom role (role_id). Nobody can be given more access than you have; only an owner makes owners; you can't change your own role.",
-    input: z.object({ user_id: z.uuid(), role: z.enum(ROLES).optional(), role_id: z.uuid().nullable().optional(), ...companyArg }),
+    input: z.object({ user_id: z.uuid(), role: z.enum(LEVELS).optional(), role_id: z.uuid().nullable().optional(), ...companyArg }),
     area: "team",
     run: async (ctx, a) => {
       if (!a.role && a.role_id === undefined) throw new Error("Give a role or a role_id.");
@@ -111,7 +114,7 @@ export const teamTools = {
     input: z.object({
       role_id: z.uuid().optional(),
       name: z.string().trim().min(1).max(60),
-      base_role: z.enum(ROLES.filter((r) => r !== "owner") as [Role, ...Role[]]),
+      base_role: z.enum(LEVELS.filter((r) => r !== "owner") as [Role, ...Role[]]),
       permissions: z.array(z.enum(permissionKeys)).max(permissionKeys.length),
       ...companyArg,
     }),

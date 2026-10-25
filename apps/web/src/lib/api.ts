@@ -22,7 +22,11 @@ export interface AppConfig {
   turnstileSiteKey: string | null;
   /** Error reporting (Sentry or GlitchTip), when the deployment sets CREWTAVO_SENTRY_DSN. */
   sentry: MonitoringConfig | null;
-  features: { ai: boolean; payments: boolean; email: boolean; sms: boolean; roofInsights: boolean; devMail?: boolean; findPaving?: boolean };
+  /**
+   * `emailCodes`: a sub can get a sign-in code by email, since this Crewtavo sends email in some way
+   * (its own sender or some company's mailbox). For the whole instance, never one business.
+   */
+  features: { ai: boolean; payments: boolean; email: boolean; sms: boolean; emailCodes?: boolean; roofInsights: boolean; devMail?: boolean; findPaving?: boolean };
 }
 
 /**

@@ -7,7 +7,8 @@ import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from
 const PALETTE = ["#3b7d23", "#3474d4", "#c9852a", "#d2445c", "#8b5cf6", "#0e7490", "#57534e", "#b45309"];
 
 async function team(ctx: ToolContext) {
-  const members = await rows(ctx.db.from("memberships").select("user_id, role").eq("company_id", ctx.companyId).eq("active", true));
+  // The team: a sub is never on a crew.
+  const members = await rows(ctx.db.from("memberships").select("user_id, role").eq("company_id", ctx.companyId).eq("active", true).neq("role", "subcontractor"));
   const profiles = members.length ? await rows(ctx.db.from("profiles").select("user_id, full_name, email").in("user_id", members.map((m) => m.user_id))) : [];
   const byId = new Map(profiles.map((p) => [p.user_id, p]));
   return members.map((m) => ({ user_id: m.user_id, name: byId.get(m.user_id)?.full_name ?? null, email: byId.get(m.user_id)?.email ?? null, role: ROLE_LABELS[m.role as Role] ?? m.role }));

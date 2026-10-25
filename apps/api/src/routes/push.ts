@@ -1,4 +1,5 @@
 /** Phone and browser push: the public key to subscribe with, saving and removing a device, and a test. */
+import { WITH_SUBS } from "@crewtavo/core";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -35,10 +36,11 @@ push.post("/push/unsubscribe", requireUser, async (c) => {
   return c.json({ subscribed: false });
 });
 
-push.post("/push/test", requireUser, requireCompany(), async (c) => {
+// Subs too. A sub can't read the companies row, so its name comes with the server's key.
+push.post("/push/test", requireUser, requireCompany(WITH_SUBS), async (c) => {
   const devices = must(await c.var.db.from("push_subscriptions").select("id, endpoint, p256dh, auth").eq("user_id", c.var.userId));
   if (!devices.length) throw new HttpError(400, "Turn on notifications on this phone first.");
-  const company = must(await c.var.db.from("companies").select("name, email").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, email").eq("id", c.var.companyId).maybeSingle());
   const base = appUrl(c);
   let sent = 0;
   for (const device of devices) {

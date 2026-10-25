@@ -48,6 +48,7 @@ recovery.post("/team/:userId/password-link", requireUser, requireCompany(ADMINS,
   const memberships = must(await admin.from("memberships").select("company_id, role, active").eq("user_id", targetId));
   const here = memberships.find((m) => m.company_id === companyId);
   if (!here?.active || !isRole(here.role)) throw new HttpError(404, "That person isn't on your team.");
+  if (here.role === "subcontractor") throw new HttpError(400, "A sub signs in with a link from their page under Subs.");
   if (!canMakeResetLink(role, here.role)) {
     throw new HttpError(403, role === "owner" ? "Another owner has to reset their own password." : "Only the owner can make a reset link for an admin or the owner.");
   }

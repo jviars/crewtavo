@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
   team: [] as Array<{ user_id: string }>,
   elsewhere: [] as Array<{ company_id: string }>,
   existing: null as string | null,
-  accounts: {} as Record<string, { id: string; email: string; created_at: string; last_sign_in_at?: string; invited_at?: string; recovery_sent_at?: string }>,
+  accounts: {} as Record<string, { id: string; email: string; created_at: string; last_sign_in_at?: string; invited_at?: string; recovery_sent_at?: string; app_metadata?: Record<string, unknown> }>,
   names: {} as Record<string, string>,
   links: [] as Array<{ type: string; email: string }>,
   lookups: [] as string[],
@@ -120,6 +120,16 @@ describe("inviting someone", () => {
     const body = await (await request("/team/invite", { email: "sam@juliet.test" })).json();
     expect(state.links).toEqual([{ type: "recovery", email: "sam@juliet.test" }]);
     expect(body).toMatchObject({ invited: false, emailed: true, link: "https://ops.example.com/?token_hash=tok-1&type=recovery&welcome=1" });
+  });
+
+  it("isn't for a sign-in another business made for its subcontractor, which would stop it working there", async () => {
+    samInvited();
+    state.accounts[SAM]!.app_metadata = { provider: "email", crewtavo_sub: "00000000-0000-4000-8000-0000000000a9:00000000-0000-4000-8000-0000000000b9" };
+    state.existing = SAM;
+    const res = await request("/team/invite", { email: "sam@juliet.test", role: "field_crew" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("That email is a sign-in another business made for its subcontractor. Invite them with another email address.");
+    expect(state.upserts).toEqual([]);
   });
 
   it("just tells someone who already signed in that they have access", async () => {

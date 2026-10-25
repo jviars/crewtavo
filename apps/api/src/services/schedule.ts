@@ -152,7 +152,15 @@ export const visitChangeInput = z.object({
 /** The steps a crew takes a visit through, in order. */
 const CREW_STEPS: Record<string, number> = { unscheduled: 0, scheduled: 0, en_route: 1, in_progress: 2, completed: 3 };
 
+/** What a sub changes on their own visit (the database holds them to it: private.visit_sub_guard). */
+const SUB_FIELDS = ["status", "notes", "forward_only"];
+const SUB_STATUSES = ["scheduled", "en_route", "in_progress", "completed"];
+
 export async function updateVisit(s: Scope, id: string, body: z.infer<typeof visitChangeInput>) {
+  if (s.role === "subcontractor") {
+    if (Object.keys(body).some((k) => !SUB_FIELDS.includes(k))) throw new HttpError(403, "You can change a visit's status and notes. Ask the office about anything else.");
+    if (body.status && !SUB_STATUSES.includes(body.status)) throw new HttpError(403, "Ask the office to cancel or move this visit.");
+  }
   const { assignee_ids, equipment_ids, shift_series, forward_only, ...fields } = body;
   // A crew only moves a visit forward. A tap sent again later (the phone closed the app before it
   // heard back, say) can arrive after the taps that followed it, so it's skipped, not applied

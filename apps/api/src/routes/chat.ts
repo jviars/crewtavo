@@ -8,7 +8,7 @@
  * them at once (lib/chatHub.ts).
  */
 import type { TablesUpdate } from "@crewtavo/core";
-import { ADMINS, channelSlug, CHAT_COLORS, CHAT_REACTIONS, chatRoleKey, isChatColor, isRole, ROLE_LABELS, ROLES, type ChatColor, type Role } from "@crewtavo/core";
+import { ADMINS, channelSlug, CHAT_COLORS, CHAT_REACTIONS, chatRoleKey, isChatColor, isRole, ROLE_LABELS, STAFF, type ChatColor, type Role } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -197,7 +197,7 @@ chat.get("/chat/state", requireUser, requireCompany(), async (c) => {
   const settingFor = (level: Role | null, roleId: string | null) =>
     (roleId && rows.find((s) => s.role_id === roleId)) || rows.find((s) => s.role === level) || null;
   const roleList = [
-    ...ROLES.map((level) => ({ key: level as string, label: ROLE_LABELS[level], custom: false, setting: settingFor(level, null) })),
+    ...STAFF.map((level) => ({ key: level as string, label: ROLE_LABELS[level], custom: false, setting: settingFor(level, null) })),
     ...(roles.data ?? []).map((r) => ({ key: r.id, label: r.name, custom: true, setting: settingFor(r.base_role, r.id) })),
   ].map(({ setting, ...r }) => ({
     ...r,
@@ -469,7 +469,7 @@ chat.get("/chat/settings", requireUser, requireCompany(ADMINS), async (c) => {
     db.from("chat_role_rules").select("channel_id, role, role_id, can_see, can_post, can_manage").eq("company_id", companyId),
     db.from("chat_role_settings").select("role, role_id, color, show_separately, mentionable, own_crew_only").eq("company_id", companyId),
     db.from("company_roles").select("id, name, description, base_role").eq("company_id", companyId).order("name"),
-    db.from("memberships").select("user_id, role, role_id").eq("company_id", companyId).eq("active", true),
+    db.from("memberships").select("user_id, role, role_id").eq("company_id", companyId).eq("active", true).neq("role", "subcontractor"),
     db.from("crews").select("id, name").eq("company_id", companyId).eq("active", true).order("name"),
   ]);
   for (const r of [channels, rules, settings, roles, members, crews]) if (r.error) throw dbError(r.error);
@@ -484,7 +484,7 @@ chat.get("/chat/settings", requireUser, requireCompany(ADMINS), async (c) => {
     rules: rules.data ?? [],
     settings: settings.data ?? [],
     roles: [
-      ...ROLES.map((level) => ({ key: level as string, label: ROLE_LABELS[level], custom: false, base_role: level, description: null as string | null, people: peopleFor(level) })),
+      ...STAFF.map((level) => ({ key: level as string, label: ROLE_LABELS[level], custom: false, base_role: level, description: null as string | null, people: peopleFor(level) })),
       ...(roles.data ?? []).map((r) => ({ key: r.id, label: r.name, custom: true, base_role: r.base_role, description: r.description, people: peopleFor(r.id) })),
     ],
     crews: crews.data ?? [],
@@ -492,7 +492,8 @@ chat.get("/chat/settings", requireUser, requireCompany(ADMINS), async (c) => {
   });
 });
 
-const roleRef = { role: z.enum(ROLES).nullable().optional(), role_id: uuid.nullable().optional() };
+// The team's levels: team chat has no place for subs (the database refuses rules for them).
+const roleRef = { role: z.enum(STAFF as [Role, ...Role[]]).nullable().optional(), role_id: uuid.nullable().optional() };
 chat.put("/chat/settings/roles", requireUser, requireCompany(ADMINS), async (c) => {
   const body = await readJson(
     c,

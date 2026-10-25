@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 /**
  * Loads a demo company for local development and screenshots: a paving business with clients,
- * requests, quotes, jobs, a week of visits, invoices, crews, equipment and SOPs.
+ * requests, quotes, jobs, a week of visits, invoices, crews, equipment and SOPs, and a striping sub
+ * (Ray Lines of Precision Striping) with paperwork, paid work, a job offer waiting and a sign-in.
  *
  *   npm run seed:demo            (reads .dev.vars; needs the API running for onboarding)
  *
  * Signs in as demo@crewtavo.test / crewtavo-demo (created if missing). Safe to rerun: it skips
- * if the demo user already has a company. Never point this at production.
+ * if the demo user already has a company (adding the demo sub if it's missing). Never point this at
+ * production. The sub signs in without a password, as subs do: the browser tests sign in with a
+ * one-time link made with the server's key (e2e/auth.setup.ts).
  */
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
@@ -59,8 +62,52 @@ await must(db.auth.signInWithPassword({ email: EMAIL, password: PASSWORD }), "si
 const { data: sessionData } = await db.auth.getSession();
 const token = sessionData.session.access_token;
 
+// --- A sub, with paperwork, paid work, an offer waiting, and their own sign-in -----------------
+// The sub's id is fixed, so its sign-in's stand-in address (sub-<id>@subs.invalid) is known to the
+// browser tests (e2e/support/env.ts).
+const SUB_ID = "5ab00000-0000-4000-8000-000000000001";
+async function seedSub(company) {
+  if (await must(db.from("subcontractors").select("id").eq("id", SUB_ID).maybeSingle(), "demo sub")) return;
+  const day = (offset) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  await must(
+    db.from("subcontractors").insert({
+      id: SUB_ID, company_id: company, name: "Precision Striping LLC", contact_name: "Ray Lines", phone: "(540) 555-0177", email: "ray@precisionstriping.test",
+      trade: "Line striping", tax_classification: "llc_partnership", address: { line1: "41 Depot St", city: "Rocky Mount", region: "VA", postal_code: "24151" },
+    }),
+    "demo sub",
+  );
+  const folder = `${company}/subs/${SUB_ID}`;
+  await must(
+    db.from("sub_documents").insert([
+      { company_id: company, subcontractor_id: SUB_ID, kind: "w9", path: `${folder}/w9.pdf`, file_name: "W-9.pdf", content_type: "application/pdf" },
+      { company_id: company, subcontractor_id: SUB_ID, kind: "liability", path: `${folder}/gl.pdf`, file_name: "COI liability.pdf", content_type: "application/pdf", carrier: "Blue Ridge Mutual", policy_number: "GL-20418", starts_on: day(-65), expires_on: day(300) },
+      { company_id: company, subcontractor_id: SUB_ID, kind: "workers_comp", path: `${folder}/wc.pdf`, file_name: "COI workers comp.pdf", content_type: "application/pdf", carrier: "Blue Ridge Mutual", policy_number: "WC-7731", starts_on: day(-345), expires_on: day(20) },
+    ]),
+    "demo sub's paperwork",
+  );
+  await must(db.from("pay_rates").insert({ company_id: company, subcontractor_id: SUB_ID, basis: "per_job", rate: 1200, description: "Line striping" }), "demo sub's rate");
+  // Their sign-in, as the office's Give a sign-in makes one (services/subAccess.ts): on the stand-in
+  // address, marked as this sub's, with the server's key.
+  const account = await must(
+    admin.auth.admin.createUser({ email: `sub-${SUB_ID}@subs.invalid`, email_confirm: true, user_metadata: { full_name: "Ray Lines" }, app_metadata: { crewtavo_sub: `${company.toLowerCase()}:${SUB_ID}` } }),
+    "demo sub's sign-in",
+  );
+  await must(admin.from("memberships").insert({ company_id: company, user_id: account.user.id, role: "subcontractor", subcontractor_id: SUB_ID, active: true }), "demo sub's membership");
+  // Paid: striping the alleys after the overlay (done already, so agreed and done at once).
+  const visitTitled = async (title) => must(db.from("visits").select("id, job_id").eq("company_id", company).eq("title", title).limit(1).single(), `visit ${title}`);
+  const alleys = await visitTitled("Overlay, block 4 alleys");
+  const paid = await must(db.rpc("job_pay_start", { p_job: alleys.job_id, p_subcontractor: SUB_ID, p_visits: [alleys.id] }), "demo sub's pay");
+  await must(db.rpc("job_pay_accept", { p_pay: paid }), "agree demo sub's pay");
+  await must(db.rpc("job_pay_mark_paid", { p_pays: [paid], p_method: "check", p_paid_on: day(-1), p_reference: "Check #2215" }), "pay the demo sub");
+  // Waiting for their answer: striping Phase 2 after the surface course.
+  const surface = await visitTitled("Surface course, Phase 2");
+  const offer = await must(db.rpc("job_pay_start", { p_job: surface.job_id, p_subcontractor: SUB_ID, p_visits: [surface.id] }), "demo sub's offer");
+  await must(db.rpc("send_sub_offer", { p_pay: offer, p_respond_by: new Date(Date.now() + 2 * 86_400_000).toISOString() }), "send the demo sub's offer");
+}
+
 const existing = await must(db.from("memberships").select("company_id").eq("user_id", ownerId), "memberships");
 if (existing.length) {
+  await seedSub(existing[0].company_id);
   console.log(`Demo company already exists. Sign in as ${EMAIL} / ${PASSWORD}`);
   process.exit(0);
 }
@@ -287,5 +334,7 @@ await must(
   ], DEFAULTS),
   "SOPs",
 );
+
+await seedSub(company);
 
 console.log(`Demo company "Acme Paving" ready. Sign in as ${EMAIL} / ${PASSWORD}`);

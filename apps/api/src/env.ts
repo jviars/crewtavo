@@ -87,10 +87,14 @@ export interface Vars {
   token: string;
   /** Supabase client acting as the signed-in user: RLS applies to everything it does. */
   db: Db;
+  /** The session's app_metadata, which only the server sets (a sub's sign-in carries its mark: isSubLogin). */
+  appMetadata: Record<string, unknown>;
   companyId: string;
   role: Role;
   /** Areas the member's role includes (see packages/core/src/roles.ts). */
   permissions: Permission[];
+  /** For a sub's sign-in (role "subcontractor"): which sub it is. Null for the team. */
+  subcontractorId: string | null;
 }
 
 /** A request to the app gets the settings and, from server.ts, the connection it came in on. */

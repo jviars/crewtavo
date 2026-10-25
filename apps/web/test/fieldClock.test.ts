@@ -1,7 +1,8 @@
 /**
  * A crew member's clock on a visit (fieldActions.setVisitStatus + fieldData.clockVisit): the visit's
  * status is shared and only moves forward, but each person clocks in and out as they tapped, and
- * a tap sent again doesn't add time twice.
+ * a tap sent again doesn't add time twice. A sub without a clock moves the visit along and has no
+ * time at all, as decided when they tapped.
  */
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -9,7 +10,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 // and time_entries rows as the database holds them.
 const STEPS: Record<string, number> = { unscheduled: 0, scheduled: 0, en_route: 1, in_progress: 2, completed: 3 };
 type Entry = { id: number; user_id: string; visit_id: string | null; started_at: string; ended_at: string | null };
-const server = { status: "scheduled", entries: [] as Entry[] };
+const server = { status: "scheduled", entries: [] as Entry[], refuseTime: false };
 
 vi.mock("../src/lib/api", () => {
   const api = {
@@ -27,6 +28,8 @@ vi.mock("../src/lib/api", () => {
       select: () => q,
       update: (values: Record<string, unknown>) => ((update = values), q),
       insert: (values: Omit<Entry, "id" | "ended_at">) => {
+        // The office took a sub off the clock: the database refuses their time.
+        if (server.refuseTime) return Promise.resolve({ data: null, error: new Error('new row violates row-level security policy for table "time_entries"') });
         server.entries.push({ id: server.entries.length + 1, ended_at: null, ...values });
         return Promise.resolve({ data: null, error: null });
       },
@@ -46,13 +49,15 @@ vi.mock("../src/lib/api", () => {
   return { api, supabase: () => ({ from: () => table() }), unwrap: (r: { data: unknown; error: unknown }) => { if (r.error) throw r.error; return r.data; } };
 });
 
-const { setVisitStatus } = await import("../src/features/field/fieldActions");
-const tap = (userId: string, status: string, at: string, place?: { lat: number; lng: number; accuracy: number }) => setVisitStatus({ companyId: "c1", userId, visitId: "v1", jobId: null, status, at, place });
+const { setVisitStatus, statusSaved } = await import("../src/features/field/fieldActions");
+const { statusChange } = await import("../src/features/field/fieldData");
+const tap = (userId: string, status: string, at: string, place?: { lat: number; lng: number; accuracy: number }, clock?: boolean) => setVisitStatus({ companyId: "c1", userId, visitId: "v1", jobId: null, status, at, place, clock });
 const timeOf = (userId: string) => server.entries.filter((e) => e.user_id === userId).map((e) => [e.started_at, e.ended_at]);
 
 beforeEach(() => {
   server.status = "scheduled";
   server.entries = [];
+  server.refuseTime = false;
 });
 
 it("clocks a crewmate in and out even when the visit was finished before their taps arrived", async () => {
@@ -94,3 +99,57 @@ it("saves where the phone was with the clock it starts and stops, even sent late
   expect([drive!.in_place, drive!.out_place]).toEqual([shop, site]);
   expect([visit!.in_place, visit!.out_place]).toEqual([site, after]);
 });
+
+it("doesn't clock a sub in or out when the office doesn't keep their hours, but moves the visit along", async () => {
+  await tap("sub", "en_route", "2026-10-17T12:50:00Z", undefined, false);
+  await tap("sub", "in_progress", "2026-10-17T13:00:00Z", undefined, false);
+  expect(server.status).toBe("in_progress");
+  await tap("sub", "completed", "2026-10-17T16:00:00Z", undefined, false);
+  expect(server.status).toBe("completed");
+  expect(server.entries).toEqual([]);
+});
+
+it("clocks a sub the office keeps hours for, and a tap saved before the flag existed, as before", async () => {
+  await tap("sub", "in_progress", "2026-10-17T13:00:00Z", undefined, true);
+  await tap("sub", "completed", "2026-10-17T15:00:00Z", undefined, true);
+  expect(timeOf("sub")).toEqual([["2026-10-17T13:00:00Z", "2026-10-17T15:00:00Z"]]);
+  await tap("alice", "in_progress", "2026-10-17T13:00:00Z");
+  expect(timeOf("alice")).toEqual([["2026-10-17T13:00:00Z", null]]);
+});
+
+it("doesn't promise a running clock to someone who has none", () => {
+  const change = { companyId: "c1", userId: "sub", visitId: "v1", jobId: null, status: "in_progress", at: "2026-10-17T13:00:00Z" };
+  expect(statusSaved({ skipped: false }, { ...change, clock: false })).toBe("Visit started.");
+  expect(statusSaved({ skipped: false }, { ...change, clock: true })).toBe("Visit started. Your clock is running.");
+  expect(statusSaved({ skipped: false }, change)).toBe("Visit started. Your clock is running.");
+  expect(statusSaved({ skipped: true, visitStatus: "completed" }, { ...change, clock: false })).toBe("This visit had already moved on.");
+  expect(statusSaved({ skipped: true, visitStatus: "cancelled" }, { ...change, clock: false })).toBe("The office cancelled this visit.");
+});
+
+it("decides at the tap whether it clocks, and only then asks the phone where it is", () => {
+  const at = "2026-10-17T13:00:00Z";
+  const visit = { id: "v1", jobId: "j1" };
+  const person = (role: string, extra: object = {}, settings: Record<string, unknown> = {}) => ({ role, userId: "u1", subcontractor: null, company: { id: "c1", settings }, ...extra }) as never;
+  const sub = (uses_clock: boolean) => person("subcontractor", { subcontractor: { id: "s1", name: "Apex", can_contact_clients: false, uses_clock } });
+  expect(statusChange(sub(false), visit, "in_progress", at)).toEqual({
+    change: { companyId: "c1", userId: "u1", visitId: "v1", jobId: "j1", status: "in_progress", at, clock: false, sub: true },
+    locate: false,
+  });
+  expect(statusChange(sub(true), visit, "completed", at)).toMatchObject({ change: { clock: true, sub: true }, locate: true });
+  const crew = statusChange(person("field_crew"), visit, "in_progress", at);
+  expect(crew).toMatchObject({ change: { clock: true }, locate: true });
+  expect(crew.change).not.toHaveProperty("sub");
+  expect(statusChange(person("field_crew"), visit, "en_route", at).locate).toBe(false);
+  expect(statusChange(person("field_crew", {}, { clock: { record_location: false } }), visit, "in_progress", at).locate).toBe(false);
+});
+
+it("moves a sub's visit along when the office turned their clock off after the phone last heard, without clocking", async () => {
+  server.refuseTime = true;
+  const result = await setVisitStatus({ companyId: "c1", userId: "al", visitId: "v1", jobId: null, status: "in_progress", at: "2026-10-17T13:00:00Z", clock: true, sub: true });
+  expect(result).toEqual({ skipped: false, visitStatus: "in_progress", clockOff: true });
+  expect(server.status).toBe("in_progress");
+  expect(statusSaved(result, { companyId: "c1", userId: "al", visitId: "v1", jobId: null, status: "in_progress", at: "", clock: true, sub: true })).toBe("Visit started.");
+  // The team's clock refused is a real problem, shown as one.
+  await expect(tap("alice", "in_progress", "2026-10-17T13:05:00Z")).rejects.toThrow(/row-level security/);
+});
+

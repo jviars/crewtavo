@@ -4,7 +4,7 @@ import { RouteError } from "@/components/shell/RouteError";
 import { OAuthConsentPage } from "@/features/auth/OAuthConsentPage";
 import { HomePage } from "@/features/home/HomePage";
 import { NotFound } from "@/features/placeholder/ScreenPlaceholder";
-import { SessionProvider } from "@/lib/session";
+import { isSub, SessionProvider, useSession } from "@/lib/session";
 
 type Loader = () => Promise<Record<string, unknown>>;
 
@@ -23,6 +23,8 @@ const screens = {
   metrics: () => import("@/features/metrics/MetricsPage"),
   field: () => import("@/features/field/FieldTodayPage"),
   fieldVisit: () => import("@/features/field/FieldVisitPage"),
+  myPaperwork: () => import("@/features/field/MyPaperworkPage"),
+  myJobs: () => import("@/features/field/MyJobsPage"),
   kb: () => import("@/features/kb/KnowledgeBasePage"),
   sop: () => import("@/features/kb/SopPage"),
   sopEditor: () => import("@/features/kb/SopEditorPage"),
@@ -52,6 +54,9 @@ const screens = {
   rule: () => import("@/features/automations/RulePage"),
   equipment: () => import("@/features/equipment/EquipmentPage"),
   equipmentItem: () => import("@/features/equipment/EquipmentDetailPage"),
+  subs: () => import("@/features/subs/SubsPage"),
+  sub: () => import("@/features/subs/SubPage"),
+  subReports: () => import("@/features/subs/SubReportsPage"),
 } satisfies Record<string, Loader>;
 
 /** The measuring tool pulls in map libraries, so it's only fetched when opened. */
@@ -61,6 +66,12 @@ const measure = () => import("@/features/measure/MeasurePage");
 function Moved({ to }: { to: string }) {
   const { search, hash } = useLocation();
   return <Navigate to={{ pathname: to, search, hash }} replace />;
+}
+
+/** Signed-in screens outside the app's navigation are the team's: a sub opening one goes to My day. */
+function TeamOnly() {
+  const session = useSession();
+  return isSub(session) ? <Navigate to="/field" replace /> : <Outlet />;
 }
 
 const page = (load: Loader, name: string): Pick<RouteObject, "lazy"> => ({
@@ -108,6 +119,11 @@ export const routes: RouteObject[] = [
           { path: "reports", element: <Moved to="/finance" /> },
           { path: "field", ...page(screens.field, "FieldTodayPage") },
           { path: "field/visits/:id", ...page(screens.fieldVisit, "FieldVisitPage") },
+          // A sub's own paperwork (reminders link here).
+          { path: "field/paperwork", ...page(screens.myPaperwork, "MyPaperworkPage") },
+          // A sub's job offers and work (offers' texts and notifications link to /field/jobs/<pay id>).
+          { path: "field/jobs", ...page(screens.myJobs, "MyJobsPage") },
+          { path: "field/jobs/:payId", ...page(screens.myJobs, "MyJobsPage") },
           { path: "measure", ...page(measure, "MeasurePage") },
           { path: "kb", ...page(screens.kb, "KnowledgeBasePage") },
           { path: "kb/new", ...page(screens.sopEditor, "SopEditorPage") },
@@ -137,6 +153,10 @@ export const routes: RouteObject[] = [
           { path: "automations/:id", ...page(screens.rule, "RulePage") },
           { path: "equipment", ...page(screens.equipment, "EquipmentPage") },
           { path: "equipment/:id", ...page(screens.equipmentItem, "EquipmentDetailPage") },
+          { path: "subs", ...page(screens.subs, "SubsPage") },
+          { path: "subs/1099", ...page(screens.subReports, "YearEndPage") },
+          { path: "subs/workers-comp", ...page(screens.subReports, "WorkersCompPage") },
+          { path: "subs/:id", ...page(screens.sub, "SubPage") },
           { path: "*", element: <NotFound /> },
         ],
       },
@@ -147,7 +167,7 @@ export const routes: RouteObject[] = [
     errorElement: <RouteError fullPage />,
     element: (
       <SessionProvider>
-        <Outlet />
+        <TeamOnly />
       </SessionProvider>
     ),
     children: [
@@ -171,5 +191,7 @@ export const routes: RouteObject[] = [
   { path: "book/:company/:form", errorElement: <RouteError fullPage />, ...page(() => import("@/features/booking/BookingFormPage"), "BookingFormPage") },
   { path: "u/:token", errorElement: <RouteError fullPage />, ...page(() => import("@/features/public/UnsubscribePage"), "UnsubscribePage") },
   { path: "refer/:token", errorElement: <RouteError fullPage />, ...page(() => import("@/features/public/ReferralPage"), "ReferralPage") },
+  // A subcontractor's link to send in their W-9 and insurance.
+  { path: "paperwork/:token", errorElement: <RouteError fullPage />, ...page(() => import("@/features/public/PaperworkPage"), "PaperworkPage") },
   { path: "license", errorElement: <RouteError fullPage />, ...page(() => import("@/features/public/LicensePage"), "LicensePage") },
 ];

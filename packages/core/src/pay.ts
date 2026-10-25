@@ -1,7 +1,8 @@
 /**
  * Time entries and pay: checking an entry before it's saved (Timesheets and AI assistants' time
- * tools), and a pay period's summary for each person (Timesheets → Pay and the pay tools). Crewtavo
- * doesn't pay anyone; the summary is what the business pays through its own payroll.
+ * tools), and a pay period's summary for each person, hourly and piece pay (Timesheets → Pay and the
+ * pay tools). Crewtavo doesn't pay anyone; the summary is what the business pays through its own
+ * payroll.
  */
 import { isUnpaidBreak, type BreakPay } from "./breaks";
 import { addDays, localDate, parseZonedTime } from "./time";
@@ -36,18 +37,31 @@ export const mondayOf = (date: string) => addDays(date, -((new Date(`${date}T12:
 
 export interface PayEntry { id: string; user_id: string; started_at: string; ended_at: string | null; category: string; approved_at: string | null }
 
+/** A team member's job pay in a period (per square, per job, per day): done and earned on a day in it, or paid with it. */
+export interface PiecePay { user_id: string; total: number | string }
+
+/** With piece pay in a period: overtime on it is the payroll service's to work out. */
+export const PIECE_OVERTIME_NOTE =
+  "Hours over 40 in a week are flagged for your payroll service. With piece pay, overtime is worked out from total pay and hours, which your payroll service does.";
+
 /**
  * Each person's pay for a period: approved hours, with breaks paid as the company pays them
- * (`breaks`, settings.clock.breaks; unpaid ones are shown as break_hours), the amount at the rate
- * each entry is costed at, hours over 40 in a week (flagged for the payroll service; the amount is
- * at straight time), and what's not approved or still running.
+ * (`breaks`, settings.clock.breaks; unpaid ones are shown as break_hours), the hourly amount at the
+ * rate each entry is costed at, their piece pay (`piece`: job pay done in the period), the amount
+ * (hourly and piece together), hours over 40 in a week (flagged for the payroll service; the amount
+ * is at straight time), and what's not approved or still running.
  */
-export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntry) => number, nameOf: (userId: string) => string, timeZone: string, breaks: BreakPay) {
+export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntry) => number, nameOf: (userId: string) => string, timeZone: string, breaks: BreakPay, piece: readonly PiecePay[] = []) {
   const h = (ms: number) => ms / 3_600_000;
-  const people = new Map<string, { user_id: string; name: string; hours: number; break_hours: number; overtime_hours: number; amount: number; unapproved_hours: number; running: boolean; weeks: Map<string, number> }>();
+  const people = new Map<string, { user_id: string; name: string; hours: number; break_hours: number; overtime_hours: number; amount: number; piece: number; unapproved_hours: number; running: boolean; weeks: Map<string, number> }>();
+  const rowOf = (userId: string) => {
+    const row = people.get(userId) ?? { user_id: userId, name: nameOf(userId), hours: 0, break_hours: 0, overtime_hours: 0, amount: 0, piece: 0, unapproved_hours: 0, running: false, weeks: new Map() };
+    people.set(userId, row);
+    return row;
+  };
+  for (const p of piece) rowOf(p.user_id).piece += Number(p.total);
   for (const e of entries) {
-    const row = people.get(e.user_id) ?? { user_id: e.user_id, name: nameOf(e.user_id), hours: 0, break_hours: 0, overtime_hours: 0, amount: 0, unapproved_hours: 0, running: false, weeks: new Map() };
-    people.set(e.user_id, row);
+    const row = rowOf(e.user_id);
     if (!e.ended_at) {
       row.running = true;
       continue;
@@ -67,20 +81,27 @@ export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntr
     row.weeks.set(week, (row.weeks.get(week) ?? 0) + hours);
   }
   const round = (n: number) => Math.round(n * 100) / 100;
-  const lines = [...people.values()].map(({ weeks, ...p }) => ({
+  const lines = [...people.values()].map(({ weeks, piece: pieceAmount, ...p }) => ({
     ...p,
     hours: round(p.hours),
     break_hours: round(p.break_hours),
     overtime_hours: round([...weeks.values()].reduce((s, w) => s + Math.max(0, w - 40), 0)),
-    amount: round(p.amount),
+    hourly_amount: round(p.amount),
+    piece_amount: round(pieceAmount),
+    amount: round(round(p.amount) + round(pieceAmount)),
     unapproved_hours: round(p.unapproved_hours),
   }));
+  const pieceAmount = round(lines.reduce((s, l) => s + l.piece_amount, 0));
   return {
     people: lines.sort((a, b) => a.name.localeCompare(b.name)),
     hours: round(lines.reduce((s, l) => s + l.hours, 0)),
+    hourly_amount: round(lines.reduce((s, l) => s + l.hourly_amount, 0)),
+    piece_amount: pieceAmount,
     amount: round(lines.reduce((s, l) => s + l.amount, 0)),
     overtime_hours: round(lines.reduce((s, l) => s + l.overtime_hours, 0)),
     unapproved_hours: round(lines.reduce((s, l) => s + l.unapproved_hours, 0)),
     running_clocks: lines.filter((l) => l.running).length,
+    /** PIECE_OVERTIME_NOTE when anyone has piece pay in the period. */
+    overtime_note: pieceAmount > 0 ? PIECE_OVERTIME_NOTE : null,
   };
 }

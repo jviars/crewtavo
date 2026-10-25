@@ -1,8 +1,9 @@
 /**
  * Timesheets → Pay: each person's approved hours and pay for a period (breaks aren't paid; hours
- * over 40 in a week are counted for the payroll service), and marking them paid once the business
- * has paid them through its own payroll or bank. Crewtavo moves no money. The same work as AI
- * assistants' pay tools (apps/api/src/services/pay.ts).
+ * over 40 in a week are counted for the payroll service), their piece pay (per square, per job or
+ * per day, from work done on jobs in it), and marking them paid once the business has paid them
+ * through its own payroll or bank. Crewtavo moves no money. The same work as AI assistants' pay
+ * tools (apps/api/src/services/pay.ts).
  */
 import { breakPay, SHORT_BREAK_MINUTES, type BreakPay } from "@crewtavo/core/breaks";
 import { mondayOf } from "@crewtavo/core/pay";
@@ -17,12 +18,12 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
+import { addDaysIso, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { owedFor, PAY_COLUMNS, payRows, pieceJobs, waitingFor, type PayPerson } from "./payCsv";
 
-interface Paid { paid_amount: number | null; method: string | null; reference: string | null; paid_at: string | null }
-interface PersonPay { user_id: string; name: string; hours: number; break_hours: number; overtime_hours: number; amount: number; unapproved_hours: number; running: boolean; paid: Paid | null }
-interface Summary { from: string; to: string; period_id: string | null; status: string; people: PersonPay[]; hours: number; amount: number; overtime_hours: number; unapproved_hours: number; running_clocks: number }
+type PersonPay = PayPerson;
+interface Summary { from: string; to: string; period_id: string | null; status: string; people: PersonPay[]; hours: number; hourly_amount: number; piece_amount: number; amount: number; overtime_hours: number; overtime_note: string | null; unapproved_hours: number; running_clocks: number }
 interface Period { id: string; starts_on: string; ends_on: string; status: string; paid_total: number; lines: Array<{ user_id: string; name: string }> }
 
 /** How the company pays breaks (Settings → Company), as the note under a period says it. */
@@ -71,20 +72,11 @@ export function PayPeriods() {
   });
 
   const d = summary.data;
-  const waiting = d ? d.people.filter((p) => p.hours > 0 && (p.unapproved_hours > 0 || p.running)) : [];
-  const unpaid = d ? d.people.filter((p) => p.hours > 0 && !p.paid) : [];
-  const exportCsv = () =>
-    d &&
-    downloadCsv(
-      `pay-${d.from}-to-${d.to}.csv`,
-      toCsv(
-        d.people.map((p) => ({ person: p.name, hours: p.hours.toFixed(2), overtime: p.overtime_hours.toFixed(2), breaks: p.break_hours.toFixed(2), amount: p.amount.toFixed(2), paid: p.paid?.paid_amount?.toFixed(2) ?? "", method: methodLabel(p.paid?.method ?? null), reference: p.paid?.reference ?? "", not_approved: p.unapproved_hours.toFixed(2) })),
-        [
-          { key: "person", label: "Person" }, { key: "hours", label: "Approved hours" }, { key: "overtime", label: "Hours over 40 a week" }, { key: "breaks", label: "Breaks (unpaid)" },
-          { key: "amount", label: "Pay at their rate" }, { key: "paid", label: "Paid" }, { key: "method", label: "How" }, { key: "reference", label: "Reference" }, { key: "not_approved", label: "Hours not approved" },
-        ],
-      ),
-    );
+  const unpaid = d ? d.people.filter((p) => owedFor(p) && !p.paid) : [];
+  // Marking paid is refused while anyone it marks has time not approved (piece pay alone included).
+  const waiting = waitingFor(unpaid);
+  const piece = (d?.piece_amount ?? 0) > 0;
+  const exportCsv = () => d && downloadCsv(`pay-${d.from}-to-${d.to}.csv`, toCsv(payRows(d.people, methodLabel), [...PAY_COLUMNS]));
 
   return (
     <div className="stack">
@@ -103,12 +95,12 @@ export function PayPeriods() {
 
       {summary.isPending && <Loading><CardSkeleton lines={5} /></Loading>}
       {summary.error && <div className="card"><ErrorState error={summary.error} onRetry={() => summary.refetch()} /></div>}
-      {d && !d.people.length && <div className="card"><EmptyState icon="clock" title="No time in this period" /></div>}
+      {d && !d.people.length && <div className="card"><EmptyState icon="clock" title="No time or piece pay in this period" /></div>}
       {d && d.people.length > 0 && (
         <section className="card">
           <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
             <strong className="grow">{dayLabel(d.from)} – {dayLabel(d.to)}</strong>
-            <span className="tabular"><strong>{d.hours.toFixed(2)}</strong> h · <strong>{formatMoney(d.amount)}</strong></span>
+            <span className="tabular"><strong>{d.hours.toFixed(2)}</strong> h{piece ? <> · <strong>{formatMoney(d.piece_amount)}</strong> piece</> : null} · <strong>{formatMoney(d.amount)}</strong></span>
             {d.overtime_hours > 0 && <span className="chip chip-amber">{d.overtime_hours.toFixed(1)} h over 40</span>}
             <Button size="sm" icon="download" onClick={exportCsv}>Download</Button>
             {unpaid.length > 0 && <Button size="sm" variant="primary" icon="check" disabled={waiting.length > 0} onClick={() => setMarking(true)}>Mark paid</Button>}
@@ -123,21 +115,32 @@ export function PayPeriods() {
           )}
           {d.people.map((p) => (
             <div key={p.user_id} className="card-row" style={{ flexWrap: "wrap" }}>
-              <strong className="grow" style={{ minWidth: 140 }}>{p.name}</strong>
+              <span className="grow" style={{ minWidth: 140 }}>
+                <strong>{p.name}</strong>
+                {p.piece.length > 0 && <span className="muted small" style={{ display: "block" }}>{pieceJobs(p, formatMoneyCents)}</span>}
+              </span>
               <span className="tabular">{p.hours.toFixed(2)} h</span>
               {p.overtime_hours > 0 && <span className="muted small tabular">{p.overtime_hours.toFixed(1)} over 40</span>}
               {p.break_hours > 0 && <span className="muted small tabular">{p.break_hours.toFixed(1)} h unpaid breaks</span>}
+              {piece && (
+                <span className="muted small tabular" style={{ minWidth: 150, textAlign: "right" }}>
+                  {formatMoney(p.hourly_amount)} hourly · {p.piece_amount > 0 ? `${formatMoney(p.piece_amount)} piece pay` : "no piece pay"}
+                </span>
+              )}
               <span className="tabular strong" style={{ minWidth: 90, textAlign: "right" }}>{formatMoney(p.amount)}</span>
               {p.paid ? (
                 <span title={[methodLabel(p.paid.method), p.paid.reference].filter(Boolean).join(" · ")}><StatusPill label={`Paid ${formatMoney(p.paid.paid_amount)}`} tone="good" /></span>
               ) : p.unapproved_hours > 0 || p.running ? (
                 <StatusPill label={p.running ? "Clock running" : `${p.unapproved_hours.toFixed(1)} h to approve`} tone="warning" />
-              ) : p.hours > 0 ? (
+              ) : owedFor(p) ? (
                 <StatusPill label="Not paid yet" tone="muted" />
               ) : null}
             </div>
           ))}
-          <p className="muted small" style={{ margin: 12 }}>Approved time at each person's pay rate. {BREAK_RULE[breakPay(session.company.settings)]} Hours over 40 in a week are shown for your payroll service; the amounts here are at straight time.</p>
+          <p className="muted small" style={{ margin: 12 }}>
+            Approved time at each person's pay rate{piece ? ", plus piece pay for work done on jobs in this period" : ""}. {BREAK_RULE[breakPay(session.company.settings)]}{" "}
+            {d.overtime_note ?? "Hours over 40 in a week are shown for your payroll service; the amounts here are at straight time."}
+          </p>
         </section>
       )}
 
@@ -174,7 +177,7 @@ function MarkPaidDialog({ summary, people, onClose, onSaved }: { summary: Summar
     },
   });
   return (
-    <Dialog open onClose={onClose} title="Mark paid" description={`${people.length} ${people.length === 1 ? "person" : "people"}, ${formatMoney(total)}. Record this after you've paid them: Crewtavo doesn't send money. Their time in this period is then locked.`}>
+    <Dialog open onClose={onClose} title="Mark paid" description={`${people.length} ${people.length === 1 ? "person" : "people"}, ${formatMoney(total)}. Record this after you've paid them: Crewtavo doesn't send money. Their time and piece pay in this period are then locked.`}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <Field label="How they were paid">
           <select className="select" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>

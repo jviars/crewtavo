@@ -2,6 +2,7 @@
  * Consent screen for Supabase's OAuth 2.1 server, shown when Claude, ChatGPT or another MCP client
  * asks to connect. Configure this path (/oauth/consent) under Authentication > OAuth Server. A new
  * connection only reads until the person chooses what it can change (Settings → AI assistants).
+ * A sub's sign-in can't connect one (the server refuses it too).
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -11,16 +12,21 @@ import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
 import { supabase } from "@/lib/api";
+import { onlySubs, useSessionIfAny } from "@/lib/session";
 import { authMessage, AuthLayout } from "./LoginPage";
 import styles from "./auth.module.css";
 
 const CAN = ["Clients, requests, quotes and jobs", "Schedule", "Knowledge base"];
+const NO_ASSISTANTS_FOR_SUBS = "AI assistants are for a business's own team. A subcontractor's sign-in can't use one.";
 
 export function OAuthConsentPage() {
   const [params] = useSearchParams();
   const authorizationId = params.get("authorization_id");
   const [busy, setBusy] = useState<null | "allow" | "deny">(null);
   const [error, setError] = useState<string | null>(null);
+  // Someone whose every sign-in is a sub's.
+  const session = useSessionIfAny();
+  const onlySub = onlySubs(session?.companies);
 
   const details = useQuery({
     queryKey: ["oauth-consent", authorizationId],
@@ -60,6 +66,13 @@ export function OAuthConsentPage() {
   );
 
   if (!authorizationId) return shell(<EmptyState icon="link" title="This link is incomplete" />);
+  if (onlySub) {
+    return shell(
+      <EmptyState icon="lock" title="Can't connect an AI assistant" action={<Button loading={busy === "deny"} disabled={busy !== null} onClick={() => decide(false)}>Go back</Button>}>
+        {error ?? NO_ASSISTANTS_FOR_SUBS}
+      </EmptyState>,
+    );
+  }
   if (details.error) return shell(<EmptyState icon="alert" title="This request can't be used" action={<Button onClick={() => details.refetch()} icon="refresh">Try again</Button>}>{(details.error as Error).message}</EmptyState>);
   if (details.isPending || !details.data || !("client" in details.data))
     return shell(

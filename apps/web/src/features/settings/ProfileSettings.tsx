@@ -1,3 +1,4 @@
+import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -6,9 +7,10 @@ import { Face } from "@/components/ui/Avatar";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { MapsAppSetting } from "@/components/ui/MapsLink";
 import { api, supabase } from "@/lib/api";
-import { can, hasRole, useSession } from "@/lib/session";
+import { can, hasRole, isSub, useSession } from "@/lib/session";
 import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
 import { toast } from "@/lib/toast";
+import { signingInNote, subCodeWays } from "../auth/textCode";
 import { MeasureMapSetting } from "../measure/ImageryPicker";
 import { CalendarFeedCard } from "./CalendarFeedCard";
 import { NotificationSettings } from "./NotificationSettings";
@@ -22,6 +24,11 @@ export function ProfileSettings() {
   const session = useSession();
   // People who sign estimates for the business keep their signature here.
   const signs = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
+  // A sub has no schedule color or calendar feed. On a sign-in Crewtavo made for them, they sign in
+  // with a link or a code and stay signed in (no password); someone's own account keeps its password.
+  const sub = isSub(session);
+  const madeForSub = sub && session.subcontractor?.own_sign_in !== false;
+  const email = isPlaceholderEmail(session.profile.email) ? null : session.profile.email;
   const [name, setName] = useState(session.profile.full_name);
   const [phone, setPhone] = useState(session.profile.phone ?? "");
   const [color, setColor] = useState(session.profile.color ?? COLORS[0]);
@@ -31,6 +38,7 @@ export function ProfileSettings() {
     meta: { inline: true, success: "Profile saved" },
     mutationFn: async () => {
       await api.patch("/me", { full_name: name.trim(), phone: phone.trim() || null });
+      if (sub) return;
       const { error } = await supabase().from("profiles").update({ color }).eq("user_id", session.userId);
       if (error) throw new Error(error.message);
     },
@@ -54,27 +62,29 @@ export function ProfileSettings() {
     <div className="two-col">
       <form className="wide card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="row" style={{ gap: 14 }}>
-          <span className="avatar" style={{ width: 72, height: 72, fontSize: 26, background: color }}><Face name={name || session.profile.email} photo={session.profile.avatar_url} /></span>
+          <span className="avatar" style={{ width: 72, height: 72, fontSize: 26, background: color }}><Face name={name || email} photo={session.profile.avatar_url} /></span>
           <div className="stack-sm" style={{ gap: 8 }}>
             <div>
               <strong style={{ fontSize: 16 }}>{name || "Your name"}</strong>
-              <div className="muted small">{session.profile.email}</div>
+              {email && <div className="muted small">{email}</div>}
             </div>
             <PhotoButtons userId={session.userId} photo={session.profile.avatar_url} />
           </div>
         </div>
         <div className="form-grid">
           <Field label="Full name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoComplete="name" /></Field>
-          <Field label="Mobile phone" optional><input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={40} autoComplete="tel" /></Field>
+          <Field label="Mobile phone" optional hint={madeForSub ? `Texts about your jobs go here. Leave it empty to get them at the number ${session.company.name} has for you.` : undefined}>
+            <input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={40} autoComplete="tel" />
+          </Field>
         </div>
-        <div className="field">
+        {!sub && <div className="field">
           <span>Color on the schedule</span>
           <div className="row wrap" style={{ gap: 8 }}>
             {COLORS.map((c) => (
               <button key={c} type="button" aria-label={`Color ${c}`} aria-pressed={color === c} onClick={() => setColor(c)} style={{ width: 30, height: 30, borderRadius: "50%", background: c, border: color === c ? "3px solid var(--surface)" : "0", boxShadow: color === c ? `0 0 0 2px ${c}` : "none", cursor: "pointer", transition: "box-shadow 150ms" }} />
             ))}
           </div>
-        </div>
+        </div>}
         <FormError error={save.error} />
         <div className="form-actions"><Button type="submit" variant="primary" loading={save.isPending} disabled={!name.trim()}>Save profile</Button></div>
       </form>
@@ -83,16 +93,22 @@ export function ProfileSettings() {
       <NotificationSettings phone={session.profile.phone} />
       <Appearance />
       <MapsAppSetting />
-      <MeasureMapSetting />
-      <CalendarFeedCard />
+      {!sub && <MeasureMapSetting />}
+      {!sub && <CalendarFeedCard />}
       <SpareKeysCard />
-      <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>
+      {madeForSub && (
+        <div className="card card-pad stack-sm">
+          <strong>Signing in</strong>
+          <span className="muted small">{signingInNote(session.company.name, subCodeWays(session.config.features, session.subcontractor))}</span>
+        </div>
+      )}
+      {!madeForSub && <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>
         <strong>Change password</strong>
         <Field label="New password" hint="At least 8 characters."><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} /></Field>
         <Field label="Confirm new password" error={confirmPw && password !== confirmPw ? "Doesn't match" : null}><input className="input" type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} autoComplete="new-password" /></Field>
         <FormError error={changePassword.error} />
         <Button type="submit" loading={changePassword.isPending} disabled={!password || !confirmPw} style={{ justifySelf: "start" }}>Change password</Button>
-      </form>
+      </form>}
       </div>
     </div>
   );
