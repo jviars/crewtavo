@@ -429,7 +429,7 @@ function Parties({ data, level }: { data: DocumentData; level: number }) {
 function LineRow({ line, cut }: { line: DocumentLine; cut?: PaperPart }) {
   const [name, description] = cut ? cut.words.map((w, i) => wordsOf(i ? line.description ?? "" : line.name, w)) : [line.name, line.description];
   return (
-    <tr data-carried={flag(cut?.carried)} data-carries={flag(cut?.carries)}>
+    <tr data-carried={flag(cut?.carried)} data-carries={flag(cut?.carries)} data-mark={line.mark}>
       <td>
         {(!cut || name) && <span data-split={flag(!cut)}>{name}</span>}
         {description && <span className={styles.lineDescription} data-split={flag(!cut)}>{description}</span>}

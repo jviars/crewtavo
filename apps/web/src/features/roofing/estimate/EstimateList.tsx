@@ -18,7 +18,7 @@ import { formatNumber } from "@/lib/format";
 import { takeoffVariables, type TakeoffRow } from "../../paving/data";
 import type { EstimateEditor } from "./data";
 import { counts, destinationText, estimateRows, isPendingLine, lineDestination, money, ownServices, quickAddPrice, searchServices, serviceDetail, type EstimateRow, type LinePlace, type RowTag } from "./rows";
-import type { EstimateQuote, EstimateService, QuickAddService } from "./types";
+import type { EstimateLine, EstimateQuote, EstimateService, QuickAddService } from "./types";
 import styles from "./estimate.module.css";
 
 const TAGS: Record<RowTag, string> = { added: "Added", changed: "Changed", removed: "Taken off" };
@@ -40,6 +40,8 @@ export interface EstimateListProps {
   takeoff?: TakeoffRow | null;
   /** On an estimate with options: the option looked at, its tier word or name, and its own services (rows.ts packageServices). */
   view?: EstimateView | null;
+  /** Tapping a line opens it to change by hand (its quantity, price and words); without it, only − and +. */
+  onEdit?: (line: EstimateLine) => void;
 }
 
 /** The option an estimate list shows, with the shared lines. */
@@ -59,7 +61,7 @@ export interface EstimateView {
 
 const NO_SERVICES: ReadonlySet<string> = new Set();
 
-export function EstimateList({ quote, changes, size = "regular", editable, editor, quickAdds = [], services, takeoff, view }: EstimateListProps) {
+export function EstimateList({ quote, changes, size = "regular", editable, editor, quickAdds = [], services, takeoff, view, onEdit }: EstimateListProps) {
   const canEdit = editable && Boolean(editor);
   const optionId = view?.optionId ?? null;
   const [place, setPlace] = useState<LinePlace | null>(null);
@@ -97,8 +99,8 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
         </span>
       )}
       {!roof.length && !other.length && <p className={styles.empty}>Nothing on the estimate yet.{canEdit ? " Add something below." : ""}</p>}
-      {roof.length > 0 && <Section title={roofTitle} rows={roof} canEdit={canEdit} editor={editor} />}
-      {other.length > 0 && <Section title="Everything else" rows={other} canEdit={canEdit} editor={editor} />}
+      {roof.length > 0 && <Section title={roofTitle} rows={roof} canEdit={canEdit} editor={editor} onEdit={onEdit} />}
+      {other.length > 0 && <Section title="Everything else" rows={other} canEdit={canEdit} editor={editor} onEdit={onEdit} />}
 
       {canEdit && editor && (
         <div className={styles.add}>
@@ -147,33 +149,42 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
   );
 }
 
-function Section({ title, rows, canEdit, editor }: { title: string; rows: EstimateRow[]; canEdit: boolean; editor?: EstimateEditor | null }) {
+function Section({ title, rows, canEdit, editor, onEdit }: { title: string; rows: EstimateRow[]; canEdit: boolean; editor?: EstimateEditor | null; onEdit?: (line: EstimateLine) => void }) {
   const id = useId();
   return (
     <section className={styles.section} aria-labelledby={id}>
       <h3 id={id} className={styles.sectionTitle}>{title}</h3>
       <ul className={styles.rows}>
-        {rows.map((row) => <Row key={row.key} row={row} editor={canEdit ? editor : null} />)}
+        {rows.map((row) => <Row key={row.key} row={row} editor={canEdit ? editor : null} onEdit={canEdit ? onEdit : undefined} />)}
       </ul>
     </section>
   );
 }
 
-function Row({ row, editor }: { row: EstimateRow; editor?: EstimateEditor | null }) {
+function Row({ row, editor, onEdit }: { row: EstimateRow; editor?: EstimateEditor | null; onEdit?: (line: EstimateLine) => void }) {
   const removed = row.tag === "removed";
   const line = row.line;
   // Still saving (just put back or added): its buttons work once it's saved.
   const saving = Boolean(line && isPendingLine(line));
-  return (
-    <li className={styles.row} data-removed={removed || undefined}>
-      <span className={styles.what}>
-        <span className={styles.nameLine}>
-          <span className={styles.name}>{row.name}</span>
-          {row.tag && <span className={styles.tag} data-tag={row.tag}>{TAGS[row.tag]}</span>}
-          {row.shared && <span className={styles.tag} data-tag="shared">On every option</span>}
-        </span>
-        {row.detail && <span className={styles.detail}>{row.detail}</span>}
+  const what = (
+    <>
+      <span className={styles.nameLine}>
+        <span className={styles.name}>{row.name}</span>
+        {row.tag && <span className={styles.tag} data-tag={row.tag}>{TAGS[row.tag]}</span>}
+        {row.shared && <span className={styles.tag} data-tag="shared">On every option</span>}
       </span>
+      {row.detail && <span className={styles.detail}>{row.detail}</span>}
+    </>
+  );
+  return (
+    <li className={styles.row} data-removed={removed || undefined} data-line={row.key}>
+      {onEdit && line && !removed ? (
+        <button type="button" className={`${styles.what} ${styles.whatButton}`} disabled={saving} aria-label={`Change ${row.name}`} onClick={() => onEdit(line)}>
+          {what}
+        </button>
+      ) : (
+        <span className={styles.what}>{what}</span>
+      )}
       <span className={styles.controls}>
         {editor && line && row.less && (
           <button type="button" className={styles.round} aria-label={row.lessLabel} disabled={saving} onClick={() => editor.dec(line)}>

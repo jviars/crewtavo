@@ -322,6 +322,8 @@ export interface DocumentQuoteLine {
   /** A price set on site has none (core isSiteAdjustment); the Client Hub doesn't send them. */
   service_id?: string | null;
   formula?: string | null;
+  /** Printed as the line's mark (DocumentLine.mark), for a screen that shows which line just changed. */
+  mark?: string;
 }
 
 /**
@@ -400,7 +402,7 @@ export function documentLines(lines: readonly DocumentQuoteLine[], shownOptionId
       Object.assign(last, { unit_price: sum, total: sum, description: last.description ?? (line.description?.trim() || null) });
       return;
     }
-    printed.push({ name: line.name, description: line.description?.trim() || null, quantity: Number(line.quantity ?? 0), unit: line.unit, unit_price: Number(line.unit_price ?? 0), total });
+    printed.push({ name: line.name, description: line.description?.trim() || null, quantity: Number(line.quantity ?? 0), unit: line.unit, unit_price: Number(line.unit_price ?? 0), total, ...(line.mark ? { mark: line.mark } : {}) });
   });
   return printed;
 }

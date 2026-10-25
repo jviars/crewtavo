@@ -16,6 +16,16 @@
 .list[data-size="large"] .row { grid-template-columns: minmax(0, 1fr) auto 100px; gap: 14px; min-height: 64px; }
 .what { display: grid; gap: 2px; min-width: 0; }
 .list[data-size="large"] .what { gap: 3px; }
+/* A line that opens to change by hand: the whole name and detail is the button. */
+.whatButton {
+  justify-items: start; min-height: 44px; margin: -6px -8px; padding: 6px 8px; border: 0; border-radius: 10px; background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer; touch-action: manipulation;
+  transition: background var(--dur-fast);
+}
+.whatButton:hover:not(:disabled) { background: var(--fill-2); }
+.whatButton:active:not(:disabled) { background: var(--fill-3); }
+.whatButton:focus-visible { outline: none; box-shadow: var(--ring); }
+.whatButton:disabled { cursor: progress; }
 .nameLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .name { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .list[data-size="large"] .name { font-size: 16.5px; }

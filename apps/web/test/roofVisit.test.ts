@@ -20,6 +20,7 @@ import {
   rangeNote,
   rangeWords,
   readKeptPrice,
+  readQuantity,
   readSigningOutcome,
   roofFacts,
   roundDown,
@@ -29,10 +30,13 @@ import {
   signedCopies,
   signedSentence,
   signedWhen,
+  sitePriced,
   totalsAt,
   visitChanges,
 } from "../src/features/roofing/visit/price";
 import { checkSigningAgain, paperContract } from "../src/features/roofing/visit/data";
+import { pictureFor } from "../src/features/roofing/visit/pictures";
+import { documentLines } from "../src/features/documents/build";
 
 let n = 0;
 const line = (patch: Partial<EstimateLine>): EstimateLine => ({
@@ -421,6 +425,19 @@ describe("the price on site, with options", () => {
     expect(optionTotals(again, "good", "good", money(converted))).toEqual(stored);
   });
 
+  it("shows the paper beside the visit with the price adjustment lines the server will book, on the option chosen", () => {
+    const q = offered({ discount_amount: 500 });
+    const adjustments = (ls: ReadonlyArray<{ name: string; option_id: string | null; unit_price: number; taxable: boolean }>) =>
+      ls.filter((l) => l.name === SITE_ADJUSTMENT_NAME).map((l) => [l.option_id, l.unit_price, l.taxable]);
+    for (const price of [15000, 16500]) {
+      const paper = sitePriced(q, price);
+      expect(adjustments(paper.lines)).toEqual(adjustments(booked(q, price)));
+      // The office's discount stays, and the paper comes to what the screen says.
+      expect(paper.discount).toBe(500);
+      expect(optionTotals(paper.lines, "good", "good", money(q))).toEqual(totalsAt(q, price));
+    }
+  });
+
   it("keeps a typed price for the quote and the option it was for", () => {
     expect(keptPriceKey("q1", null)).toBe("crewtavo.site-price.q1");
     expect(keptPriceKey("q1", "good")).toBe("crewtavo.site-price.q1.good");
@@ -432,5 +449,90 @@ describe("the price on site, with options", () => {
     const now = lines.map((l) => (l.id === better.id ? { ...l, quantity: 25 } : l));
     expect(visitChanges(range, now, "good")).toEqual([]);
     expect(visitChanges(range, now, "better")!.map((c) => [c.name, c.kind])).toEqual([["Designer shingle roof", "changed"]]);
+  });
+});
+
+describe("the paper beside the visit", () => {
+  const adjustments = (ls: ReadonlyArray<{ name: string; unit_price: number; taxable: boolean }>) => ls.filter((l) => l.name === SITE_ADJUSTMENT_NAME).map((l) => [l.unit_price, l.taxable]);
+
+  it("prints a lower price as a discount and a higher one as a price adjustment line, as the server books them", () => {
+    const below = sitePriced(quote(), 16000);
+    expect(adjustments(below.lines)).toEqual([]);
+    expect(below.discount).toBe(7);
+    const above = sitePriced(quote(), 16500);
+    expect(adjustments(above.lines)).toEqual([[493, true]]);
+    expect(above.discount).toBe(0);
+    // The paper comes to what the screen says, tax and all.
+    for (const price of [16000, 16500]) {
+      const q = quote({ tax_rate: 0.05 });
+      const paper = sitePriced(q, price);
+      expect(quoteTotals(paper.lines, { taxRate: 0.05, discountAmount: paper.discount })).toEqual(totalsAt(q, price));
+    }
+  });
+
+  it("swaps a price set before for the new one, and prints the estimate as it is when none is set", () => {
+    const before = quote({ lines: [...roof, adjustment(493)], priced_on_site_at: "2026-10-24T18:00:00Z" });
+    expect(adjustments(sitePriced(before, 16200).lines)).toEqual([[193, true]]);
+    expect(sitePriced(quote(), null)).toEqual({ lines: roof, discount: 0 });
+    // The office's discount stays when the estimate's price is kept.
+    expect(sitePriced(quote({ discount_amount: 500 }), null).discount).toBe(500);
+    // A promo code keeps its own discount, and no price is set on top of it.
+    expect(sitePriced(quote({ promo_code_id: "p1", discount_amount: 500 }), 16000)).toEqual({ lines: roof, discount: 500 });
+  });
+
+  it("marks each printed line with the quote line it is, so the screen can light it up", () => {
+    const printed = documentLines(roof.map((l) => ({ ...l, mark: `all:${l.service_id}` })));
+    expect(printed.map((l) => l.mark)).toEqual([shingles, tearOff, boots, dumpster].map((l) => `all:${l.service_id}`));
+    // Without marks the lines print as they always have.
+    expect(documentLines(roof).some((l) => "mark" in l)).toBe(false);
+  });
+
+  it("reads a quantity typed by hand", () => {
+    expect(readQuantity("3")).toBe(3);
+    expect(readQuantity("1,200")).toBe(1200);
+    expect(readQuantity(" 2.5 ")).toBe(2.5);
+    expect(readQuantity("0")).toBeNull();
+    expect(readQuantity("-2")).toBeNull();
+    expect(readQuantity("two")).toBeNull();
+    expect(readQuantity("1.2345")).toBeNull();
+    expect(readQuantity("200000")).toBeNull();
+  });
+});
+
+describe("pictures of the price list", () => {
+  it("draws the roofing price list's items by name", () => {
+    const drawn: Array<[string, string]> = [
+      ["Pipe boot", "pipeBoot"],
+      ["Box vent", "boxVent"],
+      ["Power vent", "powerVent"],
+      ["Ridge vent", "ridgeVent"],
+      ["Ridge cap", "ridgeCap"],
+      ["Ice and water shield", "iceWater"],
+      ["Chimney flashing", "chimneyFlash"],
+      ["Chimney cricket", "cricket"],
+      ["Rotten decking", "decking"],
+      ["Reflash a skylight", "reflash"],
+      ["New skylight", "skylight"],
+      ["Gutters off and back on", "gutterOffOn"],
+      ["Gutter guards", "guards"],
+      ["Seamless gutters", "gutters"],
+      ["Satellite dish off and back", "satellite"],
+      ["Solar panels off and back", "solar"],
+      ["Two stories or higher", "twoStory"],
+      ["Low-slope section", "lowSlope"],
+      ["Steep roof charge", "steep"],
+      ["Building permit", "permit"],
+      ["Tear-off and disposal", "tearOff"],
+      ["Dumpster", "dumpster"],
+      ["Drip edge", "dripEdge"],
+      ["Valley flashing", "valley"],
+    ];
+    expect(drawn.map(([name]) => [name, pictureFor(name)])).toEqual(drawn);
+  });
+
+  it("draws a house for anything else, a backyard deck included", () => {
+    expect(pictureFor("Architectural shingle roof")).toBe("house");
+    expect(pictureFor("Composite deck")).toBe("house");
+    expect(pictureFor("Vinyl siding")).toBe("house");
   });
 });

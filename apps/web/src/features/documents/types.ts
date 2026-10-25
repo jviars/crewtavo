@@ -27,6 +27,8 @@ export interface DocumentLine {
   unit: string;
   unit_price: number;
   total: number;
+  /** On screen only: the quote line it prints (its id), so the screen beside it can find it on the paper. */
+  mark?: string;
 }
 
 export interface DocumentSignature {

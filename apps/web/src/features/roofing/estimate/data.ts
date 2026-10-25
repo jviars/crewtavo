@@ -176,8 +176,16 @@ interface NewLine {
   sort: number;
 }
 
+/** What can be set on a line by hand: how many, its price for one, and the words printed under its name. */
+export interface LinePatch {
+  quantity?: number;
+  unit_price?: number;
+  description?: string | null;
+}
+
 type Edit =
   | { op: "quantity"; lineId: string; quantity: number }
+  | { op: "line"; lineId: string; patch: LinePatch }
   | { op: "delete"; lineId: string }
   | { op: "layers"; lineId: string; formula: string; name: string }
   | { op: "insert"; row: NewLine; serviceId: string | null; putBack?: RemovedLine; pendingId: string | null };
@@ -196,6 +204,8 @@ export interface EstimateEditor {
   /** − on a line: one fewer (taking it off at one), a layer fewer, or take a measured line off. */
   dec: (line: EstimateLine) => void;
   remove: (line: EstimateLine) => void;
+  /** Set a line's quantity, price for one or description by hand. */
+  setLine: (line: EstimateLine, patch: LinePatch) => void;
   /** Put a line that was taken off back, as it was. */
   putBack: (snapshot: SnapshotLine) => void;
   /**
@@ -307,6 +317,10 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
         unwrap(await db.from("quote_line_items").update({ quantity: e.quantity }).eq("id", e.lineId));
         return null;
       }
+      if (e.op === "line") {
+        unwrap(await db.from("quote_line_items").update(e.patch).eq("id", e.lineId));
+        return null;
+      }
       if (e.op === "delete") {
         unwrap(await db.from("quote_line_items").delete().eq("id", e.lineId));
         return null;
@@ -340,7 +354,7 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
         // estimate may not load again until later edits have saved.
         show((lines) => withSavedLine(lines, measuredInto(pendingLine(saved.id, e.row, quote.option_id), saved.measured), e.pendingId));
         if (!e.putBack || added.includes(e.putBack.id)) setAdded((a) => [...a, saved.id]);
-      } else if (e.op === "quantity" || e.op === "layers") {
+      } else if (e.op === "quantity" || e.op === "layers" || e.op === "line") {
         setChanged((c) => (c.includes(e.lineId) ? c : [...c, e.lineId]));
       }
     },
@@ -364,6 +378,12 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
     if (isPendingLine(line)) return;
     show((lines) => lines.map((l) => (l.id === line.id ? { ...l, quantity } : l)));
     run({ op: "quantity", lineId: line.id, quantity });
+  };
+  const setLine = (line: EstimateLine, patch: LinePatch) => {
+    const now = lineNow(line.id);
+    if (!now || isPendingLine(now)) return;
+    show((lines) => lines.map((l) => (l.id === now.id ? { ...l, ...patch } : l)));
+    run({ op: "line", lineId: now.id, patch });
   };
   const remove = (line: EstimateLine) => {
     // Already gone (a second tap), or still being saved.
@@ -471,6 +491,7 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
       if (now) step(now, lessOf(now));
     },
     remove,
+    setLine,
     putBack,
     addService,
     setLayers,

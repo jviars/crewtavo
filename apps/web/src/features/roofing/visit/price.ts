@@ -9,7 +9,7 @@
  * or below what it comes to less the office's discount, as the server books it (services/
  * roofPackages.ts setSitePrice; core siteSubtotal, sitePriceAdjustment and siteAdjustmentLines).
  */
-import { isSiteAdjustment, lineChanges, siteAdjustmentLines, sitePriceAdjustment, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
+import { isSiteAdjustment, lineChanges, SITE_ADJUSTMENT_NAME, siteAdjustmentLines, sitePriceAdjustment, siteSubtotal, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
 import { lineTotal, quoteTotals, toCents, type Amount } from "@crewtavo/core/money";
 import { formatNumber } from "@/lib/format";
 import type { TakeoffRow } from "../../paving/data";
@@ -118,6 +118,47 @@ export function totalsAt(quote: PriceQuote, price: number | null): { subtotal: n
   return quoteTotals(priced, { taxRate: quote.tax_rate, discountAmount: discount });
 }
 
+/** A line as the paper beside the visit prints it. */
+export type PaperLine = Pick<EstimateLine, "id" | "option_id" | "service_id" | "name" | "description" | "quantity" | "unit" | "unit_price" | "taxable" | "optional" | "selected" | "formula" | "sort">;
+
+/**
+ * The estimate's lines and discount as they will be once Review and sign saves the price set here
+ * (null: the estimate's), for the paper beside the visit: the earlier price adjustment swapped for
+ * the new one, booked as the server books it (services/roofPackages.ts setSitePrice). Below the
+ * estimate it's a discount, above it a price adjustment line; with options it's always lines on the
+ * option chosen, and the office's discount stays. A promo code keeps its own discount, so the
+ * estimate is as it is.
+ */
+export function sitePriced<L extends PaperLine>(quote: Omit<PriceQuote, "lines"> & { lines: readonly L[] }, override: number | null): { lines: Array<L | PaperLine>; discount: number } {
+  if (quote.promo_code_id) return { lines: [...quote.lines], discount: Number(quote.discount_amount) };
+  const shown = chosen(quote);
+  const onOption = shown !== null;
+  const price = priceToSave(quote, override);
+  const subtotal = siteSubtotal(quote.lines, shown);
+  const net = onOption ? (toCents(subtotal) - toCents(quote.discount_amount)) / 100 : subtotal;
+  const { discount, extra } = price === null ? { discount: 0, extra: 0 } : sitePriceAdjustment(net, price, { onOption });
+  const work = quote.lines.filter((l) => counts(l, shown) && !isSiteAdjustment(l));
+  const parts = onOption ? siteAdjustmentLines(extra, work) : extra > 0 ? [{ unit_price: extra, taxable: true }] : [];
+  const sort = quote.lines.reduce((max, l) => Math.max(max, l.sort), 0) + 1;
+  const kept = quote.lines.filter((l) => !(isSiteAdjustment(l) && (l.option_id === null || l.option_id === shown)));
+  const added: PaperLine[] = parts.map((part, i) => ({
+    id: `site-price-${i}`,
+    option_id: shown,
+    service_id: null,
+    name: SITE_ADJUSTMENT_NAME,
+    description: null,
+    quantity: 1,
+    unit: "ea",
+    unit_price: part.unit_price,
+    taxable: part.taxable,
+    optional: false,
+    selected: true,
+    formula: null,
+    sort: sort + i,
+  }));
+  return { lines: [...kept, ...added], discount: onOption ? Number(quote.discount_amount) : discount };
+}
+
 /**
  * What the option chosen comes to before tax, less the office's discount and without a price set on
  * site: what the server measures a price set on an option against (siteSubtotal less discount_amount).
@@ -139,6 +180,17 @@ export function parsePrice(text: string): number | null {
   if (!/^\d*(\.\d{0,2})?$/.test(clean) || !/\d/.test(clean)) return null;
   const value = toCents(Number(clean)) / 100;
   return value > 0 && value <= MAX_SITE_PRICE ? value : null;
+}
+
+/** The most of one thing a line can be set to by hand (LineEditor). */
+export const MAX_QUANTITY = 100_000;
+
+/** How many of something, as typed ("3", "1,200", "2.5"), to a thousandth; null when it isn't one above zero. */
+export function readQuantity(text: string): number | null {
+  const clean = text.replace(/[\s,]/g, "");
+  if (!/^\d*(\.\d{0,3})?$/.test(clean) || !/\d/.test(clean)) return null;
+  const n = Math.round(Number(clean) * 1000) / 1000;
+  return n > 0 && n <= MAX_QUANTITY ? n : null;
 }
 
 /** A price in the box: "19,524", or "19,524.50" when there are cents. */
