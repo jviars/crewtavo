@@ -55,7 +55,7 @@ import {
   useVisitDetails,
   visitPath,
 } from "./data";
-import { roofFacts, signBlocker } from "./price";
+import { signBlocker } from "./price";
 import { Pad, VisitClosed, VisitError, VisitFrame, VisitLoading, VisitNoAccess } from "./VisitFrame";
 import styles from "./visit.module.css";
 
@@ -187,8 +187,6 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
           // Dated as the homeowner's link dates it, and as its {Date} says it: the day it was sent, else
           // the day it was made, where the business is.
           date: quoteDate({ sent_at: details.data?.sent_at, created_at: details.data?.created_at }, tz),
-          // With options, the strip says which they chose rather than the package.
-          facts: roofFacts(offers ? null : details.data?.packageName, takeoff),
           signatures: {
             customer: signature ? { name: name.trim(), image: signature, date: signedAt } : null,
             company: companyImage ? { name: myName, image: companyImage, date: signedAt } : null,
@@ -413,15 +411,18 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
                 </div>
               ))}
 
+            {/* Nothing about email when this Crewtavo can't send it. */}
             {canEmail ? (
               <label className={styles.check}>
                 <input type="checkbox" checked={emailCopy} onChange={(e) => setEmailCopy(e.target.checked)} />
                 <span>Email {first || "them"} a copy at <strong className={styles.breakable}>{email}</strong></span>
               </label>
             ) : (
-              <p className={styles.smallNote}>
-                {email ? "Email isn't set up yet, so print or text a copy after signing." : `There's no email address for ${first || "this client"}, so print or text a copy after signing.`}
-              </p>
+              session.config.features.email && (
+                <p className={styles.smallNote}>
+                  There's no email address for {first || "this client"}, so {session.config.features.sms ? "print or text" : "print"} a copy after signing.
+                </p>
+              )
             )}
           </div>
 

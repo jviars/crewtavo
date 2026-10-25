@@ -10,7 +10,6 @@ import {
   copySentence,
   dayText,
   depositLabel,
-  documentFacts,
   emptyOptions,
   emptyOptionsText,
   estimateShare,
@@ -496,11 +495,5 @@ describe("putting the package on", () => {
     expect(emptyOptionsText(["Good", "Better", "Best"], 3, { measured: true, fromPackages: true })).toEqual({ text: "Good, Better and Best have nothing on them yet.", action: "Price them from their packages" });
     expect(emptyOptionsText(["Best"], 3, { measured: true, fromPackages: false })).toEqual({ text: "Best has nothing on it yet. Add its lines from your price list.", action: null });
     expect(emptyOptionsText([], 3, { measured: true, fromPackages: true })).toBeNull();
-  });
-
-  it("puts the package and the roof under the document's address", () => {
-    expect(documentFacts("Architectural shingle", { roofing_squares: 22, roof_pitch: "6/12" })).toEqual(["Architectural shingle", "22.0 squares", "6/12 pitch"]);
-    expect(documentFacts(null, { roofing_squares: null, roof_pitch: null })).toEqual([]);
-    expect(documentFacts(" ", null)).toEqual([]);
   });
 });

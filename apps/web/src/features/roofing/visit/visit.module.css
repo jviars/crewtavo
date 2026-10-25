@@ -357,7 +357,10 @@
 .doneHead p { margin: 0; max-width: 640px; font-size: 17px; line-height: 1.5; color: var(--text-2); }
 .doneHead p strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 
-.actions { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+/* A column for each card: print, and email and text when this Crewtavo can send them. */
+.actions { width: 100%; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; }
+/* Print alone keeps a card's width, centered under the heading. */
+.actions:has(> .actCell:only-child) { grid-auto-columns: minmax(0, 330px); justify-content: center; }
 .actCell { display: grid; grid-template-rows: 1fr auto; gap: 8px; min-width: 0; }
 .act {
   display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-height: 150px; padding: 18px;
@@ -390,7 +393,7 @@ button.act[aria-busy="true"] { cursor: progress; }
 
 /* ---------- Phones ---------- */
 @media (max-width: 760px) {
-  .actions { grid-template-columns: minmax(0, 1fr); }
+  .actions, .actions:has(> .actCell:only-child) { grid-auto-flow: row; grid-auto-columns: minmax(0, 1fr); }
   .act { min-height: 0; }
   .done { padding: 28px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); gap: 22px; }
   .doneHead h1 { font-size: 26px; }

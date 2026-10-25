@@ -11,10 +11,8 @@ import { dateIn, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { DocumentSheet } from "../../documents/EstimateDocument";
 import { documentCompany, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
-import type { TakeoffRow } from "../../paving/data";
 import { firstName, type EstimateQuote } from "../estimate";
 import type { RoofProjectExtras } from "./data";
-import { documentFacts } from "./model";
 import { QuotePrint, useQuotePrint } from "./QuotePrint";
 import styles from "./flow.module.css";
 
@@ -22,7 +20,7 @@ import styles from "./flow.module.css";
  * The quote as its template document, with what the project page knows about it. Once signed, it's
  * on the template it was signed with, whatever changed in Settings since.
  */
-export function useEstimateDocument(quote: EstimateQuote, extras: RoofProjectExtras, takeoff: TakeoffRow | null) {
+export function useEstimateDocument(quote: EstimateQuote, extras: RoofProjectExtras) {
   const { company } = useSession();
   const { template } = useQuoteTemplate(quote);
   const letterhead = useLetterhead();
@@ -32,11 +30,10 @@ export function useEstimateDocument(quote: EstimateQuote, extras: RoofProjectExt
       quoteDocument(
         { ...quote, sent_at: extras.sent_at, valid_until: extras.valid_until, deposit_amount: extras.deposit_amount, message: extras.message, created_at: extras.created_at, promo: extras.promo },
         quote.lines,
-        // Dated the day it went out where the business is, like the homeowner's copy. Signed for an
-        // option, the strip names it ("Your choice: Better · Designer shingle") instead of the package.
-        { date: extras.sent_at ? dateIn(extras.sent_at, tz) : todayIn(tz), facts: documentFacts(readApproval(quote.approval)?.option ? null : extras.package?.name, takeoff) },
+        // Dated the day it went out where the business is, like the homeowner's copy.
+        { date: extras.sent_at ? dateIn(extras.sent_at, tz) : todayIn(tz) },
       ),
-    [quote, extras, takeoff, tz],
+    [quote, extras, tz],
   );
   return { template, company: letterhead.data ?? documentCompany(company), data };
 }
@@ -50,10 +47,10 @@ function signedBy(approval: ReturnType<typeof readApproval>): string {
   return `On your letterhead, with ${names.join(" and ")} ${names.length === 1 ? "signature" : "signatures"}`;
 }
 
-export function SignedEstimate({ quote, extras, takeoff }: { quote: EstimateQuote; extras: RoofProjectExtras; takeoff: TakeoffRow | null }) {
+export function SignedEstimate({ quote, extras }: { quote: EstimateQuote; extras: RoofProjectExtras }) {
   const { company } = useSession();
   const id = useId();
-  const doc = useEstimateDocument(quote, extras, takeoff);
+  const doc = useEstimateDocument(quote, extras);
   const printer = useQuotePrint();
   const [open, setOpen] = useState(false);
   const approval = readApproval(quote.approval);

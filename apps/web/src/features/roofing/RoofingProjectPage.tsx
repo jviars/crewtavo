@@ -174,7 +174,7 @@ function RoofProject() {
         </StepCard>
 
         <StepCard id="visit" n={4} title={label("visit")} status={visitStepStatus({ ...quote, sent_at: extras.sent_at, approval: readApproval(quote.approval) }, quote.client?.display_name, tz)} done={done("visit")} current={step === "visit"}>
-          <VisitStep quote={quote} extras={extras} takeoff={takeoff} salesperson={salesperson} current={step === "visit"} canSell onSend={send} />
+          <VisitStep quote={quote} extras={extras} salesperson={salesperson} current={step === "visit"} canSell onSend={send} />
         </StepCard>
 
         <StepCard id="schedule" n={5} title={label("schedule")} status={job ? `Job #${job.number}` : quote.status === "approved" ? "Ready to schedule" : "After it's signed"} done={Boolean(job)} current={step === "schedule"}>

@@ -223,13 +223,6 @@ export function hubLetterhead(company: HubCompany): DocumentCompany {
   };
 }
 
-/** The roof's size from its drawing, for the strip under the address: ["22.4 squares", "6/12 pitch"]. */
-function roofFacts(drawings: HubDrawing[] | undefined): string[] {
-  const roof = drawings?.find((d) => d.roofing_squares != null && Number(d.roofing_squares) > 0);
-  if (!roof) return [];
-  return [`${formatNumber(Number(roof.roofing_squares), 1)} squares`, ...(roof.roof_pitch ? [`${roof.roof_pitch} pitch`] : [])];
-}
-
 // ---------------------------------------------------------------------------------------------
 // An open quote: choose an option, review the agreement, sign
 // ---------------------------------------------------------------------------------------------
@@ -408,8 +401,6 @@ export function quoteDocument(view: QuoteView, paper: HubPaper = {}): DocumentDa
     // Dated the day it was sent where the business is, else the day it was made, as its {Date} says (an
     // open quote's facts say it when the server doesn't send the day it was made).
     date: quoteDate({ sent_at: q.sent_at, created_at: q.created_at ?? (view.contract?.kind === "live" ? view.contract.facts.date : null) }, tz),
-    // With options, the option's own name says what it is, not the package's.
-    facts: [...(q.package && !options.length ? [q.package.name] : []), ...roofFacts(view.drawings)],
     optionId,
     options: options.map((o) => ({ id: o.id, name: o.name, tier: o.tier, picture: o.picture, style: o.style, highlights: o.highlights, warranty: o.warranty, total: o.total })),
     choice: paper.signing || signed ? hubChoice(view, optionId) : null,

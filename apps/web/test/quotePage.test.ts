@@ -306,8 +306,7 @@ describe("the approval kept when the office marks it approved", () => {
 });
 
 describe("the paper", () => {
-  const paper = (q: PaperQuote, viewed: string | null, packageName: string | null = "Architectural shingle") =>
-    paperDocument({ quote: q, lines, options, viewed, date: "2026-10-20", packageName, roof: { roofing_squares: 22, roof_pitch: "6/12" }, contract: null });
+  const paper = (q: PaperQuote, viewed: string | null) => paperDocument({ quote: q, lines, options, viewed, date: "2026-10-20", contract: null });
 
   it("prints the option looked at, with its own totals, and compares the options while they decide", () => {
     const doc = paper(quote, B);
@@ -319,8 +318,8 @@ describe("the paper", () => {
       ["Designer shingle", "Better", true],
       ["Standing-seam metal", "Best", false],
     ]);
-    // With options, each has its own name, so the strip doesn't name one package.
-    expect(doc.facts).toEqual(["22.0 squares", "6/12 pitch"]);
+    // Nothing under the address while they decide: not the package, not the roof's size.
+    expect(doc.facts).toEqual([]);
   });
 
   it("prints the option shown, with the quote's own totals, when it's the one looked at", () => {
@@ -337,19 +336,19 @@ describe("the paper", () => {
     const approval = JSON.parse(JSON.stringify(officeApproval({ name: "Sam Office", template, option: better, tier: "Better", contract })));
     const signed: PaperQuote = { ...quote, status: "approved", option_id: B, approval, subtotal: totals.subtotal, tax_amount: totals.tax, total: totals.total };
     expect(printedOption(signed, C)).toBe(B);
-    const doc = paperDocument({ quote: signed, lines: chose, options, viewed: C, date: "2026-10-20", packageName: null, roof: null, contract: null });
+    const doc = paperDocument({ quote: signed, lines: chose, options, viewed: C, date: "2026-10-20", contract: null });
     expect(doc.lines.map((l) => l.name)).toEqual(["Tear-off", "Permit", "Designer shingles"]);
     expect(doc.total).toBe(totals.total);
     expect(doc.options).toBeUndefined();
     expect(doc.facts).toEqual(["Your choice: Better · Designer shingle"]);
   });
 
-  it("prints a quote without options as it is, with its package in the strip", () => {
+  it("prints a quote without options as it is", () => {
     const plain: PaperQuote = { ...quote, option_id: null };
-    const doc = paperDocument({ quote: plain, lines: lines.slice(0, 2), options: [], viewed: null, date: "2026-10-20", packageName: "Architectural shingle", roof: null, contract: null });
+    const doc = paperDocument({ quote: plain, lines: lines.slice(0, 2), options: [], viewed: null, date: "2026-10-20", contract: null });
     expect(doc.lines.map((l) => l.name)).toEqual(["Tear-off", "Permit"]);
     expect(doc.options).toBeUndefined();
-    expect(doc.facts).toEqual(["Architectural shingle"]);
+    expect(doc.facts).toEqual([]);
   });
 });
 

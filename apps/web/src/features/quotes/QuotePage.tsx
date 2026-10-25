@@ -71,7 +71,7 @@ import type { DocumentData } from "../documents/types";
 import { SignaturePad } from "../field/SignaturePad";
 import { DrawingsCard } from "../measure/drawings";
 import { PlansCard } from "../plans/PlansCard";
-import { dayText, documentFacts } from "../roofing/flow/model";
+import { dayText } from "../roofing/flow/model";
 import { QuotePrint, useQuotePrint } from "../roofing/flow/QuotePrint";
 import { SendEstimateDialog } from "../roofing/flow/SendEstimateDialog";
 import { PackagePicture } from "../roofing/PackageCards";
@@ -258,8 +258,7 @@ export function printedOption(q: Pick<PaperQuote, "status" | "option_id" | "appr
 /**
  * The estimate as the office prints it (the Paper view, and "Print or save PDF"): the option looked
  * at with its own totals, and the options side by side while the customer is still deciding; once
- * signed, the option it was signed for with its totals. The facts strip names the package only
- * without options (with them, each option has its own name). `contract`: filled in for that option.
+ * signed, the option it was signed for with its totals. `contract`: filled in for that option.
  */
 export function paperDocument(input: {
   quote: PaperQuote;
@@ -267,8 +266,6 @@ export function paperDocument(input: {
   options: readonly QuoteOptionRow[];
   viewed: string | null;
   date: string;
-  packageName: string | null;
-  roof: { roofing_squares: number | null; roof_pitch: string | null } | null;
   contract: QuoteContract | null;
 }): DocumentData {
   const { quote: q, lines, options } = input;
@@ -277,7 +274,6 @@ export function paperDocument(input: {
   const totals = tabTotals(q, lines, signed ? null : printed);
   return quoteDocument({ ...q, subtotal: totals.subtotal, discount_amount: totals.discount, tax_amount: totals.tax, total: totals.total }, lines, {
     date: input.date,
-    facts: documentFacts(options.length ? null : input.packageName, input.roof),
     optionId: printed,
     options: options.length && !signed ? documentOptions(sortOptions(options), lines, moneyOf(q)) : undefined,
     contract: input.contract,
@@ -775,13 +771,6 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
   const isPending = look.isPending;
   const letterhead = useLetterhead();
   const company = letterhead.data ?? documentCompany(session.company);
-  // The roof it shows comes from the drawing the client sees (read again with the quote).
-  const roof = useQuery({
-    queryKey: ["quote", q.id, "roof"],
-    meta: { silent: true },
-    queryFn: async () =>
-      unwrap(await supabase().from("measurements").select("roofing_squares, roof_pitch").eq("quote_id", q.id).eq("show_on_quote", true).order("updated_at", { ascending: false }).limit(1).maybeSingle()) ?? null,
-  });
 
   const printed = printedOption(q, viewed);
   const option = options.find((o) => o.id === printed) ?? null;
@@ -790,7 +779,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
   const input = useMemo(() => (isPending ? null : contractFor(q, template, option, total, tier)), [isPending, q, template, option, total, tier]);
   const terms = useQuoteContract(input);
   const contract = useSameContent(terms.contract ?? (terms.error ? NO_CONTRACT : null));
-  const ready = !isPending && !roof.isPending && contract !== null;
+  const ready = !isPending && contract !== null;
   const data = useMemo(
     () =>
       ready
@@ -801,12 +790,10 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
             viewed,
             // The day it was sent, else the day it was made, as its {Date} says it.
             date: quoteDate(q, tz),
-            packageName: (q.package as { name: string } | null)?.name ?? null,
-            roof: roof.data ?? null,
             contract,
           })
         : null,
-    [ready, q, options, viewed, tz, roof.data, contract],
+    [ready, q, options, viewed, tz, contract],
   );
   const paperTemplate = useMemo(() => contractTemplate(template, contract), [template, contract]);
   // While another option's contract loads, the pages stay as they were rather than blinking out.

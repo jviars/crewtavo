@@ -13,7 +13,6 @@ import { Icon } from "@/components/ui/Icon";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { useSession } from "@/lib/session";
 import { readApproval } from "../../documents/data";
-import type { TakeoffRow } from "../../paving/data";
 import { AbcBadge, ChangeList, estimateFigures, firstName, LOW_MARGIN, money, NotesThread, signedMoney, type EstimateQuote } from "../estimate";
 import { useSendSignedCopy, useSignedCopies, type RoofProjectExtras } from "./data";
 import { copySentence, dayText, hasRange, homeownerName, rangePill, rangeState, rangeWords, signedHeadline, signedSentence } from "./model";
@@ -21,10 +20,9 @@ import type { SendChannel, SendMode } from "./RangeCard";
 import { SignedEstimate } from "./SignedEstimate";
 import styles from "./flow.module.css";
 
-export function VisitStep({ quote, extras, takeoff, salesperson, current, canSell, onSend }: {
+export function VisitStep({ quote, extras, salesperson, current, canSell, onSend }: {
   quote: EstimateQuote;
   extras: RoofProjectExtras;
-  takeoff: TakeoffRow | null;
   salesperson: string | null;
   /** This is the step the project is at. */
   current: boolean;
@@ -37,7 +35,7 @@ export function VisitStep({ quote, extras, takeoff, salesperson, current, canSel
   const who = homeownerName(quote.client?.display_name);
   const rep = firstName(salesperson);
 
-  if (state === "signed") return <SignedView quote={quote} extras={extras} takeoff={takeoff} salesperson={salesperson} canSell={canSell} />;
+  if (state === "signed") return <SignedView quote={quote} extras={extras} salesperson={salesperson} canSell={canSell} />;
   if (!quote.lines.length) return <span className="muted small">Price the estimate first; the iPad shows the same list.</span>;
   if (state === "closed") return <span className="muted small">This estimate was marked {quote.status === "lost" ? "lost" : "archived"}. Reopen it from the quote to visit.</span>;
 
@@ -67,7 +65,7 @@ export function VisitStep({ quote, extras, takeoff, salesperson, current, canSel
   );
 }
 
-function SignedView({ quote, extras, takeoff, salesperson, canSell }: { quote: EstimateQuote; extras: RoofProjectExtras; takeoff: TakeoffRow | null; salesperson: string | null; canSell: boolean }) {
+function SignedView({ quote, extras, salesperson, canSell }: { quote: EstimateQuote; extras: RoofProjectExtras; salesperson: string | null; canSell: boolean }) {
   const { company } = useSession();
   const changedId = useId();
   const approval = readApproval(quote.approval);
@@ -150,7 +148,7 @@ function SignedView({ quote, extras, takeoff, salesperson, canSell }: { quote: E
         <NotesThread quoteId={quote.id} composer="office" title="Notes" placeholder="Add a note for the crew: where the dumpster goes, the gate code…" bare />
       </section>
 
-      <SignedEstimate quote={quote} extras={extras} takeoff={takeoff} />
+      <SignedEstimate quote={quote} extras={extras} />
     </div>
   );
 }

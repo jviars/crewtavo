@@ -8,9 +8,8 @@
 import { optionsIntroText, optionsRange, priceRange, rangeIntroText, type RangeSettings } from "@crewtavo/core/estimates";
 import { optionBaseTotal, optionTierLabels, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { SALES, type Role } from "@crewtavo/core/roles";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import type { QuoteApproval } from "../../documents/build";
-import type { TakeoffRow } from "../../paving/data";
 import { firstName, money, rangePosition, whenText } from "../estimate/rows";
 
 // ---------------------------------------------------------------------------------------------
@@ -458,11 +457,3 @@ export function emptyOptionsText(empty: readonly string[], count: number, { meas
   return { text: nothing, action: one ? "Price it from its package" : "Price them from their packages" };
 }
 
-/** The strip under the address on the document: the package and the roof ("22.0 squares", "6/12 pitch"). */
-export function documentFacts(packageName: string | null | undefined, takeoff: Pick<TakeoffRow, "roofing_squares" | "roof_pitch"> | null | undefined): string[] {
-  const facts = packageName?.trim() ? [packageName.trim()] : [];
-  const squares = takeoff?.roofing_squares != null ? Number(takeoff.roofing_squares) : 0;
-  if (squares > 0) facts.push(`${formatNumber(squares, 1)} squares`);
-  if (takeoff?.roof_pitch) facts.push(`${takeoff.roof_pitch} pitch`);
-  return facts;
-}

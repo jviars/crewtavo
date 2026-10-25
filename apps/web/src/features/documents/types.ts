@@ -85,9 +85,9 @@ export interface DocumentData {
   validUntil?: string | null;
   /** Invoices: "Due". */
   dueOn?: string | null;
-  /** The bold label on the summary strip under the address, like "Architectural shingle roof". */
+  /** Invoices: the bold label on the strip under the address, its subject. */
   title?: string | null;
-  /** The rest of the strip, like ["22.0 squares", "6/12 pitch", "Tear off 1 layer"]. */
+  /** The rest of the strip: on an estimate, only which option they chose ("Your choice: Better · Designer shingle"). */
   facts?: string[];
   client: { name: string; lines: string[] };
   lines: DocumentLine[];

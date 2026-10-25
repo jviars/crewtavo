@@ -13,7 +13,7 @@
  * measure the roof first). "Change" starts a single estimate over from other packages.
  */
 import { lineChanges } from "@crewtavo/core/estimates";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Button, Spinner } from "@/components/ui/Button";
@@ -103,11 +103,20 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
     void queryClient.invalidateQueries({ queryKey: quoteOptionsKey(quote.id) });
     refresh();
   };
-  // Once the roof is measured: the options (or the one package) picked before get their lines.
+  // Once the roof is measured: the options (or the one package) picked before get their lines. It
+  // often starts as this screen first draws (the effect below), and React's StrictMode subscribing
+  // the screen again then leaves useMutation's own copy at pending after it's done, so whether it's
+  // running comes from the mutation cache, and how it went from its callbacks.
+  const fillKey = useMemo(() => ["fill-options", quote.id], [quote.id]);
+  const [fillOutcome, setFillOutcome] = useState<{ done: boolean; error: Error | null }>({ done: false, error: null });
   const fill = useMutation({
+    mutationKey: fillKey,
     meta: { inline: true },
     mutationFn: () => fillOptions(quote.id),
+    onMutate: () => setFillOutcome({ done: false, error: null }),
+    onError: (error) => setFillOutcome({ done: false, error }),
     onSuccess: (result) => {
+      setFillOutcome({ done: true, error: null });
       setSkipped(result.skipped);
       // A cheaper option, now priced, can lower the deposit: say so.
       const deposit = depositNote(result);
@@ -141,8 +150,10 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
   useEffect(() => {
     if (filled) hadLines.current = true;
   }, [filled]);
+  const filling = useIsMutating({ mutationKey: fillKey }) > 0;
+  const fillError = fillOutcome.error;
   const due = autoFillKey(quote, takeoff, { editable, busy: false, hadLines: hadLines.current });
-  const autoKey = editor.busy || fill.isPending || add.isPending || fetching ? null : due;
+  const autoKey = editor.busy || filling || add.isPending || fetching ? null : due;
   const tried = useRef<string | null>(null);
   useEffect(() => {
     if (!autoKey || tried.current === autoKey) return;
@@ -174,7 +185,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
   const rep = firstName(salesperson) || null;
   // About to fill it in (waiting for the estimate to load, or edits to save), filling it in, or
   // loading the lines it put on: show that, not the picker.
-  const pricing = (due !== null && fill.isIdle && tried.current !== due) || fill.isPending || (fill.isSuccess && !quote.lines.length && fetching);
+  const pricing = (due !== null && !filling && !fillOutcome.done && !fillError && tried.current !== due) || filling || (fillOutcome.done && !quote.lines.length && fetching);
   const pricingText = options.length ? "Pricing each option from its package…" : `Pricing the roof${pkgName ? ` from the ${pkgName} package` : ""}…`;
   const lead = signed
     ? `Signed${quote.approved_at ? ` ${dayText(quote.approved_at, company.timezone)}` : ""}, so the lines are locked. Anything more goes on a change order.`
@@ -195,7 +206,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
       <PickPackage
         quote={quote}
         packages={packages}
-        error={add.error ?? fill.error}
+        error={add.error ?? fillError}
         pending={add.isPending}
         onPrice={(ids) => add.mutate({ ids, startOver: false })}
         byHand={
@@ -208,7 +219,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
     const measured = quote.lines.some((l) => l.formula);
     // Options with nothing of their own: priced once the roof is measured, or from their packages now
     // (after a fill that failed, its error has the way to try again).
-    const empty = editable && !pricing && !fill.error ? emptyOptions(options, quote.lines) : [];
+    const empty = editable && !pricing && !fillError ? emptyOptions(options, quote.lines) : [];
     const emptyNote = emptyOptionsText(
       empty.map((o) => tabs.find((t) => t.option.id === o.id)?.tier ?? o.name),
       options.length,
@@ -251,15 +262,15 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
             <span className={styles.note}>{emptyNote.text}</span>
             {emptyNote.action && !takeoff && <Link className="btn btn-sm" to={measureLinkFor({ id: "roofing" }, quote, null)}><Icon name="ruler" size={15} />{emptyNote.action}</Link>}
             {emptyNote.action && takeoff && (
-              <Button size="sm" icon="package" loading={fill.isPending} disabled={editor.busy || add.isPending} onClick={() => fill.mutate()}>{emptyNote.action}</Button>
+              <Button size="sm" icon="package" loading={filling} disabled={editor.busy || add.isPending} onClick={() => fill.mutate()}>{emptyNote.action}</Button>
             )}
           </div>
         )}
-        {(add.error || fill.error) && !changing && (
+        {(add.error || fillError) && !changing && (
           <div className="stack-sm">
-            <FormError error={add.error ?? fill.error} />
-            {fill.error && takeoff && (
-              <Button size="sm" icon="refresh" style={{ justifySelf: "start" }} loading={fill.isPending} onClick={() => fill.mutate()}>Try again</Button>
+            <FormError error={add.error ?? fillError} />
+            {fillError && takeoff && (
+              <Button size="sm" icon="refresh" style={{ justifySelf: "start" }} loading={filling} onClick={() => fill.mutate()}>Try again</Button>
             )}
           </div>
         )}
@@ -321,7 +332,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
           )}
         </div>
         <aside className={styles.aside} aria-label="The range and your numbers">
-          <RangeCard quote={quote} salesperson={salesperson} canSell={canSell} busy={editor.busy || add.isPending || fill.isPending} onSend={onSend} />
+          <RangeCard quote={quote} salesperson={salesperson} canSell={canSell} busy={editor.busy || add.isPending || filling} onSend={onSend} />
           <EstimateNumbers quote={quote} clientName={quote.client?.display_name} optionId={viewed} optionLabel={view?.label ?? null} />
         </aside>
       </div>

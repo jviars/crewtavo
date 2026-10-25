@@ -340,11 +340,9 @@ export function quoteDate(quote: { sent_at?: string | null; created_at?: string 
 /** An option as it's offered, for the "Your options" comparison (DocumentOption without which is shown). */
 export type OfferedOption = Omit<DocumentOption, "chosen">;
 
-/** What a screen knows beyond the quote: who it's for, the strip under the address, its date. */
+/** What a screen knows beyond the quote: who it's for, its date. */
 export interface DocumentExtras {
   client?: { name: string; lines: string[] };
-  title?: string | null;
-  facts?: string[];
   /** The date it's dated; else when it was sent, else when it was made. */
   date?: string | null;
   signatures?: DocumentData["signatures"];
@@ -410,7 +408,7 @@ export function documentLines(lines: readonly DocumentQuoteLine[], shownOptionId
 /** An option as it's named to the customer: "Better · Designer shingle", or just its name without a tier. */
 export const choiceLabel = (choice: { name: string; tier?: string | null }) => `${choice.tier?.trim() ? `${choice.tier.trim()} · ` : ""}${choice.name.trim()}`;
 
-/** "Your choice: Better · Designer shingle", first in the strip of a copy being signed or signed. */
+/** "Your choice: Better · Designer shingle", in the strip of a copy being signed or signed. */
 export const choiceFact = (choice: { name: string; tier?: string | null }) => `Your choice: ${choiceLabel(choice)}`;
 
 /**
@@ -433,8 +431,8 @@ export function quoteDocument(quote: DocumentQuote, lines: readonly DocumentQuot
     number: quote.number,
     date: extras.date ?? quote.sent_at ?? quote.created_at ?? null,
     validUntil: quote.valid_until ?? null,
-    title: extras.title !== undefined ? extras.title : quote.title ?? null,
-    facts: [...(choice ? [choiceFact(choice)] : []), ...(extras.facts ?? [])],
+    // No project name, package or roof size under the address: only, signing for an option, which one.
+    facts: choice ? [choiceFact(choice)] : [],
     client: extras.client ?? { name: quote.client?.display_name ?? "", lines: addressLines(quote.property) },
     lines: documentLines(lines, shown),
     subtotal: Number(quote.subtotal ?? 0),
@@ -708,7 +706,7 @@ export const SAMPLE_DOCUMENT: DocumentData = sample(
     ["Dumpster", 1, "ea", 450, "And cleanup"],
     ["Building permit", 1, "ea", 250],
   ],
-  { title: "Architectural shingle roof", facts: ["22.0 squares", "6/12 pitch", "Tear off 1 layer"], client: { name: "Alex Morgan", lines: ["1482 Maple Ave", "Springfield, IL 62704"] }, deposit: null },
+  { client: { name: "Alex Morgan", lines: ["1482 Maple Ave", "Springfield, IL 62704"] }, deposit: null },
 );
 
 /** A plain estimate for any other trade. */
@@ -719,7 +717,7 @@ export const SAMPLE_GENERAL_DOCUMENT: DocumentData = sample(
     ["Equipment rental", 1, "ea", 180],
     ["Cleanup and haul away", 1, "ea", 150],
   ],
-  { title: "Your project", facts: ["About 2 days of work"], client: { name: "Alex Morgan", lines: ["1482 Maple Ave", "Springfield, IL 62704"] }, deposit: null },
+  { client: { name: "Alex Morgan", lines: ["1482 Maple Ave", "Springfield, IL 62704"] }, deposit: null },
 );
 
 /** The sample that looks like the business's own work. */

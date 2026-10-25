@@ -22,7 +22,6 @@ import {
   readKeptPrice,
   readQuantity,
   readSigningOutcome,
-  roofFacts,
   roundDown,
   savedSitePrice,
   shortDay,
@@ -228,12 +227,6 @@ describe("signing", () => {
     expect(signBlocker({ ...ready, name: " D " })).toBe("Type your name to finish");
     expect(signBlocker({ ...ready, companySignature: null })).toBe("Sign for Ridgeline Roofing to finish");
     expect(signBlocker({ ...ready, companyNeeded: false, companySignature: null })).toBeNull();
-  });
-
-  it("puts the package and the roof's size on the document, worded like the homeowner's copy", () => {
-    expect(roofFacts("Architectural shingle", { roofing_squares: 22, roof_pitch: "6/12" })).toEqual(["Architectural shingle", "22.0 squares", "6/12 pitch"]);
-    expect(roofFacts(" Standing-seam metal ", null)).toEqual(["Standing-seam metal"]);
-    expect(roofFacts(null, { roofing_squares: null, roof_pitch: "6/12" })).toEqual([]);
   });
 
   it("reads how signing went from the router or the tab, and nothing else", () => {

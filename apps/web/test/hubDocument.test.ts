@@ -54,11 +54,13 @@ function quoteView(quote: Partial<QuoteView["quote"]> = {}): QuoteView {
 }
 
 describe("the Client Hub's documents", () => {
-  it("prints a quote as saved: its lines, amounts, client and roof", () => {
+  it("prints a quote as saved: its lines, amounts and client", () => {
     const doc = quoteDocument(quoteView());
+    // Nothing under the address: not the project's name, its package or the roof's size.
+    expect(doc.title).toBeUndefined();
     expect(doc).toMatchObject({
-      kind: "estimate", number: 1042, date: "2026-10-22", validUntil: "2026-11-21", title: "New roof",
-      facts: ["Architectural shingle", "22.4 squares", "6/12 pitch"],
+      kind: "estimate", number: 1042, date: "2026-10-22", validUntil: "2026-11-21",
+      facts: [],
       client: { name: "Dana Whitfield", lines: ["1482 Ridgeview Dr", "Springfield, IL 62704"] },
       subtotal: 1400, discount: 0, tax: 70, total: 1470, deposit: null, notes: "Thanks for having us out.",
       signatures: { customer: null, company: null },
@@ -265,12 +267,11 @@ describe("an open quote that offers options", () => {
     const choosing = quoteDocument(v, { optionId: B, picked: ["b2"] });
     expect(choosing.options?.map((o) => [o.name, o.tier, o.total, o.chosen])).toEqual([["Architectural shingle", "Good", 11203.5, false], ["Designer shingle", "Better", 13975.5, true]]);
     expect(choosing.lines.map((l) => l.name)).toEqual(["Tear-off and disposal", "Designer shingle roof", "Skylight flashing"]);
-    // The option's own words, not the package's.
-    expect(choosing.facts).toEqual(["22.4 squares", "6/12 pitch"]);
+    expect(choosing.facts).toEqual([]);
     expect(choosing.total).toBe(14290.5);
     const signing = quoteDocument(v, { optionId: B, picked: ["b2"], signing: true, contract: { terms: "", sections: [{ id: "k1", title: "Cancel", html: "<p>x</p>", place: "signatures", initials: true }], hash: "0" } });
     expect(signing.options).toBeUndefined();
-    expect(signing.facts).toEqual(["Your choice: Better · Designer shingle", "22.4 squares", "6/12 pitch"]);
+    expect(signing.facts).toEqual(["Your choice: Better · Designer shingle"]);
     expect(signing.contract?.sections.map((s) => s.id)).toEqual(["k1"]);
     expect(hubChoice(v, B)).toEqual({ name: "Designer shingle", tier: "Better" });
     expect(hubChoice(v, null)).toBeNull();
@@ -284,7 +285,7 @@ describe("an open quote that offers options", () => {
     v.quote.lines = v.quote.lines.filter((l) => l.option_id !== A).map((l) => (l.option_id === B && !l.optional ? { ...l, selected: true } : l));
     const doc = quoteDocument(v);
     expect(doc.options).toBeUndefined();
-    expect(doc.facts?.[0]).toBe("Your choice: Better · Designer shingle");
+    expect(doc.facts).toEqual(["Your choice: Better · Designer shingle"]);
     expect(doc.lines.map((l) => l.name)).toEqual(["Tear-off and disposal", "Designer shingle roof"]);
   });
 

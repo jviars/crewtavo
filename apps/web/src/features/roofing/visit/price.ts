@@ -12,7 +12,6 @@
 import { isSiteAdjustment, lineChanges, SITE_ADJUSTMENT_NAME, siteAdjustmentLines, sitePriceAdjustment, siteSubtotal, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
 import { lineTotal, quoteTotals, toCents, type Amount } from "@crewtavo/core/money";
 import { formatNumber } from "@/lib/format";
-import type { TakeoffRow } from "../../paving/data";
 import { counts, money } from "../estimate/rows";
 import type { EstimateLine, EstimateQuote } from "../estimate/types";
 
@@ -257,20 +256,6 @@ export function signBlocker(s: { name: string; signature: string | null; company
   if (s.name.trim().length < 2) return "Type your name to finish";
   if (s.companyNeeded && !s.companySignature) return `Sign for ${s.company} to finish`;
   return null;
-}
-
-/**
- * The strip under the address on the document: the package, the roof's squares and its pitch,
- * worded as the homeowner's link words them (hub/document.ts), so both copies read the same.
- */
-export function roofFacts(packageName: string | null | undefined, takeoff: Pick<TakeoffRow, "roofing_squares" | "roof_pitch"> | null | undefined): string[] {
-  const facts = packageName?.trim() ? [packageName.trim()] : [];
-  const squares = takeoff?.roofing_squares == null ? 0 : Number(takeoff.roofing_squares);
-  if (squares > 0) {
-    facts.push(`${formatNumber(squares, 1)} squares`);
-    if (takeoff?.roof_pitch) facts.push(`${takeoff.roof_pitch} pitch`);
-  }
-  return facts;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -57,7 +57,6 @@ import {
   rangeNote,
   rangeWords,
   readKeptPrice,
-  roofFacts,
   roundDown,
   savedSitePrice,
   shortDay,
@@ -300,15 +299,13 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
         paperLines,
         {
           date: quoteDate({ sent_at: details.data?.sent_at, created_at: details.data?.created_at }, tz),
-          // With options, the strip says the one shown rather than the package.
-          facts: roofFacts(options.length ? null : details.data?.packageName, takeoff),
           signatures: { customer: null, company: null },
           optionId: paperOptionId,
           choice,
           contract,
         },
       ),
-    [quote, shownTotals, paperOptionId, details.data, paperLines, tz, options.length, takeoff, choice, contract],
+    [quote, shownTotals, paperOptionId, details.data, paperLines, tz, choice, contract],
   );
   const paperReady = !templatePending && Boolean(details.data);
   const paperRef = useRef<HTMLDivElement>(null);

@@ -256,17 +256,18 @@ describe("a quote as a document", () => {
         promo: { code: "SPRING" }, client: { display_name: "Alex Morgan" }, property: { line1: "1482 Maple Ave", city: "Springfield", region: "IL", postal_code: "62704" },
       },
       [{ name: "Architectural shingle roof", quantity: 24.2, unit: "square", unit_price: 560, option_id: null }],
-      { facts: ["22.0 squares", "6/12 pitch"] },
     );
     expect(doc).toMatchObject({
-      kind: "estimate", number: 1042, date: "2026-10-22T14:00:00Z", validUntil: "2026-11-21", title: "New roof", facts: ["22.0 squares", "6/12 pitch"],
+      kind: "estimate", number: 1042, date: "2026-10-22T14:00:00Z", validUntil: "2026-11-21", facts: [],
       client: { name: "Alex Morgan", lines: ["1482 Maple Ave", "Springfield, IL 62704"] },
       subtotal: 18304, discount: 250, discountLabel: "Promo code SPRING", tax: 0, total: 18054, deposit: null, notes: "Thanks for having us out.",
       signatures: { customer: null, company: null },
     });
+    // Nothing under the address but the address: not the project's name.
+    expect(doc.title).toBeUndefined();
     // What a screen knows better wins.
-    const custom = quoteDocument({ number: 7, subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0, title: "Roof" }, [], { client: { name: "Dana", lines: [] }, title: "Architectural shingle roof", date: "2026-10-24" });
-    expect(custom).toMatchObject({ client: { name: "Dana", lines: [] }, title: "Architectural shingle roof", date: "2026-10-24", discountLabel: undefined });
+    const custom = quoteDocument({ number: 7, subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0, title: "Roof" }, [], { client: { name: "Dana", lines: [] }, date: "2026-10-24" });
+    expect(custom).toMatchObject({ client: { name: "Dana", lines: [] }, date: "2026-10-24", discountLabel: undefined });
   });
 
   it("has believable samples whose totals add up", () => {
@@ -327,13 +328,13 @@ describe("a quote that offers options, and its contract", () => {
     expect(offered[1]!.picture).toEqual({ src: "/api/public/package/c0c0c0c0-0000-4000-8000-000000000000/d0d0d0d0-0000-4000-8000-000000000000.jpg", width: 1600, height: 1200 });
     expect(offered[2]).toMatchObject({ picture: null, highlights: [], warranty: "" });
 
-    const deciding = quoteDocument(shownA, lines, { options: offered, facts: ["22.0 squares"] });
+    const deciding = quoteDocument(shownA, lines, { options: offered });
     expect(deciding.options?.map((o) => [o.name, o.chosen])).toEqual([["Architectural shingle", true], ["Designer shingle", false], ["Standing-seam metal", false]]);
-    expect(deciding.facts).toEqual(["22.0 squares"]);
+    expect(deciding.facts).toEqual([]);
 
-    const signing = quoteDocument(shownA, lines, { options: offered, choice: { name: "Architectural shingle", tier: "Good" }, facts: ["22.0 squares"] });
+    const signing = quoteDocument(shownA, lines, { options: offered, choice: { name: "Architectural shingle", tier: "Good" } });
     expect(signing.options).toBeUndefined();
-    expect(signing.facts).toEqual(["Your choice: Good · Architectural shingle", "22.0 squares"]);
+    expect(signing.facts).toEqual(["Your choice: Good · Architectural shingle"]);
     expect(choiceFact({ name: " Designer shingle ", tier: null })).toBe("Your choice: Designer shingle");
     expect(choiceLabel({ name: "Designer shingle", tier: " Better " })).toBe("Better · Designer shingle");
     // One option, or more than three, isn't a comparison.
@@ -356,10 +357,10 @@ describe("a quote that offers options, and its contract", () => {
     };
     // The database flipped the lines to B when it was signed.
     const signedLines = lines.map((l) => ({ ...l, selected: l.option_id === B ? !l.optional : l.option_id === A ? false : l.selected }));
-    const doc = quoteDocument({ ...shownA, status: "approved", option_id: A, approval }, signedLines, { options: documentOptions(rows, lines, money), facts: ["22.0 squares"] });
+    const doc = quoteDocument({ ...shownA, status: "approved", option_id: A, approval }, signedLines, { options: documentOptions(rows, lines, money) });
     expect(doc.lines.map((l) => l.name)).toEqual(["Tear-off and disposal", "Designer shingle roof"]);
     expect(doc.options).toBeUndefined();
-    expect(doc.facts).toEqual(["Your choice: Better · Designer shingle", "22.0 squares"]);
+    expect(doc.facts).toEqual(["Your choice: Better · Designer shingle"]);
     expect(doc.contract?.sections).toEqual([
       { id: "k1", title: "Your right to cancel", html: "<p>Cancel within 3 days.</p>", place: "signatures", initials: true, initialed: { image: MIKE, date: "2026-10-25T18:00:00Z" } },
       { id: "k2", title: "Payment", html: "<p>Due on completion.</p>", place: "terms", initials: false, initialed: null },
@@ -750,13 +751,13 @@ describe("pages", () => {
       return block!;
     };
     expect(blocks.map((b) => b.key)).toEqual([
-      "parties", "strip", "lines-head", ...SAMPLE_DOCUMENT.lines.map((_, i) => `line-${i}`), "totals", "notes-0", "terms-0",
+      "parties", "lines-head", ...SAMPLE_DOCUMENT.lines.map((_, i) => `line-${i}`), "totals", "notes-0", "terms-0",
       "s0-title", "s0-0", "s0-1", "s0-2", "accept", "signatures", "terms-heading", "s1-title", "s1-0", "s1-initials", "s2-title", "s2-t1-head", "s2-t1-0",
     ]);
     // The head of the lines stays with the first row, and repeats over the rows on later pages; a row moves whole unless it's taller than a page.
     expect(at("lines-head")).toMatchObject({ keepWithNext: true, head: true, table: "lines", cuts: false });
     expect(at("line-0")).toMatchObject({ table: "lines", whole: true, cuts: true, keepWithNext: false });
-    for (const key of ["parties", "strip", "totals", "signatures", "s1-initials"]) expect(at(key).cuts, key).toBe(false);
+    for (const key of ["parties", "totals", "signatures", "s1-initials"]) expect(at(key).cuts, key).toBe(false);
     for (const key of ["notes-0", "terms-0", "s0-0", "s1-0"]) expect(at(key).cuts, key).toBe(true);
     // Titles and headings never end a page alone.
     for (const key of ["s0-title", "s0-1", "s1-title", "s2-title", "terms-heading"]) expect(at(key).keepWithNext, key).toBe(true);
