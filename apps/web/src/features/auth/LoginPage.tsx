@@ -11,6 +11,8 @@ import { BrandLockup } from "@/components/shell/BrandMark";
 
 type Mode = "sign_in" | "sign_up" | "magic_link" | "forgot" | "recover";
 
+type AuthSettings = { external?: Record<string, boolean>; disable_signup?: boolean };
+
 /** Which sign-in methods the Supabase project has turned on. */
 function useAuthSettings() {
   return useQuery({
@@ -22,10 +24,17 @@ function useAuthSettings() {
       const config = await loadConfig();
       const res = await fetch(`${config.supabaseUrl}/auth/v1/settings`, { headers: { apikey: config.supabaseKey } });
       if (!res.ok) throw new Error("settings");
-      return (await res.json()) as { external?: Record<string, boolean>; disable_signup?: boolean };
+      return (await res.json()) as AuthSettings;
     },
   });
 }
+
+/**
+ * Whether to offer "Create an account": only once Auth has said sign-up is open. A Crewtavo instance
+ * turns it off (the owner invites everyone else), so while the answer is on its way, or when it
+ * doesn't come (Auth still starting, no signal), there's no link to a form that would be turned away.
+ */
+export const signupOpen = (settings: AuthSettings | undefined) => settings?.disable_signup === false;
 
 /** Supabase's messages, in plain words. */
 export function authMessage(error: { message: string; status?: number; code?: string }): string {
@@ -104,7 +113,6 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
   const [confirming, setConfirming] = useState<{ email: string; password: string } | null>(null);
   useSignInWhenConfirmed(confirming);
   const google = settings.data?.external?.google ?? false;
-  const signupOpen = !settings.data?.disable_signup;
 
   useEffect(() => {
     if (!cooldown) return;
@@ -319,7 +327,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
 
         <div className={styles.links} style={{ justifyContent: "center" }}>
           {mode === "sign_in" ? (
-            signupOpen && <span className="muted">New to Crewtavo? <button type="button" className="link-btn" onClick={() => switchTo("sign_up")}>Create an account</button></span>
+            signupOpen(settings.data) && <span className="muted">New to Crewtavo? <button type="button" className="link-btn" onClick={() => switchTo("sign_up")}>Create an account</button></span>
           ) : (
             <span className="muted">{mode === "sign_up" ? "Already have an account? " : ""}<button type="button" className="link-btn" onClick={() => switchTo("sign_in")}>{mode === "sign_up" ? "Sign in" : "Back to sign in"}</button></span>
           )}
