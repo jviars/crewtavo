@@ -1,11 +1,12 @@
 /**
  * The roofing project page in plain functions the page and the tests share: where the price range
- * stands with the homeowner, what each step says it's at, how the estimate was signed and whether a
- * copy went out, the deposit button, who can go out on a site visit, the words the range is sent
- * with, and the strip under the address on the estimate document.
+ * stands with the homeowner (from the lowest option to the highest when the estimate offers options),
+ * what each step says it's at, how the estimate was signed and whether a copy went out, the deposit
+ * button, who can go out on a site visit, the words the range and the options are sent with, and the
+ * strip under the address on the estimate document.
  */
-import { priceRange, type RangeSettings } from "@crewtavo/core/estimates";
-import { toCents } from "@crewtavo/core/money";
+import { optionsIntroText, optionsRange, priceRange, rangeIntroText, type RangeSettings } from "@crewtavo/core/estimates";
+import { optionBaseTotal, optionTierLabels, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { SALES, type Role } from "@crewtavo/core/roles";
 import { formatMoney, formatNumber } from "@/lib/format";
 import type { QuoteApproval } from "../../documents/build";
@@ -60,16 +61,79 @@ export function rangeState(q: RangeQuote): RangeState {
 
 /**
  * Whether the office can mark the range as agreed for the homeowner (they said yes on the phone, by
- * text or in person): only while it's out and waiting for their answer, the same as their own Yes
- * on the link. Not once they've said yes, it's signed, or the exact price went out.
+ * text or in person): while it's out and waiting for their answer, the same as their own Yes on the
+ * link, or before it's gone out, when the office told them the range itself (the server saves it as
+ * they were told it, without sending them anything). Not once they've said yes, it's signed, or the
+ * exact price went out.
  */
-export const canMarkAgreed = (q: RangeQuote) => rangeState(q) === "waiting";
+export const canMarkAgreed = (q: RangeQuote) => rangeState(q) === "waiting" || rangeState(q) === "unsent";
 
-/** The range this estimate would go out at now, to the business's settings. */
-export const rangeNow = (q: Pick<RangeQuote, "total">, settings: RangeSettings) => priceRange(q.total, settings);
+/**
+ * What the range is worked out from: the quote's total, or with options each option's price before
+ * add-ons (its lines, the shared ones and its tax and discount: core optionBaseTotal).
+ */
+export interface RangeEstimate {
+  total: number;
+  options?: ReadonlyArray<{ id: string }>;
+  lines?: readonly OptionLine[];
+  tax_rate?: Amount;
+  discount_amount?: Amount;
+  promo?: TotalsPromo | null;
+}
+
+/**
+ * Each option's price before its add-ons, for the options that have one, in the order offered: what
+ * the range runs across and what the Client Hub prices each option's card at. The server counts the
+ * same ones (services/sales.ts optionPrices).
+ */
+export function optionPrices(q: RangeEstimate): Array<{ id: string; total: number }> {
+  const opts = { taxRate: q.tax_rate ?? 0, discountAmount: q.discount_amount ?? 0, promo: q.promo ?? null };
+  return (q.options ?? []).flatMap((o) => {
+    const total = optionBaseTotal(q.lines ?? [], o.id, opts);
+    return total === null ? [] : [{ id: o.id, total }];
+  });
+}
+
+/** Whether there's a price to make a range from: an option with lines of its own, or the estimate's lines. */
+export const isPriced = (q: RangeEstimate) => (q.options?.length ? optionPrices(q).some((p) => p.total > 0) : (q.lines?.length ?? 0) > 0 && q.total > 0);
+
+/**
+ * The options a homeowner can say they're leaning toward when the office marks their yes, in the
+ * order offered: each with its tier word (as its card has it, core optionTierLabels) and its own
+ * range, worked out as the estimate's is (null while it has no price yet).
+ */
+export function leaningChoices<O extends { id: string; tier: string | null }>(q: Omit<RangeEstimate, "options"> & { options: readonly O[] }, settings: RangeSettings) {
+  const prices = optionPrices(q);
+  const totalOf = (id: string) => prices.find((p) => p.id === id)?.total ?? null;
+  const tiers = optionTierLabels(q.options.map((o) => ({ id: o.id, tier: o.tier, total: totalOf(o.id) })));
+  return q.options.map((option) => {
+    const total = totalOf(option.id);
+    return { option, tier: tiers.get(option.id) ?? null, range: total === null ? null : priceRange(total, settings) };
+  });
+}
+
+/**
+ * The range this estimate would go out at now, to the business's settings: from the cheapest
+ * option's low end to the priciest one's high end when it offers options (the server's sendRange
+ * works it out the same way), else around its total.
+ */
+export function rangeNow(q: RangeEstimate, settings: RangeSettings): { low: number; high: number } {
+  if (!q.options?.length) return priceRange(q.total, settings);
+  return optionsRange(optionPrices(q).map((p) => p.total), settings);
+}
+
+/**
+ * The price an estimate that offers options starts from: its cheapest option's, before add-ons
+ * (optionPrices). Null without options, or before any has a price. Lists show it ("From $18,300")
+ * until it's signed, when the quote's own total is the option chosen.
+ */
+export function lowestOption(q: RangeEstimate): number | null {
+  const prices = optionPrices(q);
+  return prices.length ? Math.min(...prices.map((p) => p.total)) : null;
+}
 
 /** The estimate changed since its range went out, so sending it again sends a different range. */
-export function rangeOutdated(q: RangeQuote, settings: RangeSettings): boolean {
+export function rangeOutdated(q: RangeQuote & RangeEstimate, settings: RangeSettings): boolean {
   if (!hasRange(q)) return false;
   const now = rangeNow(q, settings);
   return toCents(now.low) !== toCents(q.range_low) || toCents(now.high) !== toCents(q.range_high);
@@ -77,6 +141,18 @@ export function rangeOutdated(q: RangeQuote, settings: RangeSettings): boolean {
 
 /** "$18,300 to $21,050" */
 export const rangeWords = (range: { low: number; high: number }) => `${formatMoney(range.low)} to ${formatMoney(range.high)}`;
+
+/** What a range across options runs between, said after it. */
+export const ACROSS_OPTIONS = "from the lowest option to the highest";
+
+/**
+ * Whether the estimate's range runs across its options: two or more with a price (optionPrices), as
+ * rangeNow works it out and the server's words count them.
+ */
+export const rangeAcrossOptions = (q: RangeEstimate) => optionPrices(q).length >= 2;
+
+/** "$18,300 to $21,050", and across options "$18,300 to $32,600, from the lowest option to the highest". */
+export const rangeWordsFor = (range: { low: number; high: number }, q: RangeEstimate) => `${rangeWords(range)}${rangeAcrossOptions(q) ? `, ${ACROSS_OPTIONS}` : ""}`;
 
 /** How much of the range bar is the estimate itself; the rest is the room on top. */
 export function estimateShare(total: number, high: number): number {
@@ -92,12 +168,67 @@ export function rangePill(price: number, range: { low: number; high: number }): 
   return { label: "Inside the range", tone: "good" };
 }
 
-/** The words a range goes out with unless the office writes their own (the server's own, routes/roofing.ts). */
-export const rangeIntro = (range: { low: number; high: number }) =>
-  `Thanks for having us look at your roof. From our measurements, your new roof will cost between ${formatMoney(range.low)} and ${formatMoney(range.high)}. You can see what's included and let us know when you'd like us to come out:`;
+/** Whole dollars in the business's currency, as the server words its messages. */
+const wholeMoney = (amount: number, currency: string | null | undefined) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: 0 }).format(amount);
+
+/**
+ * The words a range goes out with unless the office writes their own: the server's own (core
+ * rangeIntroText, services/sales.ts rangeMessage), across the options when `optionCount` (the options
+ * with a price, optionPrices) is two or more.
+ */
+export const rangeIntro = (range: { low: number; high: number }, optionCount = 0, currency?: string | null) =>
+  rangeIntroText(wholeMoney(range.low, currency), wholeMoney(range.high, currency), optionCount);
+
+/**
+ * The words the exact price goes out with unless the office writes their own, for an estimate that
+ * offers options: how many have a price and the lowest (core optionsIntroText, as services/sales.ts
+ * optionsMessage words it). Empty with fewer than two, when the server's own words say the total.
+ */
+export function optionsIntro(prices: ReadonlyArray<{ total: number }>, currency?: string | null): string {
+  if (prices.length < 2) return "";
+  const from = new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Math.min(...prices.map((p) => p.total)));
+  return optionsIntroText(prices.length, from);
+}
+
+/** One option on the range card: where its price sits on the bar (0 to 1, of the range's high end). */
+export interface OptionTick {
+  id: string;
+  /** Its tier word, else its name. */
+  label: string;
+  total: number;
+  at: number;
+}
+
+/**
+ * The options as ticks along the range card's bar, cheapest first: each at its price before add-ons
+ * (optionPrices), as a share of the range's high end, labelled with its tier word (core
+ * optionTierLabels) or its name. Options with no price yet aren't on it.
+ */
+export function optionTicks(q: Omit<RangeEstimate, "options"> & { options: ReadonlyArray<{ id: string; name: string; tier: string | null }> }, high: number): OptionTick[] {
+  const prices = optionPrices(q);
+  const tiers = optionTierLabels(q.options.map((o) => ({ id: o.id, tier: o.tier, total: prices.find((p) => p.id === o.id)?.total ?? null })));
+  return prices
+    .map(({ id, total }) => ({ id, total, label: tiers.get(id) ?? q.options.find((o) => o.id === id)!.name, at: estimateShare(total, high) }))
+    .sort((a, b) => toCents(a.total) - toCents(b.total));
+}
 
 /** The email subject a roof estimate goes out with. */
 export const estimateSubject = (companyName: string) => `Your roof estimate from ${companyName}`;
+
+/**
+ * What sending an estimate quotes, as the server works it out: the range it goes out at now, the
+ * options with a price, and the words the message starts as unless the office writes its own (the
+ * range's, or for the exact price with options how many there are and the lowest; empty when the
+ * server's own words say the total). Null until the estimate's options are known (`options`
+ * undefined: the quote page loads them), so it never reads as one estimate when it offers options.
+ */
+export function sendWords(q: RangeEstimate, mode: "range" | "exact", settings: RangeSettings, currency?: string | null): { range: { low: number; high: number }; prices: Array<{ id: string; total: number }>; message: string } | null {
+  if (!q.options) return null;
+  const range = rangeNow(q, settings);
+  const prices = optionPrices(q);
+  return { range, prices, message: mode === "range" ? rangeIntro(range, prices.length, currency) : optionsIntro(prices, currency) };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Dates and names
@@ -220,6 +351,17 @@ export function depositLabel(deposit: number, total: number): string {
   return `Bill the${share} deposit, ${money(deposit)}`;
 }
 
+/**
+ * What a signed estimate brings to its job, in a sentence: every line, or with options the ones on
+ * every option and the chosen option's (the job takes the lines that count, and another option's
+ * never do). Once signed, the option shown is the one chosen.
+ */
+export function jobLinesText(q: { option_id: string | null; options: ReadonlyArray<{ id: string; name: string }> }): string {
+  if (!q.options.length) return "Every line comes along, so nothing gets typed twice.";
+  const chosen = q.options.find((o) => o.id === q.option_id)?.name.trim();
+  return chosen ? `The lines for ${chosen} and the ones on every option come along, so nothing gets typed twice.` : "The lines they signed for come along, so nothing gets typed twice.";
+}
+
 // ---------------------------------------------------------------------------------------------
 // The team
 // ---------------------------------------------------------------------------------------------
@@ -265,27 +407,55 @@ export const notesTitle = (salesperson: string | null | undefined) => (firstName
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Whether to put the estimate's package on it now, and the key that makes sure it's tried once:
- * an estimate that's never had lines on this screen, with a package and a measured roof. One that
- * had lines and lost them all (taken off by hand) is left alone.
+ * Whether to fill the estimate in from its packages now (POST /quotes/:id/options/fill), and the key
+ * that makes sure it's tried once: with a measured roof, the options picked before it was measured,
+ * while none of them has a line of its own (keyed on the options and the measurement), or for an
+ * estimate without options, the package it remembers. Either way only when it's never had them on
+ * this screen (`hadLines`: any line, or with options any option's own line): what was taken off by
+ * hand stays off. An option still empty beside ones with lines is filled only when asked
+ * (emptyOptionsText), since the fill would bring back lines taken off another empty option too.
  */
-export function autoApplyKey(q: { id: string; roof_package_id: string | null; lines: readonly unknown[] }, takeoff: { id: string } | null, options: { editable: boolean; busy: boolean; hadLines: boolean }): string | null {
-  if (!options.editable || options.busy || options.hadLines || !q.roof_package_id || !takeoff || q.lines.length) return null;
+export function autoFillKey(
+  q: { id: string; roof_package_id: string | null; lines: ReadonlyArray<{ option_id: string | null }>; options: ReadonlyArray<{ id: string }> },
+  takeoff: { id: string } | null,
+  state: { editable: boolean; busy: boolean; hadLines: boolean },
+): string | null {
+  if (!state.editable || state.busy || !takeoff || state.hadLines) return null;
+  if (q.options.length) {
+    if (q.lines.some((l) => l.option_id !== null)) return null;
+    return `${q.id}:${q.options.map((o) => o.id).sort().join(",")}:${takeoff.id}`;
+  }
+  if (!q.roof_package_id || q.lines.length) return null;
   return `${q.id}:${q.roof_package_id}:${takeoff.id}`;
 }
 
-/** What a package left off, worth saying: a service that can't be measured, or isn't on this roof. */
-export function skippedNote(skipped: ReadonlyArray<{ name: string; reason: string }> | undefined): string | null {
-  if (!skipped?.length) return null;
-  const none = skipped.filter((s) => s.reason === "None on this roof").map((s) => s.name);
-  const other = skipped.filter((s) => s.reason !== "None on this roof").map((s) => s.name);
-  const list = (names: string[]) => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
-  return [
-    none.length ? `Left off, with nothing to measure on this roof: ${list(none)}.` : null,
-    other.length ? `Couldn't work out ${list(other)} from the roof. Check the measurements, then add ${other.length === 1 ? "it" : "them"} below.` : null,
-  ]
-    .filter(Boolean)
-    .join(" ");
+/** Whether the estimate has the lines autoFillKey fills: any line, or with options any option's own. */
+export const hasFilledLines = (q: { lines: ReadonlyArray<{ option_id: string | null }>; options: readonly unknown[] }) =>
+  q.options.length ? q.lines.some((l) => l.option_id !== null) : q.lines.length > 0;
+
+/** The options with no lines of their own yet, in order. */
+export const emptyOptions = <O extends { id: string }>(options: readonly O[], lines: ReadonlyArray<{ option_id: string | null }>): O[] =>
+  options.filter((o) => !lines.some((l) => l.option_id === o.id));
+
+const listWords = (names: readonly string[]) => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+
+/**
+ * What the estimate step says about the options with nothing of their own on them yet (`empty`, by
+ * their tier word or name, of `count` options), and what its button does, or null when every option
+ * has lines. Before the roof is measured they're priced once it is (the measure link); after, they
+ * can be priced from their packages now (`fromPackages`: one of them still has its package), or
+ * their lines added by hand.
+ */
+export function emptyOptionsText(empty: readonly string[], count: number, { measured, fromPackages }: { measured: boolean; fromPackages: boolean }): { text: string; action: string | null } | null {
+  if (!empty.length) return null;
+  const one = empty.length === 1;
+  const names = listWords(empty);
+  if (!measured) {
+    return { text: empty.length === count ? "Each option is priced from its package once the roof is measured." : `${names} ${one ? "is" : "are"} priced from ${one ? "its package" : "their packages"} once the roof is measured.`, action: "Measure the roof" };
+  }
+  const nothing = `${names} ${one ? "has nothing on it" : "have nothing on them"} yet.`;
+  if (!fromPackages) return { text: `${nothing} Add ${one ? "its" : "their"} lines from your price list.`, action: null };
+  return { text: nothing, action: one ? "Price it from its package" : "Price them from their packages" };
 }
 
 /** The strip under the address on the document: the package and the roof ("22.0 squares", "6/12 pitch"). */

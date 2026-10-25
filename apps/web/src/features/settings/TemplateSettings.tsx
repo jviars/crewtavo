@@ -1,7 +1,9 @@
 /**
  * Settings → Estimate template: how a business's estimates, proposals and invoices look, in every
- * trade. The letterhead (style, color, lettering), the license and insurer, the terms printed above
- * the signatures, the signature lines and the footer, with a live preview of a letter-size page.
+ * trade. The letterhead (Crewtavo's in a style, color and lettering, or the business's own, uploaded),
+ * the license and insurer, the contract (the terms printed above the signatures, and which of the
+ * business's contract sections every estimate and every invoice prints, from Settings → Contract
+ * terms), the signature lines and the footer, with a live preview of the letter-size pages.
  * A business can keep several templates (one is the default; a quote can pick another). One that
  * never saved a template prints with the built-in one, and its first save keeps it as "Standard".
  */
@@ -10,6 +12,7 @@ import {
   DEFAULT_TERMS,
   documentColor,
   HEADER_STYLES,
+  ownLetterhead,
   TEMPLATE_COLORS,
   TEMPLATE_LIMITS,
   templateSettings,
@@ -17,6 +20,7 @@ import {
   type TemplateSettings as Template,
 } from "@crewtavo/core/documents";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { LibrarySection } from "@crewtavo/core/contracts";
 import { useEffect, useId, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
@@ -32,9 +36,14 @@ import { hasRole, useSession } from "@/lib/session";
 import { CLASSIC_FONT, DocumentSheet, PrintableDocument, printDocument } from "../documents/EstimateDocument";
 import { documentCompany, letterheadKey, sampleDocument, templatesKey, useLetterhead, useTemplates, websiteLabel, type TemplateRow } from "../documents/data";
 import { CompanyLogo } from "./CompanyLogo";
+import { contractPreview, contractSummary, inLibraryOrder, pickSection, placeLabel, useContractSections } from "./ContractSettings";
+import { OwnLetterhead } from "./OwnLetterhead";
 import styles from "./TemplateSettings.module.css";
 
-type SectionId = "letterhead" | "details" | "terms" | "signatures" | "footer";
+type SectionId = "letterhead" | "details" | "contract" | "signatures" | "footer";
+
+/** Before the contract sections load (or when there are none). */
+const NO_SECTIONS: LibrarySection[] = [];
 
 export function TemplateSettings() {
   const templates = useTemplates();
@@ -67,7 +76,9 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   const letterhead = useLetterhead();
   const saved = useMemo(() => (row ? templateSettings(row.settings) : DEFAULT_TEMPLATE), [row]);
   const [t, setT] = useState<Template>(saved);
-  const [open, setOpen] = useState<Record<SectionId, boolean>>({ letterhead: true, details: true, terms: false, signatures: true, footer: false });
+  const [open, setOpen] = useState<Record<SectionId, boolean>>({ letterhead: true, details: true, contract: false, signatures: true, footer: false });
+  const [previewing, setPreviewing] = useState<"estimate" | "invoice">("estimate");
+  const library = useContractSections();
   const [naming, setNaming] = useState<null | "new" | "rename">(null);
   const dirty = JSON.stringify(t) !== JSON.stringify(saved);
   const set = <K extends keyof Template>(key: K, value: Template[K]) => setT((prev) => ({ ...prev, [key]: value }));
@@ -158,13 +169,24 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   const sample = sampleDocument(company.trade_preset);
   const name = row?.name ?? "Standard";
   const isDefault = row ? row.is_default : true;
+  const own = ownLetterhead(t);
+  // Crewtavo's header prints at the top unless the business's own letterhead has a top.
+  const builtInTop = !own.header;
+  const sections = library.data ?? NO_SECTIONS;
+  // Sections deleted from the library since don't print, so they don't count.
+  const counted = (ids: string[]) => (library.data ? inLibraryOrder(ids, library.data).length : ids.length);
+  // The sample with the contract this template prints, filled in like a real estimate's (or invoice's).
+  const preview = useMemo(
+    () => contractPreview({ kind: previewing, sample, template: t, library: sections, company: { name: doc.name, phone: doc.phone, timezone: company.timezone } }),
+    [previewing, sample, t, sections, doc.name, doc.phone, company.timezone],
+  );
 
   const summary: Record<SectionId, string> = {
-    letterhead: `${HEADER_STYLES.find((h) => h.id === t.header)?.label ?? "Classic"} · ${colorName} · ${t.font === "classic" ? "Classic" : "Modern"} lettering`,
+    letterhead: letterheadSummary(t, colorName),
     details: [doc.name, t.show_license && t.license.trim() ? `License ${t.license.trim()}` : null].filter(Boolean).join(" · "),
-    terms: t.terms.trim() ? t.terms.trim().split("\n")[0]! : "Nothing printed above the signatures",
+    contract: contractSummary(t.terms, counted(t.sections), counted(t.invoice_sections)),
     signatures: t.customer_signs && t.company_signs ? "The customer and your company sign" : t.customer_signs ? "The customer signs" : t.company_signs ? "Your company signs" : "No signature lines",
-    footer: [t.footer.trim(), t.page_numbers ? "Page numbers" : null].filter(Boolean).join(" · ") || "Nothing along the bottom",
+    footer: [own.footer ? "Your letterhead's bottom" : t.footer.trim(), t.page_numbers ? "Page numbers" : null].filter(Boolean).join(" · ") || "Nothing along the bottom",
   };
 
   return (
@@ -221,30 +243,51 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
         <div className={styles.controls}>
           <Section id="letterhead" icon="palette" title="Letterhead" summary={summary.letterhead} open={open.letterhead} onToggle={toggle}>
             <div className={styles.group}>
-              <span className={styles.label} id="header-style">Header style</span>
-              <div className={styles.tiles} role="group" aria-labelledby="header-style">
-                {HEADER_STYLES.map((h) => (
-                  <button key={h.id} type="button" className={styles.tile} aria-pressed={t.header === h.id} onClick={() => set("header", h.id)}>
-                    <MiniHeader style={h.id} color={color} />
-                    {h.label}
-                  </button>
-                ))}
+              <span className={styles.label} id="letterhead-kind">Letterhead</span>
+              <div className="segmented" role="group" aria-labelledby="letterhead-kind" style={{ justifySelf: "start" }}>
+                <button type="button" aria-pressed={t.letterhead === "built_in"} onClick={() => set("letterhead", "built_in")}>Crewtavo's</button>
+                <button type="button" aria-pressed={t.letterhead === "custom"} onClick={() => set("letterhead", "custom")}>Your own</button>
               </div>
             </div>
 
-            <div className={styles.group}>
-              <span className={styles.label}>Logo</span>
-              {isAdmin ? (
-                <CompanyLogo path={logoPath} />
-              ) : doc.logo ? (
-                <div className="row wrap" style={{ gap: 12 }}>
-                  <span className={styles.logoTile}><img src={doc.logo} alt="Your logo" /></span>
-                  <span className="muted small">From Settings → Company. An admin can change it there.</span>
+            {t.letterhead === "custom" && (
+              <OwnLetterhead
+                header={t.letterhead_header}
+                footer={t.letterhead_footer}
+                onChange={(pictures) => setT((prev) => ({ ...prev, letterhead: "custom", letterhead_header: pictures.header, letterhead_footer: pictures.footer }))}
+              />
+            )}
+            {own.footer && builtInTop && <p className={styles.note}>Your letterhead has no top, so Crewtavo's header prints at the top of the first page, in the style below.</p>}
+
+            {builtInTop && (
+              <>
+                <div className={styles.group}>
+                  <span className={styles.label} id="header-style">Header style</span>
+                  <div className={styles.tiles} role="group" aria-labelledby="header-style">
+                    {HEADER_STYLES.map((h) => (
+                      <button key={h.id} type="button" className={styles.tile} aria-pressed={t.header === h.id} onClick={() => set("header", h.id)}>
+                        <MiniHeader style={h.id} color={color} />
+                        {h.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ) : (
-                <span className="muted small">No logo yet, so your initials go at the top. An admin can add a logo in Settings → Company.</span>
-              )}
-            </div>
+
+                <div className={styles.group}>
+                  <span className={styles.label}>Logo</span>
+                  {isAdmin ? (
+                    <CompanyLogo path={logoPath} />
+                  ) : doc.logo ? (
+                    <div className="row wrap" style={{ gap: 12 }}>
+                      <span className={styles.logoTile}><img src={doc.logo} alt="Your logo" /></span>
+                      <span className="muted small">From Settings → Company. An admin can change it there.</span>
+                    </div>
+                  ) : (
+                    <span className="muted small">No logo yet, so your initials go at the top. An admin can add a logo in Settings → Company.</span>
+                  )}
+                </div>
+              </>
+            )}
 
             <div className={styles.group}>
               <span className={styles.label} id="doc-color">Color <span className="muted" style={{ fontWeight: 400 }}>· {colorName}</span></span>
@@ -270,6 +313,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
           </Section>
 
           <Section id="details" icon="home" title="Business details" summary={summary.details} open={open.details} onToggle={toggle}>
+            {own.header && <p className={styles.note}>Your own letterhead prints at the top in place of these.</p>}
             <div className={styles.readonly}>
               <strong>{doc.name}</strong>
               {doc.address.length ? doc.address.map((line, i) => <span key={i}>{line}</span>) : <span>No address yet</span>}
@@ -298,12 +342,36 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
             </label>
           </Section>
 
-          <Section id="terms" icon="file" title="Terms and warranty" summary={summary.terms} open={open.terms} onToggle={toggle}>
+          <Section id="contract" icon="file" title="Contract" summary={summary.contract} open={open.contract} onToggle={toggle}>
             <Field label="Printed above the signatures" hint="Payment, changes and your warranty, in plain words. Each line prints on its own line.">
               <textarea className="textarea" rows={7} value={t.terms} maxLength={TEMPLATE_LIMITS.terms} onChange={(e) => set("terms", e.target.value)} />
             </Field>
             {t.terms.trim() !== DEFAULT_TERMS && (
               <Button size="sm" variant="ghost" icon="undo" style={{ justifySelf: "start" }} onClick={() => set("terms", DEFAULT_TERMS)}>Use the suggested wording</Button>
+            )}
+            {library.isPending ? (
+              <div className={styles.group} aria-hidden="true"><Skeleton width="45%" /><Skeleton width="80%" /><Skeleton width="70%" /></div>
+            ) : library.error ? (
+              <ErrorState compact title="Your contract sections couldn't load" error={library.error} onRetry={() => library.refetch()} />
+            ) : sections.length ? (
+              <>
+                <SectionPicks
+                  label="Sections on estimates"
+                  hint="After the terms above, in the order of your contract terms. A package can bring more, and a quote can add more for one job."
+                  library={sections}
+                  ids={t.sections}
+                  showPlace
+                  onChange={(ids) => set("sections", ids)}
+                />
+                <SectionPicks label="Sections on invoices" hint="Printed after the invoice's totals." library={sections} ids={t.invoice_sections} onChange={(ids) => set("invoice_sections", ids)} />
+                <p className={styles.note}>
+                  Write, change and reorder your sections in <Link to="/settings?tab=contracts">Settings → Contract terms</Link>.
+                </p>
+              </>
+            ) : (
+              <p className={styles.note}>
+                Add sections like payment, your warranty and the right to cancel in <Link to="/settings?tab=contracts">Settings → Contract terms</Link>, then pick the ones every estimate and invoice prints here.
+              </p>
             )}
           </Section>
 
@@ -332,9 +400,13 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
           </Section>
 
           <Section id="footer" icon="list" title="Footer" summary={summary.footer} open={open.footer} onToggle={toggle}>
-            <Field label="Along the bottom of every page" optional>
-              <input className="input" value={t.footer} maxLength={TEMPLATE_LIMITS.footer} placeholder="Licensed and insured · Family owned since 1998" onChange={(e) => set("footer", e.target.value)} />
-            </Field>
+            {own.footer ? (
+              <p className={styles.note}>The bottom of your own letterhead prints along the bottom of the page. To print words here instead, upload your letterhead again and leave its bottom out.</p>
+            ) : (
+              <Field label="Along the bottom of every page" optional>
+                <input className="input" value={t.footer} maxLength={TEMPLATE_LIMITS.footer} placeholder="Licensed and insured · Family owned since 1998" onChange={(e) => set("footer", e.target.value)} />
+              </Field>
+            )}
             <label className="switch-row" style={{ fontWeight: 500 }}>
               <input type="checkbox" className="switch" checked={t.page_numbers} onChange={(e) => set("page_numbers", e.target.checked)} />
               Page numbers
@@ -344,14 +416,18 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
 
         <section className={styles.preview} aria-label="Live preview">
           <div className={styles.previewHead}>
-            <span><Icon name="eye" size={16} />Live preview, with a sample {company.trade_preset === "roofing_exteriors" ? "roof " : ""}estimate</span>
+            <span><Icon name="eye" size={16} />Live preview, with a sample {previewing === "invoice" ? "invoice" : company.trade_preset === "roofing_exteriors" ? "roof estimate" : "estimate"}</span>
+            <div className="segmented" role="group" aria-label="Sample to show">
+              <button type="button" aria-pressed={previewing === "estimate"} onClick={() => setPreviewing("estimate")}>Estimate</button>
+              <button type="button" aria-pressed={previewing === "invoice"} onClick={() => setPreviewing("invoice")}>Invoice</button>
+            </div>
             <span>Letter size · prints and saves as a PDF</span>
           </div>
-          <DocumentSheet template={t} company={doc} data={sample} />
+          <DocumentSheet template={preview.template} company={doc} data={preview.data} />
         </section>
       </div>
 
-      <PrintableDocument template={t} company={doc} data={sample} />
+      <PrintableDocument template={preview.template} company={doc} data={preview.data} />
       {naming === "new" && (
         <NameDialog
           title="New template"
@@ -380,6 +456,20 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   );
 }
 
+/**
+ * The Letterhead fold's line: whose letterhead prints, its color and lettering. With the business's
+ * own letterhead that has no top, Crewtavo's header still prints there, so it says which style.
+ */
+export function letterheadSummary(t: Pick<Template, "letterhead" | "letterhead_header" | "letterhead_footer" | "header" | "font">, colorName: string): string {
+  const own = ownLetterhead(t);
+  const style = HEADER_STYLES.find((h) => h.id === t.header)?.label ?? "Classic";
+  const lettering = `${t.font === "classic" ? "Classic" : "Modern"} lettering`;
+  if (t.letterhead !== "custom") return `${style} · ${colorName} · ${lettering}`;
+  if (own.header) return `Your own letterhead · ${colorName} · ${lettering}`;
+  if (own.footer) return `${style} header · Your letterhead's bottom · ${colorName} · ${lettering}`;
+  return "Your own letterhead, not uploaded yet";
+}
+
 /** One fold of the template's settings: a header that says what's chosen, and the choices. */
 function Section({ id, icon, title, summary, open, onToggle, children }: { id: SectionId; icon: IconName; title: string; summary: string; open: boolean; onToggle: (id: SectionId) => void; children: ReactNode }) {
   const bodyId = useId();
@@ -394,6 +484,35 @@ function Section({ id, icon, title, summary, open, onToggle, children }: { id: S
         <span className={styles.chevron} aria-hidden="true"><Icon name="chevronDown" /></span>
       </button>
       <div id={bodyId} className={styles.sectionBody} hidden={!open}>{children}</div>
+    </div>
+  );
+}
+
+/** A checklist of the library's sections, in its order, for the ones a template prints. */
+function SectionPicks({ label, hint, library, ids, showPlace = false, onChange }: { label: string; hint: string; library: LibrarySection[]; ids: string[]; showPlace?: boolean; onChange: (ids: string[]) => void }) {
+  const labelId = useId();
+  const hintId = useId();
+  const chosen = new Set(ids.map((id) => id.toLowerCase()));
+  return (
+    <div className={styles.group}>
+      <span className={styles.label} id={labelId}>{label}</span>
+      <div className={styles.picks} role="group" aria-labelledby={labelId} aria-describedby={hintId}>
+        {library.map((s) => (
+          <label key={s.id} className="checkbox">
+            <input type="checkbox" checked={chosen.has(s.id.toLowerCase())} onChange={(e) => onChange(pickSection(ids, s.id, e.target.checked, library))} />
+            <span className={styles.pick}>
+              {s.title}
+              {showPlace && (
+                <span className={styles.pickMeta}>
+                  {placeLabel(s.place)}
+                  {s.initials ? " · The customer initials it" : ""}
+                </span>
+              )}
+            </span>
+          </label>
+        ))}
+      </div>
+      <span className="muted small" id={hintId}>{hint}</span>
     </div>
   );
 }

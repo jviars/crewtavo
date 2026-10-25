@@ -3,15 +3,47 @@
  * Stripe webhooks. These use the admin client, so every query filters by the company in the link
  * or form, and responses include only client-facing fields (never costs or internal notes).
  */
+import { contractValues, fillIn } from "@crewtavo/core/contracts";
 import { pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
-import { hidesExactPrice, inRangeMode, isSiteAdjustment, priceRange, rangeSettings } from "@crewtavo/core/estimates";
+import { hidesExactPrice, inRangeMode, isSiteAdjustment, optionsRange, priceRange, rangeSettings } from "@crewtavo/core/estimates";
+import { chosenTotals, countsOn, optionBaseTotal, optionTotals, type OptionLine } from "@crewtavo/core/money";
+import { isPackagePicturePath, packagePictureSrc } from "@crewtavo/core/presets";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { handleStripeEvent, hubPayment, stripeAccess, stripeCheckout, type WebhookRoute } from "../integrations/stripe";
 import { kickAutomations, runInBackground } from "../lib/background";
+import {
+  addressLines,
+  checkContract,
+  contractFacts,
+  contractInput,
+  freezeContract,
+  freezeOption,
+  initialsImage,
+  invoiceContract,
+  invoiceFill,
+  invoiceInput,
+  isPriced,
+  loadLibrary,
+  loadOptions,
+  optionTiers,
+  packageFill,
+  postedId,
+  readFrozen,
+  resolveContract,
+  sectionsHashSchema,
+  type FrozenOption,
+  type OptionRow,
+} from "../services/contracts";
 import { geocodeAddress } from "../services/external";
-import { isPng, logoImage, logoOf } from "../services/logo";
+import { LETTERHEAD_MAX_BYTES } from "../services/letterhead";
+import { isDrawnPng, isPng, LOGO_MAX_BYTES, logoImage, logoOf } from "../services/logo";
+import { PACKAGE_PICTURE_MAX_BYTES } from "../services/packagePictures";
+import { isJpeg } from "../services/photos";
+import { isRoofWork, quoteMeasurement, sitePriceSet } from "../services/roofPackages";
+import { optionsFrom } from "../services/sales";
+import { signatureImage } from "../services/signing";
 import { firstName } from "../lib/email";
 import { signToken, verifyToken } from "../lib/crypto";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
@@ -64,27 +96,23 @@ async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | 
   if (!result.success) throw new HttpError(400, "Please complete the verification and try again.");
 }
 
-// The range settings (settings->roofing) are read here but never sent: they're the business's room on top.
-const BRANDING = "name, phone, email, website, timezone, address, settings->branding, settings->hub_tips, settings->roofing";
+// The range settings (settings->roofing) and the trade are read here but never sent: the room on top
+// is the business's own, and the trade only decides whether a preview shows a roofing range.
+const BRANDING = "name, phone, email, website, timezone, address, trade_preset, settings->branding, settings->hub_tips, settings->roofing";
 
 /** The company as its clients see it, with where its logo loads from (null without one). */
 const withLogo = <T extends { branding?: unknown }>(companyId: string, company: T) => ({ ...company, logo: logoImage("", companyId, { branding: company.branding })?.src ?? null });
 
-/**
- * The business's address as it prints on a letterhead: the street (and a second line, like a suite),
- * then "City, ST 12345". The same lines the staff app prints (web documents/build.ts addressLines).
- */
-export function addressLines(address: unknown): string[] {
-  const a = address && typeof address === "object" && !Array.isArray(address) ? (address as Record<string, unknown>) : {};
-  const part = (key: string) => (typeof a[key] === "string" ? (a[key] as string).trim() : "");
-  const place = [[part("city"), part("region")].filter(Boolean).join(", "), part("postal_code")].filter(Boolean).join(" ");
-  return [part("line1"), part("line2"), place].filter(Boolean);
-}
+/** The business's address as it prints on a letterhead (services/contracts.ts). */
+export { addressLines };
 
-/** The company for a Hub page (name, contact details, address lines, logo), and its range settings for the server's own use. */
+/**
+ * The company for a Hub page (name, contact details, address lines, logo), and its range settings and
+ * trade for the server's own use.
+ */
 async function hubCompany(admin: ReturnType<typeof adminClient>, companyId: string) {
-  const { address, roofing, ...row } = must(await admin.from("companies").select(BRANDING).eq("id", companyId).maybeSingle());
-  return { company: withLogo(companyId, { ...row, address: addressLines(address) }), roofing };
+  const { address, roofing, trade_preset: trade, ...row } = must(await admin.from("companies").select(BRANDING).eq("id", companyId).maybeSingle());
+  return { company: withLogo(companyId, { ...row, address: addressLines(address) }), roofing, trade };
 }
 
 /**
@@ -108,12 +136,13 @@ async function hubTemplate(admin: ReturnType<typeof adminClient>, companyId: str
   return pickTemplate(data ?? [], templateId);
 }
 
-const PNG_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
-const pngOrNull = (value: unknown) => (typeof value === "string" && PNG_DATA_URL.test(value) ? value : null);
+/** A drawn signature, only when it's one a signature pad makes (logo.ts isDrawnPng), else null. */
+const pngOrNull = (value: unknown) => (isDrawnPng(value) ? value : null);
 
 /**
  * Who signed a quote, for the signed document: the client's name and signature, and the business's
- * when someone signed for it. Never the address the client signed from.
+ * when someone signed for it, with the option they chose, the contract as they signed it and their
+ * initials (it's the client's own signed copy). Never the address the client signed from.
  */
 export function publicApproval(raw: unknown, approvedAt: string | null) {
   const a = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -127,11 +156,12 @@ export function publicApproval(raw: unknown, approvedAt: string | null) {
     // "manual": the office marked it approved, so nobody signed on the client's line.
     method: a.method === "manual" || a.method === "in_person" ? a.method : null,
     company: companySignature ? { name: text(co!.name) ?? "", signature: companySignature, signed_at: text(co!.signed_at) } : null,
+    ...readFrozen(raw),
   };
 }
 
-/** The parts of a quote line the range reads: what's on it, and which line takes off the old roof. */
-interface RangeLine { service_id: string | null; name: string; unit: string; unit_price: number; formula: string | null; optional: boolean; selected: boolean }
+/** The parts of a quote line the range reads: what's on it, the option it's on, and which line takes off the old roof. */
+interface RangeLine { service_id: string | null; option_id?: string | null; name: string; unit: string; unit_price: number; formula: string | null; optional: boolean; selected: boolean }
 /** A package's quick add, priced from the price list. */
 interface RangeQuickAdd { service_id: string; name: string; unit: string; unit_price: number }
 
@@ -141,12 +171,12 @@ const perUnit = (unit: string) => (/^(ea|each|lump ?sum|job|flat)$/i.test(unit.t
 
 /**
  * What the client sees with a price range: what's included (the lines on the estimate, without a
- * price set on site), and up to three things that could move the price: the package's quick adds for
- * rotten decking and chimneys that aren't on it already, and another layer of old shingles at the
- * tear-off's price a square.
+ * price set on site; with options, the shared lines and the shown option's), and up to three things
+ * that could move the price: the package's quick adds for rotten decking and chimneys that aren't on
+ * it already, and another layer of old shingles at the tear-off's price a square.
  */
-export function rangeDetails(lines: readonly RangeLine[], quickAdds: readonly RangeQuickAdd[]) {
-  const counted = lines.filter((l) => (!l.optional || l.selected) && !isSiteAdjustment(l));
+export function rangeDetails(lines: readonly RangeLine[], quickAdds: readonly RangeQuickAdd[], shownOptionId: string | null = null) {
+  const counted = lines.filter((l) => countsOn(l, shownOptionId) && !isSiteAdjustment(l));
   const onIt = new Set(counted.map((l) => l.service_id).filter(Boolean));
   const offered = quickAdds.filter((q) => !onIt.has(q.service_id) && Number(q.unit_price) > 0);
   const item = (name: string, price: number, unit: string) => ({ name, price: Number(price), per: perUnit(unit) });
@@ -172,6 +202,32 @@ async function packageQuickAdds(admin: ReturnType<typeof adminClient>, companyId
     return s ? [{ service_id: s.id, name: s.name, unit: s.unit, unit_price: Number(s.unit_price) }] : [];
   });
 }
+
+/**
+ * The lines a range was sent with (quotes.range_lines, core estimates.ts snapshotLines), as lines an
+ * option's total is worked out from: the shared lines and each option's required lines, all counted.
+ * Null when the range was sent before the lines were kept with it.
+ */
+function sentRangeLines(raw: unknown): OptionLine[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw.flatMap((s) => {
+    if (!s || typeof s !== "object") return [];
+    const line = s as Record<string, unknown>;
+    return [{ option_id: typeof line.option_id === "string" ? line.option_id : null, quantity: Number(line.quantity ?? 0), unit_price: Number(line.unit_price ?? 0), taxable: line.taxable !== false, optional: false, selected: true }];
+  });
+}
+
+/** A range kept inside another: an option's own range inside the range the homeowner was sent. */
+function within(range: { low: number; high: number }, outer: { low: number; high: number }) {
+  const low = Math.min(Math.max(range.low, outer.low), outer.high);
+  return { low, high: Math.max(Math.min(range.high, outer.high), low) };
+}
+
+/** An option's card as it was signed (approval.option), with its picture where the Client Hub loads it. */
+const signedCard = (o: FrozenOption) => ({
+  id: o.id, name: o.name, tier: o.tier, picture: o.picture ? { src: packagePictureSrc(o.picture.path), width: o.picture.width, height: o.picture.height } : null,
+  style: o.style, highlights: o.highlights, warranty: o.warranty,
+});
 
 /**
  * The business's signature on a quote the client signs online: the salesperson's saved one, when
@@ -221,14 +277,14 @@ async function hubDrawings(admin: ReturnType<typeof adminClient>, companyId: str
 publicRoutes.get("/hub/:token", async (c) => {
   const l = await link(c);
   const admin = adminClient(c.env);
-  const { company, roofing } = await hubCompany(admin, l.c);
+  const { company, roofing, trade } = await hubCompany(admin, l.c);
   if (l.t === "client") return c.json(await clientHome(c, admin, l.c, l.id, company));
   if (l.t === "quote") {
     const quote = must(
       await admin
         .from("quotes")
         .select(
-          "id, number, status, title, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, approved_at, approval, client_id, change_order_for, template_id, roof_package_id, range_low, range_high, range_sent_at, range_accepted_at, priced_on_site_at, exact_sent_at, promo:promo_codes(code, kind, value, description), client:clients(display_name), property:properties(line1, city, region, postal_code)",
+          "id, number, status, title, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, created_at, approved_at, approval, client_id, change_order_for, template_id, roof_package_id, option_id, section_ids, range_low, range_high, range_sent_at, range_lines, range_accepted_at, priced_on_site_at, exact_sent_at, promo_code_id, promo:promo_codes(code, kind, value, description, min_subtotal), client:clients(display_name, billing_address), property:properties(line1, city, region, postal_code)",
         )
         .eq("company_id", l.c)
         .eq("id", l.id)
@@ -237,37 +293,106 @@ publicRoutes.get("/hub/:token", async (c) => {
     );
     if (quote.status === "draft" && !l.pv) throw new HttpError(404, "This quote isn't ready yet.");
     const signed = quote.status === "approved" || quote.status === "converted";
-    const [lineRows, drawings, template, roofPackage, home] = await Promise.all([
+    const [lineRows, options, drawings, template, roofPackage, home] = await Promise.all([
       // The formula only tells the server which line is the tear-off; it's never sent.
-      admin.from("quote_line_items").select("id, service_id, name, description, quantity, unit, unit_price, taxable, optional, selected, option_group, sort, formula").eq("company_id", l.c).eq("quote_id", quote.id).order("sort"),
+      admin.from("quote_line_items").select("id, option_id, service_id, name, description, quantity, unit, unit_price, taxable, optional, selected, option_group, sort, formula").eq("company_id", l.c).eq("quote_id", quote.id).order("sort"),
+      loadOptions(admin, l.c, quote.id),
       hubDrawings(admin, l.c, "quote_id", quote.id),
       // Signed, it prints with the template it was signed with.
       hubTemplate(admin, l.c, quote.template_id, signed ? quote.approval : null),
-      quote.roof_package_id ? admin.from("roof_packages").select("name").eq("company_id", l.c).eq("id", quote.roof_package_id).maybeSingle() : null,
+      quote.roof_package_id ? admin.from("roof_packages").select("name, warranty").eq("company_id", l.c).eq("id", quote.roof_package_id).maybeSingle() : null,
       l.pv ? null : homeLink(c, l.c, quote.client_id),
     ]);
     const lines = [...must(lineRows)].sort((a, b) => a.sort - b.sort);
+    const shown = quote.option_id;
+    const money = { taxRate: quote.tax_rate, discountAmount: quote.discount_amount, promo: quote.promo };
+    // Each option's price before add-ons: what its range and its tier word come from.
+    const bases = new Map(options.map((o) => [o.id, optionBaseTotal(lines, o.id, money)]));
+    const priced = [...bases.values()].filter((total): total is number => total !== null);
+    const tiers = optionTiers(options, lines, money);
+    const settings = rangeSettings({ roofing });
 
     // Sent as a price range: the client sees the range, never the exact price, until the salesperson
     // prices it on site or the office sends the exact price instead. The office's preview of a
-    // package estimate not sent yet shows the range it would get, once there's something on it to
-    // price; one already sent at its exact price previews as the client sees it.
+    // roofing estimate not sent yet shows the range it would get (from the cheapest option to the
+    // priciest), once there's something on it to price and, with options, once one of them has a
+    // price (a range can't be sent before); one already sent at its exact price previews as the
+    // client sees it. Roof work is a roofer's, or a roof another trade measured (roofPackages.ts
+    // isRoofWork), which Roofing sends as a range too; other work never goes out as one, so it
+    // previews the price.
+    const draftPreview = Boolean(l.pv) && quote.status === "draft" && quote.range_low === null;
+    const roofWork = trade === "roofing_exteriors" || (draftPreview && isRoofWork(trade, await quoteMeasurement(admin, l.c, quote.id)));
     const previewRange =
-      Boolean(l.pv) && quote.roof_package_id !== null && quote.range_low === null && quote.priced_on_site_at === null &&
-      quote.status === "draft" && Number(quote.total) > 0;
+      draftPreview && roofWork && (quote.roof_package_id !== null || options.length > 0) && (!options.length || priced.length > 0) &&
+      quote.priced_on_site_at === null && Number(quote.total) > 0;
     let range = null;
+    let between: { low: number; high: number } | null = null;
     if (inRangeMode(quote) || previewRange) {
-      const { low, high } = previewRange ? priceRange(quote.total, rangeSettings({ roofing })) : { low: Number(quote.range_low), high: Number(quote.range_high) };
+      between = previewRange ? (options.length ? optionsRange(priced, settings) : priceRange(quote.total, settings)) : { low: Number(quote.range_low), high: Number(quote.range_high) };
       const quickAdds = quote.roof_package_id ? await packageQuickAdds(admin, l.c, quote.roof_package_id) : [];
-      range = { low, high, sent_at: quote.range_sent_at, accepted_at: quote.range_accepted_at, ...rangeDetails(lines, quickAdds) };
+      range = { ...between, sent_at: quote.range_sent_at, accepted_at: quote.range_accepted_at, ...rangeDetails(lines, quickAdds, shown) };
     }
+    // Each option's own range. A range that was sent keeps the lines it was sent with, so editing the
+    // estimate after doesn't move an option's range away from the range the homeowner got (an option
+    // added since has none), and it stays inside that range.
+    const sentWith = between && !previewRange ? sentRangeLines(quote.range_lines) : null;
+    const optionRange = (id: string) => {
+      const base = sentWith ? optionBaseTotal(sentWith, id, money) : (bases.get(id) ?? null);
+      if (!between || base === null) return null;
+      return previewRange ? priceRange(base, settings) : within(priceRange(base, settings), between);
+    };
     // A range marked lost or archived no longer shows the range, but its exact price stays hidden too:
     // the client never saw one.
     const exact = range === null && !hidesExactPrice(quote);
+    // Once signed, the option they chose as it was signed, and its lines; before, every option, each
+    // with its own lines.
+    const kept = signed ? readFrozen(quote.approval) : null;
+    const chosen = kept?.option?.id ?? shown;
+    const sent = exact ? lines.filter((line) => !signed || line.option_id === null || line.option_id === chosen) : [];
+    const liveCard = (o: OptionRow) => ({
+      id: o.id, name: o.name, tier: tiers.get(o.id) ?? null,
+      picture: o.picture && isPackagePicturePath(o.picture) && o.picture_width && o.picture_height ? { src: packagePictureSrc(o.picture), width: o.picture_width, height: o.picture_height } : null,
+      style: o.style, highlights: o.highlights, warranty: o.warranty, section_ids: o.section_ids, sort: o.sort,
+    });
+    // Each option's card. With the exact price, its total as if it were picked with none of its
+    // add-ons (signed: the total signed, on the option as it was signed); with a range, its own range
+    // and never a price.
+    const cards = signed
+      ? kept?.option
+        ? // Its sections are in the contract kept with the approval.
+          [{ ...signedCard(kept.option), section_ids: [] as string[], sort: 0, total: exact ? quote.total : null, range: null }]
+        : options.filter((o) => o.id === shown).map((o) => ({ ...liveCard(o), total: exact ? quote.total : null, range: null }))
+      : options.map((o) => ({ ...liveCard(o), total: exact && bases.get(o.id) != null ? optionTotals(lines, o.id, null, money).total : null, range: optionRange(o.id) }));
+
+    // The contract, never with a range (it would say the price). Open, it's the library's words as
+    // written for every section any option could print, with the facts for the fill-ins, so the page
+    // fills in whichever option is picked exactly as the server will when it's signed. Signed, it's
+    // the copy kept with the approval.
+    let contract = null;
+    if (exact) {
+      // Without options, {Option} and {Warranty} say the package it was priced from; with them, the
+      // option picked does.
+      const fill = options.length || !roofPackage?.data ? null : { name: roofPackage.data.name, warranty: roofPackage.data.warranty ?? "" };
+      const facts = contractInput(quote, quote.client, quote.property, company, template, fill);
+      contract = kept
+        ? kept.contract
+          ? { kind: "signed" as const, terms: kept.contract.terms, sections: kept.contract.sections, initials: kept.initials }
+          : // Signed before the contract was kept with it: the terms it was signed under, filled in as they are today.
+            { kind: "signed" as const, terms: fillIn(template.terms, contractValues(facts), { text: true }), sections: [], initials: null }
+        : {
+            kind: "live" as const,
+            terms: template.terms,
+            library: await loadLibrary(admin, l.c, [...template.sections, ...options.flatMap((o) => o.section_ids), ...quote.section_ids]),
+            template_sections: template.sections,
+            quote_sections: quote.section_ids,
+            facts: contractFacts(facts),
+          };
+    }
     return c.json({
       kind: "quote",
       company,
       template,
+      contract,
       quote: {
         id: quote.id, number: quote.number, status: quote.status, title: quote.title, message: quote.message,
         subtotal: exact ? quote.subtotal : null,
@@ -276,17 +401,20 @@ publicRoutes.get("/hub/:token", async (c) => {
         tax_amount: exact ? quote.tax_amount : null,
         total: exact ? quote.total : null,
         deposit_amount: exact ? quote.deposit_amount : null,
-        valid_until: quote.valid_until, sent_at: quote.sent_at, approved_at: quote.approved_at, client_id: quote.client_id, change_order_for: quote.change_order_for,
-        promo: quote.promo, client: quote.client, property: quote.property,
+        valid_until: quote.valid_until, sent_at: quote.sent_at, created_at: quote.created_at, approved_at: quote.approved_at, client_id: quote.client_id, change_order_for: quote.change_order_for,
+        promo: quote.promo, client: quote.client ? { display_name: quote.client.display_name } : null, property: quote.property,
         package: roofPackage?.data ? { name: roofPackage.data.name } : null,
         approval: signed ? publicApproval(quote.approval, quote.approved_at) : null,
+        // A price agreed on site is in effect, so a promo code can't go on it (the promo route says so).
+        site_priced: sitePriceSet(quote, lines),
+        option_id: chosen,
+        section_ids: quote.section_ids,
+        options: cards,
         range,
-        lines: exact
-          ? lines.map((line) => ({
-              id: line.id, name: line.name, description: line.description, quantity: line.quantity, unit: line.unit, unit_price: line.unit_price,
-              taxable: line.taxable, optional: line.optional, selected: line.selected, option_group: line.option_group, sort: line.sort,
-            }))
-          : [],
+        lines: sent.map((line) => ({
+          id: line.id, option_id: line.option_id, name: line.name, description: line.description, quantity: line.quantity, unit: line.unit, unit_price: line.unit_price,
+          taxable: line.taxable, optional: line.optional, selected: line.selected, option_group: line.option_group, sort: line.sort,
+        })),
       },
       drawings,
       preview: Boolean(l.pv),
@@ -297,7 +425,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     await admin
       .from("invoices")
       .select(
-        "id, number, status, subject, notes, issued_on, due_on, subtotal, discount_amount, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, promo:promo_codes(code, kind, value, description), client:clients(display_name), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort), payments(amount, tip_amount, received_at)",
+        "id, number, status, subject, notes, issued_on, due_on, subtotal, discount_amount, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, promo:promo_codes(code, kind, value, description), client:clients(display_name, billing_address), job:jobs(property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, roof_package_id, option:quote_options!quotes_option_fkey(name, warranty))), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort), payments(amount, tip_amount, received_at)",
       )
       .eq("company_id", l.c)
       .eq("id", l.id)
@@ -312,8 +440,15 @@ publicRoutes.get("/hub/:token", async (c) => {
   const [online, template, drawings] = await Promise.all([hubPayment(c.env, admin, l.c, invoice.id), hubTemplate(admin, l.c, null), hubDrawings(admin, l.c, "invoice_id", invoice.id)]);
   // Invoices made in Stripe are paid exactly as Stripe billed them, so no tip.
   const tips = (company as { hub_tips?: unknown }).hub_tips === true && !online.imported;
+  // The template's terms and invoice sections, filled in with the invoice's facts (the customer's
+  // billing address and the job's address only go into the words, never out on their own). Its
+  // {Option} and {Warranty} are those of the estimate the job came from (contracts.ts invoiceFill).
+  const { client, job, ...billed } = invoice;
+  const fill = await invoiceFill(admin, l.c, job?.quote);
+  const facts = invoiceInput(invoice, client, job?.property ?? null, company, template, fill);
+  const contract = await invoiceContract(admin, l.c, template, facts);
   return c.json({
-    kind: "invoice", company, template, invoice, preview: Boolean(l.pv), tips,
+    kind: "invoice", company, template, contract, invoice: { ...billed, client: client ? { display_name: client.display_name } : null }, preview: Boolean(l.pv), tips,
     drawings,
     can_pay: !l.pv && online.enabled && !online.processing && Number(invoice.balance_due) > 0,
     processing: online.processing,
@@ -330,43 +465,105 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
     c,
     z.object({
       name: z.string().trim().min(2).max(120),
-      selected_line_ids: z.array(z.uuid()).max(200).default([]),
-      // Drawn on the screen (a small PNG); kept with the approval.
-      signature: z.string().max(300_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/).optional(),
+      selected_line_ids: z.array(postedId).max(200).default([]),
+      // Drawn on the screen (a small PNG of a size a signature pad makes); kept with the approval.
+      signature: signatureImage.optional(),
+      // The option they picked: required when the quote offers options.
+      option_id: postedId.optional(),
+      // The total they saw (core chosenTotals): the database turns the approval down if it's changed.
+      expected_total: z.number().min(0).max(100_000_000).optional(),
+      // The terms they read (core sectionsHash), and their initials for the sections that ask.
+      sections_hash: sectionsHashSchema.optional(),
+      initials: initialsImage.optional(),
     }),
   );
   const admin = adminClient(c.env);
-  const quote = must(await admin.from("quotes").select("id, status, template_id, salesperson_id, range_low, priced_on_site_at, exact_sent_at").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
+  const quote = must(
+    await admin
+      .from("quotes")
+      .select(
+        "id, number, status, sent_at, created_at, total, deposit_amount, tax_rate, discount_amount, template_id, salesperson_id, option_id, section_ids, roof_package_id, range_low, priced_on_site_at, exact_sent_at, promo:promo_codes(kind, value), client:clients(display_name, billing_address), property:properties(line1, city, region, postal_code)",
+      )
+      .eq("company_id", l.c)
+      .eq("id", l.id)
+      .maybeSingle(),
+    "Quote not found.",
+  );
   if (!["sent", "changes_requested"].includes(quote.status)) throw new HttpError(409, "This quote can't be approved anymore.");
   // A price range isn't a price to sign: the client signs once the salesperson has set the exact one.
   if (inRangeMode(quote)) throw new HttpError(409, "This is a price range, not the final price. You'll sign once you've seen the exact price.");
+  const [lineRows, options, business] = await Promise.all([
+    admin.from("quote_line_items").select("id, option_id, quantity, unit_price, taxable, optional, selected, option_group").eq("company_id", l.c).eq("quote_id", l.id),
+    loadOptions(admin, l.c, l.id),
+    admin.from("companies").select("name, phone, timezone").eq("id", l.c).maybeSingle(),
+  ]);
+  const lines = must(lineRows);
+
+  // The option they picked, when the quote offers options: one of this quote's, as it is now.
+  let option: OptionRow | null = null;
+  if (options.length || body.option_id) {
+    if (!body.option_id) throw new HttpError(400, "Pick one of the options first.");
+    option = options.find((o) => o.id === body.option_id) ?? null;
+    if (!option) throw new HttpError(409, "The options on this estimate changed. Please look it over again.");
+    if (!isPriced(option, lines)) throw new HttpError(409, "This option isn't priced yet. Pick another one, or ask us about it.");
+  }
+  // Add-ons only among the shared lines and the option's own; another option's are left off.
+  const onIt = lines.filter((line) => line.option_id === null || line.option_id === option?.id);
+  const picked = body.selected_line_ids.filter((id) => onIt.some((line) => line.id === id && line.optional));
   // Lines that share an option group ("Good", "Better" and "Best" roofs) are one choice: exactly one of them.
-  const grouped = must(await admin.from("quote_line_items").select("id, option_group").eq("company_id", l.c).eq("quote_id", l.id).eq("optional", true).not("option_group", "is", null));
+  const grouped = onIt.filter((line) => line.optional && line.option_group);
   for (const group of new Set(grouped.map((g) => g.option_group!))) {
-    const picked = grouped.filter((g) => g.option_group === group && body.selected_line_ids.includes(g.id)).length;
-    if (picked !== 1) throw new HttpError(400, `Pick one of the choices for ${group}.`);
+    const count = grouped.filter((g) => g.option_group === group && picked.includes(g.id)).length;
+    if (count !== 1) throw new HttpError(400, `Pick one of the choices for ${group}.`);
   }
 
-  // One step in the database (20261018000830_hub_approval.sql): it claims the quote while it's still
-  // waiting for an answer, then sets the optional lines to the client's choices and records the
-  // approval with the amounts they came to. So two approvals at once, or one racing a change by the
-  // office, record one, and only that one picks the options. The business signs too when its
-  // salesperson has a saved signature, so the signed estimate has both. The template is kept with
-  // the approval as it is now, so the signed copy keeps the terms the client signed under.
+  // The contract for the option they picked, from the business's own library, filled in as the page
+  // showed it to them (the fingerprint it sent says so); then those words are kept with the approval,
+  // with their initials.
   const template = await hubTemplate(admin, l.c, quote.template_id);
+  const contract = await resolveContract(admin, l.c, { template, option, quoteSectionIds: quote.section_ids });
+  const money = { taxRate: quote.tax_rate, discountAmount: quote.discount_amount, promo: quote.promo };
+  // {Total} says the price they agreed to: the total they saw, else what their choices come to.
+  const total = body.expected_total ?? chosenTotals(lines, option?.id ?? null, quote.option_id, picked, money).total;
+  // Without options, {Option} and {Warranty} say the package it was priced from, as the page showed them.
+  const fill = option ?? (options.length ? null : await packageFill(admin, l.c, quote.roof_package_id));
+  const facts = contractInput({ ...quote, total }, quote.client, quote.property, must(business, "Company not found."), template, fill);
+  const tier = option ? optionTiers(options, lines, money).get(option.id) : null;
+  checkContract(contract, body, { facts, option: option && freezeOption(option, tier) });
+  const signedAt = new Date().toISOString();
+  const kept = freezeContract({ contract, facts, option, tier, initials: body.initials ?? null, signedAt });
+
+  // One step in the database (20261025000100_contracts_and_options.sql): it claims the quote while
+  // it's still waiting for an answer, shows the option they picked, sets the add-ons to their
+  // choices, checks the total still comes to what they saw, and records the approval with the
+  // amounts they came to. So two approvals at once, or one racing a change by the office, record
+  // one, and only that one picks the options. The business signs too when its salesperson has a
+  // saved signature, so the signed estimate has both. The template is kept with the approval as it
+  // is now, so the signed copy keeps the terms the client signed under.
   const company = await businessSignature(admin, l.c, quote, template);
   const { data: approved, error } = await admin.rpc("approve_hub_quote", {
     p_company: l.c,
     p_quote: l.id,
-    p_selected: body.selected_line_ids,
+    p_selected: picked,
     p_approval: {
-      name: body.name, selected_line_ids: body.selected_line_ids, signature: body.signature ?? null, signed_at: new Date().toISOString(), ip: clientIp(c),
+      name: body.name, selected_line_ids: picked, signature: body.signature ?? null, signed_at: signedAt, ip: clientIp(c),
       template: asJson(template),
       ...(company ? { company } : {}),
+      option: asJson(kept.option),
+      contract: asJson(kept.contract),
+      initials: asJson(kept.initials),
     },
+    ...(option ? { p_option: option.id } : {}),
+    ...(body.expected_total !== undefined ? { p_expected_total: body.expected_total } : {}),
   });
-  if (error) throw dbError(error);
-  if (!approved) throw new HttpError(409, "This quote can't be approved anymore.");
+  // A promo code whose minimum order their choices don't reach: nothing changed, and the message says what to do.
+  if (error) throw error.code === "CX412" ? new HttpError(409, error.message) : dbError(error);
+  if (!approved) {
+    // Another approval got there first or the office closed it, else the total isn't the one they saw.
+    const now = must(await admin.from("quotes").select("status").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "Quote not found.");
+    const waiting = ["sent", "changes_requested"].includes(now.status);
+    throw new HttpError(409, waiting && body.expected_total !== undefined ? "The price changed. Please look it over again." : "This quote can't be approved anymore.");
+  }
   kickAutomations(c, l.c);
   return c.json({ status: "approved" });
 });
@@ -397,10 +594,17 @@ publicRoutes.post("/hub/:token/accept-range", async (c) => {
   const l = await link(c);
   if (l.t !== "quote") throw new HttpError(400, "Only an estimate has a price range.");
   if (l.pv) throw new HttpError(400, "This is a preview, so nothing was sent.");
+  // The option they're leaning toward, when the estimate offers options.
+  const body = await readJson(c, z.object({ option_id: postedId.optional() }));
   if (!(await allow(c.env, `hub-range:${clientIp(c)}`, 20, 60 * 60))) throw new HttpError(429, "Too many tries. Try again later, or call us.");
-  // One step in the database (20261023001000_roofing_estimates.sql): only while the range is out and
-  // nobody has priced it on site, and only once.
-  const { data: acceptedAt, error } = await adminClient(c.env).rpc("accept_hub_range", { p_company: l.c, p_quote: l.id });
+  const admin = adminClient(c.env);
+  if (body.option_id && !(await loadOptions(admin, l.c, l.id)).some((o) => o.id === body.option_id)) {
+    throw new HttpError(409, "The options on this estimate changed. Please look it over again.");
+  }
+  // One step in the database (20261025000100_contracts_and_options.sql): only while the range is out
+  // and nobody has priced it on site, and only once. The option they lean toward becomes the one
+  // shown, and the office hears which.
+  const { data: acceptedAt, error } = await admin.rpc("accept_hub_range", { p_company: l.c, p_quote: l.id, ...(body.option_id ? { p_option: body.option_id } : {}) });
   if (error) throw dbError(error);
   if (!acceptedAt) throw new HttpError(409, "This price range isn't waiting for an answer.");
   kickAutomations(c, l.c);
@@ -424,15 +628,32 @@ async function hubDocument(c: Parameters<typeof appUrl>[0]) {
 
 publicRoutes.post("/hub/:token/promo", async (c) => {
   if (!(await allow(c.env, `promo:${clientIp(c)}`, 10, 10 * 60))) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
-  const { code } = await readJson(c, z.object({ code: z.string().trim().min(1, "Enter a promo code.").max(40) }));
+  const body = await readJson(
+    c,
+    z.object({
+      code: z.string().trim().min(1, "Enter a promo code.").max(40),
+      // On an estimate, what the client is choosing (the option they picked and the add-ons they
+      // ticked), so the code's minimum order is checked against that rather than the option shown.
+      option_id: postedId.optional(),
+      selected_line_ids: z.array(postedId).max(200).optional(),
+    }),
+  );
   const { l, admin, kind } = await hubDocument(c);
+  let choice = {};
   if (kind === "quote") {
-    const quote = must(await admin.from("quotes").select("status, range_low, priced_on_site_at, exact_sent_at").eq("company_id", l.c).eq("id", l.id).maybeSingle());
+    const quote = must(await admin.from("quotes").select("status, range_low, priced_on_site_at, exact_sent_at, option_id, promo_code_id, discount_amount").eq("company_id", l.c).eq("id", l.id).maybeSingle());
     if (!["sent", "changes_requested"].includes(quote.status)) throw new HttpError(409, "This quote isn't waiting for a response.");
     // The answer has the new total, and a range doesn't show the exact price yet.
     if (inRangeMode(quote)) throw new HttpError(409, "A promo code goes on the exact price. Mention it at the visit.");
+    // A price agreed on site already has its discount in it (roofPackages.ts sitePriceSet).
+    const lines = must(await admin.from("quote_line_items").select("option_id, name, service_id, formula, optional, selected").eq("company_id", l.c).eq("quote_id", l.id));
+    if (sitePriceSet(quote, lines)) throw new HttpError(409, "Your price was set with you at the visit, so a promo code can't go on it. Give us a call about the code.");
+    if (body.option_id && !(await loadOptions(admin, l.c, l.id)).some((o) => o.id === body.option_id)) {
+      throw new HttpError(409, "The options on this estimate changed. Please look it over again.");
+    }
+    choice = { ...(body.option_id ? { p_option: body.option_id } : {}), ...(body.selected_line_ids ? { p_selected: body.selected_line_ids } : {}) };
   }
-  const { data, error } = await admin.rpc("apply_promo_code", { p_kind: kind, p_id: l.id, p_code: code });
+  const { data, error } = await admin.rpc("apply_promo_code", { p_kind: kind, p_id: l.id, p_code: body.code, ...choice });
   if (error) throw dbError(error);
   return c.json(data as Record<string, unknown>);
 });
@@ -665,13 +886,26 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
   const settings = must(await admin.from("companies").select("timezone, settings").eq("id", companyId).maybeSingle());
   const today = new Date().toLocaleDateString("en-CA", { timeZone: settings.timezone || "UTC" });
   const [quotes, invoices, jobs, payments, requests, services] = await Promise.all([
-    admin.from("quotes").select("id, number, title, status, total, valid_until, sent_at, approved_at, range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at").eq("company_id", companyId).eq("client_id", clientId).in("status", ["sent", "changes_requested", "approved", "converted"]).order("created_at", { ascending: false }).limit(20),
+    admin.from("quotes").select("id, number, title, status, total, tax_rate, discount_amount, valid_until, sent_at, approved_at, range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at, promo:promo_codes(kind, value)").eq("company_id", companyId).eq("client_id", clientId).in("status", ["sent", "changes_requested", "approved", "converted"]).order("created_at", { ascending: false }).limit(20),
     admin.from("invoices").select("id, number, subject, status, total, balance_due, due_on, issued_on").eq("company_id", companyId).eq("client_id", clientId).in("status", ["sent", "partially_paid", "overdue", "paid"]).order("issued_on", { ascending: false }).limit(20),
     admin.from("jobs").select("id").eq("company_id", companyId).eq("client_id", clientId),
     admin.from("payments").select("amount, tip_amount, method, received_at, invoice:invoices(number)").eq("company_id", companyId).eq("client_id", clientId).gt("amount", 0).order("received_at", { ascending: false }).limit(5),
     admin.from("requests").select("number, title, status, created_at").eq("company_id", companyId).eq("client_id", clientId).in("status", ["new", "assessment_scheduled", "assessment_complete"]).order("created_at", { ascending: false }).limit(5),
     admin.from("services").select("category").eq("company_id", companyId).eq("active", true).not("category", "is", null).limit(200),
   ]);
+  // The options and lines of the quotes still waiting for an answer that show a price: one that offers
+  // options says how many and the lowest (services/sales.ts optionsFrom), not the option shown.
+  const waiting = (quotes.data ?? []).filter((q) => !["approved", "converted"].includes(q.status) && !hidesExactPrice(q)).map((q) => q.id);
+  const [optionRows, lineRows] = waiting.length
+    ? await Promise.all([
+        admin.from("quote_options").select("id, quote_id").eq("company_id", companyId).in("quote_id", waiting),
+        admin.from("quote_line_items").select("quote_id, option_id, quantity, unit_price, taxable, optional, selected").eq("company_id", companyId).in("quote_id", waiting),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const offerOf = (q: NonNullable<typeof quotes.data>[number]) => {
+    const options = (optionRows.data ?? []).filter((o) => o.quote_id === q.id);
+    return options.length ? optionsFrom({ ...q, options, lines: (lineRows.data ?? []).filter((line) => line.quote_id === q.id) }) : null;
+  };
   const jobIds = (jobs.data ?? []).map((j) => j.id);
   const visitFields = "id, title, scheduled_on, starts_at, ends_at, status, completed_at, property:properties(line1), assignees:visit_assignees(user_id)";
   const [upcoming, done] = jobIds.length
@@ -701,14 +935,17 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
     kind: "client",
     company,
     client: { name: client.display_name, first_name: firstName(client.display_name), properties: client.properties },
-    // A quote out as a price range shows the range, never its exact total.
+    // A quote out as a price range shows the range, never its exact total. One that offers options
+    // shows how many and the lowest price (`options`) until the client chooses, never as a total.
     quotes: await Promise.all(
       (quotes.data ?? []).map(async (q) => {
         const ranged = inRangeMode(q);
+        const offer = offerOf(q);
         return {
           id: q.id, number: q.number, title: q.title, status: q.status, valid_until: q.valid_until, sent_at: q.sent_at, approved_at: q.approved_at,
-          total: ranged || hidesExactPrice(q) ? null : q.total,
+          total: ranged || hidesExactPrice(q) || offer ? null : q.total,
           range: ranged ? { low: Number(q.range_low), high: Number(q.range_high), accepted_at: q.range_accepted_at } : null,
+          options: offer,
           link: await sign("quote", q.id),
         };
       }),
@@ -750,6 +987,45 @@ publicRoutes.post("/hub/:token/message", async (c) => {
   return c.json({ ok: true }, 201);
 });
 
+/**
+ * A file from the files bucket, read only up to `max` bytes: null when it isn't there or is larger,
+ * which is never read whole. These routes answer anyone, and the folders they read can hold what a
+ * member uploads straight to Storage (up to its 200 MB limit), so a request never makes the server
+ * hold more than a picture's worth.
+ */
+async function storedFile(admin: ReturnType<typeof adminClient>, path: string, max: number): Promise<Uint8Array | null> {
+  const { data, error } = await admin.storage.from("files").download(path).asStream();
+  if (error || !data) return null;
+  const reader = data.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    // Storage stopped partway: as good as not there.
+    return null;
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return bytes;
+}
+
+/** A map drawing's picture is a JPEG of the map (MeasurePage), a few hundred KB to a few MB. */
+const DRAWING_MAX_BYTES = 20_000_000;
+
 // The picture of a map drawing on a quote or invoice. Only drawings shown to the client, and only
 // through the link to the quote or invoice they're on.
 publicRoutes.get("/hub/:token/drawings/:file", async (c) => {
@@ -760,9 +1036,11 @@ publicRoutes.get("/hub/:token/drawings/:file", async (c) => {
   const drawing = must(await admin.from("measurements").select("snapshot_path, show_on_quote, show_on_invoice, quote_id, invoice_id").eq("company_id", l.c).eq("id", id).maybeSingle(), "Drawing not found.");
   const shown = l.t === "quote" ? drawing.show_on_quote && drawing.quote_id === l.id : drawing.show_on_invoice && drawing.invoice_id === l.id;
   if (!shown || !drawing.snapshot_path) throw new HttpError(404, "Drawing not found.");
-  const { data, error } = await admin.storage.from("files").download(drawing.snapshot_path);
-  if (error || !data) throw new HttpError(404, "Drawing not found.");
-  return c.body(await data.arrayBuffer(), 200, { "Content-Type": data.type || "image/jpeg", "Cache-Control": "private, max-age=3600" });
+  // A member uploads it straight to Storage, so only a picture goes out, as the picture it is.
+  const bytes = await storedFile(admin, drawing.snapshot_path, DRAWING_MAX_BYTES);
+  const type = bytes && (isJpeg(bytes) ? "image/jpeg" : isPng(bytes) ? "image/png" : null);
+  if (!bytes || !type) throw new HttpError(404, "Drawing not found.");
+  return c.body(bytes, 200, { "Content-Type": type, "Cache-Control": "private, max-age=3600" });
 });
 
 // The company's logo (services/logo.ts), on the Client Hub and in emails. A logo's file name is
@@ -776,11 +1054,36 @@ publicRoutes.get("/public/logo/:company/:file", async (c) => {
   const { data: company } = await admin.from("companies").select("settings").eq("id", companyId).maybeSingle();
   const path = company ? logoOf(company.settings, companyId) : null;
   if (!path) throw new HttpError(404, "Logo not found.");
-  const { data, error } = await admin.storage.from("files").download(path);
-  const bytes = data && !error ? new Uint8Array(await data.arrayBuffer()) : null;
+  const bytes = await storedFile(admin, path, LOGO_MAX_BYTES);
   if (!bytes || !isPng(bytes)) throw new HttpError(404, "Logo not found.");
   const current = path === `${companyId}/logo/${file}.png`;
   return c.body(bytes, 200, { "Content-Type": "image/png", "Cache-Control": current ? "public, max-age=31536000, immutable" : "public, max-age=3600" });
+});
+
+// A picture of the business's own letterhead (services/letterhead.ts), on its estimates and invoices
+// on the Client Hub. Any it ever added, so a signed estimate keeps the letterhead it was signed on. A
+// file name is never reused and the file never changes, so it's kept for good. Only as large as the
+// server saves one: anything bigger in the folder never came from it.
+publicRoutes.get("/public/letterhead/:company/:file", async (c) => {
+  const companyId = c.req.param("company");
+  const file = (c.req.param("file") ?? "").replace(/\.png$/i, "");
+  if (!z.uuid().safeParse(companyId).success || !z.uuid().safeParse(file).success) throw new HttpError(404, "Letterhead not found.");
+  const bytes = await storedFile(adminClient(c.env), `${companyId}/letterhead/${file}.png`, LETTERHEAD_MAX_BYTES);
+  if (!bytes || !isPng(bytes)) throw new HttpError(404, "Letterhead not found.");
+  return c.body(bytes, 200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable" });
+});
+
+// A package's picture (its own, or the one an option was offered with) on the Client Hub and the
+// paper: any the business ever added, so a signed estimate keeps the picture it was offered with. A
+// file name is never reused and the file never changes, so it's kept for good. Only as large as the
+// server saves one (services/packagePictures.ts): anything bigger in the folder never came from it.
+publicRoutes.get("/public/package/:company/:file", async (c) => {
+  const companyId = c.req.param("company");
+  const file = (c.req.param("file") ?? "").replace(/\.jpg$/i, "");
+  if (!z.uuid().safeParse(companyId).success || !z.uuid().safeParse(file).success) throw new HttpError(404, "Picture not found.");
+  const bytes = await storedFile(adminClient(c.env), `${companyId}/packages/${file}.jpg`, PACKAGE_PICTURE_MAX_BYTES);
+  if (!bytes || !isJpeg(bytes)) throw new HttpError(404, "Picture not found.");
+  return c.body(bytes, 200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" });
 });
 
 // "Add to calendar" for one of the client's visits.

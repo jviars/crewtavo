@@ -3,10 +3,12 @@
  * measurement with a pitch or roof edges), the same records a paving project uses (paving/data.ts).
  * The estimate sorts the price list's services by what they price on a roof: the roof itself
  * (offered as one choice, or as Good, Better and Best), tearing off the old one, and the rest.
- * Also here: the words for a project's stage, and the pure parts of roof packages (packages.ts
- * has their records and hooks).
+ * Also here: the words for a project's stage, and the pure parts of packages, which every trade has
+ * now (packages.ts has their records and hooks): picking them, their highlights and contract sections.
  */
+import { STARTER_NOTE } from "@crewtavo/core/contracts";
 import { formulaVariables } from "@crewtavo/core/formulas";
+import { isExampleWarranty, PACKAGE_LIMITS } from "@crewtavo/core/presets";
 import { ROOFING_VARIABLE_NAMES, isRoofDrawing } from "@crewtavo/core/roofing";
 import { invoicesSettled, sectionsOf, type FlowStep, type TakeoffRow } from "../paving/data";
 
@@ -154,7 +156,7 @@ export function roofStage(q: RoofStageQuote, hasTakeoff: boolean): { label: stri
 export const rangeText = (low: number, high: number, format: (n: number) => string) => `${format(low)} – ${format(high)}`;
 
 // ---------------------------------------------------------------------------------------------
-// Roof packages (roof_packages): what goes on each kind of roof
+// Packages (roof_packages): what goes on each kind of roof, or any trade's services sold together
 // ---------------------------------------------------------------------------------------------
 
 export type PackageStyle = "shingle" | "designer" | "metal" | "other";
@@ -166,7 +168,92 @@ export const PACKAGE_STYLES: Array<{ id: PackageStyle; label: string }> = [
 ];
 
 /** Package names are 1 to 80 characters (roof_packages.name). */
-export const PACKAGE_NAME_MAX = 80;
+export const PACKAGE_NAME_MAX = PACKAGE_LIMITS.name;
+
+/** The tier words offered for a package or an option; a business can write its own. */
+export const TIER_WORDS = ["Good", "Better", "Best"] as const;
+
+/** A quote offers up to 3 options (quote_options). */
+export const MAX_OPTIONS = 3;
+
+/** Whether the business is a roofer: packages are roofs, priced by the square, with ranges and ABC Supply. */
+export const isRoofingCompany = (company: { trade_preset?: string | null }) => company.trade_preset === "roofing_exteriors";
+
+/** Where the business edits its packages: Roofing → Packages for a roofer, else its own page. */
+export const packagesPath = (company: { trade_preset?: string | null }) => (isRoofingCompany(company) ? "/roofing/packages" : "/packages");
+
+/**
+ * What a tap on a package card picks. A tap picks that package instead of the one picked, as it
+ * always has; `add` ("+ Offer as an option") puts it beside the others instead. With two or more
+ * picked, or on a screen that only offers options (`toggle`), a tap adds a package or takes it off
+ * again. Locked packages (already on the estimate) stay first and can't be taken off. Past `max`
+ * nothing changes and `full` says so.
+ */
+export function pickPackage(
+  value: readonly string[],
+  id: string,
+  { max = MAX_OPTIONS, locked = [], add = false, toggle = false }: { max?: number; locked?: readonly string[]; add?: boolean; toggle?: boolean } = {},
+): { value: string[]; full: boolean } {
+  const picked = [...locked, ...value.filter((v) => !locked.includes(v))];
+  if (locked.includes(id)) return { value: picked, full: false };
+  const on = picked.includes(id);
+  if (!add && !toggle && picked.length <= 1) return { value: on ? picked : [...locked, id], full: false };
+  if (on) return { value: add ? picked : picked.filter((v) => v !== id), full: false };
+  if (picked.length >= max) return { value: picked, full: true };
+  return { value: [...picked, id], full: false };
+}
+
+/**
+ * Highlights as they're saved: each line trimmed, empty ones left out, at most 8 of them and 1,200
+ * characters between them (roof_packages_highlights_check), the last ones cut to fit.
+ */
+export function cleanHighlights(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  let room = PACKAGE_LIMITS.highlightChars;
+  for (const line of lines) {
+    const text = line.trim().slice(0, room).trim();
+    if (!text || out.length >= PACKAGE_LIMITS.highlights) continue;
+    out.push(text);
+    room -= text.length;
+  }
+  return out;
+}
+
+/**
+ * The highlights to show once the saved ones change: the lines as they're being typed while they
+ * still come to what's saved (with an empty line just added, say), else the saved ones (changed
+ * somewhere else, or put back after a save failed).
+ */
+export const typedOrSaved = (typed: string[], saved: string[]): string[] => (sameList(cleanHighlights(typed), saved) ? typed : saved);
+
+/** How many characters the highlight at `index` can have, with the others as they are. */
+export function highlightRoom(lines: readonly string[], index: number): number {
+  const others = lines.reduce((sum, line, i) => (i === index ? sum : sum + line.trim().length), 0);
+  return Math.max(0, PACKAGE_LIMITS.highlightChars - others);
+}
+
+/** The list with one item moved from `from` to `to` (both kept inside the list). */
+export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
+  const next = [...list];
+  if (from < 0 || from >= next.length) return next;
+  const [item] = next.splice(from, 1);
+  next.splice(Math.min(Math.max(to, 0), next.length), 0, item!);
+  return next;
+}
+
+/** Whether two lists hold the same things in the same order. */
+export const sameList = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * A package's (or an option's) contract sections after one is switched on or off: in the library's
+ * order, as the template's are, without sections that aren't in the library any more, at most 50.
+ */
+export function toggleSection(library: ReadonlyArray<{ id: string }>, sectionIds: readonly string[], id: string, on: boolean): string[] {
+  const chosen = new Set(sectionIds);
+  if (on) chosen.add(id);
+  else chosen.delete(id);
+  return library.filter((s) => chosen.has(s.id)).map((s) => s.id).slice(0, PACKAGE_LIMITS.sections);
+}
 
 /** A copy's name: "Architectural shingle (copy)", cut to fit. */
 export function copyName(name: string): string {
@@ -231,6 +318,55 @@ export function unitPrice(amount: number, unit: string, format: { whole: (n: num
   if (WHOLE.test(unit.trim())) return price;
   if (EACH.test(unit.trim())) return short ? price : `${price} each`;
   return `${price} / ${unitShort(unit)}`;
+}
+
+/** "$560 a square" for a roof priced by the square (else its price and unit), or null without one. */
+export function squarePrice(roof: { unit_price: number; unit: string } | null | undefined, format: { whole: (n: number) => string; cents: (n: number) => string }): string | null {
+  if (!roof) return null;
+  return isSquareUnit(roof.unit) ? `${moneyText(roof.unit_price, format)} a square` : unitPrice(roof.unit_price, roof.unit, format);
+}
+
+/**
+ * The price line on a package's card: a roof's price a square; elsewhere its main service and that
+ * service's price, or how many services are always in it.
+ */
+export function packagePriceLine(
+  p: { roof: { name: string; unit: string; unit_price: number } | null; items: ReadonlyArray<{ kind: string }> },
+  roofing: boolean,
+  format: { whole: (n: number) => string; cents: (n: number) => string },
+): string {
+  if (p.roof) return roofing ? squarePrice(p.roof, format)! : `${p.roof.name}, ${unitPrice(p.roof.unit_price, p.roof.unit, format)}`;
+  if (roofing) return "No roof picked yet";
+  const included = p.items.filter((i) => i.kind === "included").length;
+  return included ? `${included} ${included === 1 ? "service" : "services"}` : "Nothing in it yet";
+}
+
+/**
+ * The small line under a package card's price: its highlights and, for a roof, its quick adds (only
+ * a roofer's estimates show them) and whether new estimates start from it; "No quick adds" for a
+ * roof with none of those, and nothing elsewhere.
+ */
+export function packageExtras(p: { highlights: readonly string[]; items: ReadonlyArray<{ kind: string }>; is_default: boolean }, roofing: boolean): string {
+  const quick = roofing ? p.items.filter((i) => i.kind === "quick").length : 0;
+  const extras = [
+    p.highlights.length ? `${p.highlights.length} ${p.highlights.length === 1 ? "highlight" : "highlights"}` : null,
+    quick ? `${quick} quick ${quick === 1 ? "add" : "adds"}` : null,
+    // Only a roofer's new estimates start from the default package.
+    roofing && p.is_default ? "Default" : null,
+  ].filter(Boolean);
+  return extras.length ? extras.join(" · ") : roofing ? "No quick adds" : "";
+}
+
+/**
+ * What the packages page says while packages still have the example warranty setup gave them (core
+ * isExampleWarranty, which promises years of workmanship the business never chose): which ones, and
+ * STARTER_NOTE. Null once each has the business's own, or none.
+ */
+export function exampleWarrantyNote(packages: ReadonlyArray<{ name: string; warranty: string }>): string | null {
+  const names = packages.filter((p) => isExampleWarranty(p.warranty)).map((p) => p.name.trim());
+  if (!names.length) return null;
+  const which = names.length === 1 ? `The warranty on ${names[0]} is` : names.length === packages.length ? "The warranties on your packages are" : `The warranties on ${names.slice(0, -1).join(", ")} and ${names.at(-1)} are`;
+  return `${which} from setup. ${STARTER_NOTE}`;
 }
 
 /** The parts of a service and a package item the quick-add chips need. */

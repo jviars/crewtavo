@@ -44,6 +44,8 @@
 .pricingStatus { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; color: var(--text-2); }
 .note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-3); }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+/* Options with nothing of their own yet, and the way to price them. */
+.emptyOptions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .pick { display: grid; gap: 14px; }
 .pickActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 
@@ -70,6 +72,13 @@
 .splitEstimate { background: var(--green-solid); }
 .splitRoom { background: repeating-linear-gradient(135deg, var(--green-tint-2) 0 5px, var(--green-tint) 5px 10px); }
 .splitLabels { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* With options: a tick at each option's price on the bar, and the options named under it. */
+.optionsBar { position: relative; }
+.tick { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 1.5px var(--surface); }
+.tickList { display: grid; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.tickList li { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+.tickList span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.tickList strong { font-variant-numeric: tabular-nums; font-weight: 600; }
 .cardActions { display: grid; gap: 8px; }
 .cardActions :global(.btn) { width: 100%; }
 .bigButton { min-height: 48px; font-size: 15px; }
@@ -84,6 +93,21 @@
 .agreedRange { margin: 0; font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .agreedRange strong { color: var(--ink); font-weight: 700; }
 .agreedNote { min-height: 76px; line-height: 1.5; }
+/* "They said yes": which option they're leaning toward, a row each with its picture and own range. */
+.leaning { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.leaning legend { margin-bottom: 8px; padding: 0; font-size: 14px; font-weight: 600; }
+.lean {
+  display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 14px 8px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface);
+  font-weight: 400; cursor: pointer; transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.lean:hover { border-color: var(--border-strong); }
+.lean:focus-within, .lean[data-on] { border-color: var(--green); box-shadow: var(--ring); }
+.lean input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--green); }
+.leanPicture { flex: none; width: 64px; height: 44px; border-radius: 6px; overflow: hidden; }
+.leanText { display: grid; gap: 2px; min-width: 0; }
+.leanText strong { overflow-wrap: anywhere; }
+.leanRange { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
 /* ---------- The range and site visit steps ---------- */
 .stepBody { display: grid; gap: 14px; }

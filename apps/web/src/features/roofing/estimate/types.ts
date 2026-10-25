@@ -1,14 +1,19 @@
 /**
  * The records a roof estimate is made of, as the office page and the salesperson's iPad read them:
- * the quote with its lines, the range it went out at and how it was signed, and the price list's
- * services that can go on it. The select strings below fetch exactly these fields.
+ * the quote with its lines and the options it offers (quotes/options.ts), the range it went out at
+ * and how it was signed, and the price list's services that can go on it. The select strings below
+ * fetch exactly these fields.
  */
 import type { SnapshotLine } from "@crewtavo/core/estimates";
 import type { LineMaterials } from "@crewtavo/core/materials";
+import type { TotalsPromo } from "@crewtavo/core/money";
+import { QUOTE_OPTIONS_EMBED, type QuoteOptionRow } from "../../quotes/options";
 
 /** A line on the estimate (quote_line_items). */
 export interface EstimateLine {
   id: string;
+  /** The option it's on; null for a line on every option (every line of an estimate without options). */
+  option_id: string | null;
   service_id: string | null;
   name: string;
   description: string | null;
@@ -58,7 +63,14 @@ export interface EstimateQuote {
   tax_amount: number;
   total: number;
   promo_code_id: string | null;
+  /** The promo code, and its discount, which an option's total is worked out with (core optionTotals). */
+  promo: (TotalsPromo & { code: string }) | null;
+  /** The package of the option shown (or of the estimate, without options). */
   roof_package_id: string | null;
+  /** The option shown first, and once signed the one chosen; null without options. */
+  option_id: string | null;
+  /** The contract sections added to this job (the Contract card). */
+  section_ids: string[];
   template_id: string | null;
   salesperson_id: string | null;
   /** The price range the homeowner was sent, and the lines it was made from. */
@@ -76,8 +88,10 @@ export interface EstimateQuote {
   /** Who and where, for headings ("Notes for Mike", "Dana Whitfield · 1482 Ridgeview Dr"). */
   client: { id: string; display_name: string; email: string | null; phone: string | null } | null;
   property: { id: string; line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
-  /** In order (sort). */
+  /** In order (sort): every option's lines, each with its option_id. */
   lines: EstimateLine[];
+  /** The options it offers, in order; none for a single estimate. */
+  options: QuoteOptionRow[];
 }
 
 /** A price list service that can go on the estimate. */
@@ -101,9 +115,9 @@ export interface QuickAddService extends EstimateService {
   quantity: number | null;
 }
 
-export const ESTIMATE_LINE_FIELDS = "id, service_id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, formula, sort, materials, material_cost";
+export const ESTIMATE_LINE_FIELDS = "id, option_id, service_id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, formula, sort, materials, material_cost";
 
-export const ESTIMATE_QUOTE_FIELDS = `id, number, title, status, subtotal, discount_amount, tax_rate, tax_amount, total, promo_code_id, roof_package_id, template_id, salesperson_id, range_low, range_high, range_sent_at, range_accepted_at, range_lines, priced_on_site_at, exact_sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(${ESTIMATE_LINE_FIELDS})`;
+export const ESTIMATE_QUOTE_FIELDS = `id, number, title, status, subtotal, discount_amount, tax_rate, tax_amount, total, promo_code_id, promo:promo_codes(code, kind, value), roof_package_id, option_id, section_ids, template_id, salesperson_id, range_low, range_high, range_sent_at, range_accepted_at, range_lines, priced_on_site_at, exact_sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(${ESTIMATE_LINE_FIELDS}), ${QUOTE_OPTIONS_EMBED}`;
 
 export const ESTIMATE_SERVICE_FIELDS = "id, name, unit, unit_price, unit_cost, labor_cost, taxable, formula, formula_target, category";
 

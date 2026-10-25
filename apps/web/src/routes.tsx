@@ -124,6 +124,8 @@ export const routes: RouteObject[] = [
           { path: "roofing", ...page(screens.roofing, "RoofingPage") },
           { path: "roofing/packages", ...page(screens.roofPackages, "RoofPackagesPage") },
           { path: "roofing/:id", ...page(screens.roofingProject, "RoofingProjectPage") },
+          // Every trade's packages; a roofer's are under Roofing (the page sends them there).
+          { path: "packages", ...page(screens.roofPackages, "PackagesPage") },
           { path: "quotes", ...page(screens.quotes, "QuotesPage") },
           { path: "quotes/:id", ...page(screens.quote, "QuotePage") },
           { path: "jobs", ...page(screens.jobs, "JobsPage") },

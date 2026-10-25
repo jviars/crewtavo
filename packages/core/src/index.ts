@@ -4,6 +4,7 @@ export * from "./automations";
 export * from "./breaks";
 export * from "./chat";
 export * from "./clientImport";
+export * from "./contracts";
 export * from "./email";
 export * from "./equipment";
 export * from "./estimates";

@@ -1,5 +1,6 @@
-/* Roofing → Packages: the list, the price range and ABC cards beside it, and one package's editor.
-   Also the package cards a new roof estimate starts from (PackagePicker). */
+/* Packages (Roofing → Packages, and /packages for every trade): the list, a roofer's price range and
+   ABC cards beside it, and one package's editor. A package's picture, its highlights and the cards
+   an estimate starts from are PackageCards.module.css. */
 
 .tabs { margin-top: -10px; }
 
@@ -28,6 +29,8 @@
 .pkgText { flex: 1; min-width: 0; display: grid; gap: 3px; }
 .pkgText strong { font-size: 15px; overflow-wrap: anywhere; }
 .pkgText span { font-size: 13px; color: var(--text-2); }
+/* A package still on the example warranty setup gave it. */
+.pkgText .flag { display: inline-flex; align-items: center; gap: 4px; justify-self: start; font-size: 12.5px; font-weight: 600; color: var(--warning); }
 .addPkg {
   display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; padding: 12px;
   border: 1px dashed var(--border-strong); border-radius: var(--radius-card); background: transparent; color: var(--text-2);
@@ -35,8 +38,8 @@
 }
 .addPkg:hover { color: var(--ink); background: var(--fill); }
 
-.art { flex: none; display: block; border-radius: 8px; }
-.banner { display: block; }
+/* A package's picture in the list (PackagePicture) */
+.tile { width: 56px; border-radius: 7px; }
 
 /* The cards under the list */
 .sideCard { display: grid; gap: 12px; }
@@ -68,7 +71,16 @@
 .head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
 .nameField { flex: 1 1 260px; }
 .nameField :global(.input) { height: 42px; font-size: 16px; font-weight: 700; }
+.tierField { flex: 0 1 150px; min-width: 120px; }
+.tierField :global(.input) { height: 42px; }
 .headActions { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.pictureRow { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 18px; }
+.editorPicture { width: 168px; border-radius: 10px; border: 1px solid var(--divider); }
+.pictureSide { flex: 1 1 240px; min-width: 0; display: grid; gap: 8px; justify-items: start; }
+@media (max-width: 600px) {
+  .editorPicture { width: 128px; }
+}
 
 .styleRow { display: flex; flex-wrap: wrap; gap: 8px; }
 .styleBtn {
@@ -76,7 +88,7 @@
   border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-2);
   font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
 }
-.styleBtn .art { border-radius: 6px; }
+.styleBtn svg { border-radius: 6px; }
 .styleBtn:hover { color: var(--ink); }
 .styleBtn[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); color: var(--ink); }
 
@@ -145,27 +157,7 @@ button.quick:hover { color: var(--ink); border-color: var(--border-strong); }
 .quick[aria-pressed="true"] :global(svg), .quick[data-on] :global(svg) { color: var(--green); }
 span.quick { cursor: default; }
 
-/* The new roof estimate's package cards */
-.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 12px; }
-.pick {
-  position: relative; display: flex; flex-direction: column; padding: 0; overflow: hidden;
-  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink);
-  font: inherit; font-weight: 400; text-align: left; cursor: pointer;
-  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
-}
-.pick:hover { border-color: var(--border-strong); }
-.pick[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); }
-.pickText { display: grid; gap: 4px; padding: 12px 14px 14px; }
-.pickText strong { font-size: 15px; }
-.pickText span { font-size: 13.5px; color: var(--text-2); }
-.pickText small { font-size: 12.5px; color: var(--text-3); }
-.pickCheck {
-  position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 26px; height: 26px;
-  border-radius: 50%; background: var(--green-solid, var(--green)); color: #fff; box-shadow: 0 0 0 3px var(--surface);
-}
-/* On a phone the cards stack, so the picture moves to the side. */
-@media (max-width: 600px) {
-  .pick { flex-direction: row; align-items: stretch; }
-  .pick .banner { flex: none; width: 72px; height: auto; }
-  .pickText { padding: 12px 44px 12px 14px; }
-}
+/* What's on its card, for those who only read it, and its contract sections */
+.cardLines { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; }
+.sections { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.sections :global(.checkbox) { font-weight: 600; }

@@ -1036,7 +1036,33 @@ a.hub-list-row:hover { background: var(--fill); color: var(--ink); }
 /* A price range on the client's account page (ClientPortal). The range's own page is hub/range.module.css. */
 .hub-range-line { font-size: 14px; font-weight: 700; color: var(--brand-text, var(--ink)); font-variant-numeric: tabular-nums; }
 
-/* A signed estimate: the paper at its full width where the screen has room, else as wide as the page.
-   The Hub's column stays the page's width (minmax), so the wider paper doesn't widen everything else. */
+/* The paper (a signed estimate, the agreement being reviewed, an invoice): at its full width where the
+   screen has room, else as wide as the page. The Hub's column stays the page's width (minmax), so the
+   wider paper doesn't widen everything else. */
 .hub-wrap { grid-template-columns: minmax(0, 1fr); }
 .hub-document { --doc-w: min(848px, calc(100vw - 32px)); width: var(--doc-w); margin-inline: calc((100% - var(--doc-w)) / 2); }
+
+/* An open quote's steps in the Client Hub (HubPage OpenQuote): choose an option, review the agreement, sign. */
+.hub-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 6px; }
+.hub-steps li > * {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; box-sizing: border-box;
+  border-radius: 12px; border: 1px solid var(--border); background: #fff; font: inherit; font-size: 14px; font-weight: 600; color: var(--text-2);
+}
+.hub-steps button { cursor: pointer; transition: background var(--dur-fast); }
+.hub-steps button:hover { background: var(--fill); color: var(--ink); }
+.hub-steps li[aria-current="step"] > * { border: 2px solid var(--brand); padding: 5px 9px; color: var(--ink); }
+.hub-step-n { width: 24px; height: 24px; flex: none; border-radius: 999px; display: grid; place-items: center; background: var(--fill-2); font-size: 13px; font-weight: 800; }
+.hub-steps li[aria-current="step"] .hub-step-n { background: var(--brand); color: var(--on-brand); }
+.hub-steps li[data-done] .hub-step-n { background: var(--green-tint); color: var(--green-dark); }
+.hub-step-title { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; outline: none; }
+.hub-step-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.hub-choice-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; }
+.hub-choice-thumb { position: relative; width: 64px; aspect-ratio: 4 / 3; flex: none; border-radius: 8px; overflow: hidden; background: var(--fill-2); }
+.hub-initials { display: flex; flex-direction: column; border-top: 1px solid var(--divider); }
+.hub-initials-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 12px 0; border-bottom: 1px solid var(--divider); }
+.hub-initials-row .grow { min-width: 160px; }
+.hub-initials-mark { width: 64px; height: 32px; flex: none; object-fit: contain; background: #fff; border: 1px solid var(--border); border-radius: 6px; }
+/* On a phone the pages are too small to read, so the terms being reviewed are there again as text (HubPage TermsToRead). */
+.hub-terms-read { display: none; }
+.hub-terms-read h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 16px; font-weight: 800; }
+@media (max-width: 700px) { .hub-terms-read { display: grid; } }

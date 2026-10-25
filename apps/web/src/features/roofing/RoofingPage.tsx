@@ -2,10 +2,12 @@
  * Roofing: a roof estimate from one place, for businesses set up for roofing. Start from an address
  * and a roof package, then each project walks through measuring the roof, the estimate, the price
  * range the homeowner is sent, the site visit, the schedule and the invoice (RoofingProjectPage).
- * The list shows where each one is. A business with no roof packages yet is offered the standard
- * ones (Roofing → Packages has the rest).
+ * The list shows where each one is, and its package (or how many options it offers, priced from the
+ * cheapest until it's signed). A business with no roof packages yet is offered the standard ones
+ * (Roofing → Packages has the rest).
  */
 import { inRangeMode } from "@crewtavo/core/estimates";
+import type { TotalsPromo } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -21,6 +23,7 @@ import { hasRole, useSession } from "@/lib/session";
 import { TAKEOFF_FIELDS, type TakeoffRow } from "../paving/data";
 import { NewTakeoffDialog } from "../paving/NewTakeoffDialog";
 import { isRoof, rangeText, roofStage, roofSummary } from "./data";
+import { lowestOption, SIGNED } from "./flow/model";
 import { canSetUpRoofing, packagesKey, setUpRoofing, setupMessage, useRoofPackages } from "./packages";
 import { RoofingTabs } from "./RoofPackagesPage";
 
@@ -31,6 +34,9 @@ interface ProjectRow extends TakeoffRow {
     title: string;
     status: string;
     total: number;
+    tax_rate: number;
+    discount_amount: number;
+    promo: TotalsPromo | null;
     range_low: number | null;
     range_high: number | null;
     range_sent_at: string | null;
@@ -40,13 +46,16 @@ interface ProjectRow extends TakeoffRow {
     client: { display_name: string } | null;
     property: { line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
     package: { name: string } | null;
-    lines: Array<{ id: string }>;
+    /** Its options, when it offers two or three. */
+    options: Array<{ id: string }>;
+    /** What each option's price is worked out from. */
+    lines: Array<{ id: string; option_id: string | null; quantity: number; unit_price: number; taxable: boolean; optional: boolean; selected: boolean }>;
     jobs: Array<{ id: string; status: string }>;
   } | null;
 }
 
 const QUOTE_FIELDS =
-  "id, number, title, status, total, range_low, range_high, range_sent_at, range_accepted_at, priced_on_site_at, exact_sent_at, client:clients(display_name), property:properties(line1, city, region, postal_code), package:roof_packages!quotes_roof_package_fkey(name), lines:quote_line_items(id), jobs!jobs_company_id_quote_id_fkey(id, status)";
+  "id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), range_low, range_high, range_sent_at, range_accepted_at, priced_on_site_at, exact_sent_at, client:clients(display_name), property:properties(line1, city, region, postal_code), package:roof_packages!quotes_roof_package_fkey(name), options:quote_options!quote_options_quote_fkey(id), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), jobs!jobs_company_id_quote_id_fkey(id, status)";
 
 export function RoofingPage() {
   const session = useSession();
@@ -112,6 +121,8 @@ export function RoofingPage() {
                   const q = r.quote!;
                   const stage = roofStage(q, true);
                   const ranged = inRangeMode(q) && q.range_high !== null;
+                  // Options not chosen yet: from the cheapest. Once signed, the total is the one chosen.
+                  const from = q.options?.length && !SIGNED.includes(q.status) ? lowestOption(q) : null;
                   return (
                     <tr key={q.id} className="row-link" onClick={() => navigate(`/roofing/${q.id}`)}>
                       <td>
@@ -120,11 +131,13 @@ export function RoofingPage() {
                       </td>
                       <td>
                         <span className="small">{roofSummary(r, formatNumber)}</span>
-                        <div className="muted small">{[q.package?.name, timeAgo(r.updated_at)].filter(Boolean).join(" · ")}</div>
+                        <div className="muted small">{[q.options?.length ? `${q.options.length} options` : q.package?.name, timeAgo(r.updated_at)].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td className="num">
                         {ranged ? (
                           <span title="The price range the homeowner was sent">{rangeText(Number(q.range_low), Number(q.range_high), formatMoney)}</span>
+                        ) : from !== null ? (
+                          <span title="Its cheapest option">From {formatMoney(from)}</span>
                         ) : q.lines.length ? (
                           formatMoney(q.total)
                         ) : (

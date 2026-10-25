@@ -2,16 +2,17 @@
  * Client Hub (the customer portal): what a client sees from a link. No account needed; the link
  * is signed and expires.
  *   client  - their account: what's waiting on them, the next visit, history, request work
- *   quote   - choose optional items, approve with their name, or ask for changes; a roof estimate
- *             sent as a price range asks "Yes, send someone out" instead; a signed one shows the
- *             signed estimate itself
+ *   quote   - in steps: choose one of the options it offers (with its add-ons), review the
+ *             agreement on the business's paper (initialing the sections that ask), then sign; or
+ *             ask for changes. A roof estimate sent as a price range asks "Yes, send someone out"
+ *             instead; a signed one shows the signed estimate itself
  *   invoice - view and pay (with an optional tip)
  * Quotes and invoices print as the business's estimate template. Add ?print=1 to print or save a PDF.
  */
 import { greetingName } from "@crewtavo/core/automations";
-import { lineTotal, optionLabels, quoteTotals } from "@crewtavo/core/money";
+import { lineTotal } from "@crewtavo/core/money";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
@@ -19,35 +20,70 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { BrandMark } from "@/components/shell/BrandMark";
-import { licenseLine, websiteLabel } from "@/features/documents/build";
+import {
+  awaitingInitials,
+  choiceLabel,
+  contractTemplate,
+  initialSection,
+  licenseLine,
+  stillInitialed,
+  websiteLabel,
+  withInitials,
+  type InitialedSections,
+  type QuoteContract,
+} from "@/features/documents/build";
+import { smallInitials } from "@/features/documents/data";
 import { DocumentSheet, PrintableDocument } from "@/features/documents/EstimateDocument";
+import { nextFrames, paperSettled } from "@/features/documents/paper";
+import type { DocumentSection } from "@/features/documents/types";
 import { ApiError } from "@/lib/api";
 import { dateIn, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { sanitizeContractHtml } from "@/lib/html";
 import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
 import {
   credentialLine,
+  depositToBook,
+  firstOption,
+  groupTiers,
   hubAccent,
+  hubChoice,
+  hubContract,
+  hubInvoiceContract,
   hubLetterhead,
+  hubSteps,
   hubTemplate,
+  hubTotals,
   invoiceDocument,
+  isRoofJob,
+  keepPicks,
+  listedLines,
   maybePrice,
   measuredLine,
   measuredRoof,
+  optionLinesOf,
   packageLabel,
   phoneHref,
+  pickedOption,
+  promoShortfall,
   propertyLine,
   quoteDocument,
   rangeDates,
+  rangeWords,
+  reviewChange,
   roofTiles,
   trustBadges,
+  unpickedGroup,
   websiteHref,
   type HubCompany,
   type HubDrawing,
   type HubLine,
+  type HubOption,
   type HubPromoInfo,
+  type HubStep,
   type InvoiceView,
   type MeasuredRoof,
   type QuoteView,
+  type SignedFor,
   type TrustBadge,
 } from "./document";
 import styles from "./range.module.css";
@@ -71,13 +107,14 @@ async function hubFetch<T>(path: string, body?: unknown, method?: "DELETE"): Pro
 }
 
 /**
- * Printing a quote or invoice prints the business's template (PrintableDocument), which is only put
- * on the page once someone prints: from the print button, ?print=1, or the browser's own Print (put
- * in place before the browser lays the page out). It stays after, since some browsers say printing
- * is over before they've made the copy.
+ * Printing a quote or invoice prints the business's template (PrintableDocument). It's put on the
+ * page (hidden) as soon as the page's data is in, so its pages are laid out and its pictures loaded
+ * before anyone prints; else when someone prints: from the print button, ?print=1, or the browser's
+ * own Print (put in place before the browser lays the page out). It stays after, since some
+ * browsers say printing is over before they've made the copy.
  */
-function usePrintMode() {
-  const [on, setOn] = useState(false);
+function usePrintMode(loaded: boolean) {
+  const [asked, setOn] = useState(false);
   useEffect(() => {
     // The browser lays the page out for printing right after this, so the document goes in now.
     const before = () => flushSync(() => setOn(true));
@@ -88,13 +125,14 @@ function usePrintMode() {
     setOn(true);
     void printWhenReady();
   }, []);
-  return { on, print };
+  return { on: asked || loaded, print };
 }
 
 /**
  * Print once the page is ready to: the document on it, the fonts loaded and every picture (the
- * logo, signatures, the roof drawing) loaded or given up on, so the PDF isn't missing any. Waits 5
- * seconds at most.
+ * logo, signatures, the roof drawing) loaded or given up on, so the PDF isn't missing any, and the
+ * business's document laid out on its pages with them. Waits 5 seconds at most, and a couple more
+ * for the pages.
  */
 async function printWhenReady() {
   // Two frames: the document that printing puts on the page is drawn by then.
@@ -110,6 +148,11 @@ async function printWhenReady() {
     ]),
     new Promise((resolve) => setTimeout(resolve, 5000)),
   ]);
+  // The estimate's range page prints itself as it is; a document waits for its pages.
+  if (document.querySelector("[data-printable-document]")) {
+    await nextFrames(2);
+    await paperSettled();
+  }
   window.print();
 }
 
@@ -141,11 +184,11 @@ export function HubPage() {
   const printing = params.get("print") === "1";
   const view = useQuery({ queryKey: ["hub", token], queryFn: () => hubFetch<View>(token), retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 2 });
   const [messaging, setMessaging] = useState<{ visit?: PortalVisit } | null>(null);
-  const { on: printable, print } = usePrintMode();
+  const { on: printable, print } = usePrintMode(Boolean(view.data));
   const printed = useRef(false);
 
   useEffect(() => {
-    if (view.data) document.title = `${view.data.kind === "quote" ? `${view.data.quote.range ? "Roof estimate" : "Quote"} #${view.data.quote.number}` : view.data.kind === "invoice" ? `Invoice #${view.data.invoice.number}` : "Your account"} · ${view.data.company.name}`;
+    if (view.data) document.title = `${view.data.kind === "quote" ? `${view.data.quote.range ? rangeWords({ roof: isRoofJob(view.data), options: 0, first: null }).kind : "Quote"} #${view.data.quote.number}` : view.data.kind === "invoice" ? `Invoice #${view.data.invoice.number}` : "Your account"} · ${view.data.company.name}`;
     // Once: a refresh of the page's data (after paying, say) doesn't print it again.
     if (view.data && printing && !printed.current) {
       printed.current = true;
@@ -308,12 +351,85 @@ function QuoteHub({ token, data, onChanged, printing, onPrint }: { token: string
   return <OpenQuote token={token} data={data} onChanged={onChanged} printing={printing} />;
 }
 
+/** The look of each package style, for an option without a picture: as on the Packages page (roofing/RoofPackagesPage PackageArt), drawn here so the Hub doesn't load the office's page. */
+const ART: Record<string, { bg: string; line: string; w: number; h: number; d: string }> = {
+  shingle: { bg: "#5b6770", line: "#4a555d", w: 30, h: 20, d: "M0 10h30M0 20h30M10 0v10M25 10v10" },
+  designer: { bg: "#6e5a4b", line: "#5c4a3d", w: 36, h: 24, d: "M0 12h36M0 24h36M14 0l-4 12M32 12l-4 12" },
+  metal: { bg: "#3f5566", line: "#5f7889", w: 12, h: 12, d: "M6 0v12" },
+  other: { bg: "#66747a", line: "#5a676d", w: 14, h: 14, d: "M0 14L14 0" },
+};
+
+/** An option's picture, filling its box (4:3), or its package's look when it has none. */
+function OptionPicture({ option }: { option: Pick<HubOption, "picture" | "style"> }) {
+  const id = `option-art-${useId().replace(/:/g, "")}`;
+  if (option.picture) return <img className={styles.optionPicture} src={option.picture.src} width={option.picture.width} height={option.picture.height} alt="" />;
+  const art = ART[option.style] ?? ART.other!;
+  return (
+    <svg className={styles.optionPicture} aria-hidden="true" focusable="false">
+      <defs>
+        <pattern id={id} width={art.w} height={art.h} patternUnits="userSpaceOnUse">
+          <path d={art.d} fill="none" stroke={art.line} strokeWidth="2" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={art.bg} />
+      <rect width="100%" height="100%" fill={`url(#${id})`} />
+    </svg>
+  );
+}
+
 /**
- * A roof estimate sent as a price range: the business's letterhead, the range, the roof as measured,
- * what's in it and what could change it, and "Yes, send someone out", which tells the office to book
- * the visit. Drawn in the estimate template's color, so it matches the paper they sign later. On a
- * computer the details are on the left and the price and buttons on the right; on a phone it's one
- * column (range.module.css). The exact price never reaches this page.
+ * One option's card, to compare side by side: its picture, tier, name, highlights, warranty and
+ * price. With `onPick`, tapping the card (or its button, for the keyboard) picks it; `words` are
+ * the button's, before and once it's picked.
+ */
+function OptionCard({ option, price, picked, onPick, words, disabled = false }: { option: HubOption; price: { text: string; ask?: boolean }; picked: boolean; onPick?: () => void; words: [string, string]; disabled?: boolean }) {
+  const pickable = Boolean(onPick) && !disabled;
+  return (
+    <article className={styles.option} data-picked={picked || undefined} data-pickable={pickable || undefined} onClick={pickable ? onPick : undefined}>
+      <div className={styles.optionPictureBox}>
+        <OptionPicture option={option} />
+      </div>
+      <div className={styles.optionBody}>
+        {option.tier && <span className={styles.tierChip}>{option.tier}</span>}
+        <h3 className={styles.optionName}>{option.name}</h3>
+        {option.highlights.length > 0 && (
+          <ul className={styles.highlights}>
+            {option.highlights.map((h, i) => (
+              <li key={i}><Icon name="check" size={14} strokeWidth={3} /><span>{h}</span></li>
+            ))}
+          </ul>
+        )}
+        {option.warranty.trim() && <p className={styles.warranty}>{option.warranty.trim()}</p>}
+        <div className={styles.optionPrice} data-ask={price.ask || undefined}>{price.text}</div>
+        {onPick && (
+          <Button
+            variant={picked ? "primary" : "secondary"}
+            icon={picked ? "check" : undefined}
+            block
+            className={styles.pickBtn}
+            aria-pressed={picked}
+            disabled={disabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPick();
+            }}
+          >
+            {picked ? words[1] : words[0]}
+            <span className="sr-only"> ({option.name})</span>
+          </Button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+/**
+ * A roof estimate sent as a price range: the business's letterhead, the range, the options it offers
+ * (each with its own range; the homeowner can say which they're leaning toward), the roof as
+ * measured, what's in it and what could change it, and "Yes, send someone out", which tells the
+ * office to book the visit. Drawn in the estimate template's color, so it matches the paper they sign
+ * later. On a computer the details are on the left and the price and buttons on the right; on a phone
+ * it's one column (range.module.css). The exact price never reaches this page.
  */
 function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; data: QuoteView; onChanged: () => void; onAsk: () => void; onPrint: () => void }) {
   const q = data.quote;
@@ -328,6 +444,9 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
   const place = propertyLine(q.property);
   const dates = rangeDates(data, today);
   const roof = measuredRoof(data.drawings);
+  const roofJob = isRoofJob(data);
+  const options = (q.options ?? []).length >= 2 ? q.options! : [];
+  const words = rangeWords({ roof: roofJob, options: options.length, first });
   const badges = trustBadges(template);
   const credits = credentialLine(template);
   const tagline = template.tagline.trim();
@@ -336,19 +455,26 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
   const email = company.email?.trim() || null;
   const website = company.website?.trim() || null;
   const address = (company.address ?? []).join(", ");
-  const roofType = packageLabel(q.package?.name);
+  const roofType = options.length ? "From the lowest option to the highest" : roofJob ? packageLabel(q.package?.name) : (q.package?.name.trim() ?? "");
+  // What's included is the option shown first's (with the shared lines).
+  const shown = options.find((o) => o.id === q.option_id) ?? null;
   const [previewNote, setPreviewNote] = useState(false);
+  const [leaning, setLeaning] = useState<string | null>(null);
   const thanks = useRef<HTMLDivElement>(null);
   const accept = useMutation({
-    mutationFn: () => hubFetch<{ accepted_at: string }>(`${token}/accept-range`, {}),
+    meta: { inline: true },
+    mutationFn: () => hubFetch<{ accepted_at: string }>(`${token}/accept-range`, leaning ? { option_id: leaning } : {}),
     onSuccess: onChanged,
     // Answered already (the office may have marked it after a phone call), or priced on site since
-    // the page loaded: show where it is now.
+    // the page loaded, or the options changed: show where it is now.
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) onChanged();
     },
   });
   const accepted = Boolean(range.accepted_at) || accept.isSuccess;
+  // Once they've said yes, the one they leaned toward stays marked (only on this visit to the page: the office has it).
+  const marked = accepted ? (accept.isSuccess ? leaning : null) : leaning;
+  const leanedOn = options.find((o) => o.id === marked) ?? null;
   const yes = () => (data.preview ? setPreviewNote(true) : accept.mutate());
   const ask = () => (data.preview ? setPreviewNote(true) : onAsk());
   // The button they pressed is gone, so their place on the page moves to the thanks.
@@ -395,8 +521,8 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
 
         <section className={styles.intro}>
           <div className={styles.title}>
-            <span className={styles.eyebrow}>Roof estimate · No. {q.number}</span>
-            <h1>{first ? `Your new roof, ${first}` : "Your new roof"}</h1>
+            <span className={styles.eyebrow}>{words.kind} · No. {q.number}</span>
+            <h1>{words.heading}</h1>
           </div>
           {(clientName || place || dates.sent || dates.goodUntil) && (
             <div className={styles.meta}>
@@ -420,12 +546,36 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
 
         <div className={styles.layout}>
           <div className={styles.details}>
+            {options.length > 0 && (
+              <section className={cx(styles.card, styles.choices)} aria-labelledby="range-options">
+                <h2 id="range-options">Your options</h2>
+                <p className={styles.sub}>
+                  {accepted
+                    ? leanedOn
+                      ? `You told us you're leaning toward ${leanedOn.name}. You can still change your mind when we come out.`
+                      : "You'll choose one when we come out."
+                    : "Each has its own range. Tap the one you're leaning toward, if you like: you can still change your mind when we come out."}
+                </p>
+                <div className={styles.optionGrid}>
+                  {options.map((o) => (
+                    <OptionCard
+                      key={o.id}
+                      option={o}
+                      price={o.range ? { text: `${formatMoney(o.range.low)} – ${formatMoney(o.range.high)}` } : { text: "Ask us about this one", ask: true }}
+                      picked={marked === o.id}
+                      onPick={accepted ? undefined : () => setLeaning((l) => (l === o.id ? null : o.id))}
+                      words={["I'm leaning toward this one", "Leaning toward this one"]}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
             {roof && <RoofMeasured token={token} roof={roof} included={range.included} timeZone={tz} today={today} />}
             {(range.included.length > 0 || range.maybe.length > 0) && (
               <div className={styles.lists}>
                 {range.included.length > 0 && (
                   <section className={cx(styles.card, styles.included)}>
-                    <h2>What's included</h2>
+                    <h2>{shown ? `What's included with ${shown.name}` : "What's included"}</h2>
                     <ul className={styles.checks}>
                       {range.included.map((item) => (
                         <li key={item}><span className={styles.tick}><Icon name="check" size={13} strokeWidth={3.5} /></span><span>{item}</span></li>
@@ -435,7 +585,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                 )}
                 {range.maybe.length > 0 && (
                   <section className={cx(styles.card, styles.maybe)}>
-                    <h2>If we find something on the roof</h2>
+                    <h2>{words.maybe}</h2>
                     <p className={styles.sub}>Only if we find it, and only with your OK.</p>
                     <ul className={styles.rows}>
                       {range.maybe.map((m) => <li key={m.name}><span>{m.name}</span><strong>{maybePrice(m)}</strong></li>)}
@@ -458,7 +608,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                     </p>
                     {roofType && <span className={styles.package}>{roofType}</span>}
                   </div>
-                  <p className={styles.why}>The exact price is set when we look at your roof in person. It only moves toward the top if we find something hidden, like soft wood under the shingles.</p>
+                  <p className={styles.why}>{words.why}</p>
                 </div>
               </div>
 
@@ -467,16 +617,17 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                   <div ref={thanks} tabIndex={-1} className={styles.thanks}>
                     <span className={styles.thanksMark}><Icon name="check" size={22} strokeWidth={3} /></span>
                     <strong>{first ? `Thanks, ${first}. We'll call you soon.` : "Thanks. We'll call you soon."}</strong>
-                    <p>We'll set up a time to look at your roof, usually within one business day.</p>
+                    <p>{words.thanks}</p>
                     {!data.preview && <button type="button" className={cx(styles.noteBtn, "no-print")} onClick={onAsk}>Send {company.name} a note</button>}
                   </div>
                 ) : (
                   <>
                     <h2 className={styles.nextTitle}>Ready for the next step?</h2>
-                    <p className={styles.nextText}>Say yes and we'll call to set up a time to look at your roof. You'll see the exact price and sign only if you're happy with it.</p>
+                    <p className={styles.nextText}>{words.next}</p>
                     {dates.expired && dates.goodUntil && (
                       <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">This range was good until {dates.goodUntil}. You can still say yes, and we'll confirm the price.</div></div>
                     )}
+                    {leanedOn && <p className={styles.leaning}>Leaning toward <strong>{leanedOn.tier ? `${leanedOn.tier} · ` : ""}{leanedOn.name}</strong></p>}
                     <Button variant="primary" size="lg" block className={styles.yes} loading={accept.isPending} onClick={yes}>Yes, send someone out</Button>
                     <Button size="lg" block className={styles.ask} onClick={ask}>I have a question</Button>
                     {previewNote && <div className="callout callout-info" role="status"><Icon name="eye" size={18} /><div className="grow">This is a preview, so nothing was sent. Your client's own link sends it.</div></div>}
@@ -571,11 +722,16 @@ function BadgeIcon({ kind }: { kind: TrustBadge["kind"] }) {
   );
 }
 
-/** A signed (or approved) quote: the signed estimate itself, on the business's template, to keep or print. */
+/**
+ * A signed (or approved) quote: the signed estimate itself, on the business's template, to keep or
+ * print, with the contract as it was signed (its sections, their initials and the option chosen).
+ */
 function SignedQuote({ token, data, printing, onPrint }: { token: string; data: QuoteView; printing: boolean; onPrint: () => void }) {
   const q = data.quote;
   const tz = hubZone(data.company);
-  const doc = { template: hubTemplate(data), company: hubLetterhead(data.company), data: quoteDocument(data) };
+  const contract = hubContract(data, q.option_id ?? null, q.total ?? 0);
+  // An older server sends no contract: the signed copy prints the one kept with its approval.
+  const doc = { template: contractTemplate(hubTemplate(data), contract), company: hubLetterhead(data.company), data: quoteDocument(data, contract ? { contract } : {}) };
   const when = q.approval?.signed_at ?? q.approved_at;
   const signed = Boolean(q.approval?.signature) && q.approval?.method !== "manual";
   return (
@@ -587,43 +743,175 @@ function SignedQuote({ token, data, printing, onPrint }: { token: string; data: 
         Thank you! {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}
       </Done>
       <section className="hub-document" aria-label={`${signed ? "Signed estimate" : "Estimate"} #${q.number}`}>
-        <DocumentSheet {...doc} />
+        <DocumentSheet {...doc} headingLevel={3} />
       </section>
+      {contract && <TermsToRead contract={contract} />}
       <HubDrawings token={token} drawings={data.drawings} />
       {printing && <PrintableDocument {...doc} />}
     </>
   );
 }
 
+const STEP_LABELS: Record<HubStep, string> = { choose: "Choose", review: "Review", sign: "Sign" };
+
+/**
+ * A quote waiting for the client's answer, in steps: choose one of the options it offers (with its
+ * add-ons), review the agreement on the business's paper (initialing the sections that ask), then
+ * sign. Without options it starts at the agreement, and with no contract at all it's only signing.
+ * They can ask for changes instead at any step. What they sign for (the option, the add-ons, the
+ * total and the contract's fingerprint) goes with the signature, so a quote that changed meanwhile
+ * isn't signed by mistake: it's loaded again, and they look it over again from the first step, with
+ * the box they ticked unticked and their initials off any section whose words changed.
+ */
 function OpenQuote({ token, data, onChanged, printing }: { token: string; data: QuoteView; onChanged: () => void; printing: boolean }) {
   const q = data.quote;
   const tz = hubZone(data.company);
   // Valid through the end of that day where the company is, not in UTC.
   const expired = Boolean(q.valid_until && q.valid_until < todayIn(tz));
-  const open = ["sent", "changes_requested"].includes(q.status) && !data.preview;
-  const [chosen, setChosen] = useState<string[]>(() => q.lines.filter((l) => l.optional && l.selected).map((l) => l.id!));
+  const waiting = ["sent", "changes_requested"].includes(q.status);
+  const open = waiting && !data.preview;
+  const options = q.options ?? [];
+  const [picked, setPicked] = useState<string | null>(() => firstOption(data));
+  const [chosen, setChosen] = useState<string[]>(() => keepPicks(q.lines, q.lines.filter((l) => l.optional && l.selected).map((l) => l.id!), firstOption(data)));
+  const [step, setStep] = useState<HubStep | null>(null);
+  const [initials, setInitials] = useState<string | null>(null);
+  // The sections they've added their initials to, with the words those had then.
+  const [initialed, setInitialed] = useState<InitialedSections>(() => new Map());
   const [name, setName] = useState("");
   const [signature, setSignature] = useState<string | null>(null);
-  const [agree, setAgree] = useState(false);
+  // What they ticked "I approve" for (agreeKey below): another option, total or terms unticks it.
+  const [agreed, setAgreed] = useState<string | null>(null);
+  // The total and the terms they went on to sign with, as they reviewed them.
+  const [reviewed, setReviewed] = useState<SignedFor | null>(null);
+  // Why they're looking it over again: their approval was turned down because the quote had changed.
+  const [notice, setNotice] = useState<string | null>(null);
   const [changes, setChanges] = useState("");
   const [mode, setMode] = useState<"approve" | "changes">("approve");
-  const approve = useMutation({ mutationFn: () => hubFetch(`${token}/approve`, { name: name.trim(), selected_line_ids: chosen, signature: signature ?? undefined }), onSuccess: onChanged });
-  const requestChanges = useMutation({ mutationFn: () => hubFetch(`${token}/request-changes`, { message: changes.trim() }), onSuccess: onChanged });
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [stampedAt] = useState(() => new Date().toISOString());
 
-  const included = (l: HubLine) => !l.optional || chosen.includes(l.id!);
-  const groupOf = (l: HubLine) => (l.optional && l.option_group ? l.option_group : null);
-  const tiers = optionLabels(q.lines);
-  // Picking one choice in a group drops the others in it.
-  const choose = (l: HubLine, on: boolean) => {
-    const group = groupOf(l);
-    if (group) setChosen([...chosen.filter((id) => groupOf(q.lines.find((x) => x.id === id) ?? l) !== group), l.id!]);
-    else setChosen(on ? [...chosen, l.id!] : chosen.filter((x) => x !== l.id));
-  };
-  const firstOf = (l: HubLine, i: number) => groupOf(l) !== null && !q.lines.slice(0, i).some((x) => groupOf(x) === groupOf(l));
+  const optionId = pickedOption(data, picked);
+  const option = options.find((o) => o.id === optionId) ?? null;
+  const offers = options.length > 0;
   // The database's own math (to the cent), so the total the client approves is the one saved. A
   // percent code follows the options the client picks, as it does on the saved quote.
-  const { subtotal, discount, tax, total } = quoteTotals(q.lines.map((l) => ({ ...l, selected: included(l) })), { taxRate: q.tax_rate, discountAmount: q.discount_amount ?? 0, promo: q.promo });
-  const deposit = Number(q.deposit_amount ?? 0);
+  const totals = useMemo(() => hubTotals(data, optionId, chosen), [data, optionId, chosen]);
+  const contract = useMemo(() => hubContract(data, optionId, totals.total), [data, optionId, totals.total]);
+  const steps = hubSteps(options.length, contract);
+  const signedFor: SignedFor = { total: totals.total, hash: contract?.hash ?? null };
+  // The quote was loaded again while they were signing, and it changed: back to the first step.
+  const changed = steps.length > 1 ? reviewChange(reviewed, signedFor) : null;
+  const current = changed ? steps[0]! : step && steps.includes(step) ? step : steps[0]!;
+  const at = steps.indexOf(current);
+  const message = notice ?? changed;
+  const asking = contract?.sections.filter((s) => s.initials) ?? [];
+  const initialedNow = useMemo(() => stillInitialed(contract, initialed), [contract, initialed]);
+  const missing = awaitingInitials(contract, initialedNow);
+  const stamped = useMemo(() => (contract ? withInitials(contract, initials ? { image: initials, date: stampedAt } : null, initialedNow) : null), [contract, initials, stampedAt, initialedNow]);
+  const choice = offers ? hubChoice(data, optionId) : null;
+  const agreeKey = `${optionId ?? ""}|${totals.total}|${contract?.hash ?? ""}`;
+  const agree = agreed === agreeKey;
+  const signing = current !== "choose";
+  const doc = useMemo(
+    () => ({
+      template: contractTemplate(hubTemplate(data), stamped),
+      company: hubLetterhead(data.company),
+      // While choosing, the options side by side; from the agreement on, the copy being signed.
+      data: quoteDocument(data, { optionId, picked: chosen, signing, contract: stamped }),
+    }),
+    [data, stamped, optionId, chosen, signing],
+  );
+  // Until an option with a price is picked there's no copy to sign, so the page prints as it is (the options side by side).
+  const printable = !offers || Boolean(optionId);
+
+  const approve = useMutation({
+    meta: { inline: true },
+    mutationFn: () =>
+      hubFetch(`${token}/approve`, {
+        name: name.trim(),
+        selected_line_ids: chosen,
+        signature: signature ?? undefined,
+        ...(offers && optionId ? { option_id: optionId } : {}),
+        expected_total: totals.total,
+        ...(contract?.hash ? { sections_hash: contract.hash } : {}),
+        ...(initials && asking.length ? { initials } : {}),
+      }),
+    onSuccess: onChanged,
+    // The quote changed since the page loaded (the price, the options or the terms), or it's been
+    // answered: load it as it is now, and look it over again from the first step, which says why.
+    onError: (error) => {
+      if (!(error instanceof ApiError && error.status === 409)) return;
+      setNotice(error.message);
+      setStep(null);
+      setReviewed(null);
+      setAgreed(null);
+      onChanged();
+      requestAnimationFrame(() => heading.current?.focus());
+    },
+  });
+  const requestChanges = useMutation({ meta: { inline: true }, mutationFn: () => hubFetch(`${token}/request-changes`, { message: changes.trim() }), onSuccess: onChanged });
+
+  /** On to another step, read from its top. What they go on to sign is what they've reviewed. */
+  const goTo = (next: HubStep) => {
+    setStep(next);
+    setReviewed(next === "sign" ? signedFor : null);
+    setNotice(null);
+    approve.reset();
+    requestAnimationFrame(() => heading.current?.focus());
+  };
+  // Another option fills in other words ({Option}, {Total}, {Warranty}): initials on those come off (stillInitialed).
+  const pick = (id: string) => {
+    setPicked(id);
+    setChosen((c) => keepPicks(q.lines, c, id));
+  };
+  const initialsSeq = useRef(0);
+  const drawInitials = (image: string | null) => {
+    const seq = ++initialsSeq.current;
+    if (!image) {
+      setInitials(null);
+      setInitialed(new Map());
+      return;
+    }
+    void smallInitials(image)
+      .catch(() => image)
+      .then((small) => seq === initialsSeq.current && setInitials(small));
+  };
+  const initial = (section: DocumentSection, on: boolean) => setInitialed((was) => initialSection(was, section, on));
+
+  const nextStep = steps[at + 1];
+  const nextLabel = nextStep === "review" ? "Review the agreement" : "Continue to sign";
+  const shownLines = offers ? optionLinesOf(q.lines, optionId) : q.lines;
+  // What still has to be done before going on, as the line under the buttons says it.
+  const group = unpickedGroup(shownLines, chosen);
+  const hold =
+    current === "choose"
+      ? !option || option.total === null
+        ? "Pick one of the options to go on."
+        : group && `Pick one of the choices for ${group} to go on.`
+      : current === "review"
+        ? group && !offers
+          ? `Pick one of the choices for ${group} to go on.`
+          : open && missing.length
+            ? initials
+              ? `Add your initials to ${missing.length === 1 ? "the last section that asks" : `the ${missing.length} sections that ask`} to go on.`
+              : "Draw your initials above, then add them to each section that asks."
+            : null
+        : null;
+  const lineCard = (
+    <LinesCard
+      token={token}
+      data={data}
+      lines={shownLines}
+      optionId={offers ? optionId : null}
+      chosen={chosen}
+      onChoose={setChosen}
+      // What's signed is what was reviewed: once signing, the add-ons and the promo code are changed from the steps before.
+      editable={open && (current !== "sign" || steps.length === 1)}
+      totals={totals}
+      expired={expired}
+      onChanged={onChanged}
+    />
+  );
 
   return (
     <>
@@ -636,73 +924,333 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
 
       <HubDrawings token={token} drawings={data.drawings} />
 
-      <section className="card">
-        {q.lines.map((l, i) => (
-          <Fragment key={l.id}>
-          {firstOf(l, i) && <div className="card-row hub-choice-head"><strong>{l.option_group}</strong><span className="muted small">{open ? "Pick one" : "One of these"}</span></div>}
-          <div className="card-row" style={{ alignItems: "flex-start", opacity: included(l) ? 1 : 0.6, transition: "opacity 200ms" }}>
-            {l.optional && (
-              <input type={groupOf(l) ? "radio" : "checkbox"} name={groupOf(l) ? `choice-${groupOf(l)}` : undefined} aria-label={groupOf(l) ? `Choose ${l.name}` : `Add ${l.name}`} checked={chosen.includes(l.id!)} disabled={!open} onChange={(e) => choose(l, e.target.checked)} style={{ marginTop: 4, width: 18, height: 18 }} />
-            )}
-            <div className="grow">
-              <strong>{l.name}</strong>
-              {l.optional && <span className="chip chip-blue" style={{ marginLeft: 6 }}>{groupOf(l) ? tiers.get(l.id!) ?? "Choice" : "Optional"}</span>}
-              {l.description && <div className="muted text-sm pre-wrap">{l.description}</div>}
-              <div className="muted small">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</div>
-            </div>
-            <strong className="tabular">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</strong>
-          </div>
-          </Fragment>
-        ))}
-        <div className="card-pad totals" style={{ borderTop: "1px solid var(--divider)" }}>
-          <div className="line"><span>Subtotal</span><span>{formatMoneyCents(subtotal)}</span></div>
-          <HubDiscount token={token} promo={q.promo} discount={discount} canChange={open && !data.preview} onChanged={onChanged} />
-          {tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(tax)}</span></div>}
-          <div className="line grand" style={{ fontSize: 22 }}><span>Total</span><span>{formatMoneyCents(total)}</span></div>
-          {deposit > 0 && <div className="line"><span>Deposit to book</span><span>{formatMoneyCents(deposit)}</span></div>}
-          {q.valid_until && <div className="line"><span>Valid until</span><span className={expired ? "text-danger" : undefined}>{formatDate(q.valid_until)}</span></div>}
-        </div>
-      </section>
+      {/* Without options, what's on it and its add-ons, always in view. */}
+      {!offers && lineCard}
 
       {requestChanges.isSuccess ? (
         <Done title="Request sent">{data.company.name} will review your notes and follow up with an updated quote.</Done>
-      ) : open ? (
+      ) : !waiting && !data.preview ? (
+        <>
+          {offers && <OptionsCompared options={options} optionId={q.option_id ?? null} />}
+          {offers && lineCard}
+          <div className="card card-pad muted">This quote is no longer open. Contact {data.company.name} if you have questions.</div>
+        </>
+      ) : mode === "changes" ? (
         <section className="card card-pad stack no-print">
+          <h2 className="hub-step-title">Request changes</h2>
+          <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); requestChanges.mutate(); }}>
+            <label className="field">What would you like changed?<textarea className="textarea" value={changes} onChange={(e) => setChanges(e.target.value)} required minLength={3} maxLength={2000} placeholder="Could you add the side walkway? Can we start after the 15th?" /></label>
+            <FormError error={requestChanges.error} />
+            <div className="hub-step-actions">
+              <Button type="submit" size="lg" icon="send" loading={requestChanges.isPending} disabled={changes.trim().length < 3}>Send request</Button>
+              <Button size="lg" variant="ghost" onClick={() => setMode("approve")}>Back to the quote</Button>
+            </div>
+          </form>
+        </section>
+      ) : (
+        <>
           {expired && <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">This quote's valid-until date has passed. You can still approve it, and {data.company.name} will confirm the price.</div></div>}
           {q.status === "changes_requested" && <div className="callout"><Icon name="messages" size={18} /><div className="grow">You've asked for changes. {data.company.name} may send an updated quote, or you can approve this one as it is.</div></div>}
-          <div className="segmented" role="group" aria-label="Your response" style={{ justifySelf: "start" }}>
-            <button type="button" aria-pressed={mode === "approve"} onClick={() => setMode("approve")}>Approve</button>
-            <button type="button" aria-pressed={mode === "changes"} onClick={() => setMode("changes")}>Request changes</button>
-          </div>
-          {mode === "approve" ? (
-            <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); approve.mutate(); }}>
-              <label className="field">Your full name<input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={120} autoComplete="name" /></label>
-              <div className="field">
-                <span>Your signature</span>
-                <SignaturePad value={signature} onChange={setSignature} label="Sign with your finger or mouse" />
-              </div>
-              <label className="checkbox">
-                <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-                I approve this {q.change_order_for ? "change order" : "quote"} for {formatMoneyCents(total)} and authorize {data.company.name} to do {q.change_order_for ? "this added work" : "the work"}.
-              </label>
-              <FormError error={approve.error} />
-              <Button type="submit" variant="primary" size="lg" icon="check" loading={approve.isPending} disabled={!agree || name.trim().length < 2 || !signature}>{q.change_order_for ? "Approve change order" : "Approve quote"}</Button>
-            </form>
-          ) : (
-            <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); requestChanges.mutate(); }}>
-              <label className="field">What would you like changed?<textarea className="textarea" value={changes} onChange={(e) => setChanges(e.target.value)} required minLength={3} maxLength={2000} placeholder="Could you add the side walkway? Can we start after the 15th?" /></label>
-              <FormError error={requestChanges.error} />
-              <Button type="submit" size="lg" icon="send" loading={requestChanges.isPending} disabled={changes.trim().length < 3}>Send request</Button>
-            </form>
-          )}
-        </section>
-      ) : !data.preview ? (
-        <div className="card card-pad muted">This quote is no longer open. Contact {data.company.name} if you have questions.</div>
-      ) : null}
 
-      {/* What prints: the estimate on the business's template, with the options the client has picked. */}
-      {printing && <PrintableDocument template={hubTemplate(data)} company={hubLetterhead(data.company)} data={quoteDocument(data, chosen)} />}
+          {steps.length > 1 && (
+            <ol className="hub-steps no-print" aria-label="Steps">
+              {steps.map((s, i) => (
+                <li key={s} aria-current={s === current ? "step" : undefined} data-done={i < at || undefined}>
+                  {i < at ? (
+                    <button type="button" onClick={() => goTo(s)}>
+                      <span className="hub-step-n"><Icon name="check" size={13} strokeWidth={3} /></span>
+                      {STEP_LABELS[s]}
+                      <span className="sr-only"> (done, go back)</span>
+                    </button>
+                  ) : (
+                    <span>
+                      <span className="hub-step-n">{i + 1}</span>
+                      {STEP_LABELS[s]}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+
+          {message && current !== "sign" && (
+            <div className="callout callout-warning no-print" role="alert">
+              <Icon name="alert" size={18} />
+              <div className="grow">{message}</div>
+            </div>
+          )}
+
+          {current === "choose" && (
+            <>
+              <section className="card card-pad stack" aria-labelledby="hub-choose">
+                <div className="stack-xs">
+                  <h2 id="hub-choose" ref={heading} tabIndex={-1} className="hub-step-title">Choose your option</h2>
+                  <p className="muted" style={{ margin: 0 }}>{options.length} options to compare. Pick one to see what's in it.</p>
+                </div>
+                <div className={styles.optionGrid}>
+                  {options.map((o) => (
+                    <OptionCard
+                      key={o.id}
+                      option={o}
+                      price={o.total !== null ? { text: formatMoneyCents(o.total) } : { text: "Ask us about this one", ask: true }}
+                      picked={o.id === optionId}
+                      onPick={() => pick(o.id)}
+                      disabled={o.total === null}
+                      words={["Choose this one", "Your choice"]}
+                    />
+                  ))}
+                </div>
+              </section>
+              {option && lineCard}
+            </>
+          )}
+
+          {current !== "choose" && choice && option && (
+            <div className="card hub-choice-summary">
+              <span className="hub-choice-thumb"><OptionPicture option={option} /></span>
+              <span className="grow stack-xs">
+                <span className="hub-meta">Your choice</span>
+                <strong>{choiceLabel(choice)}</strong>
+              </span>
+              <strong className="hub-amount">{formatMoneyCents(totals.total)}</strong>
+              {open && <Button size="sm" variant="ghost" onClick={() => goTo("choose")}>Change<span className="sr-only"> the option</span></Button>}
+            </div>
+          )}
+
+          {current === "review" && (
+            <>
+              <section className="card card-pad stack-xs" aria-labelledby="hub-review">
+                <h2 id="hub-review" ref={heading} tabIndex={-1} className="hub-step-title">Review the agreement</h2>
+                <p className="muted" style={{ margin: 0 }}>
+                  This is what you'll sign: the estimate{contract?.sections.length ? " and its terms" : ""}, as it prints.
+                  {asking.length ? " Add your initials where it asks, below." : ""}
+                </p>
+              </section>
+              <section className="hub-document" aria-label="The agreement">
+                {/* Its headings go under the step's. */}
+                <DocumentSheet {...doc} headingLevel={3} />
+              </section>
+              {contract && <TermsToRead contract={contract} />}
+              {asking.length > 0 && <InitialsCard sections={asking} initials={initials} onInitials={drawInitials} initialed={initialedNow} onInitial={initial} />}
+            </>
+          )}
+
+          {current === "sign" && (
+            <section className="card card-pad stack no-print" aria-labelledby="hub-sign">
+              <h2 id="hub-sign" ref={heading} tabIndex={-1} className="hub-step-title">{steps.length > 1 ? "Sign" : "Approve"}</h2>
+              {data.preview ? (
+                <div className="callout callout-info"><Icon name="eye" size={18} /><div className="grow">Preview: your client signs here.</div></div>
+              ) : (
+                <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); approve.mutate(); }}>
+                  <label className="field">Your full name<input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={120} autoComplete="name" /></label>
+                  <div className="field">
+                    <span>Your signature</span>
+                    <SignaturePad value={signature} onChange={setSignature} label="Sign with your finger or mouse" />
+                  </div>
+                  <label className="checkbox">
+                    <input type="checkbox" checked={agree} onChange={(e) => setAgreed(e.target.checked ? agreeKey : null)} />
+                    <span>
+                      I approve this {q.change_order_for ? "change order" : "quote"} for {formatMoneyCents(totals.total)}
+                      {choice ? ` (${choiceLabel(choice)})` : ""}
+                      {steps.includes("review") ? ", agree to the terms I reviewed," : ""} and authorize {data.company.name} to do {q.change_order_for ? "this added work" : "the work"}.
+                    </span>
+                  </label>
+                  <FormError error={approve.error} />
+                  {approve.error instanceof ApiError && approve.error.status === 400 && steps[0] !== "sign" && (
+                    <Button icon="refresh" style={{ justifySelf: "start" }} onClick={() => goTo(steps[0]!)}>Look it over again</Button>
+                  )}
+                  <Button type="submit" variant="primary" size="lg" icon="check" loading={approve.isPending} disabled={!agree || name.trim().length < 2 || !signature || missing.length > 0}>{q.change_order_for ? "Approve change order" : "Approve quote"}</Button>
+                </form>
+              )}
+            </section>
+          )}
+
+          <div className="hub-step-actions no-print">
+            {nextStep && (
+              <Button variant="primary" size="lg" icon="arrowRight" disabled={Boolean(hold)} onClick={() => goTo(nextStep)}>
+                {nextLabel}
+              </Button>
+            )}
+            {at > 0 && <Button size="lg" variant="ghost" icon="chevronLeft" onClick={() => goTo(steps[at - 1]!)}>Back</Button>}
+            {open && <Button size="lg" variant="ghost" onClick={() => setMode("changes")}>Request changes</Button>}
+          </div>
+          {nextStep && hold && <p className="muted small no-print" role="status" style={{ margin: 0 }}>{hold}</p>}
+        </>
+      )}
+
+      {/* What prints: the estimate on the business's template, with the option and add-ons the client has picked. */}
+      {printing && printable && <PrintableDocument {...doc} />}
     </>
+  );
+}
+
+/** The options a closed quote offered, side by side, the one it showed marked. */
+function OptionsCompared({ options, optionId }: { options: HubOption[]; optionId: string | null }) {
+  return (
+    <section className="card card-pad stack" aria-label="The options">
+      <div className={styles.optionGrid}>
+        {options.map((o) => (
+          <OptionCard key={o.id} option={o} price={o.total !== null ? { text: formatMoneyCents(o.total) } : { text: "Ask us about this one", ask: true }} picked={o.id === optionId} words={["", ""]} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * What's on the quote (the shared lines and the picked option's), with the add-ons to tick (a group
+ * is one choice) and what it all comes to, with the promo code. Both change only while `editable`.
+ */
+function LinesCard({ token, data, lines, optionId, chosen, onChoose, editable, totals, expired, onChanged }: {
+  token: string;
+  data: QuoteView;
+  lines: HubLine[];
+  /** The option picked (null without options): a promo code's minimum order is checked against it and the add-ons ticked. */
+  optionId: string | null;
+  chosen: string[];
+  onChoose: (ids: string[]) => void;
+  editable: boolean;
+  totals: { subtotal: number; discount: number; tax: number; total: number };
+  expired: boolean;
+  onChanged: () => void;
+}) {
+  const q = data.quote;
+  const included = (l: HubLine) => !l.optional || chosen.includes(l.id!);
+  const groupOf = (l: HubLine) => (l.optional && l.option_group ? l.option_group : null);
+  const tiers = groupTiers(data);
+  // Picking one choice in a group drops the others in it.
+  const choose = (l: HubLine, on: boolean) => {
+    const group = groupOf(l);
+    if (group) onChoose([...chosen.filter((id) => groupOf(q.lines.find((x) => x.id === id) ?? l) !== group), l.id!]);
+    else onChoose(on ? [...chosen, l.id!] : chosen.filter((x) => x !== l.id));
+  };
+  // A price set on site below the estimate is two lines, shown as one.
+  const listed = listedLines(lines);
+  const firstOf = (l: HubLine, i: number) => groupOf(l) !== null && !listed.slice(0, i).some((x) => groupOf(x) === groupOf(l));
+  const deposit = depositToBook(q.deposit_amount, totals.total);
+  // The add-ons ticked among these lines: what the code's minimum order is checked against, as it will be when they approve.
+  const ticked = chosen.filter((id) => lines.some((l) => l.id === id));
+  const short = promoShortfall(q.promo, lines, ticked);
+  return (
+    <section className="card" aria-label="What's included">
+      {listed.map((l, i) => (
+        <Fragment key={l.id}>
+        {firstOf(l, i) && <div className="card-row hub-choice-head"><strong>{l.option_group}</strong><span className="muted small">{editable ? "Pick one" : "One of these"}</span></div>}
+        <div className="card-row" style={{ alignItems: "flex-start", opacity: included(l) ? 1 : 0.6, transition: "opacity 200ms" }}>
+          {l.optional && (
+            <input type={groupOf(l) ? "radio" : "checkbox"} name={groupOf(l) ? `choice-${groupOf(l)}` : undefined} aria-label={groupOf(l) ? `Choose ${l.name}` : `Add ${l.name}`} checked={chosen.includes(l.id!)} disabled={!editable} onChange={(e) => choose(l, e.target.checked)} style={{ marginTop: 4, width: 18, height: 18 }} />
+          )}
+          <div className="grow">
+            <strong>{l.name}</strong>
+            {l.optional && <span className="chip chip-blue" style={{ marginLeft: 6 }}>{groupOf(l) ? tiers.get(l.id!) ?? "Choice" : "Optional"}</span>}
+            {l.description && <div className="muted text-sm pre-wrap">{l.description}</div>}
+            <div className="muted small">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</div>
+          </div>
+          <strong className="tabular">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</strong>
+        </div>
+        </Fragment>
+      ))}
+      <div className="card-pad totals" style={{ borderTop: "1px solid var(--divider)" }}>
+        <div className="line"><span>Subtotal</span><span>{formatMoneyCents(totals.subtotal)}</span></div>
+        <HubDiscount
+          token={token}
+          promo={q.promo}
+          discount={totals.discount}
+          canChange={editable}
+          // A price agreed at the visit has its discount in it already, so no code goes on top.
+          canAdd={editable && !q.site_priced}
+          choice={{ ...(optionId ? { option_id: optionId } : {}), selected_line_ids: ticked }}
+          onChanged={onChanged}
+        />
+        {short !== null && (
+          <div className="callout callout-warning" role="status" style={{ margin: "4px 0" }}>
+            <Icon name="alert" size={16} />
+            <div className="grow">{q.promo?.code} needs an order of at least {formatMoneyCents(short)}. Remove the code, or change your choices.</div>
+          </div>
+        )}
+        {totals.tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(totals.tax)}</span></div>}
+        <div className="line grand" style={{ fontSize: 22 }}><span>Total</span><span>{formatMoneyCents(totals.total)}</span></div>
+        {deposit > 0 && <div className="line"><span>Deposit to book</span><span>{formatMoneyCents(deposit)}</span></div>}
+        {q.valid_until && <div className="line"><span>Valid until</span><span className={expired ? "text-danger" : undefined}>{formatDate(q.valid_until)}</span></div>}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The homeowner's initials, drawn once on a small pad, then added to each section that asks for
+ * them ("Add my initials"), which stamps them on that section of the agreement.
+ */
+function InitialsCard({ sections, initials, onInitials, initialed, onInitial }: {
+  sections: DocumentSection[];
+  initials: string | null;
+  onInitials: (image: string | null) => void;
+  initialed: ReadonlySet<string>;
+  onInitial: (section: DocumentSection, on: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <section className="card card-pad stack no-print" aria-labelledby={id}>
+      <div className="stack-xs">
+        <h3 id={id} style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Your initials</h3>
+        <p className="muted small" style={{ margin: 0 }}>
+          {sections.length === 1 ? "One section asks for your initials." : `${sections.length} sections ask for your initials.`} Draw them once, then add them to each.
+        </p>
+      </div>
+      <SignaturePad value={initials} onChange={onInitials} label="Draw your initials" height={90} maxWidth={240} />
+      <div className="hub-initials">
+        {sections.map((s) => {
+          const title = s.title.trim() || "This section";
+          const on = Boolean(initials) && initialed.has(s.id);
+          return (
+            <div key={s.id} className="hub-initials-row" data-on={on || undefined}>
+              <span className="grow stack-xs">
+                <strong>{title}</strong>
+                <span className="muted small">{s.place === "signatures" ? "Above the signatures" : "On the terms pages"}</span>
+              </span>
+              {on ? (
+                <>
+                  <img className="hub-initials-mark" src={initials!} alt="" />
+                  <Button size="sm" variant="ghost" onClick={() => onInitial(s, false)}>Remove<span className="sr-only"> my initials from {title}</span></Button>
+                </>
+              ) : (
+                <Button size="sm" variant="primary" icon="pen" disabled={!initials} onClick={() => onInitial(s, true)}>Add my initials<span className="sr-only"> to {title}</span></Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A contract's terms again as text (the ones being reviewed, signed, or on an invoice): on a phone
+ * the pages are too small to read, so the words are here at a size that is (features.css shows it on
+ * narrow screens only), in the order they print.
+ */
+function TermsToRead({ contract }: { contract: QuoteContract }) {
+  const id = useId();
+  const terms = contract.terms.trim();
+  const sections = [...contract.sections.filter((s) => s.place === "signatures"), ...contract.sections.filter((s) => s.place === "terms")];
+  if (!terms && !sections.length) return null;
+  return (
+    <section className="card card-pad stack hub-terms-read no-print" aria-labelledby={id}>
+      <div className="stack-xs">
+        <h3 id={id} style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Read the terms</h3>
+        <p className="muted small" style={{ margin: 0 }}>The words on the pages above, in a size that's easy to read.</p>
+      </div>
+      {terms && <p className="pre-wrap" style={{ margin: 0 }}>{terms}</p>}
+      {sections.map((s) => (
+        <div key={s.id} className="stack-xs">
+          <h4>
+            {s.title.trim() || "This section"}
+            {s.initials && <span className="chip chip-blue">Asks for your initials</span>}
+          </h4>
+          <div className="prose" dangerouslySetInnerHTML={{ __html: sanitizeContractHtml(s.html) }} />
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -720,6 +1268,9 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
   const tz = hubZone(data.company);
   // Late the day after it's due where the company is (the same day the invoice turns overdue).
   const late = inv.due_on && balance > 0 && inv.due_on < todayIn(tz);
+  // The invoice as it prints, with its contract (filled in by the server).
+  const contract = hubInvoiceContract(data);
+  const doc = { template: contractTemplate(hubTemplate(data), contract), company: hubLetterhead(data.company), data: invoiceDocument(data) };
   return (
     <>
       <section className="card card-pad stack-sm">
@@ -763,6 +1314,10 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
         </div>
       </section>
       {inv.notes && <section className="card card-pad pre-wrap">{inv.notes}</section>}
+      <section className="hub-document" aria-label={`Invoice #${inv.number}, as it prints`}>
+        <DocumentSheet {...doc} />
+      </section>
+      {contract && <TermsToRead contract={contract} />}
       {balance > 0 && !data.preview && (
         data.processing ? (
           <div className="card card-pad muted no-print" role="status">Your bank payment is on its way. It usually takes a few business days to clear, and this page updates when it does.</div>
@@ -791,17 +1346,30 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
       )}
       <FormError error={pay.error} />
       {/* What prints: the invoice on the business's template. */}
-      {printing && <PrintableDocument template={hubTemplate(data)} company={hubLetterhead(data.company)} data={invoiceDocument(data)} />}
+      {printing && <PrintableDocument {...doc} />}
     </>
   );
 }
 
-/** The discount line: an applied promo code (removable while it can change), or a box to enter one. */
-function HubDiscount({ token, promo, discount, canChange, onChanged }: { token: string; promo: HubPromoInfo; discount: number; canChange: boolean; onChanged: () => void }) {
+/**
+ * The discount line: an applied promo code (removable while it can change), or a box to enter one
+ * (while `canAdd`, which is `canChange` unless said otherwise). On a quote, `choice` is what the client
+ * is choosing (the option picked and the add-ons ticked), which the code's minimum order is checked
+ * against.
+ */
+function HubDiscount({ token, promo, discount, canChange, canAdd = canChange, choice, onChanged }: {
+  token: string;
+  promo: HubPromoInfo;
+  discount: number;
+  canChange: boolean;
+  canAdd?: boolean;
+  choice?: { option_id?: string; selected_line_ids: string[] };
+  onChanged: () => void;
+}) {
   const [entering, setEntering] = useState(false);
   const [code, setCode] = useState("");
   const apply = useMutation({
-    mutationFn: () => hubFetch(`${token}/promo`, { code: code.trim() }),
+    mutationFn: () => hubFetch(`${token}/promo`, { code: code.trim(), ...choice }),
     onSuccess: () => {
       setEntering(false);
       setCode("");
@@ -825,7 +1393,7 @@ function HubDiscount({ token, promo, discount, canChange, onChanged }: { token: 
   return (
     <>
       {discount > 0 && <div className="line"><span>Discount</span><span>−{formatMoneyCents(discount)}</span></div>}
-      {canChange && (
+      {canAdd && (
         entering ? (
           <form className="promo-entry no-print" onSubmit={(e: FormEvent) => { e.preventDefault(); if (code.trim()) apply.mutate(); }}>
             <input className="input mono grow" aria-label="Promo code" placeholder="Promo code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={24} autoFocus autoCapitalize="characters" />

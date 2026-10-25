@@ -10,6 +10,7 @@ import { AssistantSettings } from "./AssistantSettings";
 import { CalendarSettings } from "./CalendarSettings";
 import { ChecklistSettings } from "./ChecklistSettings";
 import { CompanySettings } from "./CompanySettings";
+import { ContractSettings } from "./ContractSettings";
 import { CrewSettings } from "./CrewSettings";
 import { EmailSettings } from "./EmailSettings";
 import { HostingSettings } from "./HostingSettings";
@@ -70,6 +71,7 @@ export function SettingsPage() {
           {tab === "crews" && <CrewSettings />}
           {tab === "prices" && <PriceList />}
           {tab === "templates" && <TemplateSettings />}
+          {tab === "contracts" && <ContractSettings />}
           {tab === "checklists" && <ChecklistSettings />}
           {tab === "email" && <EmailSettings />}
           {tab === "calendars" && <CalendarSettings />}

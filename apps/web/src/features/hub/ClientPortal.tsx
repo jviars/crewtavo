@@ -28,8 +28,16 @@ export interface ClientView {
   kind: "client";
   company: { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null };
   client: { name: string; first_name: string; properties: Array<{ id: string; line1: string; city: string | null }> };
-  /** A quote out as a price range has its range and no total: the client hasn't seen the exact price. */
-  quotes: Array<{ id: string; number: number; title: string; status: string; total: number | null; range?: { low: number; high: number; accepted_at: string | null } | null; valid_until: string | null; approved_at: string | null; link: string }>;
+  /**
+   * A quote out as a price range has its range and no total: the client hasn't seen the exact price.
+   * One that offers options has how many and the lowest price (`options`) and no total, until they choose.
+   */
+  quotes: Array<{
+    id: string; number: number; title: string; status: string; total: number | null;
+    range?: { low: number; high: number; accepted_at: string | null } | null;
+    options?: { count: number; from: number } | null;
+    valid_until: string | null; approved_at: string | null; link: string;
+  }>;
   invoices: Array<{ id: string; number: number; subject: string | null; status: string; total: number; balance_due: number; due_on: string | null; issued_on: string; link: string }>;
   visits: PortalVisit[];
   past_visits: PortalVisit[];
@@ -178,10 +186,11 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
                 <span className="grow stack-xs">
                   <span className="hub-meta">Quote #{q.number}{q.status === "changes_requested" ? " · you asked for changes" : q.valid_until ? ` · valid until ${formatDate(q.valid_until)}` : ""}</span>
                   <strong className="hub-title">{q.title}</strong>
+                  {q.options && <span className="hub-range-line">{q.options.count} options, from {formatMoneyCents(q.options.from)}</span>}
                 </span>
-                <strong className="hub-amount">{formatMoneyCents(q.total)}</strong>
+                {!q.options && q.total !== null && <strong className="hub-amount">{formatMoneyCents(q.total)}</strong>}
               </div>
-              <a className="hub-btn hub-btn-brand" href={q.link}>Review and approve</a>
+              <a className="hub-btn hub-btn-brand" href={q.link}>{q.options ? "See your options" : "Review and approve"}</a>
             </article>
           ),
         )}

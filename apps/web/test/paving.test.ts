@@ -1,4 +1,5 @@
 import { polygonAreaM2, type Section } from "@crewtavo/core/geo";
+import { optionTotals, quoteTotals } from "@crewtavo/core/money";
 import { describe, expect, it } from "vitest";
 import { centers, gridPolygons, outlines, pieceAt, ringArea, simplifyRing } from "../src/features/measure/detect";
 import { lotAt } from "../src/features/measure/buildings";
@@ -6,7 +7,8 @@ import { contours, guessPolygons, opened } from "../src/features/measure/maskOut
 import { pickMask, pixelValues, SAM_SIZE } from "../src/features/measure/samLocal";
 import { combine, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
 import { feetPerPixel, scaleLength } from "../src/features/measure/takeoffSheet";
-import { currentStep, formulaValue, serviceKind, stageLabel, takeoffVariables, usesDepth, type TakeoffRow } from "../src/features/paving/data";
+import { currentStep, estimateSums, formulaValue, serviceKind, stageLabel, takeoffVariables, usesDepth, viewedLines, type SumsLine, type TakeoffRow } from "../src/features/paving/data";
+import { lineDestination } from "../src/features/roofing/estimate/rows";
 
 /** A cells × cells grid with the given rectangles filled ([x0, y0, x1, y1], end exclusive). */
 function grid(cells: number, ...rects: Array<[number, number, number, number]>) {
@@ -270,5 +272,73 @@ describe("the paving flow", () => {
     expect(currentStep({ status: "converted", lines: [{}], jobs: [{ id: "j", status: "completed" }] }, m, [{ status: "paid" }])).toBe("done");
     expect(stageLabel({ status: "sent", lines: [{}] }, true).label).toBe("Proposal sent");
     expect(stageLabel({ status: "draft", lines: [] }, true).label).toBe("Estimate");
+  });
+});
+
+describe("a paving estimate that offers options", () => {
+  // Good (shown) is sealcoat; Better is sealcoat and crack fill, with an add-on nobody picked. Striping is on every option.
+  const line = (id: string, option_id: string | null, quantity: number, unit_price: number, unit_cost: number | null, patch: Partial<SumsLine> = {}): SumsLine & { id: string; service_id: string } => ({
+    id, service_id: `s-${id.replace(/^(good|better)-/, "")}`, option_id, quantity, unit_price, unit_cost, taxable: true, optional: false, selected: option_id === null || option_id === "good", material_cost: null, materials: null, ...patch,
+  });
+  const lines = [
+    line("good-seal", "good", 18_000, 0.18, 0.09),
+    line("better-seal", "better", 18_000, 0.22, 0.1),
+    line("better-crack", "better", 450, 1.5, 0.6),
+    line("better-edge", "better", 1, 400, 150, { optional: true, selected: false }),
+    line("stripe", null, 1_200, 0.5, 0.2),
+  ];
+  const money = { taxRate: 0.07, discountAmount: 100, promo: null };
+  // What the database has with Good shown: its lines and the shared ones selected.
+  const saved = quoteTotals(lines, money);
+  const quote = { option_id: "good", subtotal: saved.subtotal, total: saved.total, tax_rate: 0.07, discount_amount: 100, promo: null, lines };
+
+  it("lists the option looked at with the shared lines", () => {
+    expect(viewedLines(lines, "better").map((l) => l.id)).toEqual(["better-seal", "better-crack", "better-edge", "stripe"]);
+    expect(viewedLines(lines, "good").map((l) => l.id)).toEqual(["good-seal", "stripe"]);
+    expect(viewedLines(lines, null).map((l) => l.id)).toEqual(["stripe"]);
+  });
+
+  it("prices the option shown as the quote's saved totals", () => {
+    const sums = estimateSums(quote, "good");
+    expect(sums.price).toBe(3240 + 600);
+    expect(sums.total).toBe(saved.total);
+    expect(sums.cost).toBe(1620 + 240);
+    expect(sums.profit).toBe(3840 - 1860);
+    expect(sums.margin).toBe(Math.round((1980 / 3840) * 100));
+    expect(sums.costKnown).toBe(true);
+  });
+
+  it("prices another option as the database will once it's shown, without its add-on nobody picked", () => {
+    const sums = estimateSums(quote, "better");
+    const totals = optionTotals(lines, "better", "good", money);
+    expect(sums.price).toBe(totals.subtotal);
+    expect(sums.price).toBe(3960 + 675 + 600);
+    expect(sums.total).toBe(totals.total);
+    expect(sums.cost).toBe(1800 + 270 + 240);
+    expect(sums.margin).toBe(Math.round(((5235 - 2310) / 5235) * 100));
+    // A line that counts with no cost: the cost is at least what's known.
+    expect(estimateSums({ ...quote, lines: lines.map((l) => (l.id === "better-crack" ? { ...l, unit_cost: null } : l)) }, "better")).toMatchObject({ costKnown: false, margin: null, cost: 1800 + 240 });
+    // The add-on nobody picked doesn't make it unknown.
+    expect(estimateSums({ ...quote, lines: lines.map((l) => (l.id === "better-edge" ? { ...l, unit_cost: null } : l)) }, "better").costKnown).toBe(true);
+  });
+
+  it("counts the materials priced for the option looked at", () => {
+    const priced = lines.map((l) => (l.id === "better-seal" ? { ...l, material_cost: 1500.5, materials: { items: [{ total: 1500.5, quantity: 30 }, { total: null, quantity: 2 }] } } : l.id === "good-seal" ? { ...l, material_cost: 1200 } : l));
+    expect(estimateSums({ ...quote, lines: priced }, "better")).toMatchObject({ materials: 1500.5, materialsPartial: true });
+    expect(estimateSums({ ...quote, lines: priced }, "good")).toMatchObject({ materials: 1200, materialsPartial: false });
+    expect(estimateSums(quote, "good").materials).toBeNull();
+  });
+
+  it("prices an estimate without options from its saved totals", () => {
+    const single = lines.filter((l) => l.option_id === null || l.option_id === "good").map((l) => ({ ...l, option_id: null }));
+    const totals = quoteTotals(single, money);
+    expect(estimateSums({ ...quote, option_id: null, subtotal: totals.subtotal, total: totals.total, lines: single }, null)).toMatchObject({ price: totals.subtotal, total: totals.total, cost: 1860 });
+  });
+
+  it("ticks a service another option has its own line of onto the option looked at only", () => {
+    // Looking at Good, ticking crack fill: on every option, Better would have it twice.
+    expect(lineDestination({ id: "s-crack", name: "Crack fill" }, "good", { lines, place: "every" })).toBe("good");
+    expect(lineDestination({ id: "s-sealer-edge", name: "Edging" }, "good", { lines, place: "every" })).toBeNull();
+    expect(lineDestination({ id: "s-sealer-edge", name: "Edging" }, "good", { lines, place: "only" })).toBe("good");
   });
 });

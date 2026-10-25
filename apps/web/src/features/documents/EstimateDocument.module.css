@@ -1,22 +1,21 @@
 /*
- * The estimate or invoice as a letter-size sheet of paper (816 × 1056 px is 8.5 × 11 in at 96 dpi).
- * It's paper in every theme and in print, so its colors are literal: white page, ink text, and the
- * template's color (--doc-color) for the rules, the name and the totals.
+ * The estimate or invoice as letter-size pages (816 × 1056 px is 8.5 × 11 in at 96 dpi), on screen
+ * and in print. The sizes come from paper.ts (PAPER_VARS on .doc). It's paper in every theme and in
+ * print, so its colors are literal: white page, ink text, and the template's color (--doc-color)
+ * for the rules, the name and the totals.
  */
-.page {
+.doc {
   --doc-ink: #0f2a35;
   --doc-text-2: #4e6169;
   --doc-text-3: #5f6f76;
   --doc-rule: #ecebe6;
   --doc-row: #f1f0ec;
   --doc-strip: #f6f5f1;
-  --doc-pad: 44px;
-  box-sizing: border-box;
-  width: 816px;
-  min-height: 1056px;
+  --doc-cell: #dcdbd5;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  gap: var(--page-gap);
+  width: var(--page-w);
   color: var(--doc-ink);
   font-size: 12.5px;
   line-height: 1.45;
@@ -25,32 +24,61 @@
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
-.page *,
-.page *::before,
-.page *::after { box-sizing: border-box; }
+.doc *,
+.doc *::before,
+.doc *::after { box-sizing: border-box; }
 
-/* ---- Letterhead -------------------------------------------------------------------------- */
+/* ---- A page: the paper, its 0.4 in margin, and the content box inside --------------------- */
+.page { flex: none; width: var(--page-w); height: var(--page-h); padding: var(--page-margin); background: #fff; }
+.box { display: flex; flex-direction: column; width: var(--box-w); height: var(--box-h); overflow: hidden; }
+.box > header,
+.box > footer { flex: none; }
+/* The body's blocks, each in the wrapper it was measured in; the space above each is its margin. */
+.body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: var(--pad-top) var(--doc-pad) var(--pad-bottom); }
+.block { display: flow-root; }
+/*
+ * Part of a block cut between two of its lines, with just its own words: no room above it where it
+ * carries on from the page before, none under it where it goes on to the next, and an item carried
+ * on has no number or bullet of its own (data-carried and data-carries, from paper.ts cutWords).
+ */
+.doc li[data-carried] { list-style: none; }
+.lines tr[data-carried] > td,
+.clauseTable tr[data-carried] > * { padding-top: 0; }
+.lines tr[data-carries] > td,
+.clauseTable tr[data-carries] > * { padding-bottom: 0; }
+.lines tr[data-carried] .lineDescription:first-child { margin-top: 0; }
+.clauseQuote[data-carried] { padding-top: 0; }
+.clauseQuote[data-carries] { padding-bottom: 0; }
+/* The last resort, for part of a block with no line to cut at: a window onto the whole block. */
+.clip { overflow: hidden; }
+.shift { display: flow-root; }
+
+/* ---- Letterhead (first page) -------------------------------------------------------------- */
 .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .name { font-size: 22px; font-weight: 700; line-height: 1.15; color: var(--doc-text-color); overflow-wrap: break-word; }
 .tagline { margin-top: 2px; font-size: 12px; color: var(--doc-text-2); }
 .details { flex: none; max-width: 46%; text-align: right; font-size: 11.5px; line-height: 1.65; color: var(--doc-text-2); }
 .license { color: var(--doc-ink); font-weight: 600; }
+/* The logo's box is as tall as the logo can be, so the page is the same before and after it loads. */
+.logoBox { flex: none; display: flex; align-items: center; height: 56px; }
 .logo { display: block; width: auto; height: auto; max-height: 56px; max-width: 200px; object-fit: contain; }
 .monogram {
   flex: none; display: grid; place-items: center; width: 50px; height: 50px; border-radius: 10px;
   background: var(--doc-color); color: var(--doc-on-color); font-size: 18px; font-weight: 700; letter-spacing: 0.02em;
 }
 
-.classic { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 34px var(--doc-pad) 22px; border-bottom: 3px solid var(--doc-color); }
+.classic { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 0 var(--doc-pad) 22px; border-bottom: 3px solid var(--doc-color); }
 
-.centered { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 32px var(--doc-pad) 18px; text-align: center; border-bottom: 1px solid #e3e2dd; }
+.centered { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 var(--doc-pad) 18px; text-align: center; border-bottom: 1px solid #e3e2dd; }
 .centered .name { font-size: 24px; letter-spacing: 0.01em; }
 .centered .tagline { text-transform: uppercase; letter-spacing: 0.14em; }
+.centered .logoBox { height: 60px; justify-content: center; }
 .centered .logo { max-height: 60px; max-width: 240px; }
 .detailsLine { padding-top: 4px; font-size: 11.5px; color: var(--doc-text-2); }
 .bar { width: 64px; height: 3px; margin-top: 8px; border-radius: 2px; background: var(--doc-color); }
 
-.banner { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 26px var(--doc-pad); background: var(--doc-color); color: var(--doc-on-color); }
+/* A band of color across the content box (inside the page's margin, as it prints). */
+.banner { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 22px 20px; background: var(--doc-color); color: var(--doc-on-color); }
 .banner .name,
 .banner .details,
 .banner .license { color: inherit; }
@@ -61,8 +89,12 @@
 .tile .logo { max-height: 44px; max-width: 170px; }
 .tileInitials { font-size: 18px; font-weight: 700; color: var(--doc-text-color); }
 
+/* ---- Later pages: who it's from and which document, small ---------------------------------- */
+.running { display: flex; justify-content: space-between; gap: 16px; padding: 0 var(--doc-pad) 8px; border-bottom: 1px solid var(--doc-rule); font-size: 10.5px; color: var(--doc-text-3); }
+.running span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.running span:last-child { flex: none; }
+
 /* ---- Body -------------------------------------------------------------------------------- */
-.body { flex: 1; display: flex; flex-direction: column; gap: 20px; padding: 26px var(--doc-pad) 20px; }
 .parties { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
 .eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--doc-text-3); }
 .clientName { margin-top: 5px; font-size: 14px; font-weight: 600; }
@@ -74,8 +106,8 @@
 .strip { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 10px 14px; border-radius: 6px; background: var(--doc-strip); font-size: 12.5px; color: var(--doc-text-2); }
 .strip strong { color: var(--doc-ink); }
 
-.lines { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.lines thead { display: table-header-group; }
+/* The same columns on every page (a fixed layout), and rows that add up to the table. */
+.lines { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .lines th {
   padding: 0 0 8px; border-bottom: 1.5px solid var(--doc-ink); text-align: left;
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--doc-text-2);
@@ -83,60 +115,131 @@
 .lines td { padding: 8px 0; border-bottom: 1px solid var(--doc-row); vertical-align: baseline; }
 .lines th + th,
 .lines td + td { padding-left: 10px; }
-.lines tr { break-inside: avoid; }
 .colQty { width: 84px; }
 .colPrice { width: 92px; }
 .colAmount { width: 100px; }
 .num { text-align: right !important; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* A long quantity ("1,250 sq ft") wraps in its column rather than run into the price. */
+.qty { white-space: normal; overflow-wrap: normal; }
 .muted { color: var(--doc-text-2); }
 .amount { font-weight: 600; }
 .lineDescription { display: block; margin-top: 1px; font-size: 11.5px; color: var(--doc-text-3); }
 .empty { padding: 14px 0; color: var(--doc-text-3); }
 
-.totals { display: grid; grid-template-columns: auto minmax(110px, auto); justify-content: end; gap: 6px 24px; margin: 0; font-size: 13px; text-align: right; break-inside: avoid; }
+.totals { display: grid; grid-template-columns: auto minmax(110px, auto); justify-content: end; gap: 6px 24px; margin: 0; font-size: 13px; text-align: right; }
 .totals dt { color: var(--doc-text-2); }
 .totals dd { margin: 0; font-variant-numeric: tabular-nums; }
 .totals .grand { font-size: 15px; font-weight: 700; color: var(--doc-text-color); }
 
-.notes { font-size: 12px; line-height: 1.6; white-space: pre-line; break-inside: avoid; }
+.notes { font-size: 12px; line-height: 1.6; white-space: pre-line; }
 .notes .eyebrow { margin-bottom: 4px; }
-.terms { padding-top: 14px; border-top: 1px solid var(--doc-rule); font-size: 11px; line-height: 1.6; white-space: pre-line; color: var(--doc-text-2); break-inside: avoid; }
+/* The template's own terms, a paragraph at a time; the first has the rule above. */
+.terms { font-size: 11px; line-height: 1.6; white-space: pre-line; color: var(--doc-text-2); }
+.termsFirst { padding-top: 14px; border-top: 1px solid var(--doc-rule); }
+
+/* ---- "Your options" ---------------------------------------------------------------------- */
+.options { display: grid; gap: 8px; }
+.optionGrid { display: grid; gap: 12px; }
+.option { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--doc-rule); border-radius: 8px; }
+.option[data-chosen] { border-color: var(--doc-color); box-shadow: inset 0 0 0 1px var(--doc-color); }
+.optionPicture { display: block; flex: none; width: 100%; height: 92px; object-fit: cover; background: var(--doc-strip); }
+.optionText { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px 12px; }
+.tier { padding: 1px 8px; border-radius: 999px; background: var(--doc-strip); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--doc-text-2); }
+.optionName { font-size: 13px; font-weight: 700; line-height: 1.3; }
+.optionHighlights { margin: 0; padding-left: 16px; font-size: 11px; line-height: 1.5; color: var(--doc-text-2); }
+.optionWarranty { font-size: 11px; line-height: 1.5; color: var(--doc-text-2); }
+/* Each highlight at most 2 lines and the warranty 3: three options at the packages' limits fit under the letterhead. */
+.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.optionWarranty.clamp { -webkit-line-clamp: 3; line-clamp: 3; }
+.optionPrice { margin-top: auto; padding-top: 4px; font-size: 15px; font-weight: 700; color: var(--doc-text-color); font-variant-numeric: tabular-nums; }
+
+/* ---- Contract sections ------------------------------------------------------------------- */
+.sectionTitle { margin: 0; font-size: 12.5px; font-weight: 700; line-height: 1.4; color: var(--doc-ink); }
+.clause,
+.clauseList,
+.clauseQuote { margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--doc-text-2); }
+.clause strong,
+.clause b,
+.clauseList strong,
+.clauseList b { color: var(--doc-ink); }
+.plain { white-space: pre-line; }
+.clauseHeading { margin: 0; font-size: 11.5px; font-weight: 700; line-height: 1.5; color: var(--doc-ink); }
+.clauseList { padding-left: 22px; }
+.clauseList ul,
+.clauseList ol { margin: 0; padding-left: 18px; }
+.clauseList p { margin: 0; }
+.clauseQuote { padding: 2px 0 2px 12px; border-left: 3px solid var(--doc-rule); }
+.clauseQuote > * { margin: 0; }
+.clauseQuote ul,
+.clauseQuote ol { padding-left: 20px; }
+.clauseRule { margin: 0; border: 0; border-top: 1px solid var(--doc-rule); }
+.clauseTable {
+  width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0;
+  border-top: 1px solid var(--doc-cell); border-left: 1px solid var(--doc-cell); font-size: 11px; line-height: 1.5; color: var(--doc-text-2);
+}
+.clauseTable th,
+.clauseTable td { padding: 5px 8px; border-right: 1px solid var(--doc-cell); border-bottom: 1px solid var(--doc-cell); text-align: left; vertical-align: top; }
+.clauseTable th { font-weight: 700; color: var(--doc-ink); background: var(--doc-strip); }
+.clauseTable p { margin: 0; }
+.initials { display: flex; justify-content: flex-end; align-items: flex-end; gap: 10px; font-size: 11px; color: var(--doc-text-2); }
+.initialsBox { position: relative; flex: none; width: 96px; height: 34px; border-bottom: 1px solid var(--doc-ink); }
+.initialsImage { position: absolute; left: 6px; bottom: -6px; height: 40px; width: auto; max-width: 84px; object-fit: contain; object-position: left bottom; }
+.termsHeading { margin: 0; padding-bottom: 8px; border-bottom: 2px solid var(--doc-color); font-size: 17px; font-weight: 700; line-height: 1.3; color: var(--doc-text-color); }
+.accept { margin: 0; font-size: 11.5px; color: var(--doc-text-2); }
 
 /* ---- Signatures -------------------------------------------------------------------------- */
-.signatures { display: flex; gap: 36px; margin-top: auto; padding-top: 18px; break-inside: avoid; }
+.signatures { display: flex; gap: 36px; padding-top: 18px; }
 .sign { flex: 1; min-width: 0; }
 .signLine { position: relative; height: 56px; border-bottom: 1px solid var(--doc-ink); }
 /* The signature sits on the line, the way ink does on paper. */
 .signImage { position: absolute; left: 0; bottom: -10px; height: 64px; width: auto; max-width: 80%; object-fit: contain; object-position: left bottom; }
 .signDate { position: absolute; right: 0; bottom: 5px; font-size: 12px; }
 .signUnder { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--doc-text-2); }
-.printed { margin-top: 2px; font-size: 12px; font-weight: 600; }
+.printed { min-height: 1.45em; margin-top: 2px; font-size: 12px; font-weight: 600; }
 
-.footer { display: flex; justify-content: space-between; gap: 16px; margin: 0 var(--doc-pad); padding: 12px 0 20px; border-top: 2px solid var(--doc-color); font-size: 10.5px; color: var(--doc-text-3); }
-.footer span:last-child:not(:first-child) { flex: none; }
+/* ---- Footer (every page) ----------------------------------------------------------------- */
+.footer { display: flex; justify-content: space-between; gap: 16px; margin: 0 var(--doc-pad); padding-top: 10px; border-top: 2px solid var(--doc-color); font-size: 10.5px; color: var(--doc-text-3); }
+.footer > span:last-child:not(:first-child) { flex: none; }
+/* "Page 2 of 3" in a box as wide as the widest number (both in one cell, the widest unseen), so the words wrap the same on every page. */
+.pageNumber { display: grid; justify-items: end; font-variant-numeric: tabular-nums; }
+.pageNumber > * { grid-area: 1 / 1; white-space: nowrap; }
+.pageNumberRoom { visibility: hidden; }
 
-/* ---- On screen: the sheet, scaled down to fit ------------------------------------------- */
+/* The business's own letterhead: pictures across the content box, the width they were cut for. */
+.ownImage { display: block; width: 100%; height: auto; }
+.ownHeader { padding-bottom: 6px; }
+.ownFooter { display: grid; gap: 4px; margin: 0; padding: 0; border-top: 0; }
+.ownPages { justify-self: end; padding: 0 var(--doc-pad); }
+
+/* ---- On screen: the pages, scaled down to fit (DocumentSheet) ----------------------------- */
 .sheet { width: 100%; min-width: 0; display: flex; justify-content: center; }
-.frame { flex: none; }
-.paper {
-  width: 816px; background: #fff; border-radius: 4px; overflow: hidden; transform-origin: top left;
-  box-shadow: 0 1px 3px rgba(15, 42, 53, 0.08), 0 16px 40px -16px rgba(15, 42, 53, 0.3);
-}
+.frame { flex: none; position: relative; }
+.stack { position: absolute; top: 0; left: 0; transform-origin: top left; }
+.sheet .page { border-radius: 4px; box-shadow: 0 1px 3px rgba(15, 42, 53, 0.08), 0 16px 40px -16px rgba(15, 42, 53, 0.3); }
 
-/* ---- In print: the document alone on letter paper (PrintableDocument) ------------------- */
-.printRoot .page { width: 100%; min-height: 0; }
+/* The copy that's measured (usePaper): laid out like the pages, never seen. */
+.measure { position: fixed; top: 0; left: -10000px; display: block; width: var(--box-w); visibility: hidden; pointer-events: none; contain: layout style; }
+.measureBody { padding: 0 var(--doc-pad); }
+
+/* ---- In print: the pages alone, one on each sheet (PrintableDocument) ---------------------- */
 @media screen {
-  /* Laid out at the printed width (8.5 in less the margins) to count its pages, but never seen. */
-  .printRoot { position: fixed; top: 0; left: -10000px; width: 7.7in; visibility: hidden; pointer-events: none; }
+  .printRoot { position: fixed; top: 0; left: -10000px; visibility: hidden; pointer-events: none; }
 }
 @media print {
-  .printRoot { position: static; width: auto; visibility: visible; }
+  .printRoot { position: static; visibility: visible; }
+  .printRoot .doc { display: block; width: auto; }
   /*
-   * The page fills the printed page (11 in less the 0.4 in margins), so a one-page estimate has its
-   * signatures and footer at the bottom, like the sheet on screen. A hair short, and never taller
-   * than the page the browser actually prints on, so it can't spill onto a blank second page.
+   * Each page is the content box, inside the @page margin, and a hair shorter than it, so it can't
+   * spill onto a blank sheet. The break comes before every page but the first (never after the last).
    */
-  .printRoot .page { min-height: min(calc(10.2in - 4px), calc(100vh - 4px)); }
-  /* The footer and page numbers print in the page margins instead, on every page. */
-  .printRoot[data-page-footer] .footer { display: none; }
+  .printRoot .page { width: var(--box-w); height: calc(var(--box-h) - 2px); padding: 0; overflow: hidden; break-inside: avoid; }
+  .printRoot .page + .page { break-before: page; }
+  .printRoot .box { height: calc(var(--box-h) - 2px); }
+  /*
+   * WebKit prints inside its own margins too (and a thin @page one): each page smaller, in a slot its
+   * size, centered. The page inside is one unbreakable box (inline), so WebKit never pushes a line of
+   * it down to where a sheet would end if the page weren't scaled.
+   */
+  .printRoot[data-webkit] .page { width: calc(var(--box-w) * var(--print-scale)); height: calc((var(--box-h) - 2px) * var(--print-scale)); margin-inline: auto; }
+  .printRoot[data-webkit] .box { display: inline-flex; vertical-align: top; transform: scale(var(--print-scale)); transform-origin: top left; }
 }

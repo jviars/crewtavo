@@ -1,8 +1,23 @@
-import type { TablesUpdate } from "@crewtavo/core/database";
-import { inRangeMode } from "@crewtavo/core/estimates";
-import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+/**
+ * The office's quote page (/quotes/:id), for every trade and for change orders: its lines, message,
+ * totals, deposit, template and contract, sending it, and what comes after (approved, a job, lost).
+ * Its lines show as an editable list or as the paper it prints as (the Paper view), and "Print or
+ * save PDF" prints those same pages.
+ *
+ * A quote that offers options (quote_options) has the options bar above its lines (QuoteOptions.tsx).
+ * Looking at an option changes nothing for the customer: the page shows that option's lines, totals,
+ * contract and paper. Marking it approved, or making it a job, first asks which option they chose,
+ * and an approval made here keeps that option and the contract as they read then (quotes.approval),
+ * as a signature on the Client Hub or the iPad does. The option math is core money.ts; options.ts has
+ * the option records.
+ */
+import type { Json, TablesUpdate } from "@crewtavo/core/database";
+import type { TemplateSettings } from "@crewtavo/core/documents";
+import { inRangeMode, sitePriceSet } from "@crewtavo/core/estimates";
+import { optionBaseTotal, optionTotals, taxPercent, taxRateFromPercent, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
+import { isPackagePicturePath } from "@crewtavo/core/presets";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -12,21 +27,59 @@ import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
-import { DetailSkeleton } from "@/components/ui/Skeleton";
+import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, dateIn, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
+import { ApiError, errorMessage } from "@/lib/errors";
+import { addressLine, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
-import { documentCompany, mySignatureKey, quoteDocument, quoteTemplate, readApproval, signedTemplate, templatesQuery, useLetterhead, useMySignature, useQuoteTemplate, useTemplates, type QuoteApproval } from "../documents/data";
+import { toast } from "@/lib/toast";
+import {
+  approvalContract,
+  choiceLabel,
+  contractTemplate,
+  documentCompany,
+  documentOptions,
+  isSignedQuote,
+  mySignatureKey,
+  NO_CONTRACT,
+  optionTiers,
+  quoteContract,
+  quoteDate,
+  quoteDocument,
+  quoteTemplate,
+  readApproval,
+  signedTemplate,
+  templatesQuery,
+  useLetterhead,
+  useMySignature,
+  useQuoteContract,
+  useQuoteTemplate,
+  useTemplates,
+  type ApprovalOption,
+  type DocumentQuote,
+  type DocumentQuoteLine,
+  type QuoteApproval,
+  type QuoteContract,
+  type QuoteContractInput,
+  type TemplateRow,
+} from "../documents/data";
+import { DocumentSheet } from "../documents/EstimateDocument";
+import type { DocumentData } from "../documents/types";
 import { SignaturePad } from "../field/SignaturePad";
 import { DrawingsCard } from "../measure/drawings";
 import { PlansCard } from "../plans/PlansCard";
 import { dayText, documentFacts } from "../roofing/flow/model";
 import { QuotePrint, useQuotePrint } from "../roofing/flow/QuotePrint";
 import { SendEstimateDialog } from "../roofing/flow/SendEstimateDialog";
-import { LineItems } from "./LineItems";
+import { PackagePicture } from "../roofing/PackageCards";
+import { lineSums, LineItems, visibleLines } from "./LineItems";
+import { ALREADY_ANSWERED, duplicateQuote, optionTabs, quoteOptionsKey, showOption, sortOptions, useQuoteOptions, viewedOption, type OptionsQuote, type QuoteOptionRow } from "./options";
+import styles from "./QuotePage.module.css";
+import { QuoteOptions } from "./QuoteOptions";
+import { QuoteSections } from "./QuoteSections";
 import { DiscountRows } from "./PromoRow";
 import { SendDialog } from "./SendDialog";
 
@@ -37,28 +90,269 @@ const EDITABLE = ["draft", "sent", "changes_requested"];
 const NO_QUOTE = { template_id: null, approval: null };
 const LOST_REASONS = ["Price was too high", "Went with another company", "Timing didn't work", "No response", "Scope changed", "Other"];
 
+/** The quote, with every line (every option's) and what its paper and contract are filled in from. Its options are useQuoteOptions. */
+async function loadQuote(id: string) {
+  return unwrapOne(
+    await supabase()
+      .from("quotes")
+      .select("id, number, title, status, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, approved_at, approval, lost_reason, request_id, created_at, template_id, option_id, section_ids, roof_package_id, promo_code_id, promo:promo_codes(code, kind, value, description), request:requests(promo_code), client:clients(id, display_name, email, phone, billing_address), property:properties(id, line1, city, region, postal_code, lat, lng), lines:quote_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, option_id, formula, sort, service_id), jobs!jobs_company_id_quote_id_fkey(id, number), change_order_for, change_job:jobs!quotes_change_order_fkey(id, number, title), package:roof_packages!quotes_roof_package_fkey(name, warranty), range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at")
+      .eq("id", id)
+      .order("sort", { referencedTable: "quote_line_items" })
+      .maybeSingle(),
+    "This quote",
+  );
+}
+type QuoteRow = Awaited<ReturnType<typeof loadQuote>>;
+
+// ---------------------------------------------------------------------------------------------
+// The options, in plain functions
+// ---------------------------------------------------------------------------------------------
+
+/** The parts of a quote its money for each option is worked out from. */
+export interface TabQuote {
+  status: string;
+  /** The option shown first; once signed, the one chosen. */
+  option_id: string | null;
+  subtotal: Amount;
+  discount_amount: Amount;
+  tax_amount: Amount;
+  total: Amount;
+  tax_rate: Amount;
+  promo: TotalsPromo | null;
+}
+
+/** A quote's money settings, as core money.ts takes them. */
+const moneyOf = (q: Pick<TabQuote, "tax_rate" | "discount_amount" | "promo">) => ({ taxRate: q.tax_rate, discountAmount: q.discount_amount, promo: q.promo });
+
+/**
+ * Whether a quote offers options: it has option rows, or lines on an option. The quote and its options
+ * are read apart, so for a moment after options are added or taken off only one of them may say so.
+ */
+export const offersOptions = (options: readonly unknown[], lines: ReadonlyArray<{ option_id?: string | null }>) => options.length > 0 || lines.some((l) => l.option_id != null);
+
+/** Whether marking the quote approved, or making it a job, first asks which option they chose: it offers options and isn't signed. */
+export const needsChoice = (status: string, offers: boolean) => offers && EDITABLE.includes(status);
+
+/** A step of marking a quote approved, or making it a job, from its page. */
+export type ApproveStep = "show" | "approve" | "convert";
+
+/**
+ * What "Mark approved" or "Convert to job" still has to do, from the quote as the database has it
+ * now: show the option they chose (in a write of its own, so what runs as it's approved sees that
+ * option's lines), approve it, then make the job. Once it's approved only the job is left, so trying
+ * again after making the job went wrong doesn't approve it twice or change the option. A change order
+ * joins its job as it's approved. Null when it isn't open to approve any more (lost, archived, a job).
+ */
+export function approveSteps(quote: { status: string; option_id: string | null; change_order_for: string | null }, picked: string | null, convert: boolean): ApproveStep[] | null {
+  const job: ApproveStep[] = convert && !quote.change_order_for ? ["convert"] : [];
+  if (quote.status === "approved") return job;
+  if (!EDITABLE.includes(quote.status)) return null;
+  return [...(picked && picked !== quote.option_id ? (["show"] as const) : []), "approve", ...job];
+}
+
+/**
+ * The totals for the option being looked at: the quote's own (the database's) for the option shown
+ * and for a quote without options; for another option, its totals as they'd be once it's the one
+ * shown, with its add-ons not picked yet (core optionTotals, to the cent of the database's).
+ */
+export function tabTotals(q: TabQuote, lines: readonly OptionLine[], optionId: string | null): { subtotal: number; discount: number; tax: number; total: number } {
+  if (!optionId || optionId === q.option_id) return { subtotal: Number(q.subtotal ?? 0), discount: Number(q.discount_amount ?? 0), tax: Number(q.tax_amount ?? 0), total: Number(q.total ?? 0) };
+  return optionTotals(lines, optionId, q.option_id, moneyOf(q));
+}
+
+/** What the totals card says it's for, on a quote that offers options. */
+export function totalsCaption(name: string, { shown, signed }: { shown: boolean; signed: boolean }): string {
+  if (signed) return shown ? `For ${name}, the option they chose` : `For ${name}, if they had chosen it`;
+  return shown ? `For ${name}, the option shown first` : `For ${name}, if they choose it`;
+}
+
+/**
+ * The most the deposit can be: the cheapest option's price before its add-ons (core optionBaseTotal),
+ * so it's never more than they'd pay whichever option they choose and whichever of its add-ons they
+ * leave off, with that option's name. The quote's total without options. Options with no lines of
+ * their own yet aren't counted.
+ */
+export function depositCap(q: TabQuote, lines: readonly OptionLine[], options: ReadonlyArray<{ id: string; name: string }>): { amount: number; name: string | null } {
+  const priced = options.flatMap((o) => {
+    const total = optionBaseTotal(lines, o.id, moneyOf(q));
+    return total === null ? [] : [{ name: o.name, total }];
+  });
+  if (!priced.length) return { amount: Number(q.total ?? 0), name: null };
+  const lowest = priced.reduce((low, o) => (o.total < low.total ? o : low));
+  return { amount: lowest.total, name: lowest.name };
+}
+
+/** An option in "Which option did they choose?": its card, and whether it can be chosen (it has lines of its own, so a price). */
+export interface OptionChoice {
+  option: QuoteOptionRow;
+  tier: string | null;
+  total: number | null;
+  priced: boolean;
+}
+
+/** The options to choose from, in order, each with its tier word and its total as it would be approved. */
+export function optionChoices(options: readonly QuoteOptionRow[], lines: readonly OptionLine[], q: Pick<OptionsQuote, "option_id" | "tax_rate" | "discount_amount" | "promo">): OptionChoice[] {
+  return optionTabs(options, lines, q).map(({ option, tier, total }) => ({ option, tier, total, priced: optionBaseTotal(lines, option.id, moneyOf(q)) !== null }));
+}
+
+/**
+ * The option picked when the question opens: the one the customer is shown first, when it can be
+ * chosen. Never just the one looked at, and otherwise none, so another option is only ever chosen
+ * on purpose.
+ */
+export const firstChoice = (choices: readonly OptionChoice[], shownId: string | null) =>
+  choices.some((c) => c.option.id === shownId && c.priced) ? shownId : null;
+
+/** An option as an approval keeps it (approval.option): as it's offered, with the tier word on its card. */
+export function approvalOption(option: QuoteOptionRow, tier: string | null): ApprovalOption {
+  const picture = option.picture && isPackagePicturePath(option.picture) && option.picture_width && option.picture_height ? { path: option.picture, width: option.picture_width, height: option.picture_height } : null;
+  return { id: option.id, name: option.name, tier: tier ?? option.tier ?? null, picture, style: option.style, highlights: [...option.highlights], warranty: option.warranty };
+}
+
+/**
+ * quotes.approval for "Mark approved" in the office: who marked it, the template it prints with, the
+ * option they chose and the contract as it reads now, filled in (documents/build.ts readApproval reads
+ * it back). Nobody initialed anything, and the customer's line stays blank to sign by hand.
+ */
+export function officeApproval(input: { name: string; template: TemplateSettings; option: QuoteOptionRow | null; tier: string | null; contract: QuoteContract }) {
+  return {
+    name: input.name,
+    method: "manual" as const,
+    template: { ...input.template },
+    option: input.option ? approvalOption(input.option, input.tier) : null,
+    contract: approvalContract(input.contract),
+    initials: null,
+  };
+}
+
+/** What a quote's contract is filled in from for one of its options (none without options), as the server fills in the signed copy. */
+export function contractFor(
+  q: QuoteContractInput["quote"] & Pick<QuoteContractInput, "client" | "property"> & { package?: { name: string; warranty?: string | null } | null },
+  template: TemplateSettings,
+  option: Pick<QuoteOptionRow, "name" | "warranty" | "section_ids" | "tier" | "highlights"> | null,
+  total: Amount,
+  tier: string | null = null,
+): QuoteContractInput {
+  return {
+    quote: { status: q.status, number: q.number, sent_at: q.sent_at, created_at: q.created_at, deposit_amount: q.deposit_amount, section_ids: q.section_ids, approval: q.approval },
+    template,
+    // The option's card as the customer sees it: the tier word on it (optionTiers), and its highlights.
+    option: option && { name: option.name, warranty: option.warranty, section_ids: option.section_ids, tier: tier ?? option.tier ?? null, highlights: option.highlights },
+    // Without options, {Option} and {Warranty} say the package it was priced from, as the server fills them in.
+    fill: !option && q.package ? { name: q.package.name, warranty: q.package.warranty ?? "" } : null,
+    total,
+    client: q.client,
+    property: q.property,
+  };
+}
+
+/** A quote as the office prints it. */
+export type PaperQuote = DocumentQuote & TabQuote;
+
+/** The option a quote prints: the one it was signed for once it's signed, else the one looked at. */
+export function printedOption(q: Pick<PaperQuote, "status" | "option_id" | "approval">, viewed: string | null): string | null {
+  if (isSignedQuote(q.status)) return readApproval(q.approval)?.option?.id ?? q.option_id;
+  return viewed ?? q.option_id;
+}
+
+/**
+ * The estimate as the office prints it (the Paper view, and "Print or save PDF"): the option looked
+ * at with its own totals, and the options side by side while the customer is still deciding; once
+ * signed, the option it was signed for with its totals. The facts strip names the package only
+ * without options (with them, each option has its own name). `contract`: filled in for that option.
+ */
+export function paperDocument(input: {
+  quote: PaperQuote;
+  lines: ReadonlyArray<DocumentQuoteLine & OptionLine>;
+  options: readonly QuoteOptionRow[];
+  viewed: string | null;
+  date: string;
+  packageName: string | null;
+  roof: { roofing_squares: number | null; roof_pitch: string | null } | null;
+  contract: QuoteContract | null;
+}): DocumentData {
+  const { quote: q, lines, options } = input;
+  const signed = isSignedQuote(q.status);
+  const printed = printedOption(q, input.viewed);
+  const totals = tabTotals(q, lines, signed ? null : printed);
+  return quoteDocument({ ...q, subtotal: totals.subtotal, discount_amount: totals.discount, tax_amount: totals.tax, total: totals.total }, lines, {
+    date: input.date,
+    facts: documentFacts(options.length ? null : input.packageName, input.roof),
+    optionId: printed,
+    options: options.length && !signed ? documentOptions(sortOptions(options), lines, moneyOf(q)) : undefined,
+    contract: input.contract,
+  });
+}
+
+/**
+ * The contract as it reads right now, to keep with an approval: the business and the library's
+ * sections it names read fresh, then filled in (data.ts quoteContract) as the paper fills it in.
+ */
+async function loadContract(companyId: string, input: QuoteContractInput): Promise<QuoteContract> {
+  const ids = [...new Set([...input.template.sections, ...(input.option?.section_ids ?? []), ...(input.quote.section_ids ?? [])].map((s) => s.toLowerCase()))];
+  const [company, library] = await Promise.all([
+    supabase().from("companies").select("name, phone, timezone").eq("id", companyId).single(),
+    // In the library's order, as the server reads it: an option's and the quote's sections print in it (core resolveSections).
+    ids.length ? supabase().from("contract_sections").select("id, title, body, place, initials").eq("company_id", companyId).in("id", ids).order("sort").order("created_at").order("id") : null,
+  ]);
+  return quoteContract(input, unwrap(company), library ? unwrap(library) : []);
+}
+
+/** Marked approved in the office (officeApproval), with the template, the option and the contract read fresh. */
+async function approvalFor(q: QuoteRow, options: readonly QuoteOptionRow[], optionId: string | null, by: { companyId: string; name: string; templates: readonly TemplateRow[] }) {
+  const template = quoteTemplate(by.templates, q);
+  const option = options.find((o) => o.id === optionId) ?? null;
+  const total = option ? optionTotals(q.lines, option.id, q.option_id, moneyOf(q)).total : q.total;
+  const tier = option ? (optionTiers(options, q.lines, moneyOf(q)).get(option.id) ?? null) : null;
+  const contract = await loadContract(by.companyId, contractFor(q, template, option, total, tier));
+  return officeApproval({ name: by.name, template, option, tier, contract });
+}
+
+/**
+ * "Approved" on the sales board: the approval "Mark approved" keeps here (approvalFor), from the
+ * quote and the templates as they are now. Null when it offers options by now: only its page approves
+ * those, as it asks which option they chose.
+ */
+export async function boardApproval(queryClient: QueryClient, quoteId: string, by: { companyId: string; name: string }) {
+  const [q, options, templates] = await Promise.all([
+    loadQuote(quoteId),
+    supabase().from("quote_options").select("id").eq("quote_id", quoteId).limit(1),
+    queryClient.fetchQuery({ ...templatesQuery(by.companyId), staleTime: 0 }),
+  ]);
+  if (offersOptions(unwrap(options), q.lines)) return null;
+  return approvalFor(q, [], null, { ...by, templates });
+}
+
+/**
+ * The quote as "Send the range" and "Send the exact price" read it (SendEstimateDialog): with its
+ * options, which this page reads apart from the quote, so the range runs from the lowest option to
+ * the highest and the words count the options, as the server's will.
+ */
+export const quoteToSend = <Q extends object>(q: Q, options: readonly QuoteOptionRow[]) => ({ ...q, options });
+
+// ---------------------------------------------------------------------------------------------
+// The page
+// ---------------------------------------------------------------------------------------------
+
 export function QuotePage() {
   const { id = "" } = useParams();
   const session = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<null | "send" | "exact" | "lost">(null);
+  // "Which option did they choose?", before marking it approved or making it a job.
+  const [choosing, setChoosing] = useState<null | "approve" | "convert">(null);
+  // The option being looked at (local: the customer sees nothing change), and how: as lines or as paper.
+  const [viewing, setViewing] = useState<string | null>(null);
+  const [view, setView] = useState<"lines" | "paper">("lines");
+  const panelId = useId();
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
 
-  const quote = useQuery({
-    queryKey: ["quote", id],
-    queryFn: async () =>
-      unwrapOne(
-        await supabase()
-          .from("quotes")
-          .select("id, number, title, status, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, approved_at, approval, lost_reason, request_id, created_at, template_id, promo:promo_codes(code, kind, value, description), request:requests(promo_code), client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code, lat, lng), lines:quote_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, formula, sort, service_id), jobs!jobs_company_id_quote_id_fkey(id, number), change_order_for, change_job:jobs!quotes_change_order_fkey(id, number, title), package:roof_packages!quotes_roof_package_fkey(name), range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at")
-          .eq("id", id)
-          .order("sort", { referencedTable: "quote_line_items" })
-          .maybeSingle(),
-        "This quote",
-      ),
-  });
+  const quote = useQuery({ queryKey: ["quote", id], queryFn: () => loadQuote(id) });
   const q = quote.data;
+  // Waited for with the quote: without them, every option's lines would read as on every option.
+  const optionRows = useQuoteOptions(id);
+  const options = useMemo(() => optionRows.data ?? [], [optionRows.data]);
   const templates = useTemplates();
   // The look it prints with: the template it was signed on once it's signed, else the one it's set to.
   const { template } = useQuoteTemplate(q ?? NO_QUOTE);
@@ -80,6 +374,7 @@ export function QuotePage() {
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["quote", id] });
+    queryClient.invalidateQueries({ queryKey: quoteOptionsKey(id) });
     queryClient.invalidateQueries({ queryKey: ["quotes", session.company.id] });
   };
   const update = useMutation({
@@ -87,15 +382,49 @@ export function QuotePage() {
     mutationFn: async (patch: TablesUpdate<"quotes">) => unwrap(await supabase().from("quotes").update(patch).eq("id", id)),
     onSuccess: refresh,
   });
-  // Marked approved by the office: like a signed estimate, it keeps the template it was approved on.
+  // Marked approved by the office: like a signed estimate, it keeps the template it was approved on,
+  // the option they chose and its contract as they read now. With `convert`, it becomes a job after.
+  // `approvedOnly`: it was approved, and only making the job went wrong.
+  const approvedOnly = useRef(false);
   const approve = useMutation({
-    meta: { success: "Marked approved" },
-    mutationFn: async () => {
-      const rows = await queryClient.ensureQueryData(templatesQuery(session.company.id));
-      const approval = { name: session.profile.full_name || "Office", method: "manual", template: { ...quoteTemplate(rows, q!) } };
-      return unwrap(await supabase().from("quotes").update({ status: "approved", approved_at: new Date().toISOString(), approval }).eq("id", id));
+    meta: {
+      inline: choosing !== null,
+      success: (_: unknown, v: { convert: boolean }) => (!v.convert ? "Marked approved" : quote.data?.change_order_for ? "Added to the job" : "Converted to a job. Schedule the work next."),
     },
-    onSuccess: refresh,
+    mutationFn: async ({ optionId, convert }: { optionId: string | null; convert: boolean }) => {
+      approvedOnly.current = false;
+      const current = quote.data!;
+      const now = unwrapOne(await supabase().from("quotes").select("status, option_id, change_order_for").eq("id", id).maybeSingle(), "This quote");
+      const steps = approveSteps(now, optionId, convert);
+      if (!steps) throw new ApiError("This quote isn't open to approve any more. Look it over again.", 409);
+      if (steps.includes("approve")) {
+        const templates = await queryClient.fetchQuery({ ...templatesQuery(session.company.id), staleTime: 0 });
+        const approval = await approvalFor(current, options, optionId, { companyId: session.company.id, name: session.profile.full_name || "Office", templates });
+        if (steps.includes("show")) await showOption(id, optionId!);
+        // Only while it's still open: a client who signed meanwhile keeps their own approval.
+        const saved = unwrap(
+          await supabase().from("quotes").update({ status: "approved", approved_at: new Date().toISOString(), approval: approval as unknown as Json }).eq("id", id).in("status", EDITABLE).select("id"),
+        );
+        if (!saved.length) throw new ApiError(`${ALREADY_ANSWERED} Look it over again.`, 409);
+      }
+      if (!convert) return null;
+      // A change order joins its job as it's approved.
+      if (now.change_order_for) return now.change_order_for;
+      approvedOnly.current = true;
+      return (await api.post<{ job_id: string }>(`/quotes/${id}/convert`)).job_id;
+    },
+    onSuccess: (jobId) => {
+      setChoosing(null);
+      if (jobId) navigate(`/jobs/${jobId}`);
+    },
+    // Approved with the option they chose, so that's settled: what's left is making the job.
+    onError: (error) => {
+      if (!approvedOnly.current) return;
+      setChoosing(null);
+      toast.error("Marked approved, but making the job didn't work.", { description: errorMessage(error), action: { label: "Try again", onClick: () => convert.mutate() } });
+    },
+    // Even when it didn't go through, the option they chose may have been saved.
+    onSettled: refresh,
   });
   const convert = useMutation({
     meta: { success: () => (quote.data?.change_order_for ? "Added to the job" : "Converted to a job. Schedule the work next.") },
@@ -105,30 +434,13 @@ export function QuotePage() {
       navigate(`/jobs/${res.job_id}`);
     },
   });
-  const duplicate = useMutation({
+  const copy = useMutation({
     meta: { success: "Quote copied as a new draft" },
-    mutationFn: async () => {
-      const copy = unwrap(
-        await supabase()
-          .from("quotes")
-          .insert({
-            company_id: session.company.id, client_id: q!.client!.id, property_id: q!.property?.id ?? null, title: `${q!.title} (copy)`, message: q!.message,
-            discount_amount: q!.discount_amount, tax_rate: q!.tax_rate, deposit_amount: q!.deposit_amount,
-            valid_until: q!.valid_until && q!.valid_until > todayIn(session.company.timezone) ? q!.valid_until : null,
-          })
-          .select("id")
-          .single(),
-      );
-      if (q!.lines.length) {
-        unwrap(
-          await supabase().from("quote_line_items").insert(
-            q!.lines.map(({ id: _id, ...line }) => ({ ...line, selected: line.optional ? false : true, company_id: session.company.id, quote_id: copy.id })),
-          ),
-        );
-      }
-      return copy.id;
+    mutationFn: () => duplicateQuote(id),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["quotes", session.company.id] });
+      navigate(`/quotes/${res.id}`);
     },
-    onSuccess: (newId) => navigate(`/quotes/${newId}`),
   });
   const remove = useMutation({
     meta: { success: "Quote deleted" },
@@ -142,30 +454,17 @@ export function QuotePage() {
     mutationFn: () => api.get<{ link: string }>(`/quotes/${id}/link`),
     onSuccess: ({ link }) => window.open(link, "_blank", "noopener"),
   });
-  // Printing is the template document from the quote itself: the exact price, even while the
-  // client's link shows a range. The roof it shows comes from the drawing the client sees.
-  const letterhead = useLetterhead();
+  // Printing is the paper the Paper view shows, from the quote itself: the exact price, even while
+  // the client's link shows a range.
   const printer = useQuotePrint();
-  const [roof, setRoof] = useState<{ roofing_squares: number | null; roof_pitch: string | null } | null>(null);
-  const print = useMutation({
-    mutationFn: async () => {
-      // With the templates loaded, so it never prints on the built-in look by mistake.
-      const [m] = await Promise.all([
-        supabase().from("measurements").select("roofing_squares, roof_pitch").eq("quote_id", id).eq("show_on_quote", true).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
-        queryClient.ensureQueryData(templatesQuery(session.company.id)),
-      ]);
-      return unwrap(m);
-    },
-    onSuccess: (m) => {
-      setRoof(m ?? null);
-      printer.print();
-    },
-  });
 
-  if (quote.isPending) return <DetailSkeleton />;
-  if (quote.error || !q) return <PageError error={quote.error} onRetry={() => quote.refetch()} back={<BackLink to="/quotes">Quotes</BackLink>} />;
+  if (quote.isPending || (optionRows.isPending && !optionRows.error)) return <DetailSkeleton />;
+  if (quote.error || !q || optionRows.error) {
+    return <PageError error={quote.error ?? optionRows.error} onRetry={() => void Promise.all([quote.refetch(), optionRows.refetch()])} back={<BackLink to="/quotes">Quotes</BackLink>} />;
+  }
 
   const editable = canSell && EDITABLE.includes(q.status);
+  const signed = isSignedQuote(q.status);
   // A roof estimate out as a price range: the client hasn't seen this exact price yet.
   const ranged = inRangeMode(q);
   // And they said yes to it. Sending the range again would ask them all over, so it isn't offered:
@@ -182,11 +481,27 @@ export function QuotePage() {
   );
   const changeRequest = history.data?.messages.find((m) => m.direction === "in" && m.subject === "Changes requested");
   const expired = q.valid_until && q.valid_until < todayIn(session.company.timezone) && ["sent", "draft"].includes(q.status);
-  const cost = q.lines.filter((l) => !(l.optional && !l.selected)).reduce((s, l) => s + Number(l.quantity) * Number(l.unit_cost ?? 0), 0);
-  const priceForMargin = Number(q.subtotal) - Number(q.discount_amount);
   // A change order adds to an existing job instead of becoming a new one.
   const changeJob = q.change_job as { id: string; number: number; title: string } | null;
   const convertLabel = changeJob ? `Add to job #${changeJob.number}` : "Convert to job";
+
+  // With options: the one looked at, its totals and its cost. Without, the quote as it is.
+  const offers = offersOptions(options, q.lines);
+  // A price agreed on site has its discount in it already, so no promo code goes on top (the server refuses one too).
+  const sitePriced = sitePriceSet(q, q.lines);
+  const viewed = offers ? viewedOption(options, viewing, q.option_id) : null;
+  const viewedRow = options.find((o) => o.id === viewed) ?? null;
+  const tab = tabTotals(q, q.lines, viewed);
+  const cost = lineSums(visibleLines(q.lines, viewed), { optionId: viewed, shownOptionId: q.option_id, withOptions: true }).cost;
+  const priceForMargin = tab.subtotal - tab.discount;
+  const cap = depositCap(q, q.lines, options);
+  const choose = needsChoice(q.status, offers);
+  // The quote and its options are read again apart: until both are in, which option they chose waits.
+  const settling = choose && (quote.isFetching || optionRows.isFetching);
+  const startApprove = () => (choose ? setChoosing("approve") : approve.mutate({ optionId: null, convert: false }));
+  const startConvert = () => (choose ? setChoosing("convert") : convert.mutate());
+  const converting = convert.isPending || (approve.isPending && approve.variables?.convert === true);
+  const choices = choosing ? optionChoices(options, q.lines, q) : [];
 
   return (
     <>
@@ -202,16 +517,16 @@ export function QuotePage() {
                 <Button icon="send" variant={q.status === "draft" ? "primary" : "secondary"} onClick={() => setDialog("send")} disabled={!q.lines.length} title={!q.lines.length ? "Add a line item first" : undefined}>{q.status === "draft" ? "Send quote" : "Resend"}</Button>
               ))}
             {q.status !== "draft" && ["approved", "sent", "changes_requested"].includes(q.status) && (
-              <Button variant={q.status === "approved" ? "primary" : "secondary"} icon="job" loading={convert.isPending} disabled={!q.lines.length} onClick={() => convert.mutate()}>{convertLabel}</Button>
+              <Button variant={q.status === "approved" ? "primary" : "secondary"} icon="job" loading={converting} disabled={!q.lines.length || settling} onClick={startConvert}>{convertLabel}</Button>
             )}
             <Menu
               items={[
                 { label: "Preview as client", icon: "eye", onSelect: () => openClientView.mutate() },
-                { label: "Print or save PDF", icon: "printer", onSelect: () => print.mutate() },
-                { label: "Duplicate quote", icon: "copy", onSelect: () => duplicate.mutate() },
+                { label: "Print or save PDF", icon: "printer", onSelect: () => printer.print() },
+                { label: "Copy as new draft", icon: "copy", disabled: copy.isPending, onSelect: () => copy.mutate() },
                 { separator: true },
-                { label: "Mark approved", icon: "check", hidden: !["sent", "changes_requested", "draft"].includes(q.status), disabled: approve.isPending, onSelect: () => approve.mutate() },
-                { label: convertLabel, icon: "job", hidden: q.status !== "draft", onSelect: () => convert.mutate() },
+                { label: "Mark approved", icon: "check", hidden: !["sent", "changes_requested", "draft"].includes(q.status), disabled: approve.isPending || settling, onSelect: startApprove },
+                { label: convertLabel, icon: "job", hidden: q.status !== "draft", disabled: settling, onSelect: startConvert },
                 { label: "Mark as lost", icon: "x", hidden: !EDITABLE.includes(q.status), onSelect: () => setDialog("lost") },
                 { label: "Reopen as draft", icon: "undo", hidden: !["lost", "archived"].includes(q.status), onSelect: () => update.mutate({ status: "draft", lost_reason: null }) },
                 { label: "Archive", icon: "archive", hidden: ["archived", "converted"].includes(q.status), onSelect: () => update.mutate({ status: "archived" }) },
@@ -240,7 +555,11 @@ export function QuotePage() {
         <div className="callout callout-good">
           <Icon name="check" size={18} />
           <div className="grow">
-            <div>{approval?.method === "in_person" ? "Signed on site" : "Approved"} {q.approved_at ? formatDate(q.approved_at) : ""}{approval?.name ? ` by ${approval.name}` : ""}</div>
+            <div>
+              {approval?.method === "in_person" ? "Signed on site" : "Approved"} {q.approved_at ? formatDate(q.approved_at) : ""}
+              {approval?.name ? ` by ${approval.name}` : ""}
+              {approval?.option ? `, for ${choiceLabel(approval.option)}` : ""}
+            </div>
             {signatures}
           </div>
           {canSell && <Button size="sm" variant="primary" loading={convert.isPending} onClick={() => convert.mutate()}>{convertLabel}</Button>}
@@ -291,35 +610,54 @@ export function QuotePage() {
 
       <div className="two-col">
         <div className="wide stack-lg">
-          <LineItems table="quote_line_items" parent="quote_id" parentId={q.id} lines={q.lines} editable={editable} onChanged={refresh} withOptions />
+          <QuoteOptions quote={q} options={options} lines={q.lines} viewing={viewing} onView={setViewing} mode="office" onChanged={refresh} panelId={panelId} />
+          <div className="stack-sm">
+            <div className="segmented" role="group" aria-label="Show the estimate as" style={{ justifySelf: "start" }}>
+              <button type="button" aria-pressed={view === "lines"} aria-controls={panelId} onClick={() => setView("lines")}>Lines</button>
+              <button type="button" aria-pressed={view === "paper"} aria-controls={panelId} onClick={() => setView("paper")}>Paper</button>
+            </div>
+            <div id={panelId} role={offers ? "tabpanel" : undefined} aria-label={viewedRow ? viewedRow.name : undefined}>
+              {view === "lines" && (
+                <LineItems table="quote_line_items" parent="quote_id" parentId={q.id} lines={q.lines} editable={editable} onChanged={refresh} withOptions optionId={viewed} shownOptionId={q.option_id} options={options} />
+              )}
+              {(view === "paper" || printer.request > 0) && <QuotePaper quote={q} options={options} viewed={viewed} sheet={view === "paper"} print={printer.request} />}
+            </div>
+          </div>
           <MessageCard value={q.message} editable={editable} onSave={(message) => update.mutate({ message })} />
           {canSell && <PlansCard scope={{ kind: "quote", id: q.id, propertyId: q.property?.id ?? null }} />}
         </div>
         <aside className="narrow stack">
           <div className="card card-pad totals">
-            <div className="line"><span>Subtotal</span><span>{formatMoneyCents(q.subtotal)}</span></div>
+            {viewedRow && <p className={styles.totalsFor}>{totalsCaption(viewedRow.name, { shown: viewed === q.option_id, signed })}</p>}
+            <div className="line"><span>Subtotal</span><span>{formatMoneyCents(tab.subtotal)}</span></div>
             <DiscountRows
               kind="quote"
               id={q.id}
               promo={q.promo}
-              discount={Number(q.discount_amount)}
-              subtotal={Number(q.subtotal)}
+              discount={q.promo ? tab.discount : Number(q.discount_amount)}
+              subtotal={tab.subtotal}
               canEditDiscount={editable}
-              canChangePromo={editable}
-              suggestedCode={q.request?.promo_code}
+              canChangePromo={editable && !sitePriced}
+              suggestedCode={sitePriced ? null : q.request?.promo_code}
               onSaveDiscount={(v) => update.mutate({ discount_amount: v })}
               onChanged={refresh}
             />
+            {offers && (editable || Number(q.discount_amount) > 0) && (
+              <p className={styles.note}>{q.promo ? "The promo code is worked out on whichever option they choose." : "The discount comes off whichever option they choose."}</p>
+            )}
             <div className="line">
               <span>Tax {editable ? "" : `(${formatTaxRate(q.tax_rate)})`}</span>
-              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => update.mutate({ tax_rate: taxRateFromPercent(v) })} /> : <span>{formatMoneyCents(q.tax_amount)}</span>}
+              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => update.mutate({ tax_rate: taxRateFromPercent(v) })} /> : <span>{formatMoneyCents(tab.tax)}</span>}
             </div>
-            {editable && <div className="line"><span>Tax amount</span><span>{formatMoneyCents(q.tax_amount)}</span></div>}
-            <div className="line grand"><span>Total</span><span>{formatMoneyCents(q.total)}</span></div>
+            {editable && <div className="line"><span>Tax amount</span><span>{formatMoneyCents(tab.tax)}</span></div>}
+            <div className="line grand"><span>Total</span><span>{formatMoneyCents(tab.total)}</span></div>
             <div className="line">
               <span>Deposit required</span>
-              {editable ? <MoneyInput label="Deposit" value={Number(q.deposit_amount)} max={Number(q.total)} onSave={(v) => update.mutate({ deposit_amount: v })} /> : <span>{formatMoneyCents(q.deposit_amount)}</span>}
+              {editable ? <MoneyInput label="Deposit" value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => update.mutate({ deposit_amount: v })} /> : <span>{formatMoneyCents(q.deposit_amount)}</span>}
             </div>
+            {cap.name && editable && Number(q.deposit_amount) > cap.amount && (
+              <p className={styles.warn}>That's more than {cap.name} comes to ({formatMoneyCents(cap.amount)}). Lower it so it fits whichever option they choose.</p>
+            )}
             <div className="line">
               <span>Valid until</span>
               {editable ? (
@@ -348,6 +686,7 @@ export function QuotePage() {
               <span className="muted small">{frozen ? "It keeps the look it was signed with." : "How it looks printed, as a PDF and on the client's link."}</span>
             </div>
           )}
+          {canSell && <QuoteSections quote={q} optionSectionIds={viewedRow?.section_ids ?? null} approval={q.approval} />}
           {canSell && cost > 0 && (
             <div className="card card-pad stack-sm">
               <strong>Profit estimate</strong>
@@ -379,28 +718,204 @@ export function QuotePage() {
         </aside>
       </div>
 
-      {printer.request > 0 && (
-        <QuotePrint
-          request={printer.request}
-          template={template}
-          company={letterhead.data ?? documentCompany(session.company)}
-          data={quoteDocument(q, q.lines, {
-            date: q.sent_at ? dateIn(q.sent_at, session.company.timezone) : todayIn(session.company.timezone),
-            facts: documentFacts((q.package as { name: string } | null)?.name, roof),
-          })}
-        />
-      )}
       {dialog === "send" &&
         (ranged ? (
           // Out as a range: resending sends the range again, never an email with the exact total.
-          <SendEstimateDialog quote={q} mode="range" onClose={() => setDialog(null)} onSent={refresh} />
+          <SendEstimateDialog quote={quoteToSend(q, options)} mode="range" onClose={() => setDialog(null)} onSent={refresh} />
         ) : (
           <SendDialog kind="quote" id={q.id} number={q.number} email={q.client?.email ?? null} phone={q.client?.phone ?? null} onClose={() => setDialog(null)} onSent={refresh} />
         ))}
       {/* They said yes to the range: the exact price goes out instead, the way the roofing project offers it. */}
-      {dialog === "exact" && <SendEstimateDialog quote={q} mode="exact" onClose={() => setDialog(null)} onSent={refresh} />}
+      {dialog === "exact" && <SendEstimateDialog quote={quoteToSend(q, options)} mode="exact" onClose={() => setDialog(null)} onSent={refresh} />}
       {dialog === "lost" && <LostDialog onClose={() => setDialog(null)} onSave={(reason) => update.mutateAsync({ status: "lost", lost_reason: reason }).then(() => setDialog(null))} />}
+      {choosing && (
+        <ChooseOptionDialog
+          choices={choices}
+          initial={firstChoice(choices, q.option_id)}
+          shownId={q.option_id}
+          pricedOnSite={Boolean(q.priced_on_site_at)}
+          action={choosing}
+          convertLabel={convertLabel}
+          pending={approve.isPending || settling}
+          error={approve.error}
+          onClose={() => {
+            setChoosing(null);
+            approve.reset();
+          }}
+          onChoose={(optionId) => approve.mutate({ optionId, convert: choosing === "convert" })}
+        />
+      )}
     </>
+  );
+}
+
+
+/**
+ * `value`, as the same object for as long as what's in it stays the same: a template (and a signed
+ * contract) is read afresh on every render, and the paper is built again only when it changes.
+ */
+function useSameContent<T>(value: T): T {
+  const key = JSON.stringify(value);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => value, [key]);
+}
+
+/**
+ * The estimate on paper (paperDocument): letter pages on its template, with the option looked at,
+ * its totals and its contract filled in; once signed, the option and the contract it was signed with.
+ * `sheet` shows the pages here (the Paper view). `print` is the print button's latest request: each
+ * new one prints these same pages once they're ready, and the printable copy stays on the page after,
+ * following the quote, so the browser's own Print prints it too.
+ */
+function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteRow; options: readonly QuoteOptionRow[]; viewed: string | null; sheet: boolean; print: number }) {
+  const session = useSession();
+  const tz = session.company.timezone;
+  const look = useQuoteTemplate(q);
+  const template = useSameContent(look.template);
+  const isPending = look.isPending;
+  const letterhead = useLetterhead();
+  const company = letterhead.data ?? documentCompany(session.company);
+  // The roof it shows comes from the drawing the client sees (read again with the quote).
+  const roof = useQuery({
+    queryKey: ["quote", q.id, "roof"],
+    meta: { silent: true },
+    queryFn: async () =>
+      unwrap(await supabase().from("measurements").select("roofing_squares, roof_pitch").eq("quote_id", q.id).eq("show_on_quote", true).order("updated_at", { ascending: false }).limit(1).maybeSingle()) ?? null,
+  });
+
+  const printed = printedOption(q, viewed);
+  const option = options.find((o) => o.id === printed) ?? null;
+  const total = isSignedQuote(q.status) ? Number(q.total) : tabTotals(q, q.lines, printed).total;
+  const tier = option ? (optionTiers(options, q.lines, moneyOf(q)).get(option.id) ?? null) : null;
+  const input = useMemo(() => (isPending ? null : contractFor(q, template, option, total, tier)), [isPending, q, template, option, total, tier]);
+  const terms = useQuoteContract(input);
+  const contract = useSameContent(terms.contract ?? (terms.error ? NO_CONTRACT : null));
+  const ready = !isPending && !roof.isPending && contract !== null;
+  const data = useMemo(
+    () =>
+      ready
+        ? paperDocument({
+            quote: q,
+            lines: q.lines,
+            options,
+            viewed,
+            // The day it was sent, else the day it was made, as its {Date} says it.
+            date: quoteDate(q, tz),
+            packageName: (q.package as { name: string } | null)?.name ?? null,
+            roof: roof.data ?? null,
+            contract,
+          })
+        : null,
+    [ready, q, options, viewed, tz, roof.data, contract],
+  );
+  const paperTemplate = useMemo(() => contractTemplate(template, contract), [template, contract]);
+  // While another option's contract loads, the pages stay as they were rather than blinking out.
+  const onScreen = useRef<{ template: TemplateSettings; data: DocumentData } | null>(null);
+  if (data) onScreen.current = { template: paperTemplate, data };
+
+  // Printed only with its contract: printing without it would leave the terms off the copy they sign.
+  const printable = ready && terms.contract !== null;
+  const [printing, setPrinting] = useState(0);
+  const last = useRef<{ template: TemplateSettings; data: DocumentData } | null>(null);
+  if (printable && data) last.current = { template: paperTemplate, data };
+  useEffect(() => {
+    if (printable && print > printing) setPrinting(print);
+  }, [printable, print, printing]);
+  useEffect(() => {
+    if (print > printing && terms.error) toast.error("The contract didn't load, so it can't print yet.", { action: { label: "Try again", onClick: terms.refetch } });
+    // Once for each print asked for while it can't load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [print, Boolean(terms.error)]);
+
+  return (
+    <>
+      {sheet && (
+        <section className="stack" aria-label="The estimate as it prints">
+          {terms.error && (
+            <p className="muted small" style={{ margin: 0 }}>
+              The contract didn't load, so it's not on the pages below.{" "}
+              <button type="button" className="btn btn-sm btn-ghost" onClick={terms.refetch}>Try again</button>
+            </p>
+          )}
+          {onScreen.current ? (
+            <DocumentSheet template={onScreen.current.template} company={company} data={onScreen.current.data} />
+          ) : (
+            <Skeleton height="auto" radius={4} style={{ aspectRatio: "8.5 / 11" }} />
+          )}
+        </section>
+      )}
+      {printing > 0 && last.current && <QuotePrint request={printing} template={last.current.template} company={company} data={last.current.data} />}
+    </>
+  );
+}
+
+/**
+ * "Which option did they choose?": before an estimate that offers options is marked approved, or made
+ * a job, the office says which one the customer picked. It starts on the one they're shown first (when
+ * it has a price), whichever tab was looked at. Only an option with lines of its own (a price) can be
+ * chosen. A price set on site was for the option shown, so choosing another clears it.
+ */
+function ChooseOptionDialog({ choices, initial, shownId, pricedOnSite, action, convertLabel, pending, error, onClose, onChoose }: {
+  choices: OptionChoice[];
+  initial: string | null;
+  shownId: string | null;
+  pricedOnSite: boolean;
+  action: "approve" | "convert";
+  convertLabel: string;
+  pending: boolean;
+  error: unknown;
+  onClose: () => void;
+  onChoose: (optionId: string) => void;
+}) {
+  const group = useId();
+  const [picked, setPicked] = useState(initial);
+  const nameOf = (id: string | null) => choices.find((c) => c.option.id === id)?.option.name ?? "";
+  const anyPriced = choices.some((c) => c.priced);
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Which option did they choose?"
+      description={action === "convert" ? "It's marked approved with that option, and its lines become the job's." : "It's marked approved with that option and its price. The approval keeps the option and its contract terms."}
+      size="lg"
+    >
+      <form
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (picked) onChoose(picked);
+        }}
+      >
+        <div className={styles.choices} role="radiogroup" aria-label="Options">
+          {choices.map(({ option, tier, total, priced }) => (
+            <label key={option.id} className={styles.choice} data-on={picked === option.id || undefined} data-disabled={!priced || undefined}>
+              <input type="radio" name={group} value={option.id} checked={picked === option.id} disabled={!priced} onChange={() => setPicked(option.id)} />
+              <PackagePicture path={option.picture} style={option.style} className={styles.choicePicture} />
+              <span className={styles.choiceText}>
+                {(tier || option.id === shownId) && (
+                  <span className={styles.choiceChips}>
+                    {tier && <span className="chip">{tier}</span>}
+                    {option.id === shownId && <span className="chip chip-green">Shown first</span>}
+                  </span>
+                )}
+                <strong className={styles.choiceName}>{option.name}</strong>
+                <span className={styles.choiceTotal}>{priced && total !== null ? formatMoneyCents(total) : "No lines of its own yet"}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {!anyPriced && <p className="muted" style={{ margin: 0 }}>None of the options has lines of its own yet. Add them first.</p>}
+        {pricedOnSite && picked && picked !== shownId && (
+          <p className="callout callout-warning" style={{ margin: 0 }}>The price set on site was for {nameOf(shownId)}. Choosing {nameOf(picked)} clears it.</p>
+        )}
+        <FormError error={error} />
+        <div className="form-actions">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" icon={action === "convert" ? "job" : "check"} loading={pending} disabled={!picked}>
+            {action === "convert" ? convertLabel : "Mark approved"}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

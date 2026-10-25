@@ -1,0 +1,64 @@
+/* The package pieces other screens show (PackageCards.tsx): a package's drawing and picture, the
+   cards an estimate starts from (PackagePicker), and the highlights on a package's or an option's
+   card. Corners are left to the screen showing them (:where), so its own rule always wins. */
+
+.art { flex: none; display: block; }
+:where(.art) { border-radius: 8px; }
+.artFill { display: block; width: 100%; height: 100%; }
+
+/* A package's picture: 4:3, the photo cut to fill it (PackagePicture). The width comes from its use. */
+.picture { position: relative; display: block; flex: none; aspect-ratio: 4 / 3; overflow: hidden; background: var(--fill); }
+:where(.picture) { border-radius: 8px; }
+/* The photo or drawing fills the box without sizing it, so a box sized by its row (a phone's cards) stays that size. */
+.picture > img, .picture > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.picture > img { display: block; object-fit: cover; }
+
+/* Highlights */
+.highlights { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.highlight { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.highlight :global(.input) { flex: 1; min-width: 0; margin-right: 4px; font-weight: 400; }
+
+/* The package cards an estimate starts from (PackagePicker) */
+.picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 12px; }
+.pick {
+  position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface);
+  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.pick:hover { border-color: var(--border-strong); }
+.pick[data-on] { border-color: var(--green); box-shadow: var(--ring); }
+.pickMain {
+  display: flex; flex-direction: column; flex: 1; width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 0;
+  background: none; color: var(--ink); font: inherit; font-weight: 400; text-align: left; cursor: pointer;
+}
+.pickMain:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.pickMain[aria-disabled="true"] { cursor: default; }
+.pickPicture { width: 100%; border-radius: 0; }
+.pickText { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: start; min-width: 0; padding: 12px 14px 14px; }
+/* A long tier word stops at the card's edge. */
+.pickText :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
+.pickText strong { font-size: 15px; overflow-wrap: anywhere; }
+.pickPrice { font-size: 13.5px; color: var(--text-2); }
+.pickText small { font-size: 12.5px; color: var(--text-3); }
+/* A package still on the example warranty setup gave it (flagExamples). */
+.pickFlag { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--warning); }
+.pickCheck, .pickNumber {
+  position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 50%; background: var(--green-solid, var(--green)); color: #fff; box-shadow: 0 0 0 3px var(--surface);
+}
+.pickNumber { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pickOffer, .pickFoot {
+  display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 12px;
+  border: 0; border-top: 1px solid var(--divider); background: var(--fill); font: inherit; font-size: 13px; font-weight: 700;
+}
+.pickOffer { color: var(--green-dark); cursor: pointer; }
+.pickOffer:hover { background: var(--fill-2); }
+.pickOffer:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.pickFoot { color: var(--text-3); font-weight: 600; }
+.pickNote { margin: 0; font-size: 13px; color: var(--text-2); }
+/* On a phone the cards stack, so the picture moves to the side. */
+@media (max-width: 600px) {
+  .pickMain { flex-direction: row; align-items: stretch; }
+  .pickPicture { width: 96px; aspect-ratio: auto; min-height: 72px; }
+  .pickText { padding: 12px 44px 12px 14px; }
+}

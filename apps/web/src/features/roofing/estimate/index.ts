@@ -5,7 +5,7 @@
 export * from "./types";
 export * from "./data";
 export * from "./rows";
-export { EstimateList, EstimateListSkeleton, type EstimateListProps } from "./EstimateList";
+export { EstimateList, EstimateListSkeleton, type EstimateListProps, type EstimateView } from "./EstimateList";
 export { EstimateNumbers, AbcBadge, branchLabel } from "./EstimateNumbers";
 export { RangeBar } from "./RangeBar";
 export { ChangeList } from "./ChangeList";

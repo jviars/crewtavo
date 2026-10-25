@@ -1,10 +1,12 @@
 /**
  * Paving: the whole job from one place, for businesses set up for paving. Start a takeoff from an
  * address, then each project walks through takeoff, estimate, proposal, schedule and invoice
- * (PavingProjectPage). The price book card adds the standard paving services to a price list that
- * doesn't have them yet.
+ * (PavingProjectPage). The list prices a project that offers options from its cheapest until it's
+ * signed. The price book card adds the standard paving services to a price list that doesn't have
+ * them yet.
  */
 import { pavingItem } from "@crewtavo/core/paving";
+import type { TotalsPromo } from "@crewtavo/core/money";
 import { getPreset } from "@crewtavo/core/presets";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -18,6 +20,7 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addressLine, formatMoney, formatNumber, timeAgo } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
+import { lowestOption, SIGNED } from "../roofing/flow/model";
 import { isPaving, sectionsOf, stageLabel, STEPS, TAKEOFF_FIELDS, type TakeoffRow } from "./data";
 import { NewTakeoffDialog } from "./NewTakeoffDialog";
 
@@ -28,9 +31,15 @@ interface ProjectRow extends TakeoffRow {
     title: string;
     status: string;
     total: number;
+    tax_rate: number;
+    discount_amount: number;
+    promo: TotalsPromo | null;
     client: { display_name: string } | null;
     property: { line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
-    lines: Array<{ id: string }>;
+    /** What each option's price is worked out from. */
+    lines: Array<{ id: string; option_id: string | null; quantity: number; unit_price: number; taxable: boolean; optional: boolean; selected: boolean }>;
+    /** Its options, when it offers two or three. */
+    options: Array<{ id: string }>;
     jobs: Array<{ id: string; status: string }>;
   } | null;
 }
@@ -49,7 +58,7 @@ export function PavingPage() {
       const rows = unwrap(
         await supabase()
           .from("measurements")
-          .select(`${TAKEOFF_FIELDS}, quote:quotes(id, number, title, status, total, client:clients(display_name), property:properties(line1, city, region, postal_code), lines:quote_line_items(id), jobs!jobs_company_id_quote_id_fkey(id, status))`)
+          .select(`${TAKEOFF_FIELDS}, quote:quotes(id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), client:clients(display_name), property:properties(line1, city, region, postal_code), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id), jobs!jobs_company_id_quote_id_fkey(id, status))`)
           .not("quote_id", "is", null)
           .order("updated_at", { ascending: false })
           .limit(200),
@@ -107,6 +116,8 @@ export function PavingPage() {
                 {rows.map((r) => {
                   const q = r.quote!;
                   const stage = stageLabel(q, true);
+                  // Options not chosen yet: from the cheapest. Once signed, the total is the one chosen.
+                  const from = q.options?.length && !SIGNED.includes(q.status) ? lowestOption(q) : null;
                   return (
                     <tr key={q.id} className="row-link" onClick={() => navigate(`/paving/${q.id}`)}>
                       <td>
@@ -115,9 +126,9 @@ export function PavingPage() {
                       </td>
                       <td>
                         <span className="small">{measuredSummary(r)}</span>
-                        <div className="muted small">{timeAgo(r.updated_at)}</div>
+                        <div className="muted small">{[q.options?.length ? `${q.options.length} options` : null, timeAgo(r.updated_at)].filter(Boolean).join(" · ")}</div>
                       </td>
-                      <td className="num">{q.lines.length ? formatMoney(q.total) : <span className="muted">Not priced</span>}</td>
+                      <td className="num">{from !== null ? <span title="Its cheapest option">From {formatMoney(from)}</span> : q.lines.length ? formatMoney(q.total) : <span className="muted">Not priced</span>}</td>
                       <td><StatusPill label={stage.label} tone={stage.tone} /></td>
                     </tr>
                   );

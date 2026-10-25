@@ -1,41 +1,75 @@
 /**
- * Roofing → Packages: what goes on each kind of roof. A package is the roof itself, priced by the
- * square (a price set by hand, or one that follows ABC Supply: materials plus labor and the rest,
- * plus a markup), what's always on that roof (measured from it, or counted, like 3 pipe boots), and
- * the quick adds a person puts on an estimate with one tap. Picking a package is the first step of
- * a new roof estimate (paving/NewTakeoffDialog.tsx, which uses PackagePicker from here).
+ * Packages: services sold together, for every trade. A roofer's are Roofing → Packages: what goes on
+ * each kind of roof, the roof itself priced by the square (a price set by hand, or one that follows
+ * ABC Supply: materials plus labor and the rest, plus a markup), with the price range settings
+ * (companies.settings.roofing) and the ABC Supply connection the prices come from. Every other trade
+ * has /packages (Settings → Packages): a main service if there is one, the rest the same.
  *
- * The price range settings for every package live here too (companies.settings.roofing), with the
- * ABC Supply connection the prices come from.
+ * A package has what's always on it (measured, or counted, like 3 pipe boots), and what the
+ * customer reads when it's offered as one of two or three options: its tier, picture, highlights,
+ * warranty and contract sections. A roof's package also has the quick adds a person puts on an
+ * estimate with one tap (only a roofer's estimate and iPad visit show them, so only Roofing →
+ * Packages sets them). Until each package has the business's own warranty, the page says the one
+ * setup gave it is example wording.
+ *
+ * The pieces other screens show (PackagePicker, the cards a salesperson picks one package from, or
+ * two or three to offer as options; a package's picture; the highlights input) are PackageCards.tsx,
+ * so those screens don't load this page.
  */
+import { STARTER_NOTE } from "@crewtavo/core/contracts";
 import { followPrice, marginPct, priceRange, RANGE_ROUNDING, rangeSettings } from "@crewtavo/core/estimates";
 import { materialsPerUnit } from "@crewtavo/core/materials";
-import { getPreset } from "@crewtavo/core/presets";
+import { getPreset, isExampleWarranty, PACKAGE_LIMITS } from "@crewtavo/core/presets";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
-import { Field } from "@/components/ui/Field";
+import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
+import { packagePicture } from "@/lib/files";
 import { formatMoney, formatMoneyCents, timeAgo } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { useServiceMaterials, useSupplier, type ServiceMaterial } from "../materials/data";
 import { MaterialPicker } from "../materials/MaterialPicker";
-import { copyName, formulaWords, isSquareUnit, moneyText, PACKAGE_NAME_MAX, PACKAGE_STYLES, quickAddChips, roofServiceKind, unitPrice, type PackageStyle } from "./data";
 import {
+  cleanHighlights,
+  copyName,
+  exampleWarrantyNote,
+  formulaWords,
+  isRoofingCompany,
+  isSquareUnit,
+  moneyText,
+  PACKAGE_NAME_MAX,
+  PACKAGE_STYLES,
+  packagePriceLine,
+  quickAddChips,
+  roofServiceKind,
+  sameList,
+  squarePrice,
+  toggleSection,
+  typedOrSaved,
+  unitPrice,
+} from "./data";
+import { HighlightsField, PackageArt, PackagePicture, TierWords } from "./PackageCards";
+import {
+  canEditContracts,
   canEditPackages,
   canEditRanges,
+  canSeePackages,
   canSetUpRoofing,
   packagesKey,
+  removePackagePicture,
+  setPackagePicture,
   setUpRoofing,
   setupMessage,
+  useContractLibrary,
   usePriceList,
   useRoofPackages,
   type PriceListService,
@@ -49,10 +83,6 @@ const money = (n: number) => moneyText(n, FORMAT);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const SERVICES_KEY = (companyId: string) => ["services", companyId, "roof-packages"];
 
-// ---------------------------------------------------------------------------------------------
-// Shared pieces: the Projects | Packages tabs, a package's picture, and the picker
-// ---------------------------------------------------------------------------------------------
-
 /** Roofing's two screens: the projects and the packages they're priced from. */
 export function RoofingTabs() {
   const { pathname } = useLocation();
@@ -65,77 +95,34 @@ export function RoofingTabs() {
   );
 }
 
-/** The look of each style: a roof's color and the lines of its shingles or panels. */
-const ART: Record<PackageStyle, { bg: string; line: string; w: number; h: number; d: string }> = {
-  shingle: { bg: "#5b6770", line: "#4a555d", w: 30, h: 20, d: "M0 10h30M0 20h30M10 0v10M25 10v10" },
-  designer: { bg: "#6e5a4b", line: "#5c4a3d", w: 36, h: 24, d: "M0 12h36M0 24h36M14 0l-4 12M32 12l-4 12" },
-  metal: { bg: "#3f5566", line: "#5f7889", w: 12, h: 12, d: "M6 0v12" },
-  other: { bg: "#66747a", line: "#5a676d", w: 14, h: 14, d: "M0 14L14 0" },
-};
-
-/**
- * A package's picture: a tile for lists, or a wide banner for the new-estimate cards. The colors
- * are the roofing material's own, so they're the same in dark mode.
- */
-export function PackageArt({ style, size = 44, banner = false }: { style: PackageStyle; size?: number; banner?: boolean }) {
-  const id = `roof-art-${useId().replace(/:/g, "")}`;
-  const art = ART[style] ?? ART.other;
-  return (
-    <svg className={banner ? styles.banner : styles.art} width={banner ? "100%" : size} height={banner ? 72 : size} aria-hidden="true" focusable="false">
-      <defs>
-        <pattern id={id} width={art.w} height={art.h} patternUnits="userSpaceOnUse">
-          <path d={art.d} fill="none" stroke={art.line} strokeWidth="2" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill={art.bg} />
-      <rect width="100%" height="100%" fill={`url(#${id})`} />
-    </svg>
-  );
-}
-
-/** "$560 a square" for a package's roof (or its own unit), or null when it has no roof yet. */
-function squarePrice(roof: { unit_price: number; unit: string } | null | undefined): string | null {
-  if (!roof) return null;
-  return isSquareUnit(roof.unit) ? `${money(roof.unit_price)} a square` : unitPrice(roof.unit_price, roof.unit, FORMAT);
-}
-
-/**
- * The packages as big cards to pick from when a roof estimate starts (NewTakeoffDialog): the
- * picture, the name, the price a square and how many quick adds it has.
- */
-export function PackagePicker({ packages, value, onChange }: { packages: RoofPackage[]; value: string | null; onChange: (id: string) => void }) {
-  return (
-    <div className={styles.picker} role="group" aria-label="Roof packages">
-      {packages.map((p) => {
-        const quick = p.items.filter((i) => i.kind === "quick").length;
-        const on = p.id === value;
-        return (
-          <button key={p.id} type="button" className={styles.pick} aria-pressed={on} onClick={() => onChange(p.id)}>
-            <PackageArt style={p.style} banner />
-            <span className={styles.pickText}>
-              <strong>{p.name}</strong>
-              <span>{squarePrice(p.roof) ?? "No roof picked yet"}</span>
-              <small>{quick ? `${quick} quick ${quick === 1 ? "add" : "adds"}` : "No quick adds"}{p.is_default ? " · Default" : ""}</small>
-            </span>
-            {on && <span className={styles.pickCheck} aria-hidden="true"><Icon name="check" size={15} strokeWidth={3} /></span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------------------------
 
-/** Packages are for the people who price work (they're read with the price list). */
+/**
+ * Roofing → Packages (/roofing/packages), for the people who price work (they're read with the price
+ * list). Any other trade's packages are /packages, so a link here from before goes there.
+ */
 export function RoofPackagesPage() {
   const session = useSession();
-  return hasRole(session, "admin", "office", "estimator") && can(session, "sales") ? <PackagesScreen /> : <NoAccess title="Roofing" />;
+  const { search } = useLocation();
+  if (!isRoofingCompany(session.company)) return <Navigate to={{ pathname: "/packages", search }} replace />;
+  return canSeePackages(session) ? <PackagesScreen roofing /> : <NoAccess title="Roofing" />;
 }
 
-function PackagesScreen() {
+/** Packages (/packages, from Settings) for every other trade. A roofer's are under Roofing, so they go there. */
+export function PackagesPage() {
+  const session = useSession();
+  const { search } = useLocation();
+  if (isRoofingCompany(session.company)) return <Navigate to={{ pathname: "/roofing/packages", search }} replace />;
+  return canSeePackages(session) ? <PackagesScreen roofing={false} /> : <NoAccess title="Packages" />;
+}
+
+/**
+ * The list of packages and the one picked. `roofing` (Roofing → Packages) prices each roof by the
+ * square and adds the range settings, ABC Supply and the standard roofing packages and services.
+ */
+function PackagesScreen({ roofing }: { roofing: boolean }) {
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
@@ -148,10 +135,11 @@ function PackagesScreen() {
   const select = (id: string | null) => setParams(id ? { package: id } : {}, { replace: true });
 
   const create = useMutation({
-    meta: { success: "Package added. Name it and pick what goes on it." },
+    meta: { success: "Package added. Name it and pick what goes in it." },
     mutationFn: async () => {
-      // Start from the first roof in the price list (priced by the square, with waste).
-      const roof = (services.data ?? []).find((s) => s.active && isSquareUnit(s.unit) && roofServiceKind(s.formula, s.name) === "roof") ?? null;
+      // A roof starts from the first roof in the price list (priced by the square, with waste);
+      // anything else starts empty.
+      const roof = roofing ? ((services.data ?? []).find((s) => s.active && isSquareUnit(s.unit) && roofServiceKind(s.formula, s.name) === "roof") ?? null) : null;
       const sort = list.reduce((max, p) => Math.max(max, p.sort), -1) + 1;
       return unwrap(await supabase().from("roof_packages").insert({ company_id: company.id, name: "New package", style: "other", roof_service_id: roof?.id ?? null, is_default: list.length === 0, sort }).select("id").single());
     },
@@ -161,13 +149,21 @@ function PackagesScreen() {
     },
   });
 
-  const header = (
+  const newPackage = editable && list.length > 0 && <Button variant="primary" icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New package</Button>;
+  const header = roofing ? (
     <>
-      <PageHeader title="Roofing" actions={editable && list.length > 0 && <Button variant="primary" icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New package</Button>} />
+      <PageHeader title="Roofing" actions={newPackage} />
       <p className="page-subtitle">What goes on each kind of roof. Pick a package when you start an estimate, and the roof's measurements fill in the amounts.</p>
       <RoofingTabs />
     </>
+  ) : (
+    <>
+      <PageHeader title="Packages" actions={newPackage} />
+      <p className="page-subtitle">Services you sell together, each with a picture so it's easy to pick. Put one on an estimate, or offer two or three side by side.</p>
+    </>
   );
+  const side = roofing || list.length > 0;
+  const examples = exampleWarrantyNote(list);
 
   if (packages.isPending || services.isPending) {
     return (
@@ -177,7 +173,7 @@ function PackagesScreen() {
           <div className={styles.side}>
             <CardSkeleton lines={2} title={false} />
             <CardSkeleton lines={2} title={false} />
-            <CardSkeleton lines={3} />
+            {roofing && <CardSkeleton lines={3} />}
           </div>
           <div className={styles.main}><CardSkeleton lines={10} /></div>
         </Loading>
@@ -197,45 +193,63 @@ function PackagesScreen() {
     <>
       {header}
       <div className={styles.layout}>
-        <div className={styles.side}>
-          {list.length > 0 && (
-            <ul className={styles.list} aria-label="Packages">
-              {list.map((p) => {
-                const roof = services.data.find((s) => s.id === p.roof_service_id);
-                const margin = roof ? marginPct(roof.unit_price, roof.unit_cost) : null;
-                return (
-                  <li key={p.id}>
-                    <button type="button" className={styles.pkg} aria-current={p.id === selected?.id ? "true" : undefined} onClick={() => select(p.id)}>
-                      <PackageArt style={p.style} />
-                      <span className={styles.pkgText}>
-                        <strong>{p.name}</strong>
-                        <span>{[squarePrice(roof) ?? "Pick the roof", margin !== null ? `${margin}% margin` : null].filter(Boolean).join(" · ")}</span>
-                      </span>
-                      {p.is_default && <span className="chip chip-green">Default</span>}
+        {side && (
+          <div className={styles.side}>
+            {/* Setup's example warranties, until each package has the business's own. */}
+            {examples && (
+              <div className="callout callout-info">
+                <Icon name="info" size={18} />
+                <span className="grow" style={{ fontWeight: 400 }}>{examples}</span>
+              </div>
+            )}
+            {list.length > 0 && (
+              <ul className={styles.list} aria-label="Packages">
+                {list.map((p) => {
+                  const main = services.data.find((s) => s.id === p.roof_service_id);
+                  const margin = main ? marginPct(main.unit_price, main.unit_cost) : null;
+                  const price = roofing ? (squarePrice(main, FORMAT) ?? "Pick the roof") : main ? unitPrice(main.unit_price, main.unit, FORMAT) : packagePriceLine(p, false, FORMAT);
+                  return (
+                    <li key={p.id}>
+                      <button type="button" className={styles.pkg} aria-current={p.id === selected?.id ? "true" : undefined} onClick={() => select(p.id)}>
+                        <PackagePicture path={p.picture} style={p.style} className={styles.tile} />
+                        <span className={styles.pkgText}>
+                          <strong>{p.name}</strong>
+                          <span>{[p.tier, price, margin !== null ? `${margin}% margin` : null].filter(Boolean).join(" · ")}</span>
+                          {isExampleWarranty(p.warranty) && (
+                            <span className={styles.flag}>
+                              <Icon name="alert" size={13} />
+                              Example warranty
+                            </span>
+                          )}
+                        </span>
+                        {roofing && p.is_default && <span className="chip chip-green">Default</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+                {editable && (
+                  <li>
+                    <button type="button" className={styles.addPkg} onClick={() => create.mutate()} disabled={create.isPending}>
+                      <Icon name="plus" size={16} strokeWidth={2.5} />Add a package
                     </button>
                   </li>
-                );
-              })}
-              {editable && (
-                <li>
-                  <button type="button" className={styles.addPkg} onClick={() => create.mutate()} disabled={create.isPending}>
-                    <Icon name="plus" size={16} strokeWidth={2.5} />Add a package
-                  </button>
-                </li>
-              )}
-            </ul>
-          )}
-          <div className={styles.sideCards}>
-            <RangeCard />
-            <SupplierCard packages={list} />
-            {list.length > 0 && <MissingServices services={services.data} />}
+                )}
+              </ul>
+            )}
+            {roofing && (
+              <div className={styles.sideCards}>
+                <RangeCard />
+                <SupplierCard packages={list} />
+                {list.length > 0 && <MissingServices services={services.data} />}
+              </div>
+            )}
           </div>
-        </div>
+        )}
         <div className={styles.main}>
           {selected ? (
-            <PackageEditor key={selected.id} pkg={selected} packages={list} services={services.data} editable={editable} onSelect={select} />
+            <PackageEditor key={selected.id} pkg={selected} packages={list} services={services.data} editable={editable} roofing={roofing} onSelect={select} />
           ) : (
-            <NoPackages onCreate={() => create.mutate()} creating={create.isPending} />
+            <NoPackages roofing={roofing} onCreate={() => create.mutate()} creating={create.isPending} />
           )}
         </div>
       </div>
@@ -243,8 +257,11 @@ function PackagesScreen() {
   );
 }
 
-/** A business with no packages yet: set up the standard three, or start from scratch. */
-function NoPackages({ onCreate, creating }: { onCreate: () => void; creating: boolean }) {
+/**
+ * A business with no packages yet: a roofer can set up the standard three; anyone who changes
+ * packages can start one from scratch.
+ */
+function NoPackages({ roofing, onCreate, creating }: { roofing: boolean; onCreate: () => void; creating: boolean }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const setup = useMutation({
@@ -257,6 +274,16 @@ function NoPackages({ onCreate, creating }: { onCreate: () => void; creating: bo
   });
   const canSetUp = canSetUpRoofing(session);
   const editable = canEditPackages(session);
+  if (!roofing) {
+    return (
+      <div className="card">
+        <EmptyState icon="package" title="No packages yet" action={editable && <Button variant="primary" icon="plus" loading={creating} onClick={onCreate}>New package</Button>}>
+          A package is a set of services you sell together, with a picture so it's easy to pick.
+          {!editable && " Ask the office to set them up."}
+        </EmptyState>
+      </div>
+    );
+  }
   return (
     <div className="card">
       <EmptyState
@@ -426,14 +453,15 @@ function MissingServices({ services }: { services: PriceListService[] }) {
 // One package
 // ---------------------------------------------------------------------------------------------
 
-type PackagePatch = Partial<Pick<RoofPackage, "name" | "style" | "roof_service_id" | "price_mode" | "markup_pct">>;
+type PackagePatch = Partial<Pick<RoofPackage, "name" | "style" | "roof_service_id" | "price_mode" | "markup_pct" | "tier" | "highlights" | "warranty" | "section_ids">>;
 
-function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: RoofPackage; packages: RoofPackage[]; services: PriceListService[]; editable: boolean; onSelect: (id: string | null) => void }) {
+function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }: { pkg: RoofPackage; packages: RoofPackage[]; services: PriceListService[]; editable: boolean; roofing: boolean; onSelect: (id: string | null) => void }) {
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
   const supplier = useSupplier();
-  const connected = supplier.data?.status === "connected";
+  // ABC Supply prices roofs; other trades' packages are priced by hand.
+  const connected = roofing && supplier.data?.status === "connected";
   const byId = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
   const roof = pkg.roof_service_id ? (byId.get(pkg.roof_service_id) ?? null) : null;
   const included = pkg.items.filter((i) => i.kind === "included");
@@ -465,7 +493,7 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
   const roofLinks = roof ? linksOf(roof.id) : [];
   const perSquareExact = materialsPerUnit(roofLinks);
   const perSquare = round2(perSquareExact);
-  const canFollow = roofLinks.length > 0;
+  const canFollow = roofing && roofLinks.length > 0;
   const followed = (labor: number | null, markup: number) => followPrice(perSquareExact, labor, markup);
 
   const savePackage = useMutation({
@@ -541,10 +569,14 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
     mutationFn: async () => {
       const db = supabase();
       const sort = packages.reduce((max, p) => Math.max(max, p.sort), -1) + 1;
+      // The same picture file: pictures are never changed or deleted, so both can show it.
       const row = unwrap(
         await db
           .from("roof_packages")
-          .insert({ company_id: company.id, name: copyName(pkg.name), style: pkg.style, roof_service_id: pkg.roof_service_id, price_mode: pkg.price_mode, markup_pct: pkg.markup_pct, is_default: false, sort })
+          .insert({
+            company_id: company.id, name: copyName(pkg.name), style: pkg.style, roof_service_id: pkg.roof_service_id, price_mode: pkg.price_mode, markup_pct: pkg.markup_pct, is_default: false, sort,
+            tier: pkg.tier, picture: pkg.picture, picture_width: pkg.picture_width, picture_height: pkg.picture_height, highlights: pkg.highlights, warranty: pkg.warranty, section_ids: pkg.section_ids,
+          })
           .select("id")
           .single(),
       );
@@ -572,6 +604,7 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
       queryClient.invalidateQueries({ queryKey: packagesKey(company.id) });
     },
   });
+  // Only a roofer's new estimates start from the default package, so only Roofing → Packages sets it.
   const makeDefault = useMutation({
     meta: { success: `New roof estimates start with ${pkg.name}` },
     mutationFn: async () => {
@@ -589,14 +622,43 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
     if (!clean) return setName(pkg.name);
     if (clean !== pkg.name) savePackage.mutate({ patch: { name: clean } });
   };
+  const tiersId = useId();
+  const [tier, setTier] = useState(pkg.tier ?? "");
+  useEffect(() => setTier(pkg.tier ?? ""), [pkg.tier]);
+  const saveTier = () => {
+    const clean = tier.trim().slice(0, PACKAGE_LIMITS.tier) || null;
+    setTier(clean ?? "");
+    if (clean !== pkg.tier) savePackage.mutate({ patch: { tier: clean } });
+  };
+  // Lines being typed stay as they are until they're saved (cleanHighlights), and while what's saved
+  // is what they come to, so a line just added isn't taken away by the save before it.
+  const [highlights, setHighlights] = useState(pkg.highlights);
+  const savedHighlights = JSON.stringify(pkg.highlights);
+  useEffect(() => {
+    const saved = JSON.parse(savedHighlights) as string[];
+    setHighlights((typed) => typedOrSaved(typed, saved));
+  }, [savedHighlights]);
+  const saveHighlights = (lines: string[]) => {
+    const clean = cleanHighlights(lines);
+    if (!sameList(clean, pkg.highlights)) savePackage.mutate({ patch: { highlights: clean } });
+  };
+  const [warranty, setWarranty] = useState(pkg.warranty);
+  useEffect(() => setWarranty(pkg.warranty), [pkg.warranty]);
+  const saveWarranty = () => {
+    const clean = warranty.trim().slice(0, PACKAGE_LIMITS.warranty);
+    setWarranty(clean);
+    if (clean !== pkg.warranty) savePackage.mutate({ patch: { warranty: clean } });
+  };
 
   const roofChoices = services.filter((s) => (s.active && isSquareUnit(s.unit)) || s.id === pkg.roof_service_id);
+  const mainChoices = services.filter((s) => s.active || s.id === pkg.roof_service_id);
   const shared = roof ? packages.filter((p) => p.id !== pkg.id && p.roof_service_id === roof.id) : [];
   const onRoof = new Set([pkg.roof_service_id, ...included.map((i) => i.service_id)]);
   const addable = services.filter((s) => s.active && !onRoof.has(s.id));
   const categories = [...new Set(addable.map((s) => s.category?.trim() || "Other"))];
   const chips = quickAddChips(services, pkg.items, pkg.roof_service_id);
-  const following = pkg.price_mode === "follow";
+  const following = roofing && pkg.price_mode === "follow";
+  const customer = roofing ? "homeowner" : "customer";
   const rows: Array<{ service: PriceListService; item: RoofPackageItem | null }> = [
     ...(roof ? [{ service: roof, item: null }] : []),
     ...included.flatMap((item) => {
@@ -607,15 +669,19 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
 
   return (
     <section className={`card ${styles.editor}`} aria-label={pkg.name}>
-      {/* Name, picture and the package's own actions */}
+      {/* Name, tier, picture and the package's own actions */}
       <div className={styles.part}>
         {editable ? (
           <div className={styles.head}>
             <Field label="Package name" className={styles.nameField}>
               <input className="input" value={name} maxLength={PACKAGE_NAME_MAX} onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
             </Field>
+            <Field label="Tier" optional className={styles.tierField}>
+              <input className="input" list={tiersId} value={tier} maxLength={PACKAGE_LIMITS.tier} placeholder="Good, Better…" onChange={(e) => setTier(e.target.value)} onBlur={saveTier} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+              <TierWords id={tiersId} />
+            </Field>
             <div className={styles.headActions}>
-              {!pkg.is_default && <Button variant="ghost" icon="star" loading={makeDefault.isPending} onClick={() => makeDefault.mutate()}>Make default</Button>}
+              {roofing && !pkg.is_default && <Button variant="ghost" icon="star" loading={makeDefault.isPending} onClick={() => makeDefault.mutate()}>Make default</Button>}
               <Button variant="ghost" icon="copy" loading={copy.isPending} onClick={() => copy.mutate()}>Copy</Button>
               <Button
                 variant="ghost"
@@ -628,125 +694,147 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
           </div>
         ) : (
           <div className="row wrap" style={{ gap: 10 }}>
-            <PackageArt style={pkg.style} size={36} />
+            <PackagePicture path={pkg.picture} style={pkg.style} className={styles.tile} />
             <h2 className={styles.title}>{pkg.name}</h2>
-            {pkg.is_default && <span className="chip chip-green">Default</span>}
+            {pkg.tier && <span className="chip">{pkg.tier}</span>}
+            {roofing && pkg.is_default && <span className="chip chip-green">Default</span>}
           </div>
         )}
         {editable && (
-          <div className={styles.styleRow} role="group" aria-label="Picture on its card">
-            {PACKAGE_STYLES.map((s) => (
-              <button key={s.id} type="button" className={styles.styleBtn} aria-pressed={pkg.style === s.id} onClick={() => pkg.style !== s.id && savePackage.mutate({ patch: { style: s.id } })}>
-                <PackageArt style={s.id} size={26} />
-                {s.label}
-              </button>
-            ))}
-          </div>
+          <PictureControl pkg={pkg} customer={customer}>
+            {roofing && (
+              <div className={styles.styleRow} role="group" aria-label="Drawing on its card, without a picture">
+                {PACKAGE_STYLES.map((s) => (
+                  <button key={s.id} type="button" className={styles.styleBtn} aria-pressed={pkg.style === s.id} onClick={() => pkg.style !== s.id && savePackage.mutate({ patch: { style: s.id } })}>
+                    <PackageArt style={s.id} size={26} />
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </PictureControl>
         )}
-        {editable ? (
+        {editable && roofing ? (
           <Field label="The roof" hint={roof ? `Priced by the square from the roof's measurements${roof.formula ? ` (${formulaWords(roof.formula)?.toLowerCase()})` : ""}.` : "Pick the service in your price list that prices this roof by the square."}>
             <select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => e.target.value && savePackage.mutate({ patch: { roof_service_id: e.target.value } })}>
               {!pkg.roof_service_id && <option value="">Pick the roof…</option>}
               {(roofChoices.length ? roofChoices : services.filter((s) => s.active)).map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? "" : " (turned off)"}</option>)}
             </select>
           </Field>
+        ) : editable ? (
+          <Field
+            label="Main service"
+            optional
+            hint={roof ? `Its price shows on the package's card${roof.formula ? `, measured: ${formulaWords(roof.formula)?.toLowerCase()}` : ""}.` : "What this package is mostly about, if there's one service. Its price shows on the package's card."}
+          >
+            <select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => savePackage.mutate({ patch: { roof_service_id: e.target.value || null } })}>
+              <option value="">None</option>
+              {[...new Set(mainChoices.map((s) => s.category?.trim() || "Other"))].map((c) => (
+                <optgroup key={c} label={c}>
+                  {mainChoices.filter((s) => (s.category?.trim() || "Other") === c).map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? "" : " (turned off)"}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </Field>
         ) : null}
       </div>
 
-      {/* The price a square */}
-      <div className={styles.part}>
-        <div className={styles.partHead}>
-          <div>
-            <h2>Price a square</h2>
-            <p>What the homeowner pays for the roof, installed.</p>
-          </div>
-          {editable && roof && (
-            <div className="segmented" role="group" aria-label="How the price is set">
-              <button type="button" aria-pressed={!following} onClick={() => following && savePackage.mutate({ patch: { price_mode: "manual" } })}>Set it yourself</button>
-              <button
-                type="button"
-                aria-pressed={following}
-                disabled={!canFollow && !following}
-                title={canFollow ? undefined : "Pick this roof's materials from ABC Supply first"}
-                onClick={() => !following && savePackage.mutate({ patch: { price_mode: "follow" }, price: followed(roof.labor_cost, pkg.markup_pct) })}
-              >
-                Follow ABC prices
-              </button>
+      {/* The price a square (a roof), or the main service's price */}
+      {(roofing || roof) && (
+        <div className={styles.part}>
+          <div className={styles.partHead}>
+            <div>
+              <h2>{roofing ? "Price a square" : "Price"}</h2>
+              <p>{roofing ? "What the homeowner pays for the roof, installed." : `What the customer pays for ${roof?.name}.`}</p>
             </div>
-          )}
-        </div>
-
-        {!roof ? (
-          <p className="callout callout-info" style={{ margin: 0 }}>Pick the roof above, and its price a square shows here.</p>
-        ) : loadingMaterials ? (
-          <Skeleton height={64} radius={10} />
-        ) : following && canFollow ? (
-          <div className="stack-sm">
-            <div className={styles.sum}>
-              <span className={styles.term}>
-                <span><span className={styles.abc}>ABC</span>Materials</span>
-                <strong>{formatMoneyCents(perSquare)}</strong>
-              </span>
-              <span className={styles.op} aria-hidden="true">+</span>
-              <span className={styles.term}>
-                <span>Labor and the rest</span>
-                {editable ? <MoneyInput width={110} label="Labor and the rest, a square" value={roof.labor_cost ?? 0} onSave={(v) => saveLabor.mutate(v)} /> : <strong>{formatMoneyCents(roof.labor_cost ?? 0)}</strong>}
-              </span>
-              <span className={styles.op} aria-hidden="true">+</span>
-              <span className={styles.term}>
-                <span>Markup</span>
-                {editable ? <MoneyInput percent max={1000} width={96} label="Markup percent" value={pkg.markup_pct} onSave={(v) => savePackage.mutate({ patch: { markup_pct: v }, price: followed(roof.labor_cost, v) })} /> : <strong>{pkg.markup_pct}%</strong>}
-              </span>
-              <span className={styles.op} aria-hidden="true">=</span>
-              <span className={`${styles.term} ${styles.total}`}>
-                <span>A square today</span>
-                <strong>{formatMoneyCents(followed(roof.labor_cost, pkg.markup_pct))}</strong>
-              </span>
-            </div>
-            <p className={styles.note}>Moves with ABC's prices, so every new estimate is priced at today's materials. Estimates already sent and signed keep their price.</p>
-          </div>
-        ) : (
-          <div className="stack-sm">
-            {following && <p className="callout callout-warning" style={{ margin: 0 }}>This roof has no ABC materials any more, so its price stays where it was. Set it yourself, or pick its materials again.</p>}
-            <div className={styles.priceRow}>
-              {editable ? (
-                <span className={styles.bigMoney}><MoneyInput width={160} label="Price a square" value={roof.unit_price} onSave={(v) => saveService.mutate({ id: roof.id, patch: { unit_price: v } })} /></span>
-              ) : (
-                <strong className={styles.bigPrice}>{squarePrice(roof)}</strong>
-              )}
-              <span className={styles.costLine}>
-                {roof.unit_cost !== null ? (
-                  <span>
-                    Your cost today: <strong>{formatMoneyCents(roof.unit_cost)}</strong> {isSquareUnit(roof.unit) ? "a square" : `a ${roof.unit}`}
-                    {marginPct(roof.unit_price, roof.unit_cost) !== null && <> · <strong>{marginPct(roof.unit_price, roof.unit_cost)}% margin</strong></>}
-                  </span>
-                ) : (
-                  <span>Add your cost in the <Link to="/settings?tab=prices">price list</Link> to see the margin.</span>
-                )}
-                {canFollow && <span className="small">Stays put when ABC's prices change. The margin moves instead.</span>}
-              </span>
-            </div>
-            {!canFollow && editable && (
-              <p className={styles.note}>
-                To follow ABC prices, pick what goes into a square from ABC Supply's catalog.{" "}
-                {connected ? (
-                  <button type="button" className="link-btn" onClick={() => setPicking(roof)}>Pick its materials</button>
-                ) : (
-                  "Connect ABC Supply first (Apps)."
-                )}
-              </p>
+            {editable && roof && roofing && (
+              <div className="segmented" role="group" aria-label="How the price is set">
+                <button type="button" aria-pressed={!following} onClick={() => following && savePackage.mutate({ patch: { price_mode: "manual" } })}>Set it yourself</button>
+                <button
+                  type="button"
+                  aria-pressed={following}
+                  disabled={!canFollow && !following}
+                  title={canFollow ? undefined : "Pick this roof's materials from ABC Supply first"}
+                  onClick={() => !following && savePackage.mutate({ patch: { price_mode: "follow" }, price: followed(roof.labor_cost, pkg.markup_pct) })}
+                >
+                  Follow ABC prices
+                </button>
+              </div>
             )}
           </div>
-        )}
-        {shared.length > 0 && <p className={styles.note}>The {shared.map((p) => p.name).join(" and ")} {shared.length === 1 ? "package uses" : "packages use"} this roof too, so its price changes there as well.</p>}
-      </div>
 
-      {/* Always on this roof */}
+          {!roof ? (
+            <p className="callout callout-info" style={{ margin: 0 }}>Pick the roof above, and its price a square shows here.</p>
+          ) : loadingMaterials ? (
+            <Skeleton height={64} radius={10} />
+          ) : following && canFollow ? (
+            <div className="stack-sm">
+              <div className={styles.sum}>
+                <span className={styles.term}>
+                  <span><span className={styles.abc}>ABC</span>Materials</span>
+                  <strong>{formatMoneyCents(perSquare)}</strong>
+                </span>
+                <span className={styles.op} aria-hidden="true">+</span>
+                <span className={styles.term}>
+                  <span>Labor and the rest</span>
+                  {editable ? <MoneyInput width={110} label="Labor and the rest, a square" value={roof.labor_cost ?? 0} onSave={(v) => saveLabor.mutate(v)} /> : <strong>{formatMoneyCents(roof.labor_cost ?? 0)}</strong>}
+                </span>
+                <span className={styles.op} aria-hidden="true">+</span>
+                <span className={styles.term}>
+                  <span>Markup</span>
+                  {editable ? <MoneyInput percent max={1000} width={96} label="Markup percent" value={pkg.markup_pct} onSave={(v) => savePackage.mutate({ patch: { markup_pct: v }, price: followed(roof.labor_cost, v) })} /> : <strong>{pkg.markup_pct}%</strong>}
+                </span>
+                <span className={styles.op} aria-hidden="true">=</span>
+                <span className={`${styles.term} ${styles.total}`}>
+                  <span>A square today</span>
+                  <strong>{formatMoneyCents(followed(roof.labor_cost, pkg.markup_pct))}</strong>
+                </span>
+              </div>
+              <p className={styles.note}>Moves with ABC's prices, so every new estimate is priced at today's materials. Estimates already sent and signed keep their price.</p>
+            </div>
+          ) : (
+            <div className="stack-sm">
+              {following && <p className="callout callout-warning" style={{ margin: 0 }}>This roof has no ABC materials any more, so its price stays where it was. Set it yourself, or pick its materials again.</p>}
+              <div className={styles.priceRow}>
+                {editable ? (
+                  <span className={styles.bigMoney}><MoneyInput width={160} label={roofing ? "Price a square" : "Price"} value={roof.unit_price} onSave={(v) => saveService.mutate({ id: roof.id, patch: { unit_price: v } })} /></span>
+                ) : (
+                  <strong className={styles.bigPrice}>{squarePrice(roof, FORMAT)}</strong>
+                )}
+                <span className={styles.costLine}>
+                  {roof.unit_cost !== null ? (
+                    <span>
+                      Your cost today: <strong>{formatMoneyCents(roof.unit_cost)}</strong> {isSquareUnit(roof.unit) ? "a square" : `a ${roof.unit}`}
+                      {marginPct(roof.unit_price, roof.unit_cost) !== null && <> · <strong>{marginPct(roof.unit_price, roof.unit_cost)}% margin</strong></>}
+                    </span>
+                  ) : (
+                    <span>Add your cost in the <Link to="/settings?tab=prices">price list</Link> to see the margin.</span>
+                  )}
+                  {canFollow && <span className="small">Stays put when ABC's prices change. The margin moves instead.</span>}
+                </span>
+              </div>
+              {!canFollow && editable && roofing && (
+                <p className={styles.note}>
+                  To follow ABC prices, pick what goes into a square from ABC Supply's catalog.{" "}
+                  {connected ? (
+                    <button type="button" className="link-btn" onClick={() => setPicking(roof)}>Pick its materials</button>
+                  ) : (
+                    "Connect ABC Supply first (Apps)."
+                  )}
+                </p>
+              )}
+            </div>
+          )}
+          {shared.length > 0 && <p className={styles.note}>The {shared.map((p) => p.name).join(" and ")} {shared.length === 1 ? "package uses" : "packages use"} this {roofing ? "roof" : "service"} too, so its price changes there as well.</p>}
+        </div>
+      )}
+
+      {/* Always on this roof (always included) */}
       <div className={styles.part}>
         <div className={styles.partHead}>
           <div>
-            <h2>Always on this roof</h2>
-            <p>Priced from the measurements. Nobody has to type a number.</p>
+            <h2>{roofing ? "Always on this roof" : "Always included"}</h2>
+            <p>{roofing ? "Priced from the measurements. Nobody has to type a number." : "On the estimate every time: measured ones fill in from the measurements, the rest start at the count you set."}</p>
           </div>
           {editable && addable.length > 0 && (
             <select
@@ -765,19 +853,20 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
           )}
         </div>
         {rows.length === 0 ? (
-          <p className="muted small" style={{ margin: 0 }}>Nothing yet. Pick the roof above, then add what always goes on it.</p>
+          <p className="muted small" style={{ margin: 0 }}>{roofing ? "Nothing yet. Pick the roof above, then add what always goes on it." : "Nothing yet. Add what always goes in this package from your price list."}</p>
         ) : (
           <div className={styles.rows}>
             <div className={`${styles.row} ${styles.rowHead}`} aria-hidden="true">
               <span>On the estimate</span><span>How much</span><span className={styles.num}>Price</span><span>Your cost</span><span className={styles.num}>Margin</span><span />
             </div>
-            <ul className={styles.rowList} aria-label="Always on this roof">
+            <ul className={styles.rowList} aria-label={roofing ? "Always on this roof" : "Always included"}>
               {rows.map(({ service, item }) => (
                 <AlwaysRow
                   key={service.id}
                   service={service}
                   item={item}
                   links={linksOf(service.id)}
+                  main={roofing ? "The roof" : "Main service"}
                   editable={editable}
                   canPick={editable && connected}
                   onPick={() => setPicking(service)}
@@ -788,58 +877,94 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
             </ul>
           </div>
         )}
-        {(materials.data ?? []).length > 0 && (
+        {roofing && (materials.data ?? []).length > 0 && (
           <p className={styles.note}><span className={styles.abc}>ABC</span> Materials come from what you picked for each service in ABC's catalog. Change them on any roof estimate's Materials card.</p>
         )}
       </div>
 
-      {/* Quick adds */}
+      {/* Quick adds: only a roofer's estimate and iPad visit show them */}
+      {roofing && (
+        <div className={styles.part}>
+          <div className={styles.partHead}>
+            <div>
+              <h2>Quick adds</h2>
+              <p>One tap to add to an estimate, in the office or on the iPad. Anything else in your price list can still be searched.</p>
+            </div>
+          </div>
+          {chips.length === 0 ? (
+            <p className="muted small" style={{ margin: 0 }}>Everything in your price list is already on this roof.</p>
+          ) : editable ? (
+            <>
+              <div className={styles.chips} role="group" aria-label="Quick adds">
+                {chips.map(({ service, on }) => (
+                  <button
+                    key={service.id}
+                    type="button"
+                    className={styles.quick}
+                    aria-pressed={on}
+                    onClick={() => {
+                      const item = pkg.items.find((i) => i.kind === "quick" && i.service_id === service.id);
+                      if (item) removeItem.mutate(item);
+                      else addItem.mutate({ serviceId: service.id, kind: "quick" });
+                    }}
+                  >
+                    <Icon name={on ? "check" : "plus"} size={15} strokeWidth={3} />
+                    {service.name}
+                    <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
+                  </button>
+                ))}
+              </div>
+              <p className={styles.note}>Green ones show as buttons on the estimate. Tap one to turn it off or on.</p>
+            </>
+          ) : chips.some((c) => c.on) ? (
+            <div className={styles.chips}>
+              {chips.filter((c) => c.on).map(({ service }) => (
+                <span key={service.id} className={styles.quick} data-on="">
+                  <Icon name="check" size={15} strokeWidth={3} />
+                  {service.name}
+                  <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="muted small" style={{ margin: 0 }}>No quick adds on this package.</p>
+          )}
+        </div>
+      )}
+
+      {/* What the customer reads on its card */}
       <div className={styles.part}>
         <div className={styles.partHead}>
           <div>
-            <h2>Quick adds</h2>
-            <p>One tap to add to an estimate, in the office or on the iPad. Anything else in your price list can still be searched.</p>
+            <h2>On its card</h2>
+            <p>What the {customer} reads when you offer it as one of two or three options.</p>
           </div>
         </div>
-        {chips.length === 0 ? (
-          <p className="muted small" style={{ margin: 0 }}>Everything in your price list is already on this roof.</p>
-        ) : editable ? (
+        {editable ? (
           <>
-            <div className={styles.chips} role="group" aria-label="Quick adds">
-              {chips.map(({ service, on }) => (
-                <button
-                  key={service.id}
-                  type="button"
-                  className={styles.quick}
-                  aria-pressed={on}
-                  onClick={() => {
-                    const item = pkg.items.find((i) => i.kind === "quick" && i.service_id === service.id);
-                    if (item) removeItem.mutate(item);
-                    else addItem.mutate({ serviceId: service.id, kind: "quick" });
-                  }}
-                >
-                  <Icon name={on ? "check" : "plus"} size={15} strokeWidth={3} />
-                  {service.name}
-                  <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
-                </button>
-              ))}
-            </div>
-            <p className={styles.note}>Green ones show as buttons on the estimate. Tap one to turn it off or on.</p>
+            <HighlightsField value={highlights} onChange={setHighlights} onCommit={saveHighlights} />
+            <Field label="Warranty" optional hint="One line: what it covers, and for how long.">
+              <textarea className="textarea" rows={2} style={{ minHeight: 0 }} value={warranty} maxLength={PACKAGE_LIMITS.warranty} onChange={(e) => setWarranty(e.target.value)} onBlur={saveWarranty} />
+            </Field>
+            {isExampleWarranty(warranty) && <p className="callout callout-info" style={{ margin: 0 }}>{STARTER_NOTE}</p>}
           </>
-        ) : chips.some((c) => c.on) ? (
-          <div className={styles.chips}>
-            {chips.filter((c) => c.on).map(({ service }) => (
-              <span key={service.id} className={styles.quick} data-on="">
-                <Icon name="check" size={15} strokeWidth={3} />
-                {service.name}
-                <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
-              </span>
-            ))}
+        ) : pkg.highlights.length || pkg.warranty ? (
+          <div className="stack-sm">
+            {pkg.highlights.length > 0 && (
+              <ul className={styles.cardLines}>
+                {pkg.highlights.map((line, i) => <li key={i}>{line}</li>)}
+              </ul>
+            )}
+            {pkg.warranty && <p className={styles.note}><strong className={styles.ink}>Warranty:</strong> {pkg.warranty}</p>}
+            {isExampleWarranty(pkg.warranty) && <p className="callout callout-info" style={{ margin: 0 }}>{STARTER_NOTE}</p>}
           </div>
         ) : (
-          <p className="muted small" style={{ margin: 0 }}>No quick adds on this package.</p>
+          <p className="muted small" style={{ margin: 0 }}>No highlights or warranty yet.</p>
         )}
       </div>
+
+      {/* Contract sections */}
+      <ContractPart pkg={pkg} editable={editable} onChange={(section_ids) => savePackage.mutate({ patch: { section_ids } })} />
 
       {picking && (
         <MaterialPicker
@@ -857,11 +982,132 @@ function PackageEditor({ pkg, packages, services, editable, onSelect }: { pkg: R
   );
 }
 
-/** One line of "Always on this roof": what it is, how much goes on, its price, cost and margin. */
+/**
+ * A package's picture: added, changed (a new file each time, so options already offered keep the
+ * one they showed) and taken off again, back to its drawing (`children`: the drawing's styles).
+ */
+function PictureControl({ pkg, customer, children }: { pkg: RoofPackage; customer: string; children?: ReactNode }) {
+  const { company } = useSession();
+  const queryClient = useQueryClient();
+  const input = useRef<HTMLInputElement>(null);
+  const saved = (patch: Pick<RoofPackage, "picture" | "picture_width" | "picture_height">) => {
+    queryClient.setQueryData<RoofPackage[]>(packagesKey(company.id), (list) => list?.map((p) => (p.id === pkg.id ? { ...p, ...patch } : p)));
+    queryClient.invalidateQueries({ queryKey: packagesKey(company.id) });
+  };
+  const set = useMutation({
+    meta: { inline: true, success: "Picture saved" },
+    mutationFn: async (file: File) => {
+      const jpeg = await packagePicture(file);
+      if (!jpeg) throw new Error("Crewtavo can't open that picture here. Try a JPEG or PNG.");
+      return setPackagePicture(pkg.id, jpeg);
+    },
+    onSuccess: (r) => saved({ picture: r.path, picture_width: r.width, picture_height: r.height }),
+  });
+  const remove = useMutation({
+    meta: { inline: true, success: "Picture removed" },
+    mutationFn: () => removePackagePicture(pkg.id),
+    onSuccess: () => saved({ picture: null, picture_width: null, picture_height: null }),
+  });
+  return (
+    <div className="stack-sm">
+      <div className={styles.pictureRow}>
+        <PackagePicture path={pkg.picture} style={pkg.style} className={styles.editorPicture} />
+        <div className={styles.pictureSide}>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <Button size="sm" icon="image" loading={set.isPending} disabled={remove.isPending} onClick={() => input.current?.click()}>
+              {pkg.picture ? "Change picture" : "Add a picture"}
+            </Button>
+            {pkg.picture && <Button size="sm" variant="ghost" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()}>Remove picture</Button>}
+          </div>
+          <span className="muted small">A photo of the finished work or what goes in, so it's easy to pick. The {customer} sees it when it's one of the options.</span>
+          {children && (
+            <>
+              <span className="muted small">{pkg.picture ? "Without a picture, its card shows:" : "Until it has one, its card shows:"}</span>
+              {children}
+            </>
+          )}
+        </div>
+      </div>
+      <FormError error={set.error ?? remove.error} />
+      <input
+        ref={input}
+        type="file"
+        accept="image/*,.heic,.heif"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) set.mutate(file);
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * The contract sections that come with a package (roof_packages.section_ids), switched on from the
+ * business's library (Settings → Contract terms). An option offered from the package copies them
+ * (quote_options.section_ids), and they print after the template's own when that option is the one
+ * shown or chosen. An estimate priced from the package alone takes them as its own (quotes.
+ * section_ids, its Contract card in quotes/QuoteSections.tsx), and another package put on it takes
+ * them off again for its own; when the estimate starts offering options they move onto the option
+ * it becomes, leaving the ones added for the job.
+ */
+function ContractPart({ pkg, editable, onChange }: { pkg: RoofPackage; editable: boolean; onChange: (sectionIds: string[]) => void }) {
+  const session = useSession();
+  const library = useContractLibrary();
+  const sections = library.data ?? [];
+  const full = pkg.section_ids.length >= PACKAGE_LIMITS.sections;
+  const writes = canEditContracts(session);
+  return (
+    <div className={styles.part}>
+      <div className={styles.partHead}>
+        <div>
+          <h2>Contract</h2>
+          <p>Sections that print on every estimate this package is on, after the ones every estimate has.</p>
+        </div>
+        {writes && sections.length > 0 && <Link className="link-btn small" to="/settings?tab=contracts">Contract terms</Link>}
+      </div>
+      {library.isPending ? (
+        <Skeleton height={44} radius={10} />
+      ) : library.error ? (
+        <ErrorState compact error={library.error} onRetry={() => library.refetch()} />
+      ) : !sections.length ? (
+        <p className="muted small" style={{ margin: 0 }}>
+          No contract sections yet.{" "}
+          {writes ? <>Write them in <Link to="/settings?tab=contracts">Settings → Contract terms</Link>, then pick the ones for this package here.</> : "The office writes them in Settings → Contract terms."}
+        </p>
+      ) : (
+        <ul className={styles.sections} aria-label="Contract sections">
+          {sections.map((s) => {
+            const on = pkg.section_ids.includes(s.id);
+            return (
+              <li key={s.id}>
+                <label className="checkbox">
+                  <input type="checkbox" checked={on} disabled={!editable || (!on && full)} onChange={(e) => onChange(toggleSection(sections, pkg.section_ids, s.id, e.target.checked))} />
+                  <span>
+                    {s.title}
+                    <span className={styles.sub}>{s.place === "signatures" ? "Above the signatures" : "On the terms pages"}{s.initials ? " · The customer initials it" : ""}</span>
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One line of "Always on this roof" ("Always included"): what it is, how much goes on, its price,
+ * cost and margin. The package's main service (the roof) comes first, labelled `main`.
+ */
 function AlwaysRow({
   service,
   item,
   links,
+  main,
   editable,
   canPick,
   onPick,
@@ -871,6 +1117,7 @@ function AlwaysRow({
   service: PriceListService;
   item: RoofPackageItem | null;
   links: ServiceMaterial[];
+  main: string;
   editable: boolean;
   canPick: boolean;
   onPick: () => void;
@@ -891,7 +1138,7 @@ function AlwaysRow({
     <li className={styles.row}>
       <span className={styles.cellName}>
         <strong>{service.name}</strong>
-        {!item && <span className={styles.sub}>The roof</span>}
+        {!item && <span className={styles.sub}>{main}</span>}
         {item && !service.active && <span className={styles.sub}>Turned off in your price list, so it's left off</span>}
       </span>
       <span className={styles.cellHow}>

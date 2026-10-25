@@ -6,9 +6,10 @@
  * Materials belong to the price list's services, so picking them once prices every roof after.
  * The estimate is priced again by itself whenever its lines, quantities or materials change
  * (useMaterialReprice), and keeps the prices it was priced with (quote_line_items.materials) until then.
+ * On an estimate with options, the card shows the option being looked at and the shared lines.
  */
 import { describePerUnit, orderQuantity, type PricedMaterial } from "@crewtavo/core/materials";
-import { lineTotal, optionLabels, toCents } from "@crewtavo/core/money";
+import { countsOn, lineTotal, optionLabels, toCents } from "@crewtavo/core/money";
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -27,11 +28,17 @@ import { useMaterialReprice, type PricedLine, type PricedQuote } from "./estimat
 /** A material on a line as shown: what to order, at the price the estimate has (or the last one). */
 interface Row extends PricedMaterial { link: ServiceMaterial | null }
 
-export function RoofMaterials({ quote, editable, onChanged }: { quote: PricedQuote; editable: boolean; onChanged: () => void }) {
+export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
+  quote: PricedQuote;
+  editable: boolean;
+  onChanged: () => void;
+  /** The option looked at, on an estimate with options: its lines and the shared ones show. */
+  optionId?: string | null;
+}) {
   const session = useSession();
   const canSetUp = hasRole(session, "admin") && can(session, "apps");
   const canEdit = editable && hasRole(session, "admin", "office", "estimator") && can(session, "settings");
-  const lines = quote.lines.filter((l) => l.service_id);
+  const lines = quote.lines.filter((l) => l.service_id && (l.option_id === null || l.option_id === optionId));
   // Prices the lines again by itself whenever they change, and onChanged refreshes the page (not
   // while − and + are still saving: the estimate's editor refreshes it once they have).
   const { supplier, connected, linksOf, serviceOf, refreshMaterials, price } = useMaterialReprice(quote, editable, onChanged);
@@ -66,7 +73,8 @@ export function RoofMaterials({ quote, editable, onChanged }: { quote: PricedQuo
     );
   }
 
-  const choices = optionLabels(quote.lines);
+  // An estimate with options names its options Good, Better and Best, not its lines.
+  const choices = optionId ? new Map<string, string>() : optionLabels(quote.lines);
   /** What's on a line: from its materials as they are now while it can change, or as it was priced once it can't. */
   const rowsOf = (line: PricedLine): Row[] => {
     const priced = line.materials?.items ?? [];
@@ -90,7 +98,7 @@ export function RoofMaterials({ quote, editable, onChanged }: { quote: PricedQuo
       };
     });
   };
-  const counts = (l: PricedLine) => !l.optional || l.selected;
+  const counts = (l: PricedLine) => countsOn(l, optionId);
   const lineCost = (rows: Row[]) => rows.reduce((t, r) => t + toCents(r.total ?? 0), 0) / 100;
   const shown = lines.map((line) => ({ line, rows: rowsOf(line) }));
   const total = shown.reduce((t, s) => t + (counts(s.line) ? toCents(lineCost(s.rows)) : 0), 0) / 100;

@@ -20,6 +20,7 @@ import {
   type TemplateVars,
 } from "@crewtavo/core";
 import { hidesExactPrice } from "@crewtavo/core/estimates";
+import { countsOn } from "@crewtavo/core/money";
 import type { Env } from "../env";
 import { firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink } from "../lib/links";
@@ -27,6 +28,8 @@ import { sendEmail, sendSms } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 import { logoImage } from "./logo";
 import { sendReviewRequest } from "./reviews";
+import { isRoofWork } from "./roofPackages";
+import { optionsFrom } from "./sales";
 
 export interface ActionResult {
   type: string;
@@ -42,6 +45,7 @@ interface CompanyInfo {
   website: string | null;
   timezone: string;
   currency: string;
+  trade_preset: string | null;
   settings: Record<string, unknown>;
   address: Record<string, string | undefined>;
 }
@@ -81,12 +85,22 @@ export function companyAddress(address: Record<string, string | undefined> | nul
 type Property = { line1: string; city: string | null; region: string | null } | null;
 const addressOf = (p: Property) => (p ? [p.line1, [p.city, p.region].filter(Boolean).join(", ")].filter(Boolean).join(", ") : "");
 
+/**
+ * Whether a quote is roof work (roofPackages.ts isRoofWork): the business is a roofer or its newest
+ * measurement is a roof, or the quote went out as a price range (only Roofing sends those).
+ */
+async function roofWork(admin: Db, company: CompanyInfo, quoteId: string, sentAsRange: boolean): Promise<boolean> {
+  if (sentAsRange || isRoofWork(company.trade_preset, null)) return true;
+  const { data } = await admin.from("measurements").select("sections, roof_pitch, roofing_squares").eq("company_id", company.id).eq("quote_id", quoteId).order("updated_at", { ascending: false }).limit(1);
+  return isRoofWork(company.trade_preset, data?.[0] ?? null);
+}
+
 /** Everything a rule can know about the record it runs on. Null when the record is gone. */
 export async function loadContext(admin: Db, companyId: string, subjectType: string, subjectId: string): Promise<RunContext | null> {
   if (!SUBJECTS.includes(subjectType as SubjectKind)) return null;
   const subject = subjectType as SubjectKind;
 
-  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, settings, address").eq("id", companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, trade_preset, settings, address").eq("id", companyId).maybeSingle();
   if (!company) return null;
   const co = company as unknown as CompanyInfo;
   const fmt = (n: number | string | null | undefined) => money(n, co.currency || "USD");
@@ -119,21 +133,35 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
     case "quote": {
       const { data } = await admin
         .from("quotes")
-        .select("number, title, status, total, range_low, range_high, priced_on_site_at, exact_sent_at, roof_package_id, client_id, property_id, property:properties(line1, city, region), lines:quote_line_items(name)")
+        .select(
+          "number, title, status, total, tax_rate, discount_amount, range_low, range_high, priced_on_site_at, exact_sent_at, roof_package_id, option_id, client_id, property_id, property:properties(line1, city, region), promo:promo_codes(kind, value), lines:quote_line_items(name, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)",
+        )
         .eq("company_id", companyId)
         .eq("id", subjectId)
         .maybeSingle();
       if (!data) return null;
       clientId = data.client_id;
       propertyId = data.property_id;
-      facts = { status: data.status, amount: Number(data.total), line_items: (data.lines as Array<{ name: string }>).map((l) => l.name) };
+      // Before the client answers, what's offered: the shared lines and the shown option's, add-ons
+      // included (not picked isn't turned down yet). Once they've signed, what they're getting: the
+      // shared lines and the option they chose, without the add-ons they left off, as the job has them.
+      const answered = data.status === "approved" || data.status === "converted";
+      const lines = data.lines.filter((l) => (answered ? countsOn(l, data.option_id) : l.option_id === null || l.option_id === data.option_id));
+      facts = { status: data.status, amount: Number(data.total), line_items: lines.map((l) => l.name) };
       // Sent as a price range, the client hasn't seen the exact price (lost or archived since included),
-      // so an email about it doesn't show it either.
-      const total = hidesExactPrice(data) ? moneyRange(data.range_low, data.range_high, co.currency || "USD") : fmt(data.total);
+      // so an email about it doesn't show it either. With options and no answer yet, the quote's total is
+      // only the option shown, so it says how many there are and the lowest, as the quote's email did.
+      const offer = optionsFrom(data);
+      const total = hidesExactPrice(data)
+        ? moneyRange(data.range_low, data.range_high, co.currency || "USD")
+        : offer
+          ? `${offer.count} options from ${fmt(offer.from)}`
+          : fmt(data.total);
       vars = { number: data.number, title: data.title, total, address: addressOf(data.property as Property) };
       label = `Quote #${data.number}`;
-      // A roof package's estimate is worked on in Roofing, where the office books the visit.
-      appPath = data.roof_package_id ? `/roofing/${subjectId}` : `/quotes/${subjectId}`;
+      // A roof package's estimate is worked on in Roofing, where the office books the visit. Every
+      // trade has packages now, so a package alone doesn't make it a roof.
+      appPath = data.roof_package_id && (await roofWork(admin, co, subjectId, data.range_low !== null)) ? `/roofing/${subjectId}` : `/quotes/${subjectId}`;
       break;
     }
     case "job": {

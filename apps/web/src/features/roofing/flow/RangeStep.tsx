@@ -1,6 +1,6 @@
 /**
  * The range step: whether the homeowner has their price range yet, and what's next. Not sent: send
- * it (the card beside the estimate). Out: when, for how much, send it again or copy their link, or
+ * it (the card beside the estimate), or mark the yes they gave when the office told them on the phone. Out: when, for how much, send it again or copy their link, or
  * mark a yes they gave on the phone or in person. A yes: book the visit and start it on the iPad. After that, what happened, in a line.
  */
 import { rangeSettings } from "@crewtavo/core/estimates";
@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { useSession } from "@/lib/session";
 import { firstName, type EstimateQuote } from "../estimate";
-import { capital, dayText, hasRange, homeownerName, rangeNow, rangeOutdated, rangeState, rangeWords } from "./model";
+import { ACROSS_OPTIONS, capital, dayText, hasRange, homeownerName, rangeAcrossOptions, rangeNow, rangeOutdated, rangeState, rangeWords, rangeWordsFor } from "./model";
 import { SaidYesButton, type SendChannel, type SendMode } from "./RangeCard";
 import styles from "./flow.module.css";
 
@@ -49,7 +49,9 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
   });
 
   if (!quote.lines.length) return <span className="muted small">Price the estimate first; the range comes from it.</span>;
-  const sent = hasRange(quote) ? `${quote.range_sent_at ? `Sent ${dayText(quote.range_sent_at, tz)}: ` : ""}${rangeWords({ low: quote.range_low, high: quote.range_high })}.` : null;
+  // With options, the range runs from the lowest option to the highest, and says so.
+  const across = rangeAcrossOptions(quote);
+  const sent = hasRange(quote) ? `${quote.range_sent_at ? `Sent ${dayText(quote.range_sent_at, tz)}: ` : ""}${rangeWordsFor({ low: quote.range_low, high: quote.range_high }, quote)}.` : null;
   const yes = quote.range_accepted_at ? `${Who} said yes ${dayText(quote.range_accepted_at, tz)}.` : null;
 
   if (state === "unsent") {
@@ -59,6 +61,7 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
         {canSell && (
           <div className={styles.actions}>
             <Button variant="primary" icon="send" onClick={goToRangeCard}>Send the range</Button>
+            <SaidYesButton quote={quote} />
           </div>
         )}
       </div>
@@ -70,12 +73,13 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
     return (
       <div className={styles.stepBody}>
         <p className={styles.stepLead}>
-          Sent to {Who}{quote.range_sent_at ? ` on ${dayText(quote.range_sent_at, tz)}` : ""}: <strong>{rangeWords({ low: quote.range_low, high: quote.range_high })}</strong>. Waiting for their answer.
+          Sent to {Who}{quote.range_sent_at ? ` on ${dayText(quote.range_sent_at, tz)}` : ""}: <strong>{rangeWords({ low: quote.range_low, high: quote.range_high })}</strong>
+          {across && `, ${ACROSS_OPTIONS}`}. Waiting for their answer.
         </p>
         {outdated && (
           <p className={styles.changedNote}>
             <Icon name="alert" size={16} />
-            <span>The estimate changed since you sent it. Send it again and {who} sees {rangeWords(rangeNow(quote, settings))}.</span>
+            <span>The estimate changed since you sent it. Send it again and {who} sees {rangeWordsFor(rangeNow(quote, settings), quote)}.</span>
           </p>
         )}
         {canSell && (

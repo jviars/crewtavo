@@ -3,7 +3,10 @@
  * (worked out from the measurements) and everything else. Counts have − and +, measured lines a − to
  * take them off, and the tear-off its layers. Lines added, changed or taken off since the range say
  * so, and one taken off stays crossed out with Put back. Under it, the package's quick adds and a
- * search of the price list.
+ * search of the price list. On an estimate with options it's one option's list (`view`): its lines
+ * and the ones on every option (marked so), with where an added line goes (rows.ts lineDestination):
+ * quick adds on every option unless they're the option's own, and picks from the price list where
+ * the control beside the search says.
  */
 import type { LineChange } from "@crewtavo/core/estimates";
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
@@ -14,7 +17,7 @@ import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { formatNumber } from "@/lib/format";
 import { takeoffVariables, type TakeoffRow } from "../../paving/data";
 import type { EstimateEditor } from "./data";
-import { counts, estimateRows, isPendingLine, money, quickAddPrice, searchServices, serviceDetail, type EstimateRow, type RowTag } from "./rows";
+import { counts, destinationText, estimateRows, isPendingLine, lineDestination, money, ownServices, quickAddPrice, searchServices, serviceDetail, type EstimateRow, type LinePlace, type RowTag } from "./rows";
 import type { EstimateQuote, EstimateService, QuickAddService } from "./types";
 import styles from "./estimate.module.css";
 
@@ -22,7 +25,7 @@ const TAGS: Record<RowTag, string> = { added: "Added", changed: "Changed", remov
 
 export interface EstimateListProps {
   quote: EstimateQuote;
-  /** What changed since the range (lineChanges(quote.range_lines, quote.lines)), to tag and cross out. */
+  /** What changed since the range (lineChanges(quote.range_lines, quote.lines, the option looked at)), to tag and cross out. */
   changes?: readonly LineChange[] | null;
   /** "large" on the iPad: bigger rows and buttons for a finger. */
   size?: "regular" | "large";
@@ -35,10 +38,32 @@ export interface EstimateListProps {
   services?: readonly EstimateService[] | null;
   /** The roof's measurement, for "with 10% waste" and what a measured quick add comes to. */
   takeoff?: TakeoffRow | null;
+  /** On an estimate with options: the option looked at, its tier word or name, and its own services (rows.ts packageServices). */
+  view?: EstimateView | null;
 }
 
-export function EstimateList({ quote, changes, size = "regular", editable, editor, quickAdds = [], services, takeoff }: EstimateListProps) {
+/** The option an estimate list shows, with the shared lines. */
+export interface EstimateView {
+  optionId: string;
+  /** "Better", or the option's name. */
+  label: string;
+  /** Its package's own services, which go on it alone when added. */
+  own: ReadonlySet<string>;
+  /**
+   * Where a pick from the price list goes until the person chooses: only on this option in the
+   * office, on every option on the iPad (the default). Quick adds go on every option either way,
+   * unless they're the option's own.
+   */
+  picks?: LinePlace;
+}
+
+const NO_SERVICES: ReadonlySet<string> = new Set();
+
+export function EstimateList({ quote, changes, size = "regular", editable, editor, quickAdds = [], services, takeoff, view }: EstimateListProps) {
   const canEdit = editable && Boolean(editor);
+  const optionId = view?.optionId ?? null;
+  const [place, setPlace] = useState<LinePlace | null>(null);
+  const picks = place ?? view?.picks ?? "every";
   const vars = useMemo(() => (takeoff ? takeoffVariables(takeoff, null) : null), [takeoff]);
   const { roof, other } = useMemo(
     () =>
@@ -49,11 +74,17 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
         changed: editor?.changed,
         removed: editor?.removed,
         wastePct: takeoff ? Number(takeoff.waste_pct) : null,
+        optionId,
       }),
-    [quote.lines, quote.range_lines, changes, editor?.added, editor?.changed, editor?.removed, takeoff],
+    [quote.lines, quote.range_lines, changes, editor?.added, editor?.changed, editor?.removed, takeoff, optionId],
   );
-  const onEstimate = useMemo(() => new Set(quote.lines.filter(counts).flatMap((l) => (l.service_id ? [l.service_id] : []))), [quote.lines]);
+  const onEstimate = useMemo(() => new Set(quote.lines.filter((l) => counts(l, optionId)).flatMap((l) => (l.service_id ? [l.service_id] : []))), [quote.lines, optionId]);
   const chips = quickAdds.filter((s) => !onEstimate.has(s.id));
+  // With options: the option an added line goes on, or null for every option (the same rule the editor saves by).
+  const removed = editor?.removed;
+  const own = useMemo(() => (view ? ownServices(view.own, view.optionId, [...(quote.range_lines ?? []), ...(removed ?? [])]) : NO_SERVICES), [view, quote.range_lines, removed]);
+  const whereTo = (s: EstimateService, from: "quick" | "search") => lineDestination(s, optionId, { own, lines: quote.lines, place: from === "search" ? picks : "every" });
+  const onlyHere = (s: EstimateService, from: "quick" | "search") => (view && whereTo(s, from) ? destinationText(optionId, view.label) : null);
   const squares = vars?.roof_squares ?? null;
   const pitch = takeoff?.roof_pitch ? (takeoff.roof_pitch === "0/12" ? "flat" : `at ${takeoff.roof_pitch}`) : null;
   const roofTitle = size === "large" && squares ? `The roof · ${formatNumber(squares, 1)} squares${pitch ? ` ${pitch}` : ""}` : "The roof · from the measurements";
@@ -72,30 +103,43 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
       {canEdit && editor && (
         <div className={styles.add}>
           <h3 className={styles.addTitle}>{size === "large" ? "Found something else?" : "Add to the estimate"}</h3>
+          {view && chips.length > 0 && <p className={styles.hint}>Quick adds go on every option, unless they're part of {view.label}'s package.</p>}
           {chips.length > 0 && (
             <div className={styles.chips}>
               {chips.map((s) => {
                 const adding = editor.adding.includes(s.id);
                 const price = quickAddPrice(s, vars);
+                const only = onlyHere(s, "quick");
                 return (
-                  <button key={s.id} type="button" className={styles.chip} disabled={adding} aria-busy={adding || undefined} aria-label={`Add ${s.name}, ${price}`} onClick={() => editor.addService(s, s.quantity)}>
+                  <button key={s.id} type="button" className={styles.chip} disabled={adding} aria-busy={adding || undefined} aria-label={`Add ${s.name}, ${price}${only ? `, ${only.toLowerCase()}` : ""}`} onClick={() => editor.addService(s, s.quantity, whereTo(s, "quick"))}>
                     {adding ? <Spinner size={size === "large" ? 17 : 15} /> : <Icon name="plus" size={size === "large" ? 17 : 15} strokeWidth={2.8} />}
                     {s.name}
-                    <small>{price}</small>
+                    <small>{only ? `${price} · ${only}` : price}</small>
                   </button>
                 );
               })}
             </div>
           )}
-          {!services ? (
-            <div className={styles.search} aria-hidden="true">
-              <span className={styles.searchIcon}><Icon name="search" size={16} /></span>
-              <input className={`input ${styles.searchInput}`} disabled placeholder="Loading your price list…" tabIndex={-1} />
-            </div>
-          ) : services.length > 0 ? (
-            <ServiceSearch services={services} onEstimate={onEstimate} onPick={(s) => editor.addService(s)} />
-          ) : (
+          {services?.length === 0 ? (
             <p className={styles.hint}>Your price list is empty. Add services in <Link to="/settings?tab=prices">Settings → Price list</Link>.</p>
+          ) : (
+            <div className={styles.searchRow}>
+              {services ? (
+                // The control says where a pick goes, so a result only says so when it can't go there.
+                <ServiceSearch services={services} onEstimate={onEstimate} onlyHere={(s) => (picks === "every" ? onlyHere(s, "search") : null)} onPick={(s) => editor.addService(s, undefined, whereTo(s, "search"))} />
+              ) : (
+                <div className={styles.search} aria-hidden="true">
+                  <span className={styles.searchIcon}><Icon name="search" size={16} /></span>
+                  <input className={`input ${styles.searchInput}`} disabled placeholder="Loading your price list…" tabIndex={-1} />
+                </div>
+              )}
+              {view && (
+                <div className={`segmented ${styles.place}`} role="group" aria-label="What you pick from your price list goes">
+                  <button type="button" aria-pressed={picks === "only"} onClick={() => setPlace("only")}><span>Only on {view.label}</span></button>
+                  <button type="button" aria-pressed={picks === "every"} onClick={() => setPlace("every")}><span>On every option</span></button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -126,6 +170,7 @@ function Row({ row, editor }: { row: EstimateRow; editor?: EstimateEditor | null
         <span className={styles.nameLine}>
           <span className={styles.name}>{row.name}</span>
           {row.tag && <span className={styles.tag} data-tag={row.tag}>{TAGS[row.tag]}</span>}
+          {row.shared && <span className={styles.tag} data-tag="shared">On every option</span>}
         </span>
         {row.detail && <span className={styles.detail}>{row.detail}</span>}
       </span>
@@ -152,7 +197,7 @@ function Row({ row, editor }: { row: EstimateRow; editor?: EstimateEditor | null
 }
 
 /** "Something else? Search your price list": type, pick with a tap or the arrow keys and Enter. */
-function ServiceSearch({ services, onEstimate, onPick }: { services: readonly EstimateService[]; onEstimate: Set<string>; onPick: (service: EstimateService) => void }) {
+function ServiceSearch({ services, onEstimate, onlyHere, onPick }: { services: readonly EstimateService[]; onEstimate: Set<string>; onlyHere: (service: EstimateService) => string | null; onPick: (service: EstimateService) => void }) {
   const id = useId();
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState(false);
@@ -225,7 +270,7 @@ function ServiceSearch({ services, onEstimate, onPick }: { services: readonly Es
                 <span className={styles.optionName}>{s.name}</span>
                 <span className={styles.optionDetail}>{serviceDetail(s)}</span>
               </span>
-              {onEstimate.has(s.id) && <span className="chip chip-green">On it</span>}
+              {onEstimate.has(s.id) ? <span className="chip chip-green">On it</span> : onlyHere(s) && <span className="chip">{onlyHere(s)}</span>}
             </li>
           ))}
         </ul>

@@ -2,22 +2,22 @@
  * Signed (/roofing/:id/signed): the estimate is signed and saved on the project with both
  * signatures. From here the salesperson prints the homeowner a copy (AirPrint, from the iPad), sees
  * that the copy was emailed (or emails it), or texts them a link. It reads everything from the
- * estimate itself, so it works after a reload too.
+ * estimate itself, so it works after a reload too. The copy prints the option they chose and the
+ * contract as they signed it (with their initials), kept with the signature.
  */
 import { useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { Spinner } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { dateIn, todayIn } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/session";
-import { documentCompany, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
+import { documentCompany, quoteDate, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
 import { PrintableDocument, printDocument } from "../../documents/EstimateDocument";
 import type { TakeoffRow } from "../../paving/data";
 import { useEstimateQuote } from "../estimate/data";
 import { firstName } from "../estimate/rows";
 import { isEditableQuote, type EstimateQuote } from "../estimate/types";
-import { isSignedQuote, signingOutcome, useCanSell, useSendCopy, useSignedCopies, useVisitDetails, visitPath } from "./data";
+import { isSignedQuote, linesWithOptions, signingOutcome, useCanSell, useSendCopy, useSignedCopies, useVisitDetails, visitPath } from "./data";
 import { roofFacts, signedSentence } from "./price";
 import { VisitError, VisitFrame, VisitLoading, VisitNoAccess, whoAndWhere } from "./VisitFrame";
 import styles from "./visit.module.css";
@@ -76,19 +76,31 @@ function SignedScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeo
     byMe: approval?.company?.user_id === session.userId,
   });
 
-  // The signed estimate, as it prints: hidden on screen, and what the iPad prints.
-  const docReady = !templatePending && !details.isPending;
+  // The signed estimate, as it prints: hidden on screen, and what the iPad prints. It prints the
+  // option it was signed for and the contract kept with it (build.ts quoteDocument and signedTemplate),
+  // so it waits for the details that say which option each line is on.
+  const docReady = !templatePending && Boolean(details.data);
+  // A moment without signal: tapping Print loads them again.
+  const copyFailed = !details.data && Boolean(details.error);
   const data = quoteDocument(
     {
       ...quote,
+      option_id: details.data?.optionId ?? null,
       message: details.data?.message ?? null,
       valid_until: details.data?.valid_until ?? null,
       deposit_amount: details.data?.deposit_amount ?? 0,
       sent_at: details.data?.sent_at ?? null,
       created_at: details.data?.created_at ?? null,
     },
-    quote.lines,
-    { date: details.data?.sent_at ? dateIn(details.data.sent_at, tz) : todayIn(tz), facts: roofFacts(details.data?.packageName, takeoff) },
+    linesWithOptions(quote.lines, details.data?.lineOptions),
+    {
+      // The day it was sent, else the day it was made, as its {Date} says it.
+      date: quoteDate({ sent_at: details.data?.sent_at, created_at: details.data?.created_at }, tz),
+      // With options, the strip says which they chose rather than the package.
+      facts: roofFacts(details.data?.options.length ? null : details.data?.packageName, takeoff),
+      // An approval kept from before the option was kept with it: the option shown.
+      choice: details.data?.options.find((o) => o.id === details.data?.optionId) ?? null,
+    },
   );
   const print = async () => {
     setPrinting(true);
@@ -125,11 +137,12 @@ function SignedScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeo
         <div className={styles.actions}>
           <ActionCard
             icon="printer"
-            busy={printing}
-            disabled={!docReady}
+            busy={printing || (copyFailed && details.isFetching)}
+            disabled={!docReady && !copyFailed}
             title={printing ? "Getting it ready…" : "Print a copy"}
             text={`For ${them} to keep. Prints to any AirPrint printer nearby.`}
-            onClick={() => void print()}
+            problem={copyFailed ? "The copy didn't load. Check the connection, then tap to try again." : null}
+            onClick={() => (copyFailed ? void details.refetch() : void print())}
           />
           {emailed ? (
             <DoneCard icon="mail" title={`Emailed to ${them}`} text={`A copy with ${bothSigned ? "both signatures" : "the signature"} went to ${email ?? "their email"}.`} />

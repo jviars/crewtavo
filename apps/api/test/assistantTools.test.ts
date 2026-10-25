@@ -2,8 +2,11 @@
  * The tools that run the business (assistant-tools/): importing clients and a schedule with a
  * preview first and no duplicates on a second run, money refused to "Full access, no money",
  * reports for the roles that see them, argument errors that name the field, invites that never
- * hand their link to the assistant, and a crew's route organized (or only shown) from a chat.
+ * hand their link to the assistant, a crew's route organized (or only shown) from a chat, and quotes
+ * that offer options read and approved for the option the client chose, keeping the contract they
+ * were sent.
  */
+import { templateSettings } from "@crewtavo/core/documents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 
@@ -211,5 +214,185 @@ describe("routes", () => {
     await call("full", "create_visit", { title: "Mow 4 Elm St", kind: "task", date: "2099-06-03", start_time: "09:03", duration_min: 50, time_fixed: true });
     const visit = sent.find((r) => r.method === "POST" && r.table === "visits")!.body[0];
     expect([visit.starts_at, visit.ends_at, visit.time_fixed]).toEqual(["2099-06-03T13:03:00.000Z", "2099-06-03T13:53:00.000Z", true]);
+  });
+});
+
+describe("quotes that offer options", () => {
+  const QUOTE = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a87";
+  const GOOD = "0b8f3c2e-1d4a-4e6b-9c7d-2a1b3c4d5e60";
+  const BEST = "0b8f3c2e-1d4a-4e6b-9c7d-2a1b3c4d5e61";
+  const PAYMENT = "0b8f3c2e-1d4a-4e6b-9c7d-2a1b3c4d5e70";
+  // The business's template prints a payment section, and the quote's options are its quote_options rows too.
+  const template = templateSettings({ terms: "Thanks, {Customer name}.", sections: [PAYMENT] });
+  const offering = (db: Record<string, Row[]>, extra: Row = {}) => {
+    db.companies = [{ id: "company-1", name: "Summit Roofing", phone: "555-0100", timezone: "America/New_York", settings: {} }];
+    db.document_templates = [{ id: "t-1", company_id: "company-1", is_default: true, settings: template }];
+    db.contract_sections = [{ id: PAYMENT, company_id: "company-1", title: "Payment", body: "<p>{Total} for {Option}, {Customer name}.</p>", place: "terms", initials: false, sort: 0 }];
+    db.quotes = [{
+      id: QUOTE, number: 1042, title: "New roof", status: "sent", subtotal: 17300, discount_amount: 0, tax_rate: 0, tax_amount: 0, total: 17300, deposit_amount: 0, option_id: GOOD, promo: null,
+      sent_at: "2026-10-22T15:00:00Z", created_at: "2026-10-21T13:00:00Z", template_id: null, section_ids: [], roof_package_id: null, approval: null,
+      client: { display_name: "Dana Whitfield", billing_address: {} }, property: null,
+      lines: [
+        { id: "l-best", option_id: BEST, name: "Standing-seam metal roof", quantity: 30, unit_price: 1285, taxable: true, optional: false, selected: false, option_group: null, sort: 2 },
+        { id: "l-shared", option_id: null, name: "Dumpster", quantity: 1, unit_price: 500, taxable: true, optional: false, selected: true, option_group: null, sort: 0 },
+        { id: "l-good", option_id: GOOD, name: "Architectural shingle roof", quantity: 30, unit_price: 560, taxable: true, optional: false, selected: true, option_group: null, sort: 1 },
+      ],
+      options: [
+        { id: BEST, name: "Standing-seam metal", tier: "Best", highlights: [], warranty: "", sort: 1 },
+        { id: GOOD, name: "Architectural shingle", tier: "Good", highlights: ["Color you pick"], warranty: "30 years.", sort: 0 },
+      ],
+      ...extra,
+    }];
+    db.quote_options = db.quotes[0]!.options;
+  };
+  const writes = (sent: Array<{ method: string; table: string; body: any }>) => sent.filter((s) => s.method !== "GET" && s.table !== "assistant_calls");
+
+  it("are read with their options, each option's total, and the option each line is on", async () => {
+    const { db } = supabase();
+    offering(db);
+    const quote = await call("full", "get_quote", { quote_id: QUOTE });
+    expect(quote.option_id).toBe(GOOD);
+    expect(quote.options).toEqual([
+      { id: GOOD, name: "Architectural shingle", tier: "Good", highlights: ["Color you pick"], warranty: "30 years.", shown: true, total: 17300 },
+      { id: BEST, name: "Standing-seam metal", tier: "Best", highlights: [], warranty: "", shown: false, total: 39050 },
+    ]);
+    expect(quote.lines.map((l: Row) => [l.id, l.option_id])).toEqual([["l-shared", null], ["l-good", GOOD], ["l-best", BEST]]);
+    expect(quote).not.toHaveProperty("promo");
+  });
+
+  it("keep their lines out of reach: those are edited in Crewtavo", async () => {
+    const { db, sent } = supabase();
+    offering(db);
+    const result = await call("full", "update_quote", { quote_id: QUOTE, title: "Roof", lines: [{ name: "Gutters", unit_price: 900 }] });
+    expect(result.error).toBe("This quote offers options; edit its lines in Crewtavo.");
+    expect(writes(sent)).toEqual([]);
+  });
+
+  it("are approved for the option the client chose, set first and on its own", async () => {
+    const { db, sent } = supabase();
+    offering(db);
+    expect((await call("full", "mark_quote", { quote_id: QUOTE, status: "approved" })).error).toBe(
+      "This quote offers options (Architectural shingle, Standing-seam metal). Say which one the client chose with option_id, from get_quote.",
+    );
+    expect((await call("full", "mark_quote", { quote_id: QUOTE, status: "approved", option_id: "0b8f3c2e-1d4a-4e6b-9c7d-2a1b3c4d5e62" })).error).toBe("That option isn't on this quote. get_quote lists its options.");
+    expect((await call("full", "convert_quote_to_job", { quote_id: QUOTE })).error).toBe("This quote offers options. Mark it approved with the option the client chose first (mark_quote with option_id).");
+    expect(writes(sent)).toEqual([]);
+
+    // The approval keeps the option as it was offered, so the signed copy shows it even once it's renamed.
+    const picture = { path: "00000000-0000-4000-8000-000000000001/packages/11111111-1111-4111-8111-111111111111.jpg", width: 1600, height: 1000 };
+    Object.assign(db.quotes![0]!.options.find((o: Row) => o.id === BEST), { picture: picture.path, picture_width: 1600, picture_height: 1000, style: "metal", highlights: ["Lasts 50 years"], warranty: "40 years on the panels." });
+    expect(await call("full", "mark_quote", { quote_id: QUOTE, status: "approved", option_id: BEST })).toEqual({ saved: true });
+    const patches = writes(sent).filter((s) => s.table === "quotes").map((s) => s.body);
+    // And the contract the client was sent, filled in for the metal roof at its price, as "Mark approved" keeps it.
+    const approval = {
+      name: "Assistant",
+      method: "manual",
+      template,
+      option: { id: BEST, name: "Standing-seam metal", tier: "Best", picture, style: "metal", highlights: ["Lasts 50 years"], warranty: "40 years on the panels." },
+      contract: {
+        terms: "Thanks, Dana Whitfield.",
+        sections: [{ id: PAYMENT, title: "Payment", body: "<p>$39,050.00 for Standing-seam metal, Dana Whitfield.</p>", place: "terms", initials: false, initialed: false }],
+      },
+      initials: null,
+    };
+    expect(patches).toEqual([{ option_id: BEST }, { status: "approved", approved_at: expect.any(String), approval }]);
+
+    // The option already shown: the status alone.
+    const second = supabase();
+    offering(second.db);
+    await call("full", "mark_quote", { quote_id: QUOTE, status: "approved", option_id: GOOD });
+    expect(writes(second.sent).map((s) => s.body)).toEqual([{ status: "approved", approved_at: expect.any(String), approval: expect.objectContaining({ option: expect.objectContaining({ id: GOOD, tier: "Good" }) }) }]);
+  });
+
+  it("are approved only for an option that has a price of its own", async () => {
+    const { db, sent } = supabase();
+    offering(db);
+    db.quotes![0]!.lines = db.quotes![0]!.lines.filter((l: Row) => l.option_id !== BEST);
+    expect((await call("full", "mark_quote", { quote_id: QUOTE, status: "approved", option_id: BEST })).error).toBe(
+      "That option isn't priced yet: it has no lines of its own. Add them in Crewtavo, or pick another one.",
+    );
+    expect(writes(sent)).toEqual([]);
+  });
+
+  it("put the option shown back when the approval doesn't go through", async () => {
+    const { db, sent } = supabase();
+    offering(db);
+    const stubbed = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const approving = init?.method === "PATCH" && String(input).includes("/rest/v1/quotes") && "status" in JSON.parse(String(init.body));
+      return approving ? Response.json({ message: "This quote can't be approved right now.", code: "22023" }, { status: 400 }) : stubbed(input, init);
+    });
+    expect((await call("full", "mark_quote", { quote_id: QUOTE, status: "approved", option_id: BEST })).error).toBeDefined();
+    expect(writes(sent).map((s) => s.body)).toEqual([{ option_id: BEST }, { option_id: GOOD }]);
+    expect(db.quotes![0]!.option_id).toBe(GOOD);
+  });
+
+  it("aren't needed to approve a quote without them, which takes no option and keeps the contract it was sent", async () => {
+    const { db, sent } = supabase();
+    offering(db, { option_id: null, options: [] });
+    expect((await call("full", "mark_quote", { quote_id: QUOTE, status: "approved", option_id: GOOD })).error).toBe("This quote doesn't offer options, so leave out option_id.");
+    expect(await call("full", "mark_quote", { quote_id: QUOTE, status: "approved" })).toEqual({ saved: true });
+    const contract = { terms: "Thanks, Dana Whitfield.", sections: [{ id: PAYMENT, title: "Payment", body: "<p>$17,300.00 for , Dana Whitfield.</p>", place: "terms", initials: false, initialed: false }] };
+    expect(writes(sent).map((s) => s.body)).toEqual([{ status: "approved", approved_at: expect.any(String), approval: { name: "Assistant", method: "manual", template, option: null, contract, initials: null } }]);
+  });
+
+  it("keep a signed quote's own approval when it's marked approved again", async () => {
+    const { db, sent } = supabase();
+    offering(db, { option_id: null, options: [], status: "approved", approval: { name: "Dana Whitfield", signature: "data:image/png;base64,AAAA" } });
+    expect((await call("full", "mark_quote", { quote_id: QUOTE, status: "approved" })).error).toBe("The client has already answered this quote: it's approved already.");
+    db.quotes![0]!.status = "converted";
+    expect((await call("full", "mark_quote", { quote_id: QUOTE, status: "approved" })).error).toBe("The client has already answered this quote: it's a job already.");
+    // Nothing is written: the database would turn a new approval or approval date down anyway.
+    expect(writes(sent)).toEqual([]);
+  });
+
+  it("become a job straight from sent with the contract they were sent, approved by the assistant", async () => {
+    const { db, sent } = supabase();
+    offering(db, { option_id: null, options: [] });
+    const stubbed = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes("/rest/v1/rpc/convert_quote_to_job") ? (sent.push({ method: "POST", table: "rpc/convert_quote_to_job", body: null }), Response.json("job-1")) : stubbed(input, init),
+    );
+    expect(await call("full", "convert_quote_to_job", { quote_id: QUOTE })).toEqual({ job_id: "job-1" });
+    const [approve, convert] = writes(sent);
+    expect(approve).toMatchObject({ method: "PATCH", table: "quotes", body: { approval: { name: "Assistant", method: "manual", template, option: null, initials: null } } });
+    expect(approve!.body.approval.contract.sections.map((s: Row) => s.body)).toEqual(["<p>$17,300.00 for , Dana Whitfield.</p>"]);
+    // The approval only: the database turns it into a job (and a change order joins its job) in one step.
+    expect(approve!.body).not.toHaveProperty("status");
+    expect(convert).toMatchObject({ table: "rpc/convert_quote_to_job" });
+  });
+
+  it("keep the deposit no more than the cheapest option's price", async () => {
+    const { db } = supabase();
+    offering(db);
+    const result = await call("full", "update_quote", { quote_id: QUOTE, deposit_amount: 20000 });
+    // The shingle roof comes to $17,300, the metal one to $39,050.
+    expect(result).toMatchObject({ deposit_amount: 17300, note: "The deposit was lowered to 17300: it can't be more than the quote's total (with options, its cheapest option's price)." });
+    expect(db.quotes![0]!.deposit_amount).toBe(17300);
+    // Within it, it's kept as it is.
+    expect(await call("full", "update_quote", { quote_id: QUOTE, deposit_amount: 5000 })).not.toHaveProperty("note");
+    expect(db.quotes![0]!.deposit_amount).toBe(5000);
+  });
+
+  it("aren't what a line group is: its lines are add-ons the client picks one of, the first picked", async () => {
+    const { db, sent } = supabase();
+    db.companies = [{ id: "company-1", settings: {} }];
+    await call("full", "create_quote", {
+      client_id: QUOTE,
+      title: "Gutters",
+      lines: [
+        { name: "Cleaning", unit_price: 150 },
+        { name: "5-inch gutters", unit_price: 1200, option_group: "Size" },
+        { name: "6-inch gutters", unit_price: 1500, option_group: "Size" },
+        { name: "Guards", unit_price: 600, optional: true },
+      ],
+    });
+    const lines = sent.find((s) => s.method === "POST" && s.table === "quote_line_items")!.body;
+    expect(lines.map((l: Row) => [l.name, l.optional, l.selected, l.option_group])).toEqual([
+      ["Cleaning", false, true, null],
+      ["5-inch gutters", true, true, "Size"],
+      ["6-inch gutters", true, false, "Size"],
+      ["Guards", true, false, null],
+    ]);
   });
 });

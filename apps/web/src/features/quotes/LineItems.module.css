@@ -1,0 +1,6 @@
+/* The line list (LineItems.tsx): where new lines go on a quote that offers options. A long option
+   name stops at the edge, and on a phone the two choices can sit one under the other. */
+
+.addTo { flex-wrap: wrap; max-width: 100%; }
+.addTo button { max-width: 100%; min-width: 0; }
+.addTo span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

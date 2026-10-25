@@ -25,7 +25,8 @@ import { appUrl, asJson, dbError, HttpError, must, param, readJson, requireEnv, 
 import { clientLink } from "../lib/links";
 import { roofSegments } from "../services/external";
 import { applyMeasurement } from "../services/measurements";
-import { invoiceJobs, quoteFromRequest, remindInvoices, sendInvoice, sendQuote, sendSchema, type SalesScope } from "../services/sales";
+import { SITE_PRICE_SET, sitePriceSet } from "../services/roofPackages";
+import { convertQuote, invoiceJobs, quoteFromRequest, remindInvoices, sendInvoice, sendQuote, sendSchema, type SalesScope } from "../services/sales";
 
 export const sales = new Hono<AppEnv>();
 
@@ -53,10 +54,14 @@ sales.post("/quotes/:id/apply-measurement", requireUser, requireCompany(SALES, "
   return c.json(await applyMeasurement(c.var.db, c.var.companyId, id, body.measurement_id, body.depth_in, body.line_ids));
 });
 
+/**
+ * Turn a quote into a job. One the client never signed keeps the contract it was sent with first,
+ * approved in the name of the person converting it (services/sales.ts convertQuote).
+ */
 sales.post("/quotes/:id/convert", requireUser, requireCompany(SALES, "sales"), async (c) => {
-  const { data, error } = await c.var.db.rpc("convert_quote_to_job", { p_quote: param(c, "id") });
-  if (error) throw dbError(error);
-  return c.json({ job_id: data }, 201);
+  const id = param(c, "id");
+  const { data: profile } = await c.var.db.from("profiles").select("full_name").eq("user_id", c.var.userId).maybeSingle();
+  return c.json({ job_id: await convertQuote(scope(c), id, profile?.full_name?.trim() || "Office") }, 201);
 });
 
 sales.post("/quotes/:id/send", requireUser, requireCompany(SALES, "sales"), async (c) => {
@@ -97,12 +102,27 @@ sales.post("/invoices/remind", requireUser, requireCompany(OFFICE, "invoices"), 
   return c.json(await remindInvoices(scope(c), body.invoice_ids));
 });
 
-// Promo codes: the database checks the code's rules and recalculates the totals.
+// Promo codes: the database checks the code's rules and recalculates the totals. Not on a quote
+// whose price was set on site (roofPackages.ts sitePriceSet): the code would come off the price
+// agreed, or replace it.
 const promoBody = z.object({ code: z.string().trim().min(1, "Enter a promo code.").max(40) });
 for (const [path, kind, roles, area] of [["quotes", "quote", SALES, "sales"], ["invoices", "invoice", OFFICE, "invoices"]] as const) {
   sales.post(`/${path}/:id/promo`, requireUser, requireCompany(roles, area), async (c) => {
     const { code } = await readJson(c, promoBody);
-    const { data, error } = await c.var.db.rpc("apply_promo_code", { p_kind: kind, p_id: param(c, "id"), p_code: code });
+    const id = param(c, "id");
+    if (kind === "quote") {
+      const quote = must(
+        await c.var.db
+          .from("quotes")
+          .select("priced_on_site_at, option_id, promo_code_id, discount_amount, lines:quote_line_items(option_id, name, service_id, formula, optional, selected)")
+          .eq("id", id)
+          .eq("company_id", c.var.companyId)
+          .maybeSingle(),
+        "Quote not found.",
+      );
+      if (sitePriceSet(quote, quote.lines)) throw new HttpError(409, SITE_PRICE_SET);
+    }
+    const { data, error } = await c.var.db.rpc("apply_promo_code", { p_kind: kind, p_id: id, p_code: code });
     if (error) throw dbError(error);
     return c.json(data as Record<string, unknown>);
   });

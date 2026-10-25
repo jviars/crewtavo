@@ -111,9 +111,29 @@ export function useMarkRangeAgreed(quoteId: string, clientFirstName: string) {
   const refresh = useRefreshProject(quoteId);
   return useMutation({
     meta: { inline: true, success: `${clientFirstName} said yes to the range` },
-    mutationFn: (note: string) => api.post<{ accepted_at: string }>(`/roofing/${quoteId}/range-accepted`, note.trim() ? { note: note.trim() } : {}),
+    mutationFn: ({ note, optionId }: { note: string; optionId: string | null }) =>
+      api.post<{ accepted_at: string; range: { low: number; high: number }; option_id: string | null }>(`/roofing/${quoteId}/range-accepted`, {
+        ...(note.trim() ? { note: note.trim() } : {}),
+        ...(optionId ? { option_id: optionId } : {}),
+      }),
     onSuccess: (r) => {
-      queryClient.setQueryData<EstimateData>(estimateKey(quoteId), (old) => (old ? { ...old, quote: { ...old.quote, range_accepted_at: r.accepted_at } } : old));
+      // A range told on the phone before it was sent is saved and counts as sent: the card moves on now.
+      queryClient.setQueryData<EstimateData>(estimateKey(quoteId), (old) =>
+        old
+          ? {
+              ...old,
+              quote: {
+                ...old.quote,
+                status: old.quote.status === "draft" ? "sent" : old.quote.status,
+                range_low: r.range.low,
+                range_high: r.range.high,
+                range_sent_at: old.quote.range_sent_at ?? r.accepted_at,
+                range_accepted_at: r.accepted_at,
+                option_id: r.option_id ?? old.quote.option_id,
+              },
+            }
+          : old,
+      );
       void queryClient.invalidateQueries({ queryKey: notesKey(quoteId) });
     },
     onSettled: refresh,

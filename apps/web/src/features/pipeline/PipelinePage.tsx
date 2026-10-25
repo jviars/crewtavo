@@ -1,8 +1,12 @@
 /**
  * Sales pipeline: open requests and quotes as a board with value and age. Drag a request to
  * "Drafting quote" to start a quote, a draft to "Awaiting response" to send it, a sent quote to
- * "Approved" to mark it approved, or anything to "Lost".
+ * "Approved" to mark it approved (keeping its template and contract, as "Mark approved" on the quote
+ * does), or anything to "Lost". A quote that offers options (quote_options) is approved from its own
+ * page, where the office says which option they chose; until it's signed, its value here is its
+ * cheapest option's (quotes/options.ts listPrice), as on the quotes list.
  */
+import type { Json } from "@crewtavo/core/database";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type DragEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -15,10 +19,40 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { formatMoney, formatMoneyCompact } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { ALREADY_ANSWERED, listPrice, withOptionLines } from "../quotes/options";
+import { optionsNote } from "../quotes/QuotesPage";
 import { SendDialog } from "../quotes/SendDialog";
 
-interface Card { kind: "request" | "quote"; id: string; status: string; number: number | null; title: string; client: string; email: string | null; phone: string | null; value: number | null; updated: string }
+interface Card {
+  kind: "request" | "quote";
+  id: string;
+  status: string;
+  number: number | null;
+  title: string;
+  client: string;
+  email: string | null;
+  phone: string | null;
+  value: number | null;
+  /** The value is its cheapest option's: it offers options and isn't signed yet. */
+  from: boolean;
+  updated: string;
+  /** How many options a quote offers. */
+  options: number;
+  /** The option shown first; once it's signed, the one chosen, which its value is for. */
+  option: { name: string; tier: string | null } | null;
+}
 type ColumnKey = "new" | "assess" | "draft" | "sent" | "won";
+
+const PICK_ON_QUOTE = "Open the quote to pick the option they chose.";
+
+/**
+ * Why a card dropped on a column can't move there from the board, or null when it can: a quote that
+ * offers options is approved on its own page, which asks which option they chose. (Options added
+ * since the board was read are caught as it's approved.)
+ */
+export function moveRefusal(card: Pick<Card, "kind" | "options">, to: ColumnKey | "lost"): string | null {
+  return card.kind === "quote" && to === "won" && card.options > 0 ? PICK_ON_QUOTE : null;
+}
 
 const COLUMNS: Array<{ key: ColumnKey; label: string; statuses: string[]; kind: Card["kind"]; color: string }> = [
   { key: "new", label: "New requests", statuses: ["new"], kind: "request", color: "var(--req)" },
@@ -31,7 +65,7 @@ const COLUMNS: Array<{ key: ColumnKey; label: string; statuses: string[]; kind: 
 const daysOld = (iso: string) => Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
 
 export function PipelinePage() {
-  const { company } = useSession();
+  const { company, profile } = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [dragging, setDragging] = useState<Card | null>(null);
@@ -45,17 +79,21 @@ export function PipelinePage() {
       const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const [requests, quotes, closed] = await Promise.all([
         supabase().from("requests").select("id, number, title, status, updated_at, client:clients(display_name, email, phone)").eq("company_id", company.id).in("status", ["new", "assessment_scheduled", "assessment_complete"]),
-        supabase().from("quotes").select("id, number, title, status, total, updated_at, client:clients(display_name, email, phone)").eq("company_id", company.id).in("status", ["draft", "sent", "changes_requested", "approved"]),
-        supabase().from("quotes").select("status, total").eq("company_id", company.id).in("status", ["converted", "lost"]).gte("updated_at", since),
+        supabase().from("quotes").select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), updated_at, client:clients(display_name, email, phone), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)").eq("company_id", company.id).in("status", ["draft", "sent", "changes_requested", "approved"]),
+        supabase().from("quotes").select("id, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), options:quote_options!quote_options_quote_fkey(id)").eq("company_id", company.id).in("status", ["converted", "lost"]).gte("updated_at", since),
       ]);
+      // Quotes that offer options are worth their cheapest option until they're signed.
+      const [open, c] = await Promise.all([withOptionLines(unwrap(quotes)), withOptionLines(unwrap(closed))]);
       const cards: Card[] = [
-        ...unwrap(requests).map((x) => ({ kind: "request" as const, id: x.id, status: x.status, number: x.number, title: x.title, client: x.client?.display_name ?? "", email: x.client?.email ?? null, phone: x.client?.phone ?? null, value: null, updated: x.updated_at })),
-        ...unwrap(quotes).map((x) => ({ kind: "quote" as const, id: x.id, status: x.status, number: x.number, title: x.title, client: x.client?.display_name ?? "", email: x.client?.email ?? null, phone: x.client?.phone ?? null, value: Number(x.total), updated: x.updated_at })),
+        ...unwrap(requests).map((x) => ({ kind: "request" as const, id: x.id, status: x.status, number: x.number, title: x.title, client: x.client?.display_name ?? "", email: x.client?.email ?? null, phone: x.client?.phone ?? null, value: null, from: false, updated: x.updated_at, options: 0, option: null })),
+        ...open.map((x) => {
+          const price = listPrice(x);
+          return { kind: "quote" as const, id: x.id, status: x.status, number: x.number, title: x.title, client: x.client?.display_name ?? "", email: x.client?.email ?? null, phone: x.client?.phone ?? null, value: price.amount, from: price.from, updated: x.updated_at, options: x.options.length, option: x.option };
+        }),
       ];
-      const c = unwrap(closed);
       const won = c.filter((q) => q.status === "converted");
       const lost = c.filter((q) => q.status === "lost");
-      return { cards, won: { count: won.length, value: won.reduce((s, q) => s + Number(q.total), 0) }, lost: { count: lost.length, value: lost.reduce((s, q) => s + Number(q.total), 0) } };
+      return { cards, won: { count: won.length, value: won.reduce((s, q) => s + listPrice(q).amount, 0) }, lost: { count: lost.length, value: lost.reduce((s, q) => s + listPrice(q).amount, 0) } };
     },
   });
 
@@ -76,13 +114,23 @@ export function PipelinePage() {
         return { message: "Quote started", open: `/quotes/${quote.id}` };
       }
       if (card.kind === "quote" && to === "won") {
-        unwrap(await supabase().from("quotes").update({ status: "approved", approved_at: new Date().toISOString(), approval: { name: "Office", method: "manual" } }).eq("id", card.id));
+        // The quote page's own approval, loaded only once a quote is dropped here.
+        const { boardApproval } = await import("../quotes/QuotePage");
+        const approval = await boardApproval(queryClient, card.id, { companyId: company.id, name: profile.full_name || "Office" });
+        if (!approval) return { message: PICK_ON_QUOTE, refused: true, open: `/quotes/${card.id}` };
+        // Only while it's still waiting: a client who signed meanwhile keeps their own approval.
+        const saved = unwrap(
+          await supabase().from("quotes").update({ status: "approved", approved_at: new Date().toISOString(), approval: approval as unknown as Json }).eq("id", card.id).in("status", ["sent", "changes_requested"]).select("id"),
+        );
+        if (!saved.length) return { message: ALREADY_ANSWERED, refused: true, open: `/quotes/${card.id}` };
         return { message: `Quote #${card.number} marked approved` };
       }
       throw new Error("That move isn't possible.");
     },
-    onSuccess: (r) => {
-      toast.success(r.message, r.open ? { action: { label: "Open", onClick: () => navigate(r.open!) } } : undefined);
+    onSuccess: (r: { message: string; open?: string; refused?: boolean }) => {
+      const action = r.open ? { action: { label: "Open", onClick: () => navigate(r.open!) } } : undefined;
+      if (r.refused) toast.error(r.message, action);
+      else toast.success(r.message, action);
       refresh();
     },
   });
@@ -98,6 +146,8 @@ export function PipelinePage() {
     setDragging(null);
     setOver(null);
     if (!card || !allowed(card, to)) return;
+    const refusal = moveRefusal(card, to);
+    if (refusal) return void toast.error(refusal, { action: { label: "Open", onClick: () => navigate(`/quotes/${card.id}`) } });
     if (card.kind === "quote" && card.status === "draft" && to === "sent") return setSending(card);
     if (to === "lost" && !(await confirm({ title: card.kind === "quote" ? `Mark quote #${card.number} lost?` : "Archive this request?", body: card.kind === "quote" ? "You can reopen it later from the quote." : "It leaves the pipeline. You can reopen it from the request.", confirmLabel: card.kind === "quote" ? "Mark lost" : "Archive", danger: true }))) return;
     move.mutate({ card, to });
@@ -174,7 +224,12 @@ export function PipelinePage() {
                         <span>{c.status === "changes_requested" ? <span className="text-danger strong">Changes requested</span> : `#${c.number}`}</span>
                         <span style={age >= 14 ? { color: "var(--danger)", fontWeight: 700 } : age >= 7 ? { color: "var(--warning)", fontWeight: 700 } : undefined}>{age === 0 ? "today" : `${age}d`}</span>
                       </span>
-                      {c.value != null && <span className="d-value">{formatMoney(c.value)}</span>}
+                      {c.value != null && (
+                        <span className="d-value">
+                          {c.from ? `From ${formatMoney(c.value)}` : formatMoney(c.value)}
+                          {c.options > 0 && <span className="muted small" style={{ fontWeight: 600, overflowWrap: "anywhere" }}> · {optionsNote(c.status, c.options, c.option)}</span>}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

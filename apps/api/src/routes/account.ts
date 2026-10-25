@@ -11,6 +11,7 @@ import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
 import { timeRates } from "../services/payRates";
+import { saveLetterheadPicture } from "../services/letterhead";
 import { removeLogo, setLogo } from "../services/logo";
 import { removePhoto, setPhoto } from "../services/photos";
 import { invitePerson, inviteStatus, sendInvite, welcomeLink, type TeamScope } from "../services/team";
@@ -329,6 +330,17 @@ account.put("/company/logo", requireUser, requireCompany(ADMINS), async (c) => {
 account.delete("/company/logo", requireUser, requireCompany(ADMINS), async (c) => {
   await removeLogo(adminClient(c.env), c.var.companyId);
   return c.json({ ok: true });
+});
+
+/**
+ * A picture of the business's own letterhead (services/letterhead.ts), for an estimate template:
+ * its top or its bottom, as a PNG, base64. It goes on the template when the template is saved. Those
+ * who change the templates (Settings → Estimate template) add them.
+ */
+account.put("/templates/letterhead", requireUser, requireCompany(OFFICE, "settings"), async (c) => {
+  const body = await readJson(c, z.object({ picture: z.string().min(100).max(1_900_000).regex(/^[A-Za-z0-9+/]+={0,2}$/) }));
+  if (!(await allow(c.env, `letterhead:${c.var.companyId}`, 60, 3600))) throw new HttpError(429, "Too many letterhead changes. Wait a while and try again.");
+  return c.json(await saveLetterheadPicture(adminClient(c.env), c.var.companyId, body.picture));
 });
 
 /** Whose photo the request changes: the person's own, or a teammate's for those who manage the team. */

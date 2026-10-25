@@ -560,10 +560,14 @@ describe("drawings in the Client Hub", () => {
 describe("quote approval", () => {
   // The database claims the quote, then picks the options and records the approval with the amounts
   // they came to, in one step (approve_hub_quote; supabase/tests/hub_approval_test.sql).
+  const company = [{ name: "Acme", phone: null, timezone: "America/Chicago" }];
+  const addOn = (id: string, values: Record<string, unknown> = {}) => ({ id, option_id: null, quantity: 1, unit_price: 0, taxable: true, optional: true, selected: false, option_group: null, ...values });
   const approve = async (approved: boolean, headers: Record<string, string> = {}, bindings = connectedFrom("203.0.113.9")) => {
     const option = crypto.randomUUID();
     const calls = serve((call) => {
       if (call.method === "GET" && call.path === "quotes") return [{ id: "quote-1", status: "sent" }];
+      if (call.method === "GET" && call.path === "quote_line_items") return [addOn(option)];
+      if (call.method === "GET" && call.path === "companies") return company;
       if (call.path === "rpc/approve_hub_quote") return approved;
       return [];
     });
@@ -585,8 +589,12 @@ describe("quote approval", () => {
       p_company: "co-1",
       p_quote: "quote-1",
       p_selected: [option],
-      // The business has no template saved, so the built-in one is kept with the approval.
-      p_approval: { name: "Ana Smith", selected_line_ids: [option], signature: null, signed_at: expect.any(String), ip: "203.0.113.9", template: DEFAULT_TEMPLATE },
+      // The business has no template saved, so the built-in one is kept with the approval, with its
+      // terms as the contract (no options, no sections and nothing to initial).
+      p_approval: {
+        name: "Ana Smith", selected_line_ids: [option], signature: null, signed_at: expect.any(String), ip: "203.0.113.9", template: DEFAULT_TEMPLATE,
+        option: null, contract: { terms: DEFAULT_TEMPLATE.terms, sections: [] }, initials: null,
+      },
     });
     expect(writes(calls)).toEqual([]);
   });
@@ -613,7 +621,8 @@ describe("quote approval", () => {
     const pick = async (selected: string[]) => {
       const calls = serve((call) => {
         if (call.method === "GET" && call.path === "quotes") return [{ id: "quote-1", status: "sent" }];
-        if (call.method === "GET" && call.path === "quote_line_items") return [good, better, best].map((id) => ({ id, option_group: "Roof" }));
+        if (call.method === "GET" && call.path === "quote_line_items") return [...[good, better, best].map((id) => addOn(id, { option_group: "Roof" })), addOn(gutters)];
+        if (call.method === "GET" && call.path === "companies") return company;
         if (call.path === "rpc/approve_hub_quote") return true;
         return [];
       });

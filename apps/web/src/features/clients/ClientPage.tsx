@@ -18,6 +18,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { PlansCard } from "../plans/PlansCard";
 import { NewQuoteDialog } from "../quotes/NewQuoteDialog";
+import { listPrice, withOptionLines } from "../quotes/options";
 import { NewRequestDialog } from "../requests/NewRequestDialog";
 import { EditClientDialog } from "./ClientForm";
 import { ContactLine, ContactsCard } from "./ContactsCard";
@@ -69,11 +70,12 @@ export function ClientPage() {
       const db = supabase();
       const [requests, quotes, jobs, invoices] = await Promise.all([
         db.from("requests").select("id, number, title, status, created_at").eq("client_id", id).order("created_at", { ascending: false }),
-        db.from("quotes").select("id, number, title, status, total, updated_at").eq("client_id", id).order("created_at", { ascending: false }),
+        // Priced as the quotes list prices them (listPrice): one offering options starts from its cheapest.
+        db.from("quotes").select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), updated_at, options:quote_options!quote_options_quote_fkey(id)").eq("client_id", id).order("created_at", { ascending: false }),
         db.from("jobs").select("id, number, title, status, kind, financials:job_financials(contract_total)").eq("client_id", id).order("created_at", { ascending: false }),
         isOffice ? db.from("invoices").select("id, number, status, total, balance_due, due_on").eq("client_id", id).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
       ]);
-      return { requests: unwrap(requests), quotes: unwrap(quotes), jobs: unwrap(jobs), invoices: unwrap(invoices) as Array<{ id: string; number: number | null; status: string; total: number; balance_due: number; due_on: string | null }> };
+      return { requests: unwrap(requests), quotes: await withOptionLines(unwrap(quotes)), jobs: unwrap(jobs), invoices: unwrap(invoices) as Array<{ id: string; number: number | null; status: string; total: number; balance_due: number; due_on: string | null }> };
     },
   });
 
@@ -241,7 +243,13 @@ export function ClientPage() {
                 <WorkList empty="No requests yet." rows={work.data.requests.map((r) => ({ to: `/requests/${r.id}`, number: r.number, title: r.title, right: formatDate(r.created_at), status: <EntityStatus kind="request" status={r.status} /> }))} />
               )}
               {work.data && tab === "quotes" && (
-                <WorkList empty="No quotes yet." rows={work.data.quotes.map((q) => ({ to: `/quotes/${q.id}`, number: q.number, title: q.title, right: formatMoney(q.total), status: <EntityStatus kind="quote" status={q.status} /> }))} />
+                <WorkList
+                  empty="No quotes yet."
+                  rows={work.data.quotes.map((q) => {
+                    const price = listPrice(q);
+                    return { to: `/quotes/${q.id}`, number: q.number, title: q.title, right: price.from ? `From ${formatMoney(price.amount)}` : formatMoney(price.amount), status: <EntityStatus kind="quote" status={q.status} /> };
+                  })}
+                />
               )}
               {work.data && tab === "jobs" && (
                 <WorkList empty="No jobs yet." rows={work.data.jobs.map((j) => ({ to: `/jobs/${j.id}`, number: j.number, title: j.title, right: j.kind === "recurring" ? "Recurring" : canSell ? formatMoney(j.financials?.contract_total ?? 0) : "", status: <EntityStatus kind="job" status={j.status} /> }))} />

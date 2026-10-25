@@ -1,7 +1,7 @@
 /**
  * The estimate as its document: the business's template with the exact price and both signatures,
- * the same page the homeowner's link shows once it's signed. A small page to look at, Open for the
- * whole page, and Print or save PDF from right here.
+ * the same pages the homeowner's link shows once it's signed. Its first page, small, to look at; Open
+ * for all of them; and Print or save PDF from right here.
  */
 import { useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -32,8 +32,9 @@ export function useEstimateDocument(quote: EstimateQuote, extras: RoofProjectExt
       quoteDocument(
         { ...quote, sent_at: extras.sent_at, valid_until: extras.valid_until, deposit_amount: extras.deposit_amount, message: extras.message, created_at: extras.created_at, promo: extras.promo },
         quote.lines,
-        // Dated the day it went out where the business is, like the homeowner's copy.
-        { date: extras.sent_at ? dateIn(extras.sent_at, tz) : todayIn(tz), facts: documentFacts(extras.package?.name, takeoff) },
+        // Dated the day it went out where the business is, like the homeowner's copy. Signed for an
+        // option, the strip names it ("Your choice: Better · Designer shingle") instead of the package.
+        { date: extras.sent_at ? dateIn(extras.sent_at, tz) : todayIn(tz), facts: documentFacts(readApproval(quote.approval)?.option ? null : extras.package?.name, takeoff) },
       ),
     [quote, extras, takeoff, tz],
   );
@@ -61,9 +62,9 @@ export function SignedEstimate({ quote, extras, takeoff }: { quote: EstimateQuot
   return (
     <section className={styles.panel} aria-labelledby={id}>
       <div className={styles.doc}>
-        {/* The little page opens the big one with a click; Open beside it does the same for keyboards and screen readers. */}
+        {/* The little first page opens the whole document with a click; Open beside it does the same for keyboards and screen readers. */}
         <div className={styles.thumb} onClick={() => setOpen(true)} aria-hidden="true">
-          <DocumentSheet template={doc.template} company={doc.company} data={doc.data} />
+          <DocumentSheet template={doc.template} company={doc.company} data={doc.data} firstPageOnly />
         </div>
         <div className={styles.docText}>
           <div>

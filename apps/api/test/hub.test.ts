@@ -1,15 +1,23 @@
+import { contractValues, resolveSections, sectionsHash } from "@crewtavo/core/contracts";
 import { templateSettings } from "@crewtavo/core/documents";
+import { snapshotLines } from "@crewtavo/core/estimates";
+import { chosenTotals } from "@crewtavo/core/money";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { clientLink } from "../src/lib/links";
+import { drawnPng } from "./fixtures/drawn";
 
 // A stand-in for the service-role client the Client Hub uses: tables of rows that the usual filters
 // narrow down, and selects that return only the columns asked for (json paths like settings->branding
-// included), so a test sees what a client's browser would. Database functions answer from `rpcs`.
+// included), so a test sees what a client's browser would. Database functions answer from `rpcs`, and
+// Storage downloads from `files` (whole, or as a stream in chunks, with how much of it was read kept
+// in `streamed`).
 type Row = Record<string, unknown>;
 const state = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
-  rpcs: {} as Record<string, (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null }>,
+  files: {} as Record<string, Uint8Array>,
+  streamed: {} as Record<string, number>,
+  rpcs: {} as Record<string, (args: Record<string, unknown>) => { data: unknown; error: { message: string; code?: string } | null }>,
   calls: [] as Array<{ name: string; args: Record<string, unknown> }>,
 }));
 vi.mock("../src/lib/supabase", () => {
@@ -33,7 +41,7 @@ vi.mock("../src/lib/supabase", () => {
     if (!select || select === "*") return { ...row };
     const out: Row = {};
     for (const part of parts(select)) {
-      const embedded = /^(\w+):\w+\(/.exec(part);
+      const embedded = /^(\w+)(?::\w+)?(?:!\w+)?\(/.exec(part);
       const path = /^(\w+)->(\w+)$/.exec(part);
       if (embedded) out[embedded[1]!] = row[embedded[1]!] ?? null;
       else if (path) out[path[2]!] = ((row[path[1]!] ?? {}) as Row)[path[2]!] ?? null;
@@ -43,6 +51,29 @@ vi.mock("../src/lib/supabase", () => {
   };
   const client = () => ({
     auth: { getClaims: async () => ({ data: null, error: { message: "no session" } }) },
+    storage: {
+      from: () => ({
+        download: (path: string) => {
+          const missing = { data: null, error: { message: "Object not found" } };
+          const file = state.files[path];
+          // The file in 64 KB chunks, counting what the server read of it.
+          const stream = () =>
+            new ReadableStream<Uint8Array>({
+              start: () => void (state.streamed[path] = 0),
+              pull: (controller) => {
+                const at = state.streamed[path]!;
+                if (at >= file!.length) return controller.close();
+                const chunk = file!.slice(at, at + 65_536);
+                state.streamed[path] = at + chunk.length;
+                controller.enqueue(chunk);
+              },
+            });
+          return Object.assign(Promise.resolve(file ? { data: new Blob([file]), error: null } : missing), {
+            asStream: async () => (file ? { data: stream(), error: null } : missing),
+          });
+        },
+      }),
+    },
     rpc: async (name: string, args: Record<string, unknown>) => {
       state.calls.push({ name, args });
       const handler = state.rpcs[name];
@@ -107,31 +138,33 @@ const CLIENT = "00000000-0000-4000-8000-0000000000d3";
 const PACKAGE = "00000000-0000-4000-8000-0000000000d4";
 const SALES = "00000000-0000-4000-8000-0000000000d5";
 const TEMPLATE = "00000000-0000-4000-8000-0000000000d6";
-const PNG = "data:image/png;base64,iVBORw0KGgo=";
+const PNG = drawnPng(600, 180, "Dana");
 const S = { roof: "s-roof", tear: "s-tear", edge: "s-edge", deck: "s-deck", chimney: "s-chimney", cricket: "s-cricket", vent: "s-vent", boot: "s-boot" };
 
-const tokenFor = async (link: { t: "quote" | "client"; id: string; pv?: 1 }) => (await clientLink(env, "https://ops.example.com", { c: ROOFER, ...link })).split("/hub/")[1]!;
-const hub = async (link: { t: "quote" | "client"; id: string; pv?: 1 }, path = "", body?: unknown) =>
+const tokenFor = async (link: { t: "quote" | "invoice" | "client"; id: string; pv?: 1 }) => (await clientLink(env, "https://ops.example.com", { c: ROOFER, ...link })).split("/hub/")[1]!;
+const hub = async (link: { t: "quote" | "invoice" | "client"; id: string; pv?: 1 }, path = "", body?: unknown) =>
   app.request(`/api/hub/${await tokenFor(link)}${path}`, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.7" }, body: JSON.stringify(body) }, env);
 
 const line = (id: string, service_id: string | null, name: string, values: Row = {}) => ({
-  id, company_id: ROOFER, quote_id: QUOTE, service_id, name, description: null, quantity: 1, unit: "ea", unit_price: 0, unit_cost: 0, taxable: true,
+  id, company_id: ROOFER, quote_id: QUOTE, option_id: null, service_id, name, description: null, quantity: 1, unit: "ea", unit_price: 0, unit_cost: 0, taxable: true,
   optional: false, selected: true, option_group: null, sort: 0, formula: null, materials: null, material_cost: null, ...values,
 });
 
 function roofer(quote: Row = {}) {
   state.tables = {
     companies: [{
-      id: ROOFER, name: "Summit Roofing", phone: "555-0100", email: "office@summit.example", website: "summit.example", timezone: "America/Chicago", currency: "USD",
+      id: ROOFER, name: "Summit Roofing", phone: "555-0100", email: "office@summit.example", website: "summit.example", timezone: "America/Chicago", currency: "USD", trade_preset: "roofing_exteriors",
       address: { line1: "200 Main St", line2: "Suite 4", city: "Springfield", region: "IL", postal_code: "62704" },
       settings: { branding: { color: "#1f4e79" }, hub_tips: false, roofing: { range_pct: 15, range_round: 50 } },
     }],
     quotes: [{
       id: QUOTE, company_id: ROOFER, number: 1042, status: "sent", title: "New roof", message: null, subtotal: 18304, discount_amount: 0, tax_rate: 0, tax_amount: 0,
-      total: 18304, deposit_amount: 1000, valid_until: "2026-11-21", sent_at: "2026-10-22T15:00:00Z", approved_at: null, approval: null, client_id: CLIENT,
-      change_order_for: null, template_id: TEMPLATE, roof_package_id: PACKAGE, salesperson_id: SALES,
+      total: 18304, deposit_amount: 1000, valid_until: "2026-11-21", sent_at: "2026-10-22T15:00:00Z", created_at: "2026-10-21T13:00:00Z", approved_at: null, approval: null, client_id: CLIENT,
+      change_order_for: null, template_id: TEMPLATE, roof_package_id: PACKAGE, option_id: null, section_ids: [], salesperson_id: SALES,
       range_low: 18300, range_high: 21050, range_sent_at: "2026-10-22T15:00:00Z", range_accepted_at: null, priced_on_site_at: null, promo_code_id: null,
-      promo: null, client: { display_name: "Dana Whitfield" }, property: { line1: "1482 Ridgeview Dr", city: "Springfield", region: "IL", postal_code: "62704" },
+      promo: null, client: { display_name: "Dana Whitfield", billing_address: {} }, property: { line1: "1482 Ridgeview Dr", city: "Springfield", region: "IL", postal_code: "62704" },
+      // Its options, as automations embed them (the Hub reads quote_options itself).
+      options: [],
       ...quote,
     }],
     quote_line_items: [
@@ -161,6 +194,8 @@ function roofer(quote: Row = {}) {
       { id: TEMPLATE, company_id: ROOFER, is_default: false, settings: { header: "centered", license: "RC-104882", company_signs: true } },
     ],
     measurements: [],
+    quote_options: [],
+    contract_sections: [],
     clients: [{ id: CLIENT, company_id: ROOFER, display_name: "Dana Whitfield", properties: [] }],
     profiles: [{ user_id: SALES, full_name: "Mike Torres" }],
     user_signatures: [{ company_id: ROOFER, user_id: SALES, image: PNG }],
@@ -171,6 +206,8 @@ function roofer(quote: Row = {}) {
 beforeEach(() => roofer());
 afterEach(() => {
   state.tables = {};
+  state.files = {};
+  state.streamed = {};
   state.rpcs = {};
   state.calls = [];
 });
@@ -197,6 +234,9 @@ describe("a price range in the Client Hub", () => {
     expect(text).not.toContain("unit_cost");
     expect(text).not.toContain("formula");
     expect(text).not.toContain("range_pct");
+    // The trade only decides whether a preview shows a range; it's never sent.
+    expect(text).not.toContain("trade_preset");
+    expect(text).not.toContain("roofing_exteriors");
     expect(body.quote.package).toEqual({ name: "Architectural shingle" });
     expect(body.company.address).toEqual(["200 Main St", "Suite 4", "Springfield, IL 62704"]);
     // The quote's own template, with the defaults filled in.
@@ -214,7 +254,7 @@ describe("a price range in the Client Hub", () => {
     expect(sent.quote.range).toBeNull();
     expect(sent.quote.total).toBe(18304);
     expect(sent.quote.lines.map((l: { id: string }) => l.id)).toEqual(["l1", "l2", "l3", "l4", "l5", "l6"]);
-    expect(Object.keys(sent.quote.lines[0]).sort()).toEqual(["description", "id", "name", "option_group", "optional", "quantity", "selected", "sort", "taxable", "unit", "unit_price"]);
+    expect(Object.keys(sent.quote.lines[0]).sort()).toEqual(["description", "id", "name", "option_group", "option_id", "optional", "quantity", "selected", "sort", "taxable", "unit", "unit_price"]);
     // And the office's preview of it shows the same, not a range the client never got.
     const sentPreview = await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json();
     expect(sentPreview.quote.range).toBeNull();
@@ -262,6 +302,7 @@ describe("a price range in the Client Hub", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ accepted_at: "2026-10-23T14:00:00Z" });
     expect(state.calls.find((c) => c.name === "accept_hub_range")?.args).toEqual({ p_company: ROOFER, p_quote: QUOTE });
+    expect(Object.keys(state.calls.find((c) => c.name === "accept_hub_range")!.args)).not.toContain("p_option");
 
     state.rpcs.accept_hub_range = () => ({ data: null, error: null });
     const again = await hub({ t: "quote", id: QUOTE }, "/accept-range", {});
@@ -363,6 +404,7 @@ describe("signing online", () => {
     expect(body.quote.approval).toEqual({
       name: "Dana Whitfield", signature: PNG, signed_at: "2026-10-25T18:00:00Z", method: "in_person",
       company: { name: "Mike Torres", signature: PNG, signed_at: "2026-10-25T18:01:00Z" },
+      option: null, contract: null, initials: null,
     });
     expect(JSON.stringify(body)).not.toContain("198.51.100.4");
     expect(body.quote.total).toBe(18304);
@@ -377,6 +419,542 @@ describe("signing online", () => {
   });
 });
 
+// Two options: an architectural shingle roof (shown) and a standing-seam metal one, each with an add-on,
+// on shared tear-off, drip edge and gutter guards. Without tax or a discount, the shingle roof is
+// $1,734 + $735 + $12,544 = $15,013 and the metal one $1,734 + $735 + $28,784 = $31,253.
+const GOOD = "00000000-0000-4000-8000-0000000000a1";
+const METAL = "00000000-0000-4000-8000-0000000000a2";
+const PICTURE = "00000000-0000-4000-8000-0000000000a3";
+const OTHER = "00000000-0000-4000-8000-0000000000a4";
+const PAYMENT = "00000000-0000-4000-8000-0000000000b1";
+const CANCEL = "00000000-0000-4000-8000-0000000000b2";
+const WARRANTY = "00000000-0000-4000-8000-0000000000b3";
+const FOREIGN = "00000000-0000-4000-8000-0000000000b4";
+const UNUSED = "00000000-0000-4000-8000-0000000000b5";
+const L = {
+  tear: "00000000-0000-4000-8000-0000000000c1", edge: "00000000-0000-4000-8000-0000000000c2", shingle: "00000000-0000-4000-8000-0000000000c3",
+  vent: "00000000-0000-4000-8000-0000000000c4", metal: "00000000-0000-4000-8000-0000000000c5", snow: "00000000-0000-4000-8000-0000000000c6",
+  gutter: "00000000-0000-4000-8000-0000000000c7", ridge: "00000000-0000-4000-8000-0000000000c8", power: "00000000-0000-4000-8000-0000000000c9",
+};
+const TERMS = "Thanks, {Customer name}. Warranty: {Warranty}";
+const INITIALS = drawnPng(240, 90, "DW");
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70]);
+
+function withOptions(quote: Row = {}) {
+  roofer({ range_low: null, range_high: null, range_sent_at: null, subtotal: 15013, total: 15013, option_id: GOOD, section_ids: [WARRANTY], ...quote });
+  const t = state.tables;
+  t.quote_line_items = [
+    line(L.tear, S.tear, "Tear-off and disposal", { quantity: 20.4, unit: "square", unit_price: 85, formula: "roof_squares", sort: 1 }),
+    line(L.edge, S.edge, "Drip edge", { quantity: 210, unit: "ft", unit_price: 3.5, formula: "eave_ft + rake_ft", sort: 2 }),
+    line(L.shingle, S.roof, "Architectural shingle roof", { option_id: GOOD, quantity: 22.4, unit: "square", unit_price: 560, formula: "squares", sort: 3 }),
+    line(L.vent, S.vent, "Ridge vent upgrade", { option_id: GOOD, optional: true, selected: false, unit_price: 400, sort: 4 }),
+    line(L.metal, S.roof, "Standing-seam metal roof", { option_id: METAL, quantity: 22.4, unit: "square", unit_price: 1285, formula: "squares", selected: false, sort: 5 }),
+    line(L.snow, null, "Snow guards", { option_id: METAL, optional: true, selected: false, unit_price: 600, sort: 6 }),
+    line(L.gutter, null, "Gutter guards", { optional: true, selected: false, quantity: 120, unit: "ft", unit_price: 7, sort: 7 }),
+  ];
+  // Out of order on purpose: the Hub sends them in the order they're offered.
+  t.quote_options = [
+    {
+      id: METAL, company_id: ROOFER, quote_id: QUOTE, package_id: null, name: "Standing-seam metal", tier: null, picture: null, picture_width: null, picture_height: null,
+      style: "metal", highlights: ["Lasts 50 years or more"], warranty: "Lifetime on the panels & 15 years on our work.", section_ids: [CANCEL], sort: 1,
+    },
+    {
+      id: GOOD, company_id: ROOFER, quote_id: QUOTE, package_id: PACKAGE, name: "Architectural shingle", tier: null, picture: `${ROOFER}/packages/${PICTURE}.jpg`, picture_width: 1600, picture_height: 1067,
+      style: "shingle", highlights: ["30-year shingles", "Ice and water shield"], warranty: "10 years on our work.", section_ids: [], sort: 0,
+    },
+    // Another quote's option is never this quote's.
+    { id: OTHER, company_id: ROOFER, quote_id: "q-other", package_id: null, name: "Someone else's", tier: "Best", picture: null, picture_width: null, picture_height: null, style: "other", highlights: [], warranty: "", section_ids: [], sort: 0 },
+  ];
+  t.document_templates![1]!.settings = { header: "centered", license: "RC-104882", company_signs: true, terms: TERMS, sections: [PAYMENT, FOREIGN] };
+  t.contract_sections = [
+    { id: PAYMENT, company_id: ROOFER, title: "Payment", body: "<p>The price is {Total}. Make checks out to {Business name}.</p>", place: "terms", initials: false, sort: 1 },
+    { id: CANCEL, company_id: ROOFER, title: "Your right to cancel", body: "<p>{Customer name} may cancel within three business days.</p>", place: "signatures", initials: true, sort: 2 },
+    { id: WARRANTY, company_id: ROOFER, title: "Warranty", body: "<p>{Option}: {Warranty}</p>", place: "terms", initials: false, sort: 3 },
+    { id: UNUSED, company_id: ROOFER, title: "Not on this quote", body: "<p>Never sent.</p>", place: "terms", initials: false, sort: 4 },
+    // Another business's section, even with an id the template names, never prints.
+    { id: FOREIGN, company_id: "00000000-0000-4000-8000-0000000000ff", title: "Their terms", body: "<p>Another business's words.</p>", place: "terms", initials: false, sort: 0 },
+  ];
+}
+
+type HubLine = { id: string; option_id: string | null; quantity: number; unit_price: number; taxable: boolean; optional: boolean; selected: boolean };
+
+/**
+ * What the page posts for an option (null for a quote without options), worked out from what the Hub
+ * sent, as the browser does it: the paper's words filled in with the facts sent and the total picked,
+ * and the option's card.
+ */
+async function picked(optionId: string | null, picks: string[]) {
+  const view = await (await hub({ t: "quote", id: QUOTE })).json();
+  const template = templateSettings(view.template);
+  const option = view.quote.options.find((o: { id: string }) => o.id === optionId) ?? null;
+  const sections = resolveSections({ kind: "estimate", template, optionSectionIds: option?.section_ids, quoteSectionIds: view.contract.quote_sections, library: view.contract.library });
+  const total = chosenTotals(view.quote.lines as HubLine[], optionId, view.quote.option_id, picks, { taxRate: view.quote.tax_rate, discountAmount: view.quote.discount_amount }).total;
+  const facts = view.contract.facts;
+  const values = contractValues({ ...facts, total, optionName: option?.name ?? facts.optionName, warranty: option?.warranty ?? facts.warranty });
+  const card = option && { name: option.name, tier: option.tier, warranty: option.warranty, highlights: option.highlights };
+  return { sections_hash: sectionsHash(sections, { terms: template.terms, values, option: card }), expected_total: total };
+}
+
+const approvalArgs = () => state.calls.find((c) => c.name === "approve_hub_quote")!.args;
+
+describe("options in the Client Hub", () => {
+  it("sends every option with its picture, tier and price, and every line with its option", async () => {
+    withOptions();
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.quote.option_id).toBe(GOOD);
+    expect(body.quote.section_ids).toEqual([WARRANTY]);
+    expect(body.quote.options).toEqual([
+      {
+        id: GOOD, name: "Architectural shingle", tier: "Good", picture: { src: `/api/public/package/${ROOFER}/${PICTURE}.jpg`, width: 1600, height: 1067 },
+        style: "shingle", highlights: ["30-year shingles", "Ice and water shield"], warranty: "10 years on our work.", section_ids: [], sort: 0, total: 15013, range: null,
+      },
+      {
+        id: METAL, name: "Standing-seam metal", tier: "Better", picture: null,
+        style: "metal", highlights: ["Lasts 50 years or more"], warranty: "Lifetime on the panels & 15 years on our work.", section_ids: [CANCEL], sort: 1, total: 31253, range: null,
+      },
+    ]);
+    expect(body.quote.lines.map((l: { id: string; option_id: string | null }) => [l.id, l.option_id])).toEqual([
+      [L.tear, null], [L.edge, null], [L.shingle, GOOD], [L.vent, GOOD], [L.metal, METAL], [L.snow, METAL], [L.gutter, null],
+    ]);
+    expect(JSON.stringify(body)).not.toContain("q-other");
+  });
+
+  it("names its own tier when an option has one, and leaves the rest without one", async () => {
+    withOptions();
+    state.tables.quote_options!.find((o) => o.id === METAL)!.tier = "Premium";
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.quote.options.map((o: { tier: string | null }) => o.tier)).toEqual([null, "Premium"]);
+  });
+
+  it("shows each option's own range with a price range, and never an exact amount or the contract", async () => {
+    withOptions({ range_low: 15000, range_high: 35950, range_sent_at: "2026-10-22T15:00:00Z" });
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.quote.range).toMatchObject({ low: 15000, high: 35950, included: ["Tear-off and disposal", "Drip edge", "Architectural shingle roof"] });
+    expect(body.quote.options.map((o: { id: string; total: unknown; range: unknown }) => [o.id, o.total, o.range])).toEqual([
+      [GOOD, null, { low: 15000, high: 17300 }],
+      [METAL, null, { low: 31250, high: 35950 }],
+    ]);
+    expect(body.quote.lines).toEqual([]);
+    expect(body.contract).toBeNull();
+    const text = JSON.stringify(body);
+    for (const exact of ["15013", "31253", "12544", "28784"]) expect(text).not.toContain(exact);
+    // No contract at all: its words would say the price ({Total}).
+    expect(text).not.toContain("{Total}");
+    expect(text).not.toContain("Make checks out");
+  });
+
+  it("previews a roofing estimate's range from the cheapest option to the priciest, and other trades at their price", async () => {
+    withOptions({ status: "draft", roof_package_id: null });
+    const preview = await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json();
+    expect(preview.quote.range).toMatchObject({ low: 15000, high: 35950, sent_at: null });
+    expect(preview.quote.total).toBeNull();
+
+    state.tables.companies![0]!.trade_preset = "paving";
+    const paving = await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json();
+    expect(paving.quote.range).toBeNull();
+    expect(paving.quote.total).toBe(15013);
+    expect(paving.quote.options.map((o: { total: number }) => o.total)).toEqual([15013, 31253]);
+  });
+
+  it("previews a range for a roof another trade measured, as Roofing sends it one", async () => {
+    roofer({ status: "draft", range_low: null, range_high: null, range_sent_at: null });
+    state.tables.companies![0]!.trade_preset = "paving";
+    const preview = async () => (await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json()).quote;
+    expect(await preview()).toMatchObject({ range: null, total: 18304 });
+    state.tables.measurements = [{ id: "m-roof", company_id: ROOFER, quote_id: QUOTE, sections: [{ kind: "Area", value: 2000 }], roof_pitch: "6/12", roofing_squares: 22.4, updated_at: "2026-10-20T00:00:00Z" }];
+    expect(await preview()).toMatchObject({ range: { low: 18300, high: 21050, sent_at: null }, total: null });
+    // A lot measured for paving isn't a roof: the price.
+    Object.assign(state.tables.measurements[0]!, { roof_pitch: null, roofing_squares: null });
+    expect(await preview()).toMatchObject({ range: null, total: 18304 });
+  });
+
+  it("takes the option they're leaning toward with a yes to the range", async () => {
+    withOptions({ range_low: 15000, range_high: 35950, range_sent_at: "2026-10-22T15:00:00Z" });
+    state.rpcs.accept_hub_range = () => ({ data: "2026-10-23T14:00:00Z", error: null });
+    const res = await hub({ t: "quote", id: QUOTE }, "/accept-range", { option_id: METAL });
+    expect(res.status).toBe(200);
+    expect(state.calls.find((c) => c.name === "accept_hub_range")?.args).toEqual({ p_company: ROOFER, p_quote: QUOTE, p_option: METAL });
+
+    state.calls = [];
+    expect((await hub({ t: "quote", id: QUOTE }, "/accept-range", { option_id: "metal" })).status).toBe(400);
+    expect(state.calls.some((c) => c.name === "accept_hub_range")).toBe(false);
+  });
+
+  it("says the options changed when the one they lean toward isn't on the estimate", async () => {
+    withOptions({ range_low: 15000, range_high: 35950, range_sent_at: "2026-10-22T15:00:00Z" });
+    state.rpcs.accept_hub_range = () => ({ data: "2026-10-23T14:00:00Z", error: null });
+    for (const option_id of [OTHER, UNUSED]) {
+      const res = await hub({ t: "quote", id: QUOTE }, "/accept-range", { option_id });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("The options on this estimate changed. Please look it over again.");
+    }
+    expect(state.calls.some((c) => c.name === "accept_hub_range")).toBe(false);
+    // Sent in capitals, it's still the metal roof.
+    expect((await hub({ t: "quote", id: QUOTE }, "/accept-range", { option_id: METAL.toUpperCase() })).status).toBe(200);
+    expect(state.calls.find((c) => c.name === "accept_hub_range")?.args.p_option).toBe(METAL);
+  });
+
+  it("keeps each option's range where it was when the range was sent, inside the range sent", async () => {
+    withOptions({ range_low: 15000, range_high: 35950, range_sent_at: "2026-10-22T15:00:00Z" });
+    state.tables.quotes![0]!.range_lines = snapshotLines(state.tables.quote_line_items as never);
+    const ranges = async () => (await (await hub({ t: "quote", id: QUOTE })).json()).quote.options.map((o: { id: string; range: unknown }) => [o.id, o.range]);
+    const sent = [
+      [GOOD, { low: 15000, high: 17300 }],
+      [METAL, { low: 31250, high: 35950 }],
+    ];
+    expect(await ranges()).toEqual(sent);
+    // The office prices the metal roof higher after sending, and adds a third option: the homeowner's
+    // ranges stay as sent until a new range goes out, and the new option has none yet.
+    state.tables.quote_line_items!.find((l) => l.id === L.metal)!.unit_price = 1500;
+    state.tables.quote_options!.push({ ...state.tables.quote_options![0]!, id: UNUSED, name: "Designer shingle", sort: 2 });
+    state.tables.quote_line_items!.push(line("00000000-0000-4000-8000-0000000000ca", S.roof, "Designer shingle roof", { option_id: UNUSED, quantity: 22.4, unit: "square", unit_price: 700, selected: false, sort: 10 }));
+    expect(await ranges()).toEqual([...sent, [UNUSED, null]]);
+    // A range sent before its lines were kept: today's lines, kept inside the range that was sent.
+    state.tables.quotes![0]!.range_lines = null;
+    expect(await ranges()).toEqual([sent[0], [METAL, { low: 35950, high: 35950 }], [UNUSED, { low: 18100, high: 20900 }]]);
+  });
+
+  it("previews the exact price while none of the options has a price yet, as it can't be sent as a range", async () => {
+    withOptions({ status: "draft", roof_package_id: null });
+    state.tables.quote_line_items = state.tables.quote_line_items!.filter((l) => l.option_id === null);
+    state.tables.quotes![0]!.total = 2469;
+    const preview = await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json();
+    expect(preview.quote.range).toBeNull();
+    expect(preview.quote.total).toBe(2469);
+    expect(preview.quote.options.map((o: { total: unknown; range: unknown }) => [o.total, o.range])).toEqual([[null, null], [null, null]]);
+  });
+});
+
+describe("the contract in the Client Hub", () => {
+  it("sends the business's own sections as written, and the facts the page fills them in with", async () => {
+    withOptions();
+    state.tables.quotes![0]!.client = { display_name: "Dana Whitfield", billing_address: { line1: "PO Box 12", city: "Springfield", region: "IL", postal_code: "62705" } };
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.contract).toEqual({
+      kind: "live",
+      terms: TERMS,
+      // The template's, every option's and the quote's, and only this business's: never another business's, or one no quote names.
+      library: [
+        { id: PAYMENT, title: "Payment", body: "<p>The price is {Total}. Make checks out to {Business name}.</p>", place: "terms", initials: false },
+        { id: CANCEL, title: "Your right to cancel", body: "<p>{Customer name} may cancel within three business days.</p>", place: "signatures", initials: true },
+        { id: WARRANTY, title: "Warranty", body: "<p>{Option}: {Warranty}</p>", place: "terms", initials: false },
+      ],
+      template_sections: [PAYMENT, FOREIGN],
+      quote_sections: [WARRANTY],
+      facts: {
+        customerName: "Dana Whitfield",
+        customerAddress: ["PO Box 12", "Springfield, IL 62705"],
+        jobAddress: ["1482 Ridgeview Dr", "Springfield, IL 62704"],
+        businessName: "Summit Roofing",
+        businessPhone: "555-0100",
+        license: "RC-104882",
+        estimateNumber: 1042,
+        date: "2026-10-22T15:00:00Z",
+        timeZone: "America/Chicago",
+        deposit: 1000,
+        // The option picked says these.
+        optionName: null,
+        warranty: null,
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("Another business's words");
+    expect(JSON.stringify(body)).not.toContain("billing_address");
+    // Without a billing address, the customer's address is the job's.
+    state.tables.quotes![0]!.client = { display_name: "Dana Whitfield", billing_address: {} };
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).contract.facts.customerAddress).toEqual(["1482 Ridgeview Dr", "Springfield, IL 62704"]);
+  });
+
+  it("sends a plain quote's terms too, with no sections", async () => {
+    roofer({ range_low: null, range_high: null, range_sent_at: null });
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.quote.options).toEqual([]);
+    expect(body.quote.option_id).toBeNull();
+    expect(body.contract).toMatchObject({ kind: "live", library: [], template_sections: [], quote_sections: [] });
+    expect(body.contract.terms).toBe(body.template.terms);
+  });
+});
+
+describe("approving an estimate with options", () => {
+  beforeEach(() => {
+    withOptions();
+    state.rpcs.approve_hub_quote = () => ({ data: true, error: null });
+  });
+
+  it("signs for the option picked, with its add-ons, the terms filled in and the initials kept", async () => {
+    const posted = await picked(METAL, [L.snow, L.gutter]);
+    // The metal roof with snow guards and gutter guards: $31,253 + $600 + $840.
+    expect(posted.expected_total).toBe(32693);
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", {
+      name: "Dana Whitfield", signature: PNG, option_id: METAL, selected_line_ids: [L.snow, L.gutter, L.vent], initials: INITIALS, ...posted,
+    });
+    expect(res.status).toBe(200);
+    const args = approvalArgs();
+    // The shingle roof's add-on isn't on the metal roof, so it's left off.
+    expect(args).toMatchObject({ p_company: ROOFER, p_quote: QUOTE, p_option: METAL, p_expected_total: 32693, p_selected: [L.snow, L.gutter] });
+    const approval = args.p_approval as Row;
+    expect(approval.selected_line_ids).toEqual([L.snow, L.gutter]);
+    expect(approval.option).toEqual({
+      id: METAL, name: "Standing-seam metal", tier: "Better", picture: null, style: "metal", highlights: ["Lasts 50 years or more"], warranty: "Lifetime on the panels & 15 years on our work.",
+    });
+    expect(approval.contract).toEqual({
+      // Plain text: the paper escapes it as it prints.
+      terms: "Thanks, Dana Whitfield. Warranty: Lifetime on the panels & 15 years on our work.",
+      sections: [
+        { id: PAYMENT, title: "Payment", body: "<p>The price is $32,693.00. Make checks out to Summit Roofing.</p>", place: "terms", initials: false, initialed: false },
+        { id: CANCEL, title: "Your right to cancel", body: "<p>Dana Whitfield may cancel within three business days.</p>", place: "signatures", initials: true, initialed: true },
+        { id: WARRANTY, title: "Warranty", body: "<p>Standing-seam metal: Lifetime on the panels &amp; 15 years on our work.</p>", place: "terms", initials: false, initialed: false },
+      ],
+    });
+    expect(approval.initials).toEqual({ image: INITIALS, signed_at: approval.signed_at });
+  });
+
+  it("keeps the option's picture and no initials when nothing asks for them", async () => {
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD, initials: INITIALS, ...(await picked(GOOD, [])) });
+    expect(res.status).toBe(200);
+    const approval = approvalArgs().p_approval as Row;
+    expect(approval.option).toMatchObject({ id: GOOD, tier: "Good", picture: { path: `${ROOFER}/packages/${PICTURE}.jpg`, width: 1600, height: 1067 } });
+    expect((approval.contract as { sections: Row[] }).sections.map((s) => s.id)).toEqual([PAYMENT, WARRANTY]);
+    expect(approval.initials).toBeNull();
+  });
+
+  it("needs one of the options picked", async () => {
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Pick one of the options first.");
+    const other = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: OTHER });
+    expect(other.status).toBe(409);
+    expect((await other.json()).error).toBe("The options on this estimate changed. Please look it over again.");
+    expect(state.calls.some((c) => c.name === "approve_hub_quote")).toBe(false);
+  });
+
+  it("asks for initials where the terms ask for them", async () => {
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: METAL, ...(await picked(METAL, [])) });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Add your initials where the terms ask for them.");
+    // Only a small drawn picture.
+    const big = `data:image/png;base64,${"A".repeat(61_441)}`;
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: METAL, initials: big })).status).toBe(400);
+    expect(state.calls.some((c) => c.name === "approve_hub_quote")).toBe(false);
+  });
+
+  it("only takes a signature and initials of a size a signature pad draws", async () => {
+    // A few bytes that would take everyone who opens the signed copy gigabytes to draw.
+    const huge = drawnPng(20_000, 20_000);
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: huge, option_id: GOOD })).status).toBe(400);
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: METAL, initials: huge })).status).toBe(400);
+    // Not a PNG at all, whatever it says it is.
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: "data:image/png;base64,SU5JVElBTFM=", option_id: GOOD })).status).toBe(400);
+    expect(state.calls.some((c) => c.name === "approve_hub_quote")).toBe(false);
+    // A wide pad on a big iPad is fine.
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: drawnPng(2752, 340), option_id: METAL, initials: drawnPng(2752, 200) })).status).toBe(200);
+  });
+
+  it("turns it down when the terms changed after they were read", async () => {
+    const posted = await picked(METAL, []);
+    state.tables.contract_sections![0]!.body = "<p>The price is {Total}, due up front.</p>";
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: METAL, initials: INITIALS, ...posted });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("The terms changed. Please look them over again.");
+    expect(state.calls.some((c) => c.name === "approve_hub_quote")).toBe(false);
+  });
+
+  it("says the price changed when the database's total isn't the one they saw", async () => {
+    state.rpcs.approve_hub_quote = () => ({ data: false, error: null });
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD, expected_total: 15000 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("The price changed. Please look it over again.");
+    expect(approvalArgs().p_expected_total).toBe(15000);
+
+    state.calls = [];
+    const old = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD });
+    expect((await old.json()).error).toBe("This quote can't be approved anymore.");
+    expect(Object.keys(approvalArgs())).not.toContain("p_expected_total");
+  });
+
+  it("fills in the total their choices come to when the page didn't send one", async () => {
+    await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD, selected_line_ids: [L.vent] });
+    const contract = (approvalArgs().p_approval as Row).contract as { sections: Row[] };
+    expect(contract.sections[0]!.body).toBe("<p>The price is $15,413.00. Make checks out to Summit Roofing.</p>");
+  });
+
+  it("keeps one pick per group among the option's lines only", async () => {
+    const t = state.tables.quote_line_items!;
+    t.push(line(L.ridge, null, "Ridge vent", { option_id: GOOD, optional: true, selected: false, option_group: "Ventilation", unit_price: 300, sort: 8 }));
+    t.push(line(L.power, null, "Power vent", { option_id: GOOD, optional: true, selected: false, option_group: "Ventilation", unit_price: 500, sort: 9 }));
+    // The metal roof has no ventilation group, so nothing to pick there.
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: METAL, initials: INITIALS })).status).toBe(200);
+    state.calls = [];
+    const none = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD });
+    expect(none.status).toBe(400);
+    expect((await none.json()).error).toBe("Pick one of the choices for Ventilation.");
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD, selected_line_ids: [L.power] })).status).toBe(200);
+  });
+
+  it("won't sign an option that isn't priced yet", async () => {
+    // The metal roof was offered before measuring, and its package was gone when the lines were filled in.
+    state.tables.quote_line_items = state.tables.quote_line_items!.filter((l) => l.option_id !== METAL || l.optional);
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: METAL, initials: INITIALS });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("This option isn't priced yet. Pick another one, or ask us about it.");
+    expect(state.calls.some((c) => c.name === "approve_hub_quote")).toBe(false);
+  });
+
+  it("says it can't be approved anymore when another approval got there first, whatever total was sent", async () => {
+    state.rpcs.approve_hub_quote = () => {
+      state.tables.quotes![0]!.status = "approved";
+      return { data: false, error: null };
+    };
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD, ...(await picked(GOOD, [])) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("This quote can't be approved anymore.");
+  });
+
+  it("matches the option and add-ons when their ids come in capitals", async () => {
+    const posted = await picked(METAL, [L.snow]);
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", {
+      name: "Dana Whitfield", signature: PNG, option_id: METAL.toUpperCase(), selected_line_ids: [L.snow.toUpperCase()], initials: INITIALS, ...posted,
+    });
+    expect(res.status).toBe(200);
+    expect(approvalArgs()).toMatchObject({ p_option: METAL, p_selected: [L.snow], p_expected_total: 31853 });
+    expect((approvalArgs().p_approval as Row).selected_line_ids).toEqual([L.snow]);
+  });
+
+  it("signs a plain quote as before, keeping its terms filled in", async () => {
+    roofer({ range_low: null, range_high: null, range_sent_at: null });
+    state.rpcs.approve_hub_quote = () => ({ data: true, error: null });
+    state.tables.document_templates![1]!.settings = { company_signs: false, terms: "Thanks, {Customer name}." };
+    state.tables.quote_line_items!.find((l) => l.id === "l6")!.id = L.gutter;
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, selected_line_ids: [L.gutter] });
+    expect(res.status).toBe(200);
+    const args = approvalArgs();
+    expect(Object.keys(args).sort()).toEqual(["p_approval", "p_company", "p_quote", "p_selected"]);
+    expect(args.p_selected).toEqual([L.gutter]);
+    expect(args.p_approval).toMatchObject({ option: null, contract: { terms: "Thanks, Dana Whitfield.", sections: [] }, initials: null });
+  });
+});
+
+describe("a signed estimate with options", () => {
+  const signedWith = templateSettings({ header: "classic", terms: TERMS, license: "RC-99" });
+  const kept = {
+    name: "Dana Whitfield", signature: PNG, signed_at: "2026-10-25T18:00:00Z", ip: "198.51.100.4", template: signedWith, total: 32693,
+    option: { id: METAL, name: "Standing-seam metal", tier: "Better", picture: null, style: "metal", highlights: ["Lasts 50 years or more"], warranty: "Lifetime on the panels & 15 years on our work." },
+    contract: {
+      terms: "Thanks, Dana Whitfield. Warranty: Lifetime on the panels & 15 years on our work.",
+      sections: [{ id: CANCEL, title: "Your right to cancel", body: "<p>Dana Whitfield may cancel within three business days.</p>", place: "signatures", initials: true, initialed: true }],
+    },
+    initials: { image: INITIALS, signed_at: "2026-10-25T18:00:00Z" },
+  };
+
+  it("shows the copy kept when it was signed: the option chosen, its lines, the contract and the initials", async () => {
+    withOptions({ status: "approved", approved_at: "2026-10-25T18:00:00Z", option_id: METAL, total: 32693, approval: kept });
+    // Today's library says something else; the signed copy doesn't change.
+    state.tables.contract_sections![1]!.body = "<p>Changed after signing.</p>";
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.template).toEqual(signedWith);
+    expect(body.contract).toEqual({ kind: "signed", terms: kept.contract.terms, sections: kept.contract.sections, initials: kept.initials });
+    expect(body.quote.approval).toMatchObject({ name: "Dana Whitfield", option: kept.option, contract: kept.contract, initials: kept.initials });
+    expect(body.quote.lines.map((l: { id: string }) => l.id)).toEqual([L.tear, L.edge, L.metal, L.snow, L.gutter]);
+    expect(body.quote.options.map((o: { id: string; total: number }) => [o.id, o.total])).toEqual([[METAL, 32693]]);
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("Changed after signing");
+    expect(text).not.toContain("198.51.100.4");
+  });
+
+  it("shows the option as it was signed, whatever the office changes on it later", async () => {
+    const picture = { path: `${ROOFER}/packages/${PICTURE}.jpg`, width: 1600, height: 1067 };
+    withOptions({ status: "approved", approved_at: "2026-10-25T18:00:00Z", option_id: METAL, total: 32693, approval: { ...kept, option: { ...kept.option, picture } } });
+    Object.assign(state.tables.quote_options!.find((o) => o.id === METAL)!, { name: "Renamed later", tier: "Premium", highlights: [], warranty: "None" });
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.quote.option_id).toBe(METAL);
+    expect(body.quote.options).toEqual([
+      {
+        id: METAL, name: "Standing-seam metal", tier: "Better", picture: { src: `/api/public/package/${ROOFER}/${PICTURE}.jpg`, width: 1600, height: 1067 },
+        style: "metal", highlights: ["Lasts 50 years or more"], warranty: "Lifetime on the panels & 15 years on our work.", section_ids: [], sort: 0, total: 32693, range: null,
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("Renamed later");
+  });
+
+  it("fills in the terms of an estimate signed before the contract was kept", async () => {
+    withOptions({ status: "approved", approved_at: "2026-10-25T18:00:00Z", option_id: METAL, total: 32693, approval: { name: "Dana Whitfield", signature: PNG, template: signedWith } });
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.contract).toEqual({ kind: "signed", terms: "Thanks, Dana Whitfield. Warranty: ", sections: [], initials: null });
+    expect(body.quote.approval).toMatchObject({ option: null, contract: null, initials: null });
+  });
+});
+
+describe("an invoice in the Client Hub", () => {
+  const INVOICE = "00000000-0000-4000-8000-0000000000e1";
+
+  it("prints the template's invoice sections, the business's own only, filled in with the invoice's facts", async () => {
+    withOptions();
+    state.tables.document_templates![0]!.settings = { header: "banner", license: "RC-1", terms: "Due by {Date}. Thanks, {Customer name}.", invoice_sections: [FOREIGN, WARRANTY, PAYMENT], sections: [CANCEL] };
+    state.tables.contract_sections![2]!.body = "<p>Invoice {Estimate number} for the work at {Job address}. {Option}{Warranty}{Deposit}</p>";
+    state.tables.invoices = [{
+      id: INVOICE, company_id: ROOFER, number: 77, status: "sent", subject: "Roof replacement", notes: null, issued_on: "2026-10-01", due_on: "2026-10-31",
+      subtotal: 18304, discount_amount: 0, tax_amount: 0, total: 18304, retainage_amount: 0, amount_paid: 0, balance_due: 18304, client_id: CLIENT, promo: null,
+      client: { display_name: "Dana Whitfield", billing_address: { line1: "PO Box 12", city: "Springfield", region: "IL", postal_code: "62705" } },
+      job: { property: { line1: "1482 Ridgeview Dr", city: "Springfield", region: "IL", postal_code: "62704" } },
+      lines: [{ name: "Architectural shingle roof", description: null, quantity: 1, unit: "ea", unit_price: 18304, sort: 1 }],
+      payments: [],
+    }];
+    const res = await hub({ t: "invoice", id: INVOICE });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contract).toEqual({
+      // Plain text: the paper escapes it as it prints.
+      terms: "Due by October 1, 2026. Thanks, Dana Whitfield.",
+      sections: [
+        { id: WARRANTY, title: "Warranty", body: "<p>Invoice 77 for the work at 1482 Ridgeview Dr, Springfield, IL 62704. </p>", place: "terms", initials: false },
+        { id: PAYMENT, title: "Payment", body: "<p>The price is $18,304.00. Make checks out to Summit Roofing.</p>", place: "terms", initials: false },
+      ],
+    });
+    // Only the customer's name goes out with the invoice; their billing address and the job only in the words.
+    expect(body.invoice.client).toEqual({ display_name: "Dana Whitfield" });
+    expect(body.invoice).not.toHaveProperty("job");
+    const text = JSON.stringify(body);
+    for (const hidden of ["billing_address", "PO Box 12", "Another business's words", "may cancel"]) expect(text).not.toContain(hidden);
+  });
+});
+
+describe("package pictures", () => {
+  const picture = (file: string, company = ROOFER) => app.request(`/api/public/package/${company}/${file}.jpg`, {}, env);
+
+  it("shows any of the business's package pictures to anyone, kept for good", async () => {
+    state.files[`${ROOFER}/packages/${PICTURE}.jpg`] = JPEG;
+    const res = await picture(PICTURE);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(JPEG);
+  });
+
+  it("shows none larger than the server saves one, and never reads one like that whole", async () => {
+    // Uploaded straight to Storage by someone in the business: 8 MB that starts like a JPEG.
+    const path = `${ROOFER}/packages/${PICTURE}.jpg`;
+    const big = new Uint8Array(8_000_000);
+    big.set(JPEG);
+    state.files[path] = big;
+    expect((await picture(PICTURE)).status).toBe(404);
+    expect(state.streamed[path]).toBeLessThan(1_600_000);
+    // Just under the limit is a picture the server could have saved.
+    state.files[path] = big.slice(0, 1_400_000);
+    expect((await picture(PICTURE)).status).toBe(200);
+  });
+
+  it("shows nothing that isn't a JPEG in a business's packages folder", async () => {
+    state.files[`${ROOFER}/packages/${PICTURE}.jpg`] = JPEG;
+    // Another business's folder, another folder, a file that isn't a JPEG, a name that isn't a uuid.
+    expect((await picture(PICTURE, OTHER)).status).toBe(404);
+    state.files[`${ROOFER}/logo/${OTHER}.jpg`] = JPEG;
+    expect((await picture(OTHER)).status).toBe(404);
+    state.files[`${ROOFER}/packages/${OTHER}.jpg`] = new TextEncoder().encode("<html><script>alert(1)</script></html>");
+    expect((await picture(OTHER)).status).toBe(404);
+    expect((await app.request(`/api/public/package/${ROOFER}/..%2Flogo%2F${OTHER}.jpg`, {}, env)).status).toBe(404);
+    expect((await picture("not-a-uuid")).status).toBe(404);
+  });
+});
+
 describe("hub helpers", () => {
   it("splits the business's address into letterhead lines", () => {
     expect(addressLines({ line1: "200 Main St", city: "Springfield", region: "IL", postal_code: "62704" })).toEqual(["200 Main St", "Springfield, IL 62704"]);
@@ -386,9 +964,14 @@ describe("hub helpers", () => {
   });
 
   it("keeps only real signatures from an approval", () => {
-    expect(publicApproval({ name: "Office", method: "manual" }, "2026-10-25T18:00:00Z")).toEqual({ name: "Office", signature: null, signed_at: "2026-10-25T18:00:00Z", method: "manual", company: null });
-    expect(publicApproval({ name: "Dana", signature: "javascript:alert(1)", company: { name: "Mike", signature: "not-a-png" } }, null)).toMatchObject({ signature: null, company: null });
-    expect(publicApproval(null, null)).toEqual({ name: "", signature: null, signed_at: null, method: null, company: null });
+    expect(publicApproval({ name: "Office", method: "manual" }, "2026-10-25T18:00:00Z")).toEqual({
+      name: "Office", signature: null, signed_at: "2026-10-25T18:00:00Z", method: "manual", company: null, option: null, contract: null, initials: null,
+    });
+    expect(publicApproval({ name: "Dana", signature: "javascript:alert(1)", company: { name: "Mike", signature: "not-a-png" }, initials: { image: "javascript:alert(1)" } }, null)).toMatchObject({ signature: null, company: null, initials: null });
+    expect(publicApproval(null, null)).toEqual({ name: "", signature: null, signed_at: null, method: null, company: null, option: null, contract: null, initials: null });
+    // One kept before signatures were checked for their size isn't sent on.
+    const huge = drawnPng(20_000, 20_000);
+    expect(publicApproval({ name: "Dana", signature: huge, company: { name: "Mike", signature: huge }, initials: { image: huge } }, null)).toMatchObject({ signature: null, company: null, initials: null });
   });
 
   it("leaves a price set on site out of what's included", () => {
@@ -418,6 +1001,23 @@ describe("automations on a price range", () => {
     expect(exact?.appPath).toBe(`/quotes/${QUOTE}`);
   });
 
+  it("say how many options there are and the lowest price before the client chooses, never the option shown", async () => {
+    withOptions({ option_id: METAL, total: 31253 });
+    const q = state.tables.quotes![0]!;
+    q.lines = state.tables.quote_line_items;
+    q.options = state.tables.quote_options!.filter((o) => o.quote_id === QUOTE);
+    const total = async () => (await loadContext(adminClient(env), ROOFER, "quote", QUOTE))?.vars.total;
+    // "Just checking whether you had any questions about quote #1042 (2 options from $15,013.00)".
+    expect(await total()).toBe("2 options from $15,013.00");
+    // Signed, it's the option they chose.
+    q.status = "approved";
+    expect(await total()).toBe("$31,253.00");
+    // While only one has a price, its total, as the quote's email said.
+    q.status = "sent";
+    q.lines = (q.lines as Row[]).filter((l) => l.option_id !== GOOD);
+    expect(await total()).toBe("$31,253.00");
+  });
+
   it("keep the range on one marked lost, and say the exact price once the office sent it instead", async () => {
     const q = state.tables.quotes![0]!;
     q.lines = [];
@@ -427,5 +1027,160 @@ describe("automations on a price range", () => {
     q.status = "sent";
     q.exact_sent_at = "2026-10-24T15:00:00Z";
     expect((await loadContext(adminClient(env), ROOFER, "quote", QUOTE))?.vars.total).toBe("$18,304.00");
+  });
+});
+
+describe("a quote with options on the client's home page", () => {
+  const onHome = async () => (await (await hub({ t: "client", id: CLIENT })).json()).quotes.find((q: { id: string }) => q.id === QUOTE);
+
+  it("says how many options there are and the lowest price until the client chooses, never the option shown", async () => {
+    withOptions({ option_id: METAL, total: 31253 });
+    expect(await onHome()).toMatchObject({ total: null, range: null, options: { count: 2, from: 15013 } });
+    expect(JSON.stringify(await (await hub({ t: "client", id: CLIENT })).json())).not.toContain("31253");
+    // Signed, the total is the option they chose.
+    state.tables.quotes![0]!.status = "approved";
+    expect(await onHome()).toMatchObject({ total: 31253, options: null });
+  });
+
+  it("shows the total while only one option has a price, and for a quote without options", async () => {
+    withOptions();
+    state.tables.quote_line_items = state.tables.quote_line_items!.filter((l) => l.option_id !== METAL);
+    expect(await onHome()).toMatchObject({ total: 15013, options: null });
+    roofer({ range_low: null, range_high: null, range_sent_at: null });
+    expect(await onHome()).toMatchObject({ total: 18304, options: null });
+  });
+});
+
+describe("a promo code on a price set on site", () => {
+  const ADJUSTMENT = "00000000-0000-4000-8000-0000000000cb";
+  const promo = () => hub({ t: "quote", id: QUOTE }, "/promo", { code: "SPRING" });
+  beforeEach(() => {
+    state.rpcs.apply_promo_code = () => ({ data: { total: 14000 }, error: null });
+  });
+
+  it("can't go on an option priced on site, where it would come off the price agreed", async () => {
+    withOptions({ priced_on_site_at: "2026-10-25T18:00:00Z", subtotal: 14013, total: 14013 });
+    state.tables.quote_line_items!.push(line(ADJUSTMENT, null, "Price adjustment", { option_id: GOOD, unit_price: -1000, sort: 9 }));
+    const res = await promo();
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("Your price was set with you at the visit, so a promo code can't go on it. Give us a call about the code.");
+    expect(state.calls.some((c) => c.name === "apply_promo_code")).toBe(false);
+    // The page knows not to offer one.
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).quote.site_priced).toBe(true);
+  });
+
+  it("can't replace the discount a price set on site gave a quote without options", async () => {
+    roofer({ range_low: null, range_high: null, range_sent_at: null, priced_on_site_at: "2026-10-25T18:00:00Z", discount_amount: 1000, total: 17304 });
+    expect((await promo()).status).toBe(409);
+    expect(state.calls.some((c) => c.name === "apply_promo_code")).toBe(false);
+  });
+
+  it("still goes on after a visit that kept the estimate's price", async () => {
+    // Priced on site at the estimate's own price: no adjustment and no discount.
+    roofer({ range_low: null, range_high: null, range_sent_at: null, priced_on_site_at: "2026-10-25T18:00:00Z" });
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).quote.site_priced).toBe(false);
+    expect((await promo()).status).toBe(200);
+    expect(state.calls.find((c) => c.name === "apply_promo_code")?.args).toEqual({ p_kind: "quote", p_id: QUOTE, p_code: "SPRING" });
+    // An option priced on site that isn't shown any more doesn't count.
+    state.calls = [];
+    withOptions({ priced_on_site_at: "2026-10-25T18:00:00Z" });
+    state.tables.quote_line_items!.push(line(ADJUSTMENT, null, "Price adjustment", { option_id: METAL, unit_price: -1000, selected: false, sort: 9 }));
+    expect((await promo()).status).toBe(200);
+  });
+});
+
+describe("a promo code's minimum order in the Client Hub", () => {
+  beforeEach(() => {
+    state.rpcs.apply_promo_code = () => ({ data: { total: 14000 }, error: null });
+  });
+
+  it("is checked against the option and add-ons the client is choosing", async () => {
+    withOptions();
+    const res = await hub({ t: "quote", id: QUOTE }, "/promo", { code: "SPRING", option_id: METAL.toUpperCase(), selected_line_ids: [L.snow] });
+    expect(res.status).toBe(200);
+    expect(state.calls.find((c) => c.name === "apply_promo_code")?.args).toEqual({ p_kind: "quote", p_id: QUOTE, p_code: "SPRING", p_option: METAL, p_selected: [L.snow] });
+    // No add-ons ticked is a choice too.
+    state.calls = [];
+    await hub({ t: "quote", id: QUOTE }, "/promo", { code: "SPRING", option_id: GOOD, selected_line_ids: [] });
+    expect(state.calls.find((c) => c.name === "apply_promo_code")?.args).toMatchObject({ p_option: GOOD, p_selected: [] });
+  });
+
+  it("turns down an option that isn't this estimate's", async () => {
+    withOptions();
+    const res = await hub({ t: "quote", id: QUOTE }, "/promo", { code: "SPRING", option_id: OTHER });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("The options on this estimate changed. Please look it over again.");
+    expect(state.calls.some((c) => c.name === "apply_promo_code")).toBe(false);
+  });
+
+  it("tells the page the code's minimum, so it can warn before signing", async () => {
+    withOptions({ promo_code_id: "p-1", promo: { code: "SPRING", kind: "amount", value: 500, description: null, min_subtotal: 20000 } });
+    const body = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(body.quote.promo).toMatchObject({ code: "SPRING", min_subtotal: 20000 });
+    expect(body.quote.created_at).toBe("2026-10-21T13:00:00Z");
+  });
+
+  it("answers 409 with what to do when the choices at approval come to less than the code's minimum", async () => {
+    withOptions();
+    const message = "That code needs an order of at least $20,000.00. Remove the code, or change your choices.";
+    state.rpcs.approve_hub_quote = () => ({ data: null, error: { message, code: "CX412" } });
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, option_id: GOOD, selected_line_ids: [], ...(await picked(GOOD, [])) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(message);
+  });
+});
+
+describe("a single-package estimate's contract", () => {
+  beforeEach(() => {
+    roofer({ range_low: null, range_high: null, range_sent_at: null });
+    state.tables.roof_packages![0]!.warranty = "10 years on our workmanship.";
+    state.tables.document_templates![1]!.settings = { company_signs: false, terms: "Thanks, {Customer name}.", sections: [WARRANTY] };
+    state.tables.contract_sections = [{ id: WARRANTY, company_id: ROOFER, title: "Warranty", body: "<p>{Option}: {Warranty}</p>", place: "terms", initials: false, sort: 1 }];
+    state.rpcs.approve_hub_quote = () => ({ data: true, error: null });
+  });
+
+  it("says its package's name and warranty in {Option} and {Warranty}, on the page and in the copy kept", async () => {
+    const view = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(view.contract.facts).toMatchObject({ optionName: "Architectural shingle", warranty: "10 years on our workmanship." });
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, ...(await picked(null, [])) });
+    expect(res.status).toBe(200);
+    const approval = approvalArgs().p_approval as Row;
+    expect(approval.option).toBeNull();
+    expect((approval.contract as { sections: Row[] }).sections).toEqual([
+      { id: WARRANTY, title: "Warranty", body: "<p>Architectural shingle: 10 years on our workmanship.</p>", place: "terms", initials: false, initialed: false },
+    ]);
+  });
+
+  it("turns it down when the package's warranty changed after the page was read", async () => {
+    const posted = await picked(null, []);
+    state.tables.roof_packages![0]!.warranty = "5 years on our workmanship.";
+    const res = await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG, ...posted });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("The terms changed. Please look them over again.");
+  });
+});
+
+describe("an invoice's {Option} and {Warranty} in the Client Hub", () => {
+  const INVOICE = "00000000-0000-4000-8000-0000000000e2";
+  const invoice = (quote: Row | null) => ({
+    id: INVOICE, company_id: ROOFER, number: 78, status: "sent", subject: "Roof replacement", notes: null, issued_on: "2026-10-01", due_on: "2026-10-31",
+    subtotal: 32693, discount_amount: 0, tax_amount: 0, total: 32693, retainage_amount: 0, amount_paid: 0, balance_due: 32693, client_id: CLIENT, promo: null,
+    client: { display_name: "Dana Whitfield", billing_address: {} }, job: { property: null, quote }, lines: [], payments: [],
+  });
+  const printed = async () => (await (await hub({ t: "invoice", id: INVOICE })).json()).contract.sections[0].body;
+
+  it("say the option the job's estimate was signed for, else its package", async () => {
+    roofer();
+    state.tables.document_templates![0]!.settings = { invoice_sections: [WARRANTY] };
+    state.tables.contract_sections = [{ id: WARRANTY, company_id: ROOFER, title: "Warranty", body: "<p>{Option}: {Warranty}</p>", place: "terms", initials: false, sort: 1 }];
+    const option = { id: METAL, name: "Standing-seam metal", tier: "Better", picture: null, style: "metal", highlights: [], warranty: "Lifetime on the panels." };
+    state.tables.invoices = [invoice({ approval: { name: "Dana Whitfield", option }, option_id: METAL, roof_package_id: null, option: { name: "Renamed later", warranty: "None" } })];
+    expect(await printed()).toBe("<p>Standing-seam metal: Lifetime on the panels.</p>");
+    state.tables.roof_packages![0]!.warranty = "10 years on our workmanship.";
+    state.tables.invoices = [invoice({ approval: { name: "Dana Whitfield" }, option_id: null, roof_package_id: PACKAGE, option: null })];
+    expect(await printed()).toBe("<p>Architectural shingle: 10 years on our workmanship.</p>");
+    // A job that didn't come from an estimate has neither.
+    state.tables.invoices = [invoice(null)];
+    expect(await printed()).toBe("<p>: </p>");
   });
 });

@@ -2,8 +2,13 @@
  * Line items, shared by quotes, jobs and invoices. They read like a simple table; clicking a row opens
  * it for editing (one at a time). Each field saves when it loses focus (or on Enter); totals are
  * recalculated by Postgres triggers, so the parent just refetches. Removing a line can be undone.
+ *
+ * On a quote that offers options (quote_options), `lines` is every line on the quote and the list
+ * shows the ones on every option with the option being looked at (`optionId`). New lines go on that
+ * option, or on every option, and a line can be moved between them; the money counts as core money.ts
+ * counts it for that option. Jobs and invoices have no options.
  */
-import { lineTotal } from "@crewtavo/core/money";
+import { countsOn, lineTotal, optionLabels, optionLines, toCents } from "@crewtavo/core/money";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +20,7 @@ import { formatMoneyCents, formatNumber } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import styles from "./LineItems.module.css";
 
 type Table = "quote_line_items" | "job_line_items" | "invoice_line_items";
 type Parent = "quote_id" | "job_id" | "invoice_id";
@@ -33,9 +39,60 @@ export interface Line {
   selected?: boolean;
   formula?: string | null;
   service_id?: string | null;
+  /** A quote line's option; null (or left out) for a line on every option. */
+  option_id?: string | null;
+  /** Add-ons that share one are a single choice: the client picks one of them. */
+  option_group?: string | null;
 }
 
 const COPY_FIELDS = ["name", "description", "quantity", "unit", "unit_price", "taxable", "service_id"] as const;
+
+/** The lines a list shows: on a quote with options, the ones on every option and the option looked at's. */
+export function visibleLines<T extends { option_id?: string | null }>(lines: readonly T[], optionId: string | null | undefined): T[] {
+  return optionId ? lines.filter((l) => l.option_id == null || l.option_id === optionId) : [...lines];
+}
+
+/** The sort number for a new line: after every line there is, shown or not (another option's too). */
+export const nextSort = (lines: ReadonlyArray<{ sort: number }>) => lines.reduce((top, l) => Math.max(top, Number(l.sort)), -1) + 1;
+
+/**
+ * A line moved up or down past the next line shown: it goes just before (or after) that line among all
+ * the lines, the others keep their order (so another option's list stays as it was), and they're
+ * numbered again from 0, so equal sort values (old data) can't block a move. Only the lines whose
+ * number changes, to save.
+ */
+export function movedSorts(lines: ReadonlyArray<{ id: string; sort: number }>, shownIds: readonly string[], id: string, dir: -1 | 1): Array<{ id: string; sort: number }> {
+  const neighbor = shownIds[shownIds.indexOf(id) + dir];
+  if (!shownIds.includes(id) || !neighbor) return [];
+  const order = lines
+    .map((line, i) => ({ line, i }))
+    .sort((a, b) => Number(a.line.sort) - Number(b.line.sort) || a.i - b.i)
+    .map(({ line }) => line.id)
+    .filter((lineId) => lineId !== id);
+  order.splice(order.indexOf(neighbor) + (dir === 1 ? 1 : 0), 0, id);
+  const before = new Map(lines.map((l) => [l.id, Number(l.sort)]));
+  return order.map((lineId, sort) => ({ id: lineId, sort })).filter((l) => before.get(l.id) !== l.sort);
+}
+
+/**
+ * What the lines shown come to before any discount and tax, and what they cost: the lines that count
+ * with the option looked at, as they would once it's the one shown (core optionLines and countsOn), so
+ * the price is that option's subtotal. `withOptions`: quote lines, where an add-on the client left off
+ * doesn't count; on a job or an invoice every line does.
+ */
+export function lineSums(lines: readonly Line[], { optionId = null, shownOptionId = null, withOptions = false }: { optionId?: string | null; shownOptionId?: string | null; withOptions?: boolean } = {}) {
+  const counted = withOptions
+    ? optionLines(lines.map((l) => ({ ...l, option_id: l.option_id ?? null })), optionId, shownOptionId).filter((l) => countsOn(l, optionId))
+    : lines;
+  const price = counted.reduce((s, l) => s + toCents(lineTotal(l.quantity, l.unit_price)), 0) / 100;
+  const cost = counted.reduce((s, l) => s + Number(l.quantity) * Number(l.unit_cost ?? 0), 0);
+  const costed = counted.some((l) => l.unit_cost != null && Number(l.unit_cost) > 0);
+  return { price, cost, costed };
+}
+
+/** Where a line is, on a quote that offers options: "On every option", or "Only on Better". */
+export const placeName = (optionId: string | null | undefined, options: ReadonlyArray<{ id: string; name: string }>) =>
+  optionId ? `Only on ${options.find((o) => o.id === optionId)?.name ?? "one option"}` : "On every option";
 
 export function LineItems({
   table,
@@ -45,6 +102,9 @@ export function LineItems({
   editable,
   onChanged,
   withOptions = false,
+  optionId = null,
+  shownOptionId = null,
+  options = [],
 }: {
   table: Table;
   parent: Parent;
@@ -53,11 +113,24 @@ export function LineItems({
   editable: boolean;
   onChanged: () => void;
   withOptions?: boolean;
+  /** On a quote that offers options: the option being looked at. Its lines show with the shared ones, and new lines go on it. */
+  optionId?: string | null;
+  /** The option shown first (quotes.option_id), whose add-on picks count. */
+  shownOptionId?: string | null;
+  /** The quote's options, for where each line is ("On every option", "Only on Better"). */
+  options?: ReadonlyArray<{ id: string; name: string }>;
 }) {
   const session = useSession();
   const { company } = session;
   const listRef = useListAnimation<HTMLDivElement>();
   const showCosts = hasRole(session, "admin", "office", "estimator") && can(session, "job_costs") && table !== "invoice_line_items";
+  // Only a quote's lines are ever on an option.
+  const offers = table === "quote_line_items" && options.length > 0 && optionId !== null;
+  const viewing = offers ? optionId : null;
+  const shown = useMemo(() => visibleLines(lines, viewing), [lines, viewing]);
+  const viewingName = options.find((o) => o.id === viewing)?.name ?? "this option";
+  // Where a new line goes: the option looked at, or every option.
+  const [addToEvery, setAddToEvery] = useState(false);
   const services = useQuery({
     queryKey: ["services", company.id],
     enabled: editable,
@@ -66,8 +139,9 @@ export function LineItems({
   });
 
   const [openId, setOpenId] = useState<string | null>(null);
+  // Numbered after every line, another option's too, so a new line never shares a place with one.
   const insert = async (rows: Array<Record<string, unknown>>) => {
-    const base = (lines.at(-1)?.sort ?? -1) + 1;
+    const base = nextSort(lines);
     const created = unwrap(await supabase().from(table).insert(rows.map((row, i) => ({ ...row, company_id: company.id, [parent]: parentId, sort: base + i })) as never).select("id")) as Array<{ id: string }>;
     return created[0]?.id ?? null;
   };
@@ -80,6 +154,7 @@ export function LineItems({
         : { name: "New item", quantity: 1, unit: "ea", unit_price: 0 };
       if (table !== "invoice_line_items" && s) row.unit_cost = s.unit_cost;
       if (table === "quote_line_items" && s) row.formula = s.formula;
+      if (offers) row.option_id = addToEvery ? null : viewing;
       return { id: await insert([row]), custom: !s };
     },
     // A custom item opens for editing right away; a price-list item is ready as it is.
@@ -91,13 +166,8 @@ export function LineItems({
 
   const move = useMutation({
     mutationFn: async ({ id, dir }: { id: string; dir: -1 | 1 }) => {
-      const index = lines.findIndex((l) => l.id === id);
-      const other = lines[index + dir];
-      if (!other) return;
-      // Renumber so equal sort values (old data) can't block a move.
-      const order = lines.map((l) => l.id);
-      [order[index], order[index + dir]] = [order[index + dir], order[index]];
-      await Promise.all(order.map((lineId, i) => supabase().from(table).update({ sort: i } as never).eq("id", lineId)));
+      const changes = movedSorts(lines, shown.map((l) => l.id), id, dir);
+      await Promise.all(changes.map((c) => supabase().from(table).update({ sort: c.sort } as never).eq("id", c.id)));
     },
     onSuccess: onChanged,
   });
@@ -108,6 +178,8 @@ export function LineItems({
       const row: Record<string, unknown> = Object.fromEntries(COPY_FIELDS.map((k) => [k, line[k] ?? null]));
       if (table !== "invoice_line_items") row.unit_cost = line.unit_cost ?? null;
       if (table === "quote_line_items") Object.assign(row, { optional: line.optional ?? false, selected: line.selected ?? true, formula: line.formula ?? null });
+      // The copy is where the line is: on every option, or on the one looked at.
+      if (offers) row.option_id = line.option_id ?? null;
       setOpenId(await insert([row]));
     },
     onSuccess: onChanged,
@@ -130,8 +202,11 @@ export function LineItems({
               delete row.optional;
               delete row.selected;
               delete row.formula;
+              delete row.option_id;
+              delete row.option_group;
             }
             if (table === "invoice_line_items") delete row.unit_cost;
+            // Back on the option it was on (that option may have gone since: then it can't come back).
             const { error } = await supabase().from(table).insert(row as never);
             if (error) toast.error("Couldn't restore that line.");
             onChanged();
@@ -141,13 +216,11 @@ export function LineItems({
     },
   });
 
-  const totals = useMemo(() => {
-    const included = lines.filter((l) => !(withOptions && l.optional && !l.selected));
-    const price = included.reduce((s, l) => s + lineTotal(l.quantity, l.unit_price), 0);
-    const cost = included.reduce((s, l) => s + Number(l.quantity) * Number(l.unit_cost ?? 0), 0);
-    const costed = included.some((l) => l.unit_cost != null && Number(l.unit_cost) > 0);
-    return { price, cost, costed };
-  }, [lines, withOptions]);
+  const totals = useMemo(() => lineSums(shown, { optionId: viewing, shownOptionId, withOptions }), [shown, viewing, shownOptionId, withOptions]);
+  const place = offers ? options : null;
+  // Without options, a line group's add-ons have the tier words the Client Hub and the paper give them.
+  const tiers = useMemo(() => (table === "quote_line_items" && !offers ? optionLabels(lines) : null), [table, offers, lines]);
+  const chipOf = (line: Line) => addOnLabel(line, { offers, tier: tiers?.get(line.id) });
 
   return (
     <div className="card">
@@ -161,8 +234,8 @@ export function LineItems({
             <span role="columnheader" className="num">Total</span>
             <span role="columnheader"><span className="sr-only">Actions</span></span>
           </div>
-          {lines.length === 0 && <EmptyState compact icon="list" title="No line items yet" />}
-          {lines.map((line, i) => {
+          {shown.length === 0 && <EmptyState compact icon="list" title={offers ? `Nothing on ${viewingName} yet` : "No line items yet"} />}
+          {shown.map((line, i) => {
             const actions = (
               <Menu
                 triggerClassName="btn btn-sm btn-ghost btn-icon"
@@ -170,7 +243,7 @@ export function LineItems({
                 items={[
                   { label: "Edit", icon: "edit", hidden: openId === line.id, onSelect: () => setOpenId(line.id) },
                   { label: "Move up", icon: "chevronUp", disabled: i === 0, onSelect: () => move.mutate({ id: line.id, dir: -1 }) },
-                  { label: "Move down", icon: "chevronDown", disabled: i === lines.length - 1, onSelect: () => move.mutate({ id: line.id, dir: 1 }) },
+                  { label: "Move down", icon: "chevronDown", disabled: i === shown.length - 1, onSelect: () => move.mutate({ id: line.id, dir: 1 }) },
                   { label: "Duplicate", icon: "copy", onSelect: () => duplicate.mutate(line) },
                   { separator: true },
                   { label: "Remove", icon: "trash", danger: true, onSelect: () => remove.mutate(line) },
@@ -178,9 +251,9 @@ export function LineItems({
               />
             );
             return openId === line.id ? (
-              <LineRow key={line.id} table={table} line={line} editable withOptions={withOptions} showCosts={showCosts} onChanged={onChanged} onDone={() => setOpenId(null)} actions={actions} />
+              <LineRow key={line.id} table={table} line={line} editable withOptions={withOptions} showCosts={showCosts} place={place} viewing={viewing} addOn={chipOf(line)} onChanged={onChanged} onDone={() => setOpenId(null)} actions={actions} />
             ) : (
-              <LineSummary key={line.id} line={line} withOptions={withOptions} onOpen={() => setOpenId(line.id)} actions={actions} />
+              <LineSummary key={line.id} line={line} withOptions={withOptions} shared={offers && line.option_id == null} addOn={chipOf(line)} onOpen={() => setOpenId(line.id)} actions={actions} />
             );
           })}
         </div>
@@ -196,9 +269,9 @@ export function LineItems({
             </tr>
           </thead>
           <tbody>
-            {lines.length === 0 && <tr><td colSpan={5} className="muted">No items.</td></tr>}
-            {lines.map((line) => (
-              <LineRow key={line.id} table={table} line={line} editable={false} withOptions={withOptions} showCosts={false} onChanged={onChanged} />
+            {shown.length === 0 && <tr><td colSpan={5} className="muted">No items.</td></tr>}
+            {shown.map((line) => (
+              <LineRow key={line.id} table={table} line={line} editable={false} withOptions={withOptions} showCosts={false} place={place} viewing={viewing} addOn={chipOf(line)} onChanged={onChanged} />
             ))}
           </tbody>
         </table>
@@ -207,6 +280,12 @@ export function LineItems({
         <div className="card-pad row wrap" style={{ borderTop: "1px solid var(--divider)", paddingTop: 14, paddingBottom: 14 }}>
           <ServicePicker services={services.data ?? []} loading={services.isPending || add.isPending} onPick={(id) => add.mutate(id)} />
           <Button icon="plus" onClick={() => add.mutate(null)} disabled={add.isPending}>Custom item</Button>
+          {offers && (
+            <div className={`segmented ${styles.addTo}`} role="group" aria-label="New lines go">
+              <button type="button" aria-pressed={!addToEvery} onClick={() => setAddToEvery(false)}><span>Only on {viewingName}</span></button>
+              <button type="button" aria-pressed={addToEvery} onClick={() => setAddToEvery(true)}><span>On every option</span></button>
+            </div>
+          )}
           {showCosts && totals.costed && (
             <span className="muted small" style={{ marginLeft: "auto" }}>
               Cost {formatMoneyCents(totals.cost)} · Margin <strong style={{ color: totals.price - totals.cost < 0 ? "var(--danger)" : "var(--ink)" }}>{totals.price > 0 ? `${Math.round(((totals.price - totals.cost) / totals.price) * 100)}%` : "—"}</strong>
@@ -317,8 +396,17 @@ function NumberField({ value, onCommit, label, step = "any", align = "right", pr
   );
 }
 
-/** A line as it reads to the office: click anywhere on it to edit. */
-function LineSummary({ line, withOptions, onOpen, actions }: { line: Line; withOptions: boolean; onOpen: () => void; actions: React.ReactNode }) {
+/**
+ * The chip on an add-on, and whether it's picked. On a quote that offers options (`offers`), add-ons
+ * the client picks one of (a line group) say "Pick one": Good, Better and Best are the options there.
+ * Otherwise a group's add-on has the tier word the Client Hub and the paper give it (`tier`, core
+ * optionLabels), and any other add-on is "Optional".
+ */
+export const addOnLabel = (line: Pick<Line, "optional" | "selected" | "option_group">, { offers = false, tier }: { offers?: boolean; tier?: string | null } = {}) =>
+  line.optional ? `${offers && line.option_group ? "Pick one" : (tier ?? "Optional")}${line.selected ? " · chosen" : ""}` : null;
+
+/** A line as it reads to the office: click anywhere on it to edit. `shared`: on every option of a quote that offers options. `addOn`: its add-on chip (addOnLabel). */
+function LineSummary({ line, withOptions, shared, addOn, onOpen, actions }: { line: Line; withOptions: boolean; shared: boolean; addOn: string | null; onOpen: () => void; actions: React.ReactNode }) {
   const excluded = withOptions && line.optional && !line.selected;
   // Rounded to the cent as the database rounds it (1.5 × $0.35 is $0.53).
   const amount = lineTotal(line.quantity, line.unit_price);
@@ -329,7 +417,8 @@ function LineSummary({ line, withOptions, onOpen, actions }: { line: Line; withO
         <button type="button" className="line-open" onClick={onOpen} aria-label={`Edit ${line.name}`}>
           <span className="name-cell">
             <strong>{line.name}</strong>
-            {line.optional && <span className="chip" style={{ marginLeft: 6 }}>{line.selected ? "Optional · chosen" : "Optional"}</span>}
+            {addOn && <span className="chip" style={{ marginLeft: 6 }}>{addOn}</span>}
+            {shared && <span className="chip" style={{ marginLeft: 6 }}>On every option</span>}
             {!line.taxable && <span className="chip" style={{ marginLeft: 6 }}>No tax</span>}
             {line.description && <span className="muted small ellipsis-2" style={{ display: "block" }}>{line.description}</span>}
           </span>
@@ -344,11 +433,35 @@ function LineSummary({ line, withOptions, onOpen, actions }: { line: Line; withO
   );
 }
 
-function LineRow({ table, line, editable, withOptions, showCosts, onChanged, onDone, actions }: { table: Table; line: Line; editable: boolean; withOptions: boolean; showCosts: boolean; onChanged: () => void; onDone?: () => void; actions?: React.ReactNode }) {
+/**
+ * A line as a row: its fields to edit, or (not `editable`) as it reads. `place`: the quote's options,
+ * when it offers them, for where the line is; `viewing` is the option looked at. `addOn`: its add-on
+ * chip (addOnLabel).
+ */
+function LineRow({ table, line, editable, withOptions, showCosts, place, viewing, addOn, onChanged, onDone, actions }: {
+  table: Table;
+  line: Line;
+  editable: boolean;
+  withOptions: boolean;
+  showCosts: boolean;
+  place: ReadonlyArray<{ id: string; name: string }> | null;
+  viewing: string | null;
+  addOn: string | null;
+  onChanged: () => void;
+  onDone?: () => void;
+  actions?: React.ReactNode;
+}) {
   const [draft, setDraft] = useState(line);
   useEffect(() => setDraft(line), [line]);
   const save = useMutation({
     mutationFn: async (patch: Partial<Line>) => unwrap(await supabase().from(table).update(patch as never).eq("id", line.id)),
+    onSuccess: onChanged,
+    onError: () => setDraft(line),
+  });
+  // Moved onto another option, the line leaves this list: the toast says where it went.
+  const moveTo = useMutation({
+    meta: { success: (_: unknown, optionId: string | null) => (optionId && optionId !== viewing ? `Moved to ${place?.find((o) => o.id === optionId)?.name ?? "the other option"}` : null) },
+    mutationFn: async (optionId: string | null) => unwrap(await supabase().from(table).update({ option_id: optionId } as never).eq("id", line.id)),
     onSuccess: onChanged,
     onError: () => setDraft(line),
   });
@@ -375,7 +488,8 @@ function LineRow({ table, line, editable, withOptions, showCosts, onChanged, onD
       <tr style={excluded ? { opacity: 0.55 } : undefined}>
         <td>
           <strong>{line.name}</strong>
-          {line.optional && <span className="chip" style={{ marginLeft: 6 }}>{line.selected ? "Optional · chosen" : "Optional"}</span>}
+          {addOn && <span className="chip" style={{ marginLeft: 6 }}>{addOn}</span>}
+          {place && line.option_id == null && <span className="chip" style={{ marginLeft: 6 }}>On every option</span>}
           {line.description && <div className="muted small pre-wrap">{line.description}</div>}
         </td>
         <td className="num">{formatNumber(Number(line.quantity), Number(line.quantity) % 1 ? 2 : 0)}</td>
@@ -415,10 +529,27 @@ function LineRow({ table, line, editable, withOptions, showCosts, onChanged, onD
           rows={1}
         />
         <div className="opts">
+          {place && (
+            <select
+              className="select input-sm"
+              style={{ width: "auto", maxWidth: "100%", fontSize: 12 }}
+              aria-label="Which options it's on"
+              value={draft.option_id ?? ""}
+              disabled={moveTo.isPending}
+              onChange={(e) => {
+                const optionId = e.target.value || null;
+                setDraft({ ...draft, option_id: optionId });
+                moveTo.mutate(optionId);
+              }}
+            >
+              <option value="">On every option</option>
+              {place.map((o) => <option key={o.id} value={o.id}>{placeName(o.id, place)}</option>)}
+            </select>
+          )}
           {withOptions && (
             <label>
               <input type="checkbox" checked={Boolean(draft.optional)} onChange={(e) => set({ optional: e.target.checked, selected: !e.target.checked })} />
-              Optional (client chooses)
+              {draft.option_group ? "Optional (client picks one)" : "Optional (client chooses)"}
             </label>
           )}
           <label>

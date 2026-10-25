@@ -26,6 +26,8 @@
 .tag[data-tag="added"] { background: var(--green-tint); color: var(--green-dark); }
 .tag[data-tag="changed"] { background: var(--req-tint); color: var(--req-text); }
 .tag[data-tag="removed"] { background: var(--danger-tint); color: var(--danger); }
+/* Looking at one option: a line on every option. */
+.tag[data-tag="shared"] { background: var(--fill-2); color: var(--text-2); font-weight: 600; }
 
 .controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .round {
@@ -89,6 +91,13 @@
 
 .search { position: relative; max-width: 420px; }
 .list[data-size="large"] .search { max-width: 520px; }
+/* The search, and beside it (under it when narrow) where a pick from it goes. */
+.searchRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.searchRow .search { flex: 1 1 260px; min-width: 0; }
+.place { flex-wrap: wrap; max-width: 100%; }
+.place button { min-width: 0; max-width: 100%; }
+.place span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list[data-size="large"] .place button { height: 40px; padding: 0 14px; font-size: 14px; }
 .searchIcon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); display: grid; color: var(--text-4); pointer-events: none; }
 .search .searchInput { width: 100%; padding-left: 36px; }
 /* 16px keeps iPad Safari from zooming in when it's tapped. */

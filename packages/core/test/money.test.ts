@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { lineTotal, quoteTotals, taxPercent, taxRateFromPercent, toCents, toUnits, type TotalsPromo } from "../src/money";
+import { snapshotLines } from "../src/estimates";
+import {
+  chosenTotals,
+  countsOn,
+  inOptionBase,
+  lineTotal,
+  optionBaseTotal,
+  optionLines,
+  optionTierLabels,
+  optionTierOrder,
+  optionTotals,
+  quoteTotals,
+  taxPercent,
+  taxRateFromPercent,
+  toCents,
+  toUnits,
+  type TotalsPromo,
+} from "../src/money";
 import { sqlQuoteTotals, type SqlLine } from "./numeric";
 
 // The expected values below were checked in Postgres 16.
@@ -115,6 +132,162 @@ describe("money", () => {
       const lines = [{ quantity: "1", unit_price: a, taxable: true, selected: true }, { quantity: "1", unit_price: b, taxable: false, selected: true }];
       const { got, want } = compare(lines, { discount_amount: d, tax_rate: r, promo: null });
       if (JSON.stringify(got) !== JSON.stringify(want)) bad.push({ a, b, d, r, got, want });
+    }
+    expect(bad.slice(0, 3)).toEqual([]);
+  });
+});
+
+describe("options", () => {
+  // A roof estimate offering three roofs, with the Better one shown (quotes.option_id = "b"). As the
+  // database keeps it: the other options' lines are unselected, the shown one's add-on is picked.
+  const line = (id: string, option_id: string | null, quantity: number, unit_price: number, extra: { optional?: boolean; selected?: boolean } = {}) => ({
+    id, option_id, quantity, unit_price, taxable: true, optional: false, selected: true, ...extra,
+  });
+  const lines = [
+    line("dumpster", null, 1, 450),
+    line("ridge", null, 48, 9, { optional: true, selected: true }),
+    line("arch", "a", 30, 560, { selected: false }),
+    line("designer", "b", 30, 735),
+    line("ice", "b", 1, 400, { optional: true, selected: true }),
+    line("metal", "c", 30, 1285, { selected: false }),
+    line("snow", "c", 1, 900, { optional: true, selected: false }),
+  ];
+  const opts = { taxRate: 0, discountAmount: 100 };
+
+  it("counts the shared lines and the shown option's, without the add-ons left off", () => {
+    expect(lines.filter((l) => countsOn(l, "b")).map((l) => l.id)).toEqual(["dumpster", "ridge", "designer", "ice"]);
+    expect(lines.filter((l) => countsOn(l, null)).map((l) => l.id)).toEqual(["dumpster", "ridge"]);
+    expect(countsOn({ optional: true, selected: false }, null)).toBe(false);
+    expect(countsOn({ optional: false, selected: false }, undefined)).toBe(true); // a quote without options, as today
+  });
+
+  it("puts the shared lines that count and an option's required lines in its base", () => {
+    expect(lines.filter((l) => inOptionBase(l, "b")).map((l) => l.id)).toEqual(["dumpster", "ridge", "designer"]);
+    expect(lines.filter((l) => inOptionBase(l, "c")).map((l) => l.id)).toEqual(["dumpster", "ridge", "metal"]);
+    expect(inOptionBase({ option_id: null, optional: true, selected: false }, "b")).toBe(false);
+  });
+
+  it("picks an option's lines the way they'd be with it shown", () => {
+    expect(optionLines(lines, "c", "b").map((l) => [l.id, l.selected])).toEqual([["dumpster", true], ["ridge", true], ["metal", true], ["snow", false]]);
+    expect(optionLines(lines, "b", "b").map((l) => [l.id, l.selected])).toEqual([["dumpster", true], ["ridge", true], ["designer", true], ["ice", true]]);
+  });
+
+  it("totals each option, keeping the shown one's add-ons", () => {
+    expect(optionTotals(lines, "b", "b", opts).total).toBe(23232); // 450 + 432 + 22,050 + 400 − 100
+    expect(optionTotals(lines, "a", "b", opts).total).toBe(17582);
+    expect(optionTotals(lines, "c", "b", opts).total).toBe(39332); // its add-on starts off
+  });
+
+  it("works out an option's base for the range, whichever option is shown", () => {
+    expect(optionBaseTotal(lines, "b", opts)).toBe(22832); // without the add-on
+    expect(optionBaseTotal(lines, "c", opts)).toBe(39332);
+    expect(optionBaseTotal(lines, "d", opts)).toBeNull(); // no lines of its own yet
+    const plain = lines.filter((l) => l.option_id === null);
+    expect(optionBaseTotal(plain, null, opts)).toBe(quoteTotals(plain, opts).total);
+  });
+
+  it("leaves an option with only add-ons out of the range, rather than pricing it at the shared lines", () => {
+    const addOnly = [...lines, line("gutters", "d", 1, 1200, { optional: true, selected: false })];
+    expect(optionBaseTotal(addOnly, "d", opts)).toBeNull();
+    expect(optionBaseTotal([...addOnly, line("guards", "d", 1, 300)], "d", opts)).toBe(450 + 432 + 300 - 100);
+  });
+
+  it("totals the option the customer signs for, with the add-ons they picked", () => {
+    // Metal, with its snow guards and without the shared ridge vent; Better's ice and water shield doesn't come along.
+    expect(chosenTotals(lines, "c", "b", ["snow", "ice"], opts).total).toBe(450 + 38550 + 900 - 100);
+    expect(chosenTotals(lines, "b", "b", ["ice", "ridge"], opts)).toEqual(optionTotals(lines, "b", "b", opts));
+    expect(chosenTotals(lines, "b", "b", [], opts).total).toBe(450 + 22050 - 100);
+    const plain = lines.filter((l) => l.option_id === null);
+    expect(chosenTotals(plain, null, null, ["ridge"], opts)).toEqual(quoteTotals(plain, opts));
+  });
+
+  it("offers the options cheapest first, with the ones not priced yet last", () => {
+    expect(optionTierOrder([{ id: "c", total: 39332 }, { id: "a", total: 17582 }, { id: "b", total: "23232.00" }])).toEqual(["a", "b", "c"]);
+    expect(optionTierOrder([{ id: "x", total: null }, { id: "c", total: 500 }, { id: "y", total: "" }, { id: "a", total: 500 }])).toEqual(["c", "a", "x", "y"]);
+  });
+
+  it("names the options Good, Better and Best by total when none has a tier of its own", () => {
+    const options = [
+      { id: "c", total: 39332 },
+      { id: "a", total: 17582 },
+      { id: "b", tier: "  ", total: "23232.00" },
+    ];
+    expect(Object.fromEntries(optionTierLabels(options))).toEqual({ a: "Good", b: "Better", c: "Best" });
+    expect(Object.fromEntries(optionTierLabels([{ id: "a", total: null }, { id: "b", total: 5 }]))).toEqual({ b: "Good", a: "Better" });
+    expect(optionTierLabels([{ id: "a", total: 1 }]).size).toBe(0);
+    expect(optionTierLabels(["a", "b", "c", "d"].map((id, i) => ({ id, total: i }))).size).toBe(0);
+    expect(Object.fromEntries(optionTierLabels([{ id: "a", tier: "Basic", total: 1 }]))).toEqual({ a: "Basic" });
+  });
+
+  it("keeps the business's own tiers and never repeats one", () => {
+    expect(Object.fromEntries(optionTierLabels([{ id: "a", total: 900 }, { id: "b", tier: " Premium ", total: 100 }]))).toEqual({ b: "Premium" });
+    // A "Good" at $30,000 doesn't make the cheaper ones "Good" and "Better".
+    const mixed = optionTierLabels([{ id: "a", tier: "Good", total: 30000 }, { id: "b", total: 10000 }, { id: "c", total: 20000 }]);
+    expect(Object.fromEntries(mixed)).toEqual({ a: "Good" });
+  });
+
+  // Property test: an option's totals against the SQL, as the database holds the lines once that
+  // option is shown (the switch turns its required lines on and its add-ons off).
+  let seed = 20261025;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pick = <T,>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
+  const money = (lo: number, hi: number) => (Math.floor(lo * 100 + rnd() * (hi - lo) * 100) / 100).toFixed(2);
+  type Line = SqlLine & { id: string; option_id: string | null; optional: boolean; service_id: null; name: string; unit: string };
+  /** The lines as the database keeps them with `shown` shown; `picked` holds the add-on picks. */
+  const stored = (all: Array<Line & { picked: boolean }>, shown: string | null, keepPicks: boolean): Line[] =>
+    all.map(({ picked, ...l }) => ({
+      ...l,
+      selected: l.option_id === null ? !l.optional || picked : l.option_id === shown ? !l.optional || (keepPicks && picked) : false,
+    }));
+
+  it("matches quote_totals for every option, its base and the signed choice on random quotes", () => {
+    const bad: unknown[] = [];
+    for (let i = 0; i < 3_000; i++) {
+      const ids = ["a", "b", "c"].slice(0, 1 + Math.floor(rnd() * 3));
+      const all = Array.from({ length: 2 + Math.floor(rnd() * 8) }, (_, n) => ({
+        id: `line${n}`,
+        service_id: null,
+        name: `Line ${n}`,
+        unit: "ea",
+        option_id: rnd() < 0.3 ? null : pick(ids),
+        optional: rnd() < 0.3,
+        picked: rnd() < 0.5,
+        quantity: pick(["1", "2", "0.5", "1.5", "12.5", "24.2", (Math.floor(rnd() * 100_000) / 1000).toFixed(3)]),
+        unit_price: rnd() < 0.1 ? money(-200, 0) : pick(["450.00", "560.00", "735.00", "1285.00", "9.00", "45.00", money(0, 900)]),
+        taxable: rnd() < 0.7,
+        selected: true,
+      }));
+      const q = {
+        discount_amount: pick(["0", "100.00", "24.00", money(0, 500)]),
+        tax_rate: pick(["0", "0.053", "0.0825", "0.08875", "0.07375"]),
+        promo: pick([null, null, { kind: "percent", value: "10" }, { kind: "percent", value: "7.5" }, { kind: "amount", value: "250.00" }]),
+      };
+      const shown = pick(ids);
+      const current = stored(all, shown, true);
+      const opts = { taxRate: q.tax_rate, discountAmount: q.discount_amount, promo: q.promo };
+      const snapshot = snapshotLines(current);
+      const cents = (t: ReturnType<typeof quoteTotals>) => ({ subtotal: toCents(t.subtotal), discount: toCents(t.discount), tax: toCents(t.tax), total: toCents(t.total) });
+      for (const option of ids) {
+        const want = sqlQuoteTotals(stored(all, option, option === shown), q);
+        const got = cents(optionTotals(current, option, shown, opts));
+        if (JSON.stringify(got) !== JSON.stringify(want)) bad.push({ all, q, shown, option, got, want });
+        // The range's base: that option shown with no add-ons, whichever option is shown now.
+        const base = optionBaseTotal(current, option, opts);
+        const baseWant = all.some((l) => l.option_id === option && !l.optional) ? sqlQuoteTotals(stored(all, option, false), q).total : null;
+        if ((base === null ? null : toCents(base)) !== baseWant) bad.push({ all, q, shown, option, base, baseWant });
+        // The lines saved with the range add up to the same base.
+        const saved = snapshot.filter((s) => s.option_id === null || s.option_id === option);
+        if (base !== null && toCents(quoteTotals(saved, opts).total) !== toCents(base)) bad.push({ all, q, shown, option, base, saved });
+        // approve_hub_quote: show the chosen option (when it isn't already), then pick the add-ons
+        // that are shared or on it; picks of another option's add-ons are ignored.
+        const picks = all.filter((l) => l.optional && rnd() < 0.5).map((l) => l.id);
+        const approved = current
+          .map((l) => (option === shown || l.option_id === null ? l : { ...l, selected: l.option_id === option && !l.optional }))
+          .map((l) => (l.optional && (l.option_id === null || l.option_id === option) ? { ...l, selected: picks.includes(l.id) } : l));
+        const chosen = cents(chosenTotals(current, option, shown, picks, opts));
+        const chosenWant = sqlQuoteTotals(approved, q);
+        if (JSON.stringify(chosen) !== JSON.stringify(chosenWant)) bad.push({ all, q, shown, option, picks, chosen, chosenWant });
+      }
     }
     expect(bad.slice(0, 3)).toEqual([]);
   });

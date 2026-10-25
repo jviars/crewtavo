@@ -203,6 +203,17 @@
 .page .bigInput { height: 48px; padding: 0 14px; border-radius: 10px; font-size: 17px; }
 .padBlock { display: grid; gap: 6px; }
 
+/* The homeowner's initials: drawn once on a small pad, then added to each section that asks. */
+.initialsPad { max-width: 340px; }
+.initialsList { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--divider); }
+.initialsRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 64px; padding: 8px 0; border-bottom: 1px solid var(--divider); }
+.initialsText { flex: 1 1 180px; min-width: 0; display: grid; gap: 2px; }
+.initialsText strong { font-size: 15px; overflow-wrap: anywhere; }
+.initialsText span { font-size: 13px; color: var(--text-3); }
+/* Dark ink on clear, on paper white in both themes. */
+.initialsMark { width: 72px; height: 36px; flex: none; object-fit: contain; border-radius: 6px; background: #fff; }
+.initialsRow .textButton { margin: 0; }
+
 .companyRow { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
 /* The signature is dark ink on clear: it sits on paper white in both themes. */
 .companyImage { width: 120px; height: 48px; flex: none; object-fit: contain; border-radius: 8px; background: #fff; }

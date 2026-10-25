@@ -540,6 +540,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"contract_sections": {
+                  Row: {
+                    "body": string,"company_id": string,"created_at": string,"created_by": string | null,"id": string,"initials": boolean,"place": string,"sort": number,"title": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "body"?: string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"initials"?: boolean,"place"?: string,"sort"?: number,"title": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "body"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"initials"?: boolean,"place"?: string,"sort"?: number,"title"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "contract_sections_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"crew_members": {
                   Row: {
                     "company_id": string,"crew_id": string,"user_id": string
@@ -1408,14 +1428,14 @@ isOneToOne: false
                   ]
                 },"quote_line_items": {
                   Row: {
-                    "company_id": string,"description": string | null,"formula": string | null,"id": string,"material_cost": number | null,"materials": Json | null,"name": string,"option_group": string | null,"optional": boolean,"quantity": number,"quote_id": string,"selected": boolean,"service_id": string | null,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number
+                    "company_id": string,"description": string | null,"formula": string | null,"id": string,"material_cost": number | null,"materials": Json | null,"name": string,"option_group": string | null,"option_id": string | null,"optional": boolean,"quantity": number,"quote_id": string,"selected": boolean,"service_id": string | null,"sort": number,"taxable": boolean,"unit": string,"unit_cost": number | null,"unit_price": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"description"?: string | null,"formula"?: string | null,"id"?: string,"material_cost"?: number | null,"materials"?: Json | null,"name": string,"option_group"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id": string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
+                    "company_id": string,"description"?: string | null,"formula"?: string | null,"id"?: string,"material_cost"?: number | null,"materials"?: Json | null,"name": string,"option_group"?: string | null,"option_id"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id": string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
                   }
                   Update: {
-                    "company_id"?: string,"description"?: string | null,"formula"?: string | null,"id"?: string,"material_cost"?: number | null,"materials"?: Json | null,"name"?: string,"option_group"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id"?: string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
+                    "company_id"?: string,"description"?: string | null,"formula"?: string | null,"id"?: string,"material_cost"?: number | null,"materials"?: Json | null,"name"?: string,"option_group"?: string | null,"option_id"?: string | null,"optional"?: boolean,"quantity"?: number,"quote_id"?: string,"selected"?: boolean,"service_id"?: string | null,"sort"?: number,"taxable"?: boolean,"unit"?: string,"unit_cost"?: number | null,"unit_price"?: number
                   }
                   Relationships: [
                     {
@@ -1430,18 +1450,56 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "services"
       referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "quote_line_items_option_fkey"
+      columns: ["quote_id","option_id"]
+isOneToOne: false
+      referencedRelation: "quote_options"
+      referencedColumns: ["quote_id","id"]
+    }
+                  ]
+                },"quote_options": {
+                  Row: {
+                    "company_id": string,"created_at": string,"highlights": (string)[],"id": string,"name": string,"package_id": string | null,"picture": string | null,"picture_height": number | null,"picture_width": number | null,"quote_id": string,"section_ids": (string)[],"sort": number,"style": string,"tier": string | null,"updated_at": string,"warranty": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"highlights"?: (string)[],"id"?: string,"name": string,"package_id"?: string | null,"picture"?: string | null,"picture_height"?: number | null,"picture_width"?: number | null,"quote_id": string,"section_ids"?: (string)[],"sort"?: number,"style"?: string,"tier"?: string | null,"updated_at"?: string,"warranty"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"highlights"?: (string)[],"id"?: string,"name"?: string,"package_id"?: string | null,"picture"?: string | null,"picture_height"?: number | null,"picture_width"?: number | null,"quote_id"?: string,"section_ids"?: (string)[],"sort"?: number,"style"?: string,"tier"?: string | null,"updated_at"?: string,"warranty"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "quote_options_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "quote_options_package_fkey"
+      columns: ["company_id","package_id"]
+isOneToOne: false
+      referencedRelation: "roof_packages"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "quote_options_quote_fkey"
+      columns: ["company_id","quote_id"]
+isOneToOne: false
+      referencedRelation: "quotes"
+      referencedColumns: ["company_id","id"]
     }
                   ]
                 },"quotes": {
                   Row: {
-                    "approval": Json | null,"approved_at": string | null,"change_order_for": string | null,"client_id": string,"company_id": string,"converted_at": string | null,"created_at": string,"created_by": string | null,"deposit_amount": number,"discount_amount": number,"exact_sent_at": string | null,"id": string,"lost_reason": string | null,"message": string | null,"number": number | null,"pipeline_stage": string | null,"priced_on_site_at": string | null,"promo_code_id": string | null,"property_id": string | null,"range_accepted_at": string | null,"range_high": number | null,"range_lines": Json | null,"range_low": number | null,"range_sent_at": string | null,"request_id": string | null,"roof_package_id": string | null,"salesperson_id": string | null,"sent_at": string | null,"status": string,"subtotal": number,"tax_amount": number,"tax_rate": number,"template_id": string | null,"title": string,"total": number,"updated_at": string,"valid_until": string | null
+                    "approval": Json | null,"approved_at": string | null,"change_order_for": string | null,"client_id": string,"company_id": string,"converted_at": string | null,"created_at": string,"created_by": string | null,"deposit_amount": number,"discount_amount": number,"exact_sent_at": string | null,"id": string,"lost_reason": string | null,"message": string | null,"number": number | null,"option_id": string | null,"pipeline_stage": string | null,"priced_on_site_at": string | null,"promo_code_id": string | null,"property_id": string | null,"range_accepted_at": string | null,"range_high": number | null,"range_lines": Json | null,"range_low": number | null,"range_sent_at": string | null,"request_id": string | null,"roof_package_id": string | null,"salesperson_id": string | null,"section_ids": (string)[],"sent_at": string | null,"status": string,"subtotal": number,"tax_amount": number,"tax_rate": number,"template_id": string | null,"title": string,"total": number,"updated_at": string,"valid_until": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id": string,"company_id": string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"exact_sent_at"?: string | null,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"pipeline_stage"?: string | null,"priced_on_site_at"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"range_accepted_at"?: string | null,"range_high"?: number | null,"range_lines"?: Json | null,"range_low"?: number | null,"range_sent_at"?: string | null,"request_id"?: string | null,"roof_package_id"?: string | null,"salesperson_id"?: string | null,"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"template_id"?: string | null,"title": string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
+                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id": string,"company_id": string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"exact_sent_at"?: string | null,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"option_id"?: string | null,"pipeline_stage"?: string | null,"priced_on_site_at"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"range_accepted_at"?: string | null,"range_high"?: number | null,"range_lines"?: Json | null,"range_low"?: number | null,"range_sent_at"?: string | null,"request_id"?: string | null,"roof_package_id"?: string | null,"salesperson_id"?: string | null,"section_ids"?: (string)[],"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"template_id"?: string | null,"title": string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
                   }
                   Update: {
-                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id"?: string,"company_id"?: string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"exact_sent_at"?: string | null,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"pipeline_stage"?: string | null,"priced_on_site_at"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"range_accepted_at"?: string | null,"range_high"?: number | null,"range_lines"?: Json | null,"range_low"?: number | null,"range_sent_at"?: string | null,"request_id"?: string | null,"roof_package_id"?: string | null,"salesperson_id"?: string | null,"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"template_id"?: string | null,"title"?: string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
+                    "approval"?: Json | null,"approved_at"?: string | null,"change_order_for"?: string | null,"client_id"?: string,"company_id"?: string,"converted_at"?: string | null,"created_at"?: string,"created_by"?: string | null,"deposit_amount"?: number,"discount_amount"?: number,"exact_sent_at"?: string | null,"id"?: string,"lost_reason"?: string | null,"message"?: string | null,"number"?: number | null,"option_id"?: string | null,"pipeline_stage"?: string | null,"priced_on_site_at"?: string | null,"promo_code_id"?: string | null,"property_id"?: string | null,"range_accepted_at"?: string | null,"range_high"?: number | null,"range_lines"?: Json | null,"range_low"?: number | null,"range_sent_at"?: string | null,"request_id"?: string | null,"roof_package_id"?: string | null,"salesperson_id"?: string | null,"section_ids"?: (string)[],"sent_at"?: string | null,"status"?: string,"subtotal"?: number,"tax_amount"?: number,"tax_rate"?: number,"template_id"?: string | null,"title"?: string,"total"?: number,"updated_at"?: string,"valid_until"?: string | null
                   }
                   Relationships: [
                     {
@@ -1474,6 +1532,12 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "requests"
       referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "quotes_option_fkey"
+      columns: ["id","option_id"]
+isOneToOne: false
+      referencedRelation: "quote_options"
+      referencedColumns: ["quote_id","id"]
     },{
       foreignKeyName: "quotes_promo_fkey"
       columns: ["company_id","promo_code_id"]
@@ -1656,14 +1720,14 @@ isOneToOne: false
                   ]
                 },"roof_packages": {
                   Row: {
-                    "company_id": string,"created_at": string,"id": string,"is_default": boolean,"markup_pct": number,"name": string,"price_mode": string,"roof_service_id": string | null,"sort": number,"style": string,"updated_at": string
+                    "company_id": string,"created_at": string,"highlights": (string)[],"id": string,"is_default": boolean,"markup_pct": number,"name": string,"picture": string | null,"picture_height": number | null,"picture_width": number | null,"price_mode": string,"roof_service_id": string | null,"section_ids": (string)[],"sort": number,"style": string,"tier": string | null,"updated_at": string,"warranty": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"created_at"?: string,"id"?: string,"is_default"?: boolean,"markup_pct"?: number,"name": string,"price_mode"?: string,"roof_service_id"?: string | null,"sort"?: number,"style"?: string,"updated_at"?: string
+                    "company_id": string,"created_at"?: string,"highlights"?: (string)[],"id"?: string,"is_default"?: boolean,"markup_pct"?: number,"name": string,"picture"?: string | null,"picture_height"?: number | null,"picture_width"?: number | null,"price_mode"?: string,"roof_service_id"?: string | null,"section_ids"?: (string)[],"sort"?: number,"style"?: string,"tier"?: string | null,"updated_at"?: string,"warranty"?: string
                   }
                   Update: {
-                    "company_id"?: string,"created_at"?: string,"id"?: string,"is_default"?: boolean,"markup_pct"?: number,"name"?: string,"price_mode"?: string,"roof_service_id"?: string | null,"sort"?: number,"style"?: string,"updated_at"?: string
+                    "company_id"?: string,"created_at"?: string,"highlights"?: (string)[],"id"?: string,"is_default"?: boolean,"markup_pct"?: number,"name"?: string,"picture"?: string | null,"picture_height"?: number | null,"picture_width"?: number | null,"price_mode"?: string,"roof_service_id"?: string | null,"section_ids"?: (string)[],"sort"?: number,"style"?: string,"tier"?: string | null,"updated_at"?: string,"warranty"?: string
                   }
                   Relationships: [
                     {
@@ -2133,16 +2197,19 @@ isOneToOne: false
           }
           Functions: {
             "accept_hub_range":
-{ Args: { "p_company": string,"p_quote": string }; Returns: string
+{ Args: { "p_company": string,"p_option"?: string,"p_quote": string }; Returns: string
                            },
 "accept_terms":
 { Args: { "p_company": string,"p_version": string }; Returns: string
                            },
 "apply_promo_code":
-{ Args: { "p_code": string,"p_id": string,"p_kind": string }; Returns: Json
+{ Args: { "p_code": string,"p_id": string,"p_kind": string,"p_option"?: string,"p_selected"?: (string)[] }; Returns: Json
+                           },
+"apply_quote_options":
+{ Args: { "p_current"?: Json,"p_mode": string,"p_options": Json,"p_quote": string,"p_shared"?: (string)[] }; Returns: Json
                            },
 "approve_hub_quote":
-{ Args: { "p_approval": Json,"p_company": string,"p_quote": string,"p_selected": (string)[] }; Returns: boolean
+{ Args: { "p_approval": Json,"p_company": string,"p_expected_total"?: number,"p_option"?: string,"p_quote": string,"p_selected": (string)[] }; Returns: boolean
                            },
 "campaign_audience":
 { Args: { "p_audience": Json,"p_company_id": string }; Returns: {
@@ -2276,6 +2343,9 @@ isOneToOne: false
 "dashboard":
 { Args: { "p_company": string }; Returns: Json
                            },
+"duplicate_quote":
+{ Args: { "p_quote": string }; Returns: string
+                           },
 "emit_equipment_alerts":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
@@ -2327,6 +2397,9 @@ isOneToOne: false
               "discounted": number,"promo_code_id": string,"uses": number
             }[]
                            },
+"put_quote_package":
+{ Args: { "p_lines": Json,"p_package": string,"p_quote": string,"p_replace"?: boolean }; Returns: boolean
+                           },
 "rate_limit_hit":
 { Args: { "p_key": string,"p_max": number,"p_window_seconds": number }; Returns: boolean
                            },
@@ -2339,6 +2412,9 @@ isOneToOne: false
 "remove_promo_code":
 { Args: { "p_id": string,"p_kind": string }; Returns: undefined
                            },
+"remove_quote_option":
+{ Args: { "p_option": string,"p_quote": string }; Returns: Json
+                           },
 "renew_automation_run":
 { Args: { "p_id": number,"p_result": Json,"p_token": string }; Returns: boolean
                            },
@@ -2349,6 +2425,9 @@ isOneToOne: false
 { Args: { "p_any"?: boolean,"p_company": string,"p_limit"?: number,"p_query": string }; Returns: {
               "acknowledged": boolean,"body_text": string,"category": string,"id": string,"rank": number,"required": boolean,"revision": number,"snippet": string,"title": string
             }[]
+                           },
+"sign_quote":
+{ Args: { "p_approval": Json,"p_expected_total"?: number,"p_option"?: string,"p_quote": string }; Returns: Json
                            },
 "spare_key_use":
 { Args: { "p_hash": string,"p_user": string }; Returns: boolean

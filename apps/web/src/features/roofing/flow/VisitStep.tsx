@@ -74,7 +74,8 @@ function SignedView({ quote, extras, takeoff, salesperson, canSell }: { quote: E
   const signedAt = approval?.signed_at ?? quote.approved_at;
   const copies = useSignedCopies(quote.id, signedAt);
   const sendCopy = useSendSignedCopy(quote.id);
-  const changes = useMemo(() => (quote.range_lines ? lineChanges(quote.range_lines, quote.lines) : []), [quote.range_lines, quote.lines]);
+  // Against the range: the shared lines and the option they chose.
+  const changes = useMemo(() => (quote.range_lines ? lineChanges(quote.range_lines, quote.lines, quote.option_id) : []), [quote.range_lines, quote.lines, quote.option_id]);
   const figures = estimateFigures(quote);
   const who = homeownerName(quote.client?.display_name);
   const copy = copies.data ? copySentence(copies.data, quote.client?.display_name) : null;
