@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { AbcClient, requestToken } from "../src/integrations/abcSupply";
+import { AbcClient, abcSays, requestToken } from "../src/integrations/abcSupply";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
@@ -107,6 +107,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", abc);
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   state.tables = {};
 });
@@ -154,6 +155,23 @@ describe("ABC Supply", () => {
     await expect(requestToken(KEYS, abc as never)).rejects.toThrow(/Individual Business/);
     abc.mockImplementation(async () => { throw new Error("offline"); });
     await expect(requestToken(KEYS, abc as never)).rejects.toThrow(/Couldn't reach ABC Supply/);
+  });
+
+  it("passes on ABC's own words when it can't use a request, whatever shape they come in", async () => {
+    expect(abcSays(JSON.stringify({ message: "Invalid branch" }))).toBe("Invalid branch");
+    expect(abcSays(JSON.stringify({ type: "https://tools.ietf.org/html/rfc9110#section-15.5.1", title: "One or more validation errors occurred.", status: 400, errors: { "lines[0].uom": ["The uom field is invalid."] }, traceId: "00-abc" }))).toBe(
+      "One or more validation errors occurred. The uom field is invalid.",
+    );
+    expect(abcSays(JSON.stringify({ errors: [{ code: "E42", message: "Ship-To 2142885-2 isn't set up for pricing" }] }))).toBe("Ship-To 2142885-2 isn't set up for pricing");
+    expect(abcSays("<html><body><h1>400 Bad Request</h1></body></html>")).toBe("400 Bad Request");
+    expect(abcSays(JSON.stringify({ status: 400, error: "Bad Request" }))).toBeNull();
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    abc.mockImplementation(async () => Response.json({ title: "One or more validation errors occurred.", errors: { purpose: ["The purpose field is invalid."] } }, { status: 400 }));
+    await expect(new AbcClient("production", "token-1", abc as never).prices("2142885-2", "525", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }])).rejects.toThrow(
+      "ABC Supply couldn't use that: One or more validation errors occurred. The purpose field is invalid.",
+    );
+    expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/^ABC Supply answered 400 to \/api\/pricing\/v2\/prices: .*purpose field.*\(sent .*"shipToNumber":"2142885-2"/));
   });
 
   it("lists the ship-to accounts it can price for, without retired ones", async () => {
