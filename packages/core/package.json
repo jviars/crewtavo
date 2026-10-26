@@ -39,6 +39,7 @@
     "./forms": "./src/forms.ts",
     "./markdown": "./src/markdown.ts",
     "./clientImport": "./src/clientImport.ts",
+    "./jobberExport": "./src/jobberExport.ts",
     "./reports": "./src/reports.ts",
     "./analytics": "./src/analytics.ts",
     "./pay": "./src/pay.ts",

@@ -12,6 +12,7 @@ import { ChecklistSettings } from "./ChecklistSettings";
 import { CompanySettings } from "./CompanySettings";
 import { ContractSettings } from "./ContractSettings";
 import { CrewSettings } from "./CrewSettings";
+import { DataSettings } from "./DataSettings";
 import { EmailSettings } from "./EmailSettings";
 import { HostingSettings } from "./HostingSettings";
 import { LicenseSettings } from "./LicenseSettings";
@@ -79,6 +80,7 @@ export function SettingsPage() {
           {tab === "calendars" && <CalendarSettings />}
           {tab === "assistants" && <AssistantSettings />}
           {tab === "maps" && <MapsSettings />}
+          {tab === "data" && <DataSettings />}
           {tab === "license" && <LicenseSettings />}
         </div>
       </div>

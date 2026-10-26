@@ -51,7 +51,11 @@ export function toCsv(rows: Array<Record<string, unknown>>, columns: Array<{ key
 }
 
 export function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  downloadBlob(filename, new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+}
+
+/** Saves `blob` as a download named `filename`. */
+export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
