@@ -128,7 +128,8 @@
 .optionPictureBox { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--fill-2); }
 .optionPicture { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
 .optionBody { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px 14px; }
-.tierChip { padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 12%, #fff); color: var(--brand-text); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
+/* The tint takes some contrast from --brand-text, so the chip's words are a shade darker: 5.3:1 or more for any brand. */
+.tierChip { padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 12%, #fff); color: color-mix(in srgb, var(--brand-text) 80%, #000); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
 .optionName { margin: 0; font-size: 16.5px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .highlights { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.4; color: var(--text-2); }
 .highlights li { display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }

@@ -483,7 +483,7 @@ export const websiteHref = (url: string) => (/^https?:\/\//i.test(url.trim()) ? 
 const INK = "#0f2a35";
 
 /** How well a color reads on white, as a contrast ratio from 1 to 21. Anything that isn't a hex color counts as unreadable. */
-function contrastOnWhite(hex: string): number {
+export function contrastOnWhite(hex: string): number {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return 1;
   const n = parseInt(m[1]!, 16);
