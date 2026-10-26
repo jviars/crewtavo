@@ -76,7 +76,7 @@ test("two options → the client picks the second, initials and signs → a job 
     // The agreement, with the section that asks for initials: drawn once, then added to it.
     await hub.getByRole("button", { name: "Review the agreement" }).click();
     await expect(hub.getByRole("heading", { name: "Review the agreement" })).toBeVisible();
-    await expect(hub.getByRole("region", { name: "The agreement" })).toContainText("may cancel within three business days");
+    await expect(hub.getByRole("region", { name: "The agreement", exact: true })).toContainText("may cancel within three business days");
     await expect(hub.getByRole("button", { name: "Continue to sign" })).toBeDisabled();
     const initialsPad = hub.getByRole("img", { name: "Draw your initials" });
     await initialsPad.scrollIntoViewIfNeeded();

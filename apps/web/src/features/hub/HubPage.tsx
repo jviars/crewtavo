@@ -41,6 +41,7 @@ import { dateIn, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/li
 import { sanitizeContractHtml } from "@/lib/html";
 import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
 import {
+  contrastOnWhite,
   credentialLine,
   depositToBook,
   firstOption,
@@ -217,8 +218,8 @@ export function HubPage() {
     <div
       className="public-page hub"
       data-printing={printing || undefined}
-      // --brand-text: the brand color as text on white, or ink when it's too light to read there.
-      style={{ ["--brand" as string]: brand, ["--on-brand" as string]: onBrand, ["--brand-text" as string]: onBrand === "#fff" ? brand : "var(--ink)" }}
+      // --brand-text: the brand color as text on white, or ink when it doesn't read there at body size (4.5:1), as on the range page.
+      style={{ ["--brand" as string]: brand, ["--on-brand" as string]: onBrand, ["--brand-text" as string]: contrastOnWhite(brand) >= 4.5 ? brand : "var(--ink)" }}
     >
       {d && (
         <header className="hub-header">
