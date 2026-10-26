@@ -6,7 +6,7 @@
 import type { IconName } from "@/components/ui/Icon";
 import { can, hasRole, isSub, type Session } from "@/lib/session";
 
-export type SettingsTab = "profile" | "company" | "schedule" | "address" | "hosting" | "team" | "roles" | "crews" | "prices" | "templates" | "contracts" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "license";
+export type SettingsTab = "profile" | "company" | "schedule" | "address" | "hosting" | "team" | "roles" | "crews" | "prices" | "templates" | "contracts" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "data" | "license";
 export type SettingsItem = { label: string; icon: IconName; keywords: string } & ({ tab: SettingsTab } | { to: string });
 
 export function settingsGroups(session: Session): Array<{ title: string; items: SettingsItem[] }> {
@@ -37,6 +37,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
         managesSettings && { tab: "contracts", label: "Contract terms", icon: "file", keywords: "contract builder terms and conditions clauses sections disclaimers fine print agreement warranty payment right to cancel liens permits initials fill-ins legal attorney" },
         isAdmin && { tab: "maps", label: "Maps", icon: "map", keywords: "imagery satellite aerial google esri measure key api cloud default map" },
         managesSettings && { to: "/booking", label: "Online booking", icon: "globe", keywords: "booking form request form website embed intake" },
+        session.role === "owner" && { tab: "data", label: "Your data", icon: "download", keywords: "export download backup all data everything spreadsheet spreadsheets csv excel google sheets zip copy move switch leave another app crm jobber housecall pro" },
       ],
     },
     {
