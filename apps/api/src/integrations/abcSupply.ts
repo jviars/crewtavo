@@ -139,13 +139,39 @@ function apiProblem(status: number, body: string): AbcProblem {
   if (status === 404) return new AbcProblem("ABC Supply doesn't have that item.", 404);
   if (status === 429) return new AbcProblem("ABC Supply is busy right now. Try again in a minute.", 429);
   if (status === 400) {
-    const said = /"message"\s*:\s*"([^"]{1,200})"/.exec(body)?.[1];
-    return new AbcProblem(`ABC Supply couldn't use that${said ? `: ${said}` : ""}.`, 400);
+    const said = abcSays(body);
+    return new AbcProblem(`ABC Supply couldn't use that${said ? `: ${said.replace(/\.$/, "")}` : ""}.`, 400);
   }
   return new AbcProblem("ABC Supply isn't answering right now. Try again in a minute.", 502);
 }
 
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+
+const SAYING = /^(message|detail|title|description|reason|error|error_description)$/i;
+const NOT_SAYING = /^(type|code|status|traceId|instance|path|timestamp|links?|href|url)$/i;
+
+/**
+ * Why ABC said no, in its own words. Its error answers aren't documented and come in more than one
+ * shape ({"message"}, a validation "errors" map of field to messages, plain text from its gateway).
+ */
+export function abcSays(body: string): string | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return text(body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "))?.slice(0, 200) ?? null;
+  }
+  const said: string[] = [];
+  const walk = (value: unknown, key: string, inErrors: boolean) => {
+    if (typeof value === "string") {
+      if ((SAYING.test(key) || (inErrors && !NOT_SAYING.test(key))) && value.trim() && !/^bad request$/i.test(value.trim())) said.push(value.trim());
+    } else if (Array.isArray(value)) value.forEach((v) => walk(v, key, inErrors));
+    else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) walk(v, k, inErrors || /^errors?$/i.test(key));
+  };
+  walk(json, "", false);
+  const words = [...new Set(said)].join(" ").slice(0, 300);
+  return words || null;
+}
 
 interface RawItem {
   itemNumber?: string;
@@ -201,7 +227,12 @@ export class AbcClient {
       this.token = await this.renew();
       return this.call(path, init, true);
     }
-    if (!res.ok) throw apiProblem(res.status, await res.text().catch(() => ""));
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      // For the server's logs: what was asked and ABC's whole answer, since the person only sees the gist.
+      console.warn(`ABC Supply answered ${res.status} to ${path}: ${body.slice(0, 1000) || "(nothing)"}${init.body === undefined ? "" : ` (sent ${JSON.stringify(init.body).slice(0, 1000)})`}`);
+      throw apiProblem(res.status, body);
+    }
     return (await res.json().catch(() => ({}))) as T;
   }
 
