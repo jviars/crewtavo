@@ -3,7 +3,7 @@
  * where prices come from, the catalog's items, and the materials in a price list's services.
  * Roofing → Catalog (features/roofing/catalog) browses the catalog by these.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
@@ -52,7 +52,7 @@ export interface CatalogDetail extends CatalogItem {
   family_items: Array<{ item_number: string; name: string; color: string | null }>;
 }
 
-/** Something the account buys again and again (GET /materials/usual). */
+/** Something the account buys again and again (GET /materials/usual), its price and look asked for after. */
 export interface UsualItem {
   item_number: string;
   name: string;
@@ -61,8 +61,53 @@ export interface UsualItem {
   uom_name: string | null;
   count: number;
   at_branch: boolean | null;
-  unit_price: number | null;
-  note: string | null;
+}
+
+/** The account's price for one, for a card shown before its price came. */
+export interface CardPrice { unit_price: number | null; note: string | null }
+
+/** What a card shows of an item besides its name, for one listed without it: ABC's picture, brand, color and kind. */
+export interface CardLook { image: string | null; brand: string | null; color: string | null; kind: string | null }
+
+/** The key a card's price comes back under: "02GATZ3CH:BD". */
+export const priceKey = (item: { item_number: string; uom: string }) => `${item.item_number}:${item.uom.toUpperCase()}`;
+
+/**
+ * Prices for cards already on screen, in one request (POST /materials/prices). ABC takes a second
+ * or two to price, so the cards show first and their prices fill in.
+ */
+export function useCardPrices(items: Array<{ item_number: string; uom: string }>) {
+  const { company } = useSession();
+  const keys = [...new Set(items.map(priceKey))].slice(0, 60);
+  return useQuery({
+    queryKey: ["material-prices", company.id, keys],
+    enabled: keys.length > 0,
+    staleTime: 5 * 60_000,
+    retry: false,
+    queryFn: async () =>
+      (await api.post<{ prices: Record<string, CardPrice> }>("/materials/prices", {
+        lines: keys.map((key) => ({ item_number: key.slice(0, key.lastIndexOf(":")), uom: key.slice(key.lastIndexOf(":") + 1) })),
+      })).prices,
+  });
+}
+
+/**
+ * Looks for cards listed without them (GET /materials/pictures), a dozen at a time in the order
+ * they're shown, so the first ones fill in first. The server keeps them a day.
+ */
+export function useCardLooks(numbers: string[]): Record<string, CardLook | null> {
+  const { company } = useSession();
+  const chunks: string[][] = [];
+  for (let i = 0; i < numbers.length; i += 12) chunks.push(numbers.slice(i, i + 12));
+  return useQueries({
+    queries: chunks.map((chunk) => ({
+      queryKey: ["material-looks", company.id, chunk],
+      staleTime: 60 * 60_000,
+      retry: false,
+      queryFn: async () => (await api.get<{ looks: Record<string, CardLook | null> }>(`/materials/pictures?${new URLSearchParams({ items: chunk.join(",") })}`)).looks,
+    })),
+    combine: (results) => Object.assign({}, ...results.map((r) => r.data ?? {})) as Record<string, CardLook | null>,
+  });
 }
 
 /** A material in a service (service_materials). */
