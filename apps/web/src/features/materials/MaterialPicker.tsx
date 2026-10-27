@@ -33,7 +33,7 @@ export function MaterialPicker({ service, lineQuantity, onClose, onAdded }: { se
   );
 }
 
-function AddMaterial({ service, item, lineQuantity, onBack, onAdded }: { service: PickerService; item: CatalogItem; lineQuantity: number | null; onBack: () => void; onAdded: () => void }) {
+export function AddMaterial({ service, item, lineQuantity, onBack, onAdded }: { service: PickerService; item: CatalogItem; lineQuantity: number | null; onBack: () => void; onAdded: () => void }) {
   const { company } = useSession();
   const [uom, setUom] = useState(item.uom);
   const [length, setLength] = useState<number | null>(null);

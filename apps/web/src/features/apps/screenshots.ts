@@ -1,4 +1,10 @@
 /** Screenshots on an app's page, like an app store listing's (see assets/apps/screenshots/README.md). */
+import catalogItemDark from "@/assets/apps/screenshots/abc-catalog-item-dark.webp";
+import catalogItemLight from "@/assets/apps/screenshots/abc-catalog-item-light.webp";
+import catalogShinglesDark from "@/assets/apps/screenshots/abc-catalog-shingles-dark.webp";
+import catalogShinglesLight from "@/assets/apps/screenshots/abc-catalog-shingles-light.webp";
+import catalogUsualDark from "@/assets/apps/screenshots/abc-catalog-usual-dark.webp";
+import catalogUsualLight from "@/assets/apps/screenshots/abc-catalog-usual-light.webp";
 import analyticsSourcesDark from "@/assets/apps/screenshots/website-analytics-sources-dark.webp";
 import analyticsSourcesLight from "@/assets/apps/screenshots/website-analytics-sources-light.webp";
 import analyticsVisitsDark from "@/assets/apps/screenshots/website-analytics-visits-dark.webp";
@@ -28,6 +34,11 @@ export interface Screenshot {
 }
 
 export const SCREENSHOTS: Record<string, Screenshot[]> = {
+  abc_supply: [
+    { light: catalogShinglesLight, dark: catalogShinglesDark, alt: "Roofing → Catalog: ABC's shingles at your branch with your price on each, narrowed by type and brand" },
+    { light: catalogItemLight, dark: catalogItemDark, alt: "One shingle: your price, every color your branch carries with its price, and its specs" },
+    { light: catalogUsualLight, dark: catalogUsualDark, alt: "What you usually buy, from ABC's record of your invoices, with the items already in your price list marked" },
+  ],
   website_analytics: [
     { light: analyticsVisitsLight, dark: analyticsVisitsDark, alt: "Marketing's Website tab: visitors over the last 30 days against the 30 before, with page views, visits and booking requests" },
     { light: analyticsSourcesLight, dark: analyticsSourcesDark, alt: "The pages people read and where visits came from (Google, Facebook, Yelp), with the booking requests each brought in" },

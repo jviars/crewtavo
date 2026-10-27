@@ -936,6 +936,37 @@ describe("the packages' ABC prices", () => {
     expect(roof.unit_cost).toBe(127.5 + 182);
     expect(roof.unit_price).toBe(followPrice(127.5, 182, 70));
   });
+
+  it("keeps a material's last price when ABC won't price it, and holds a following roof whose material never had one", async () => {
+    roofer();
+    rows("roof_packages")[0]!.price_mode = "follow";
+    const roof = rows("services").find((s) => s.id === ROOF)!;
+    Object.assign(roof, { labor_cost: 182, unit_price: 555 });
+    state.tables.service_materials = [
+      { id: "sm1", company_id: ROOFER, service_id: ROOF, item_number: "02GASTZ3WW", name: "Timberline HDZ", uom: "BD", length_ft: null, per_unit: 3, unit_price: 40, priced_at: null },
+      { id: "sm2", company_id: ROOFER, service_id: ROOF, item_number: "NEWSTARTER", name: "Starter strip", uom: "BD", length_ft: null, per_unit: 0.1, unit_price: null, priced_at: null },
+    ];
+    state.tables.integrations = [{ company_id: ROOFER, provider: "abc_supply", status: "connected", settings: { environment: "sandbox", ship_to: "1163698", ship_to_name: "PEAK", branch: "18", branch_name: "ABC Supply - Madison, WI", accounts: [] } }];
+    state.tables.integration_secrets = [{ company_id: ROOFER, provider: "abc_supply", ciphertext: await encryptJson(env, { extra: { client_id: "id", client_secret: "secret", environment: "sandbox" } }) }];
+    // The branch prices neither today.
+    fetcher.mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u.includes("/oauth2/")) return Response.json({ access_token: "token-1", expires_in: 1800, token_type: "Bearer" });
+      if (u.includes("/pricing/v2/prices")) {
+        const asked = JSON.parse(String(init?.body));
+        return Response.json({ lines: asked.lines.map((l: { id: string }) => ({ id: l.id, unitPrice: 0, status: { code: "OK" } })) });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    expect((await send("/roofing/prices", {})).status).toBe(200);
+    expect(rows("service_materials").map((m) => [m.unit_price, m.price_note])).toEqual([
+      [40, expect.stringMatching(/hasn't priced/)],
+      [null, expect.stringMatching(/hasn't priced/)],
+    ]);
+    // The cost counts what's known; the price a square stays put rather than leaving the starter out.
+    expect(roof.unit_cost).toBe(120 + 182);
+    expect(roof.unit_price).toBe(555);
+  });
 });
 
 describe("automations about an estimate", () => {

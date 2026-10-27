@@ -40,6 +40,7 @@ const screens = {
   roofing: () => import("@/features/roofing/RoofingPage"),
   roofingProject: () => import("@/features/roofing/RoofingProjectPage"),
   roofPackages: () => import("@/features/roofing/RoofPackagesPage"),
+  roofCatalog: () => import("@/features/roofing/catalog/RoofCatalogPage"),
   // The salesperson's site visit on an iPad, often opened on a roof with weak signal.
   roofVisit: () => import("@/features/roofing/visit/RoofVisitPages"),
   quote: () => import("@/features/quotes/QuotePage"),
@@ -139,6 +140,7 @@ export const routes: RouteObject[] = [
           { path: "paving/:id", ...page(screens.pavingProject, "PavingProjectPage") },
           { path: "roofing", ...page(screens.roofing, "RoofingPage") },
           { path: "roofing/packages", ...page(screens.roofPackages, "RoofPackagesPage") },
+          { path: "roofing/catalog", ...page(screens.roofCatalog, "RoofCatalogPage") },
           { path: "roofing/:id", ...page(screens.roofingProject, "RoofingProjectPage") },
           // Every trade's packages; a roofer's are under Roofing (the page sends them there).
           { path: "packages", ...page(screens.roofPackages, "PackagesPage") },

@@ -185,8 +185,21 @@ async function request<T>(method: string, path: string, body?: unknown, options:
   return json as T;
 }
 
+/** A file the API answers with (a picture), or null when there's none (404). */
+async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob | null> {
+  let res = await send("GET", path, undefined, options);
+  if (res.status === 401 && client && (await refreshSignIn()) === "ok") res = await send("GET", path, undefined, options);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(json.error ?? "Something went wrong. Try again.", res.status);
+  }
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>("GET", path, undefined, options),
+  blob: (path: string, options?: RequestOptions) => requestBlob(path, options),
   post: <T>(path: string, body: unknown = {}, options?: RequestOptions) => request<T>("POST", path, body, options),
   patch: <T>(path: string, body: unknown, options?: RequestOptions) => request<T>("PATCH", path, body, options),
   put: <T>(path: string, body: unknown, options?: RequestOptions) => request<T>("PUT", path, body, options),

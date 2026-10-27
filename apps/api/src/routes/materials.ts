@@ -3,17 +3,23 @@
  * account (integrations/abcSupply.ts), and an estimate's materials priced at its branch today
  * (Roofing → Estimate → Materials). Each material is a supplier item and how many of it go into one
  * unit of the service; the service's cost is its materials plus the rest (labor_cost).
+ *
+ * Roofing → Catalog browses ABC's catalog here too: searches, what the account usually buys, an
+ * item's colors and sizes and ABC's picture of it, every material checked with ABC at once, and one
+ * replaced everywhere it's used. Prices are asked for when they're shown, never kept apart from
+ * the price list (ABC's terms).
  */
 import { SALES } from "@crewtavo/core";
-import { lineUnitCost, priceMaterials, serviceUnitCost, type LineMaterials, type MaterialLink } from "@crewtavo/core/materials";
+import { keptPrice, lineUnitCost, priceMaterials, serviceUnitCost, type LineMaterials, type MaterialLink } from "@crewtavo/core/materials";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
-import { abcConnection, AbcProblem, settingsOf } from "../integrations/abcSupply";
+import { abcBillTo, abcConnection, AbcProblem, ASSET_ID, settingsOf, type AbcClient, type AbcItem, type AbcSettings } from "../integrations/abcSupply";
 import { requireCompany, requireUser } from "../lib/auth";
 import { asJson, dbError, HttpError, must, param, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
 import { adminClient, type Db } from "../lib/supabase";
+import { pricePackages, recostServices } from "../services/roofPackages";
 
 export const materials = new Hono<AppEnv>();
 
@@ -45,28 +51,90 @@ materials.get("/materials/supplier", requireUser, requireCompany(SALES), async (
   });
 });
 
+const SEARCHES_PER_10_MIN = 120;
+
+/** Items with the account's price for one of each, in the unit they're ordered in. */
+async function withPrices(client: AbcClient, settings: AbcSettings, items: AbcItem[]) {
+  // Items cut to length can't be priced until a length is picked.
+  const prices = await client.prices(
+    settings.ship_to,
+    settings.branch,
+    items.filter((i) => !i.dimensional).map((i) => ({ id: i.item_number, item_number: i.item_number, quantity: 1, uom: i.stocking_uom })),
+    "estimating",
+  );
+  return items.map((i) => ({ ...i, uom: i.stocking_uom, unit_price: prices.get(i.item_number)?.unit_price ?? null, note: i.dimensional ? "Pick a length to see its price." : (prices.get(i.item_number)?.note ?? null) }));
+}
+
 /** ABC Supply's catalog at the company's branch, each item with the account's price for one. */
 materials.get("/materials/search", requireUser, requireCompany(SALES), async (c) => {
   const query = (c.req.query("q") ?? "").trim().slice(0, 80);
   if (query.length < 2) throw new HttpError(400, "Type at least two letters to search.");
-  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, 120, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
+  // The Catalog's categories ask for more at once than a search as you type.
+  const limit = Math.min(60, Math.max(10, Math.round(Number(c.req.query("limit")) || 30)));
+  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, SEARCHES_PER_10_MIN, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
   const { client, settings } = await connection(c);
   try {
-    const items = await client.searchItems(query, settings.branch);
-    // Items cut to length can't be priced until a length is picked.
-    const prices = await client.prices(
-      settings.ship_to,
-      settings.branch,
-      items.filter((i) => !i.dimensional).map((i) => ({ id: i.item_number, item_number: i.item_number, quantity: 1, uom: i.stocking_uom })),
-      "estimating",
-    );
-    return c.json({
-      branch_name: settings.branch_name,
-      items: items.map((i) => ({ ...i, uom: i.stocking_uom, unit_price: prices.get(i.item_number)?.unit_price ?? null, note: i.dimensional ? "Pick a length to see its price." : (prices.get(i.item_number)?.note ?? null) })),
-    });
+    return c.json({ branch_name: settings.branch_name, items: await withPrices(client, settings, await client.searchItems(query, settings.branch, limit)) });
   } catch (error) {
     throw supplierAnswer(error);
   }
+});
+
+/** The colors and sizes of one product (its family) that the branch carries, with prices. */
+materials.get("/materials/family/:id", requireUser, requireCompany(SALES), async (c) => {
+  const id = c.req.param("id") ?? "";
+  if (!/^[A-Za-z0-9._-]{1,60}$/.test(id)) throw new HttpError(400, "That isn't an ABC product family.");
+  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, SEARCHES_PER_10_MIN, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
+  const { client, settings } = await connection(c);
+  try {
+    return c.json({ branch_name: settings.branch_name, items: await withPrices(client, settings, await client.family(id, settings.branch)) });
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+});
+
+/**
+ * What the account buys again and again (ABC's record of its invoices), with today's prices. When
+ * ABC won't share it, the catalog says why and the rest of it still works.
+ */
+materials.get("/materials/usual", requireUser, requireCompany(SALES), async (c) => {
+  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, SEARCHES_PER_10_MIN, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
+  const { client, settings } = await connection(c);
+  const none = (note: string) => c.json({ branch_name: settings.branch_name, items: [], note });
+  try {
+    const billTo = await abcBillTo(adminClient(c.env), c.var.companyId, client, settings);
+    if (!billTo) return none("ABC Supply didn't say which account your purchases are billed to, so it can't show what you usually buy.");
+    const usual = (await client.usual(billTo, settings.branch)).slice(0, 40);
+    if (!usual.length) {
+      return none(
+        settings.environment === "sandbox"
+          ? "ABC's sandbox has no purchases to go by. Once you're on your real prices, what your account buys most shows here."
+          : "Nothing yet. ABC lists the items your account was invoiced for at least twice in the last 6 months.",
+      );
+    }
+    const prices = await client.prices(settings.ship_to, settings.branch, usual.map((u) => ({ id: u.item_number, item_number: u.item_number, quantity: 1, uom: u.uom })), "estimating");
+    return c.json({ branch_name: settings.branch_name, items: usual.map((u) => ({ ...u, unit_price: prices.get(u.item_number)?.unit_price ?? null, note: prices.get(u.item_number)?.note ?? null })) });
+  } catch (error) {
+    // Busy or down is worth trying again; anything else ABC said no to, the page explains.
+    if (error instanceof AbcProblem && error.status !== 429 && error.status !== 502) return none(`ABC Supply didn't share what you usually buy. ${error.message}`);
+    throw supplierAnswer(error);
+  }
+});
+
+/** ABC's picture of an item, through Crewtavo since ABC wants the app's sign-in for it. */
+materials.get("/materials/images/:asset", requireUser, requireCompany(SALES), async (c) => {
+  const asset = c.req.param("asset") ?? "";
+  if (!ASSET_ID.test(asset)) throw new HttpError(400, "That isn't an ABC picture.");
+  if (!(await allow(c.env, `materials-images:${c.var.companyId}`, 900, 10 * 60))) throw new HttpError(429, "That's a lot of pictures in a few minutes. Wait a little and try again.");
+  const { client } = await connection(c);
+  let image;
+  try {
+    image = await client.image(asset);
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+  if (!image) throw new HttpError(404, "ABC Supply has no picture of that.");
+  return new Response(image.body, { headers: { "Content-Type": image.type, "Cache-Control": "private, max-age=86400" } });
 });
 
 /** One item: its units, and the lengths it's cut to. A price for the unit asked for (and length). */
@@ -104,6 +172,23 @@ const serviceOf = async (db: Db, companyId: string, id: string) =>
 
 const perUnit = z.number().positive("How many has to be more than 0.").max(100000);
 
+/** An item picked from ABC's catalog, as a material: its unit and length checked with ABC, and priced. */
+const picked = { item_number: z.string().trim().min(1).max(40), uom: z.string().trim().min(1).max(12).optional(), length_ft: z.number().positive().max(1000).nullable().optional() };
+
+/** The item checked with ABC (its name and units come from there) and priced for one. */
+async function pickedItem(client: AbcClient, settings: AbcSettings, body: { item_number: string; uom?: string; length_ft?: number | null }) {
+  try {
+    const found = await client.item(body.item_number);
+    const unit = (body.uom ?? found.stocking_uom).toUpperCase();
+    if (found.uoms.length && !found.uoms.some((u) => u.code === unit)) throw new HttpError(400, `ABC Supply doesn't sell ${found.name} by ${unit}.`);
+    if (found.dimensional && !body.length_ft) throw new HttpError(400, "Pick the length it's cut to.");
+    const answer = (await client.prices(settings.ship_to, settings.branch, [{ id: "1", item_number: found.item_number, quantity: 1, uom: unit, length_ft: body.length_ft }], "estimating")).get("1")!;
+    return { item: found, uom: { code: unit, name: found.uoms.find((u) => u.code === unit)?.name ?? unit }, price: answer };
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+}
+
 /**
  * A material in a service: checked with ABC (its name and units come from there), priced, and the
  * service's cost worked out again. The first one splits the service's cost: what its materials
@@ -111,22 +196,11 @@ const perUnit = z.number().positive("How many has to be more than 0.").max(10000
  */
 materials.post("/services/:id/materials", requireUser, requireCompany(SALES, "settings"), async (c) => {
   const id = param(c, "id");
-  const body = await readJson(c, z.object({ item_number: z.string().trim().min(1).max(40), uom: z.string().trim().min(1).max(12).optional(), per_unit: perUnit, length_ft: z.number().positive().max(1000).nullable().optional() }));
+  const body = await readJson(c, z.object({ ...picked, per_unit: perUnit }));
   const { db, companyId } = c.var;
   const service = await serviceOf(db, companyId, id);
   const { client, settings } = await connection(c);
-  const { item, uom, price } = await (async () => {
-    try {
-      const found = await client.item(body.item_number);
-      const unit = (body.uom ?? found.stocking_uom).toUpperCase();
-      if (found.uoms.length && !found.uoms.some((u) => u.code === unit)) throw new HttpError(400, `ABC Supply doesn't sell ${found.name} by ${unit}.`);
-      if (found.dimensional && !body.length_ft) throw new HttpError(400, "Pick the length it's cut to.");
-      const answer = (await client.prices(settings.ship_to, settings.branch, [{ id: "1", item_number: found.item_number, quantity: 1, uom: unit, length_ft: body.length_ft }], "estimating")).get("1")!;
-      return { item: found, uom: { code: unit, name: found.uoms.find((u) => u.code === unit)?.name ?? unit }, price: answer };
-    } catch (error) {
-      throw supplierAnswer(error);
-    }
-  })();
+  const { item, uom, price } = await pickedItem(client, settings, body);
   const before = await linksOf(db, id);
   const { error } = await db.from("service_materials").insert({
     company_id: companyId,
@@ -185,6 +259,51 @@ materials.put("/services/:id/labor", requireUser, requireCompany(SALES, "setting
 });
 
 /**
+ * Every material in the price list checked with ABC Supply and priced at the branch today (Roofing
+ * → Catalog → Your materials): renamed ones take ABC's new name, and ones ABC doesn't carry any more
+ * or can't price are marked, keeping their last price.
+ */
+materials.post("/materials/check", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  if (!(await allow(c.env, `materials-check:${c.var.companyId}`, 10, 10 * 60))) throw new HttpError(429, "Your materials were just checked. Wait a few minutes and try again.");
+  return c.json(await pricePackages(c.env, c.var.db, c.var.companyId, { all: true, check: true }));
+});
+
+/**
+ * One material swapped for another item from ABC's catalog in every service it's in (`links`), each
+ * with how many of the new one go into a unit. The services' costs and the packages that follow
+ * ABC are worked out again; estimates are priced again when they're next opened.
+ */
+materials.post("/materials/replace", requireUser, requireCompany(SALES, "settings"), async (c) => {
+  const body = await readJson(c, z.object({ ...picked, links: z.array(z.object({ id: z.string().uuid(), per_unit: perUnit })).min(1).max(100) }));
+  const { db, companyId } = c.var;
+  const rows = must(await db.from("service_materials").select("id, service_id").eq("company_id", companyId).in("id", body.links.map((l) => l.id))) as Array<{ id: string; service_id: string }>;
+  if (rows.length !== new Set(body.links.map((l) => l.id)).size) throw new HttpError(404, "Some of those materials were taken out already. Reload the page and try again.");
+  const { client, settings } = await connection(c);
+  const { item, uom, price } = await pickedItem(client, settings, body);
+  const pricedAt = new Date().toISOString();
+  for (const link of body.links) {
+    const { error } = await db
+      .from("service_materials")
+      .update({
+        item_number: item.item_number,
+        name: item.name.slice(0, 300),
+        uom: uom.code,
+        uom_name: uom.name.slice(0, 60),
+        length_ft: item.dimensional ? body.length_ft : null,
+        per_unit: link.per_unit,
+        unit_price: price.unit_price,
+        priced_at: pricedAt,
+        price_note: price.note,
+      })
+      .eq("id", link.id)
+      .eq("company_id", companyId);
+    if (error) throw dbError(error);
+  }
+  await recostServices(db, companyId, [...new Set(rows.map((r) => r.service_id))]);
+  return c.json({ replaced: body.links.length, name: item.name, unit_price: price.unit_price });
+});
+
+/**
  * A quote's materials, priced at ABC Supply today: for each line from a service with materials,
  * whole bundles, rolls and pieces at the account's prices at its branch. Each line keeps what its
  * materials came to (materials, material_cost) and its cost per unit with the rest (unit_cost); the
@@ -233,12 +352,14 @@ materials.post("/quotes/:id/material-prices", requireUser, requireCompany(SALES,
   const pricedAt = new Date().toISOString();
   const admin = adminClient(c.env);
 
-  // The price list keeps each material's newest price, and its services' costs follow.
+  // The price list keeps each material's newest price, and its services' costs follow. One ABC
+  // won't price today keeps its last price, with ABC's reason beside it, so the service's cost
+  // (and a package that follows ABC) doesn't drop by what it cost.
   const fresh = new Map<string, { unit_price: number | null; price_note: string | null }>();
   for (const line of priced) {
     for (const link of byService.get(line.service_id!)!) {
       const answer = prices.get(`${line.id}:${link.id}`);
-      if (answer && !fresh.has(link.id)) fresh.set(link.id, { unit_price: answer.unit_price, price_note: answer.note });
+      if (answer && !fresh.has(link.id)) fresh.set(link.id, { unit_price: keptPrice(answer.unit_price, link.unit_price), price_note: answer.note });
     }
   }
   for (const [linkId, price] of fresh) {

@@ -93,6 +93,18 @@ export function materialsPerUnit(links: readonly MaterialLink[]): number {
   return links.reduce((sum, link) => sum + (num(link.per_unit) ?? 0) * (num(link.unit_price) ?? 0), 0);
 }
 
+/**
+ * The materials with no price at all: the branch never priced them. A price that follows the
+ * materials would leave them out and come out too low, so it waits until they have one.
+ */
+export const unpricedLinks = <T extends MaterialLink>(links: readonly T[]): T[] => links.filter((link) => !((num(link.unit_price) ?? 0) > 0));
+
+/**
+ * The price a material keeps when the supplier gives none today (it stopped carrying it, or the
+ * branch stopped pricing it): its last one, so nothing it's in gets cheaper by itself.
+ */
+export const keptPrice = (today: number | null, last: Amount): number | null => today ?? ((num(last) ?? 0) > 0 ? num(last) : null);
+
 const cents = (value: number) => Math.round(value * 100) / 100;
 
 /** A service's whole cost per unit (services.unit_cost): its materials at their last prices and the rest. */
