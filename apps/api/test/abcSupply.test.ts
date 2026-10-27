@@ -53,6 +53,7 @@ vi.mock("../src/lib/supabase", () => {
   return { userClient: () => user, adminClient: () => admin, publishableKey: () => "key" };
 });
 const { app } = await import("../src/app");
+const { forgetCatalogMemory } = await import("../src/routes/materials");
 
 const env = {
   SUPABASE_URL: "https://example.supabase.co",
@@ -110,6 +111,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   state.tables = {};
+  forgetCatalogMemory();
 });
 
 async function roofer({ connected = true }: { connected?: boolean } = {}) {
@@ -330,7 +332,7 @@ describe("ABC Supply's catalog", () => {
     expect(sent("/search/items").at(-1).filters[0]).toEqual({ key: "productFamilyId", condition: "equals", values: ["FAM-HDZ"], joinCondition: "and" });
   });
 
-  it("shows what the account usually buys at today's prices, finding its bill-to account the first time", async () => {
+  it("shows what the account usually buys, then its prices, finding its bill-to account the first time", async () => {
     await roofer();
     abc.mockImplementation(async (url, init) => {
       const u = String(url);
@@ -347,22 +349,29 @@ describe("ABC Supply's catalog", () => {
     });
     const res = await send("/materials/usual");
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    const usual = (await res.json()) as { items: Array<{ item_number: string; uom: string }> };
+    expect(usual).toMatchObject({
       items: [
-        { item_number: "02GATZ3CH", name: "Timberline HDZ Charcoal", uom: "BD", uom_name: "Bundle", count: 9, at_branch: true, unit_price: 41.2 },
-        { item_number: "DRIP10", uom: "PC", uom_name: "Piece", at_branch: false, unit_price: null, note: expect.stringMatching(/hasn't priced/) },
+        { item_number: "02GATZ3CH", name: "Timberline HDZ Charcoal", uom: "BD", uom_name: "Bundle", count: 9, at_branch: true },
+        { item_number: "DRIP10", uom: "PC", uom_name: "Piece", at_branch: false },
       ],
     });
-    // Pricing takes the unit's code alone: "BD - BUNDLE" can't be priced.
+    // The cards show first; their prices are asked for next, by each unit's code: "BD - BUNDLE" can't be priced.
+    expect(sent("/pricing/v2/prices")).toEqual([]);
+    const prices = await send("/materials/prices", { lines: usual.items.map((i) => ({ item_number: i.item_number, uom: i.uom })) });
+    expect(await prices.json()).toEqual({
+      prices: { "02GATZ3CH:BD": { unit_price: 41.2, note: null }, "DRIP10:PC": { unit_price: null, note: expect.stringMatching(/hasn't priced/) } },
+    });
     expect(sent("/pricing/v2/prices")[0].lines.map((l: { uom: string }) => l.uom)).toEqual(["BD", "PC"]);
     expect(String(abc.mock.calls.find(([u]) => String(u).includes("/frequents"))![0])).toContain("/api/product/v1/items/116660/frequents?itemsPerPage=50&pageNumber=1&branchNumber=18");
-    // Kept, so the accounts aren't asked for again.
     expect(state.tables.integrations![0]!.settings).toMatchObject({ bill_to: "116660" });
+    // Kept for a while: opening the Catalog again doesn't ask ABC for the list.
     abc.mockClear();
-    await send("/materials/usual");
-    expect(abc.mock.calls.some(([u]) => String(u).includes("/search/accounts"))).toBe(false);
+    expect((await (await send("/materials/usual")).json()).items).toHaveLength(2);
+    expect(abc.mock.calls.some(([u]) => /search\/accounts|frequents|recents/.test(String(u)))).toBe(false);
 
     // ABC turning it down still leaves the rest of the catalog working, with ABC's reason.
+    forgetCatalogMemory();
     abc.mockImplementation(async (url) => (String(url).includes("/oauth2/") ? Response.json({ access_token: "token-1", expires_in: 1800 }) : new Response("", { status: 403 })));
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const refused = await send("/materials/usual");
@@ -455,5 +464,69 @@ describe("ABC Supply's catalog", () => {
     expect(brandOf("CERTAINTEED, LLC")).toBe("Certainteed");
     expect(brandOf("IKO Industries Inc.")).toBe("IKO Industries");
     expect(brandOf("")).toBeNull();
+  });
+
+  it("finds the pictures of items listed without them: all in one search, then one by one, and keeps them", async () => {
+    await roofer();
+    const lookedUp: string[] = [];
+    abc.mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u.includes("/oauth2/")) return Response.json({ access_token: "token-1", expires_in: 1800 });
+      // ABC answers the search for only one of the numbers asked.
+      if (u.includes("/search/items")) return Response.json({ items: [ITEM] });
+      const number = decodeURIComponent(u.split("/items/")[1]!.split("?")[0]!);
+      lookedUp.push(u.split("/items/")[1]!);
+      if (number === "GONE1") return new Response("", { status: 404 });
+      return Response.json({ ...ITEM, itemNumber: number, images: [], supplierName: "OWENS CORNING SALES LLC", color: { name: "Driftwood" } });
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await send("/materials/pictures?items=02GATZ3CH,02OCTDDW,GONE1");
+    expect(await res.json()).toEqual({
+      looks: {
+        "02GATZ3CH": { image: "IMG-77", brand: "GAF Materials", color: "Charcoal", kind: "Laminated Shingles" },
+        "02OCTDDW": { image: null, brand: "Owens Corning", color: "Driftwood", kind: "Laminated Shingles" },
+        GONE1: null,
+      },
+    });
+    expect(sent("/search/items")[0].filters[0]).toEqual({ key: "itemNumber", condition: "equals", values: ["02GATZ3CH", "02OCTDDW", "GONE1"], joinCondition: "and" });
+    // The ones the search didn't answer for, without the slower full item.
+    expect(lookedUp.sort()).toEqual(["02OCTDDW", "GONE1"]);
+    // Kept: asking again doesn't go to ABC.
+    abc.mockClear();
+    expect((await (await send("/materials/pictures?items=02GATZ3CH,GONE1")).json()).looks).toEqual({ "02GATZ3CH": expect.objectContaining({ image: "IMG-77" }), GONE1: null });
+    expect(abc).not.toHaveBeenCalled();
+  });
+
+  it("makes ABC's big photos small for cards, and keeps them", async () => {
+    await roofer();
+    const { encode, decode } = await import("jpeg-js");
+    const width = 1200;
+    const height = 900;
+    const big = encode({ data: new Uint8Array(width * height * 4).map((_, i) => (i % 4 === 3 ? 255 : (i * 37) % 251)), width, height }, 90).data;
+    abc.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/oauth2/")) return Response.json({ access_token: "token-1", expires_in: 1800 });
+      if (u.includes("/items/BIG-1/images")) return new Response(new Uint8Array(big), { headers: { "Content-Type": "image/jpeg" } });
+      return new Response("", { status: 404 });
+    });
+    const res = await send("/materials/images/BIG-1");
+    expect(res.headers.get("Content-Type")).toBe("image/jpeg");
+    const small = new Uint8Array(await res.arrayBuffer());
+    const photo = decode(small, { useTArray: true });
+    expect([photo.width, photo.height]).toEqual([480, 360]);
+    expect(small.byteLength).toBeLessThan(big.byteLength / 4);
+    abc.mockClear();
+    expect((await send("/materials/images/BIG-1")).status).toBe(200);
+    expect(abc).not.toHaveBeenCalled();
+  });
+
+  it("keeps a company's calls to ABC under its limit of 10 a second", async () => {
+    abc.mockImplementation(async () => Response.json({ shipTos: [] }));
+    const client = new AbcClient("sandbox", "token-1", abc as never, undefined, "pace-test");
+    const started = Date.now();
+    await Promise.all(Array.from({ length: 12 }, () => client.accounts()));
+    // A burst of 8 goes at once; the next 4 wait an eighth of a second each.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(450);
+    expect(abc).toHaveBeenCalledTimes(12);
   });
 });

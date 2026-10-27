@@ -9,6 +9,10 @@
  * ABC's search finds items by the words that describe them, not by category, so a category is a
  * search (CATALOG_CATEGORIES), narrowed by ABC's own product types and brands on what comes back.
  * Prices are ABC's answer when the page asks; nothing here keeps them (ABC's terms).
+ *
+ * ABC takes a second or two for each answer, so cards show as soon as the items are known, and
+ * their prices (useCardPrices) and, for the usual items, their pictures (useCardLooks) fill in
+ * after. A picture downloads once its card is near the screen (AbcPicture).
  */
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -21,7 +25,7 @@ import { api } from "@/lib/api";
 import { formatMoneyCents, formatNumber } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { AbcPicture } from "../../materials/AbcPicture";
-import { CATALOG_CATEGORIES, uomWord, useAllMaterials, useSupplier, type CatalogCategory, type CatalogItem, type ServiceMaterial, type Supplier, type UsualItem } from "../../materials/data";
+import { CATALOG_CATEGORIES, priceKey, uomWord, useAllMaterials, useCardLooks, useCardPrices, useSupplier, type CardPrice, type CatalogCategory, type CatalogItem, type ServiceMaterial, type Supplier, type UsualItem } from "../../materials/data";
 import { canSeePackages, usePriceList, useRoofPackages } from "../packages";
 import { RoofingTabs } from "../RoofingTabs";
 import { CatalogItemDialog } from "./CatalogItemDialog";
@@ -205,11 +209,22 @@ function SearchBox({ query, onSearch }: { query: string; onSearch: (text: string
   );
 }
 
-/** One item as a card: its picture, who makes it, its name and color, and the price for one. */
+/**
+ * A card's price from the prices asked for after the cards showed: undefined while they're coming,
+ * then the price, or ABC's reason there's none.
+ */
+function priceOf(prices: { data?: Record<string, CardPrice>; isError: boolean }, item: { item_number: string; uom: string }): { price: number | null | undefined; note: string | null } {
+  if (prices.isError) return { price: null, note: "Couldn't get today's price. Open it to try again." };
+  if (!prices.data) return { price: undefined, note: null };
+  const found = prices.data[priceKey(item)];
+  return { price: found?.unit_price ?? null, note: found?.note ?? null };
+}
+
+/** One item as a card: its picture, who makes it, its name and color, and the price for one (undefined while it's coming). */
 function Card({ item, eyebrow, price, unit, note, used, icon, onOpen }: {
   item: { item_number: string; name: string; color?: string | null; image?: string | null };
   eyebrow?: string | null;
-  price: number | null;
+  price: number | null | undefined;
   unit: string;
   note: string | null;
   used: boolean;
@@ -225,7 +240,9 @@ function Card({ item, eyebrow, price, unit, note, used, icon, onOpen }: {
         <span className={styles.cardMeta}>{[item.item_number, item.color].filter(Boolean).join(" · ")}</span>
       </span>
       <span className={styles.cardFoot}>
-        {price !== null ? (
+        {price === undefined ? (
+          <Skeleton width={84} height={18} />
+        ) : price !== null ? (
           <span className={styles.price}>{formatMoneyCents(price)} <small>/ {unit.toLowerCase()}</small></span>
         ) : (
           <span className={styles.noPrice}>{note ?? "No price"}</span>
@@ -255,8 +272,8 @@ function countsOf(values: Array<string | null | undefined>): Array<[string, numb
 function Results({ query, title, icon, usedIn, onOpen }: { query: string; title: string; icon?: IconName; usedIn: Map<string, ServiceMaterial[]>; onOpen: (itemNumber: string, from?: Partial<CatalogItem>) => void }) {
   const { company } = useSession();
   const results = useQuery({
-    queryKey: ["material-search", company.id, query, 60],
-    queryFn: () => api.get<{ branch_name: string; items: CatalogItem[] }>(`/materials/search?${new URLSearchParams({ q: query, limit: "60" })}`),
+    queryKey: ["material-search", company.id, query, 60, "unpriced"],
+    queryFn: () => api.get<{ branch_name: string; items: CatalogItem[] }>(`/materials/search?${new URLSearchParams({ q: query, limit: "60", prices: "0" })}`),
     staleTime: 5 * 60_000,
     retry: false,
   });
@@ -266,6 +283,8 @@ function Results({ query, title, icon, usedIn, onOpen }: { query: string; title:
   const kinds = countsOf(items.map((i) => i.kind)).slice(0, 8);
   const brands = countsOf(items.filter((i) => !kind || i.kind === kind).map((i) => i.brand)).slice(0, 8);
   const shown = items.filter((i) => (!kind || i.kind === kind) && (!brand || i.brand === brand));
+  // Items cut to length can't be priced until a length is picked.
+  const prices = useCardPrices(items.filter((i) => !i.dimensional));
 
   return (
     <section className="stack" aria-labelledby="catalog-results" style={{ gap: 14 }}>
@@ -305,19 +324,22 @@ function Results({ query, title, icon, usedIn, onOpen }: { query: string; title:
         <div className="card"><EmptyState icon="search" title="Nothing at your branch matches" compact>Try fewer words, the brand's name, or an ABC item number.</EmptyState></div>
       ) : (
         <div className={styles.grid}>
-          {shown.map((item) => (
-            <Card
-              key={item.item_number}
-              item={item}
-              eyebrow={[item.brand, item.kind].filter(Boolean).join(" · ") || null}
-              price={item.unit_price}
-              unit={item.uoms.find((u) => u.code === item.uom)?.name ?? uomWord(item.uom)}
-              note={item.note}
-              used={usedIn.has(item.item_number)}
-              icon={icon}
-              onOpen={() => onOpen(item.item_number, item)}
-            />
-          ))}
+          {shown.map((item) => {
+            const { price, note } = item.dimensional ? { price: null, note: "Pick a length to see its price." } : priceOf(prices, item);
+            return (
+              <Card
+                key={item.item_number}
+                item={item}
+                eyebrow={[item.brand, item.kind].filter(Boolean).join(" · ") || null}
+                price={price}
+                unit={item.uoms.find((u) => u.code === item.uom)?.name ?? uomWord(item.uom)}
+                note={note}
+                used={usedIn.has(item.item_number)}
+                icon={icon}
+                onOpen={() => onOpen(item.item_number, item)}
+              />
+            );
+          })}
         </div>
       )}
     </section>
@@ -334,6 +356,8 @@ function Usual({ usedIn, onOpen, onCategory }: { usedIn: Map<string, ServiceMate
     retry: false,
   });
   const items = usual.data?.items ?? [];
+  const prices = useCardPrices(items);
+  const looks = useCardLooks(items.map((i) => i.item_number));
   return (
     <section className="stack" aria-labelledby="catalog-usual" style={{ gap: 14 }}>
       <div className={styles.head}>
@@ -348,18 +372,22 @@ function Usual({ usedIn, onOpen, onCategory }: { usedIn: Map<string, ServiceMate
         <div className="card"><ErrorState error={usual.error} onRetry={() => usual.refetch()} /></div>
       ) : items.length ? (
         <div className={styles.grid}>
-          {items.map((item) => (
-            <Card
-              key={item.item_number}
-              item={item}
-              eyebrow={item.at_branch === false ? "Not at your branch" : item.count ? `On ${formatNumber(item.count)} ${item.count === 1 ? "invoice" : "invoices"} lately` : null}
-              price={item.unit_price}
-              unit={item.uom_name ?? uomWord(item.uom)}
-              note={item.note}
-              used={usedIn.has(item.item_number)}
-              onOpen={() => onOpen(item.item_number, { item_number: item.item_number, name: item.name })}
-            />
-          ))}
+          {items.map((item) => {
+            const look = looks[item.item_number];
+            const { price, note } = priceOf(prices, item);
+            return (
+              <Card
+                key={item.item_number}
+                item={{ ...item, image: look?.image, color: look?.color }}
+                eyebrow={item.at_branch === false ? "Not at your branch" : item.count ? `On ${formatNumber(item.count)} ${item.count === 1 ? "invoice" : "invoices"} lately` : null}
+                price={price}
+                unit={item.uom_name ?? uomWord(item.uom)}
+                note={note}
+                used={usedIn.has(item.item_number)}
+                onOpen={() => onOpen(item.item_number, { item_number: item.item_number, name: item.name, image: look?.image, color: look?.color, brand: look?.brand })}
+              />
+            );
+          })}
         </div>
       ) : (
         <>

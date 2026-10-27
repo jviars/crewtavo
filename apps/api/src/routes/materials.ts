@@ -8,17 +8,23 @@
  * item's colors and sizes and ABC's picture of it, every material checked with ABC at once, and one
  * replaced everywhere it's used. Prices are asked for when they're shown, never kept apart from
  * the price list (ABC's terms).
+ *
+ * ABC takes a second or more to answer, so the Catalog shows its cards first and asks for their
+ * prices and pictures after (/materials/prices, /materials/pictures). What doesn't change from
+ * minute to minute is kept for a while in memory: the account's usual items, which picture and
+ * brand an item has, and its picture made small for a card (lib/thumbnail.ts). Prices never are.
  */
 import { SALES } from "@crewtavo/core";
 import { keptPrice, lineUnitCost, priceMaterials, serviceUnitCost, type LineMaterials, type MaterialLink } from "@crewtavo/core/materials";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
-import { abcBillTo, abcConnection, AbcProblem, ASSET_ID, settingsOf, type AbcClient, type AbcItem, type AbcSettings } from "../integrations/abcSupply";
+import { abcBillTo, abcConnection, AbcProblem, ASSET_ID, settingsOf, type AbcClient, type AbcItem, type AbcSettings, type AbcUsualItem } from "../integrations/abcSupply";
 import { requireCompany, requireUser } from "../lib/auth";
 import { asJson, dbError, HttpError, must, param, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
 import { adminClient, type Db } from "../lib/supabase";
+import { THUMBNAIL_PX, thumbnail } from "../lib/thumbnail";
 import { pricePackages, recostServices } from "../services/roofPackages";
 
 export const materials = new Hono<AppEnv>();
@@ -65,7 +71,10 @@ async function withPrices(client: AbcClient, settings: AbcSettings, items: AbcIt
   return items.map((i) => ({ ...i, uom: i.stocking_uom, unit_price: prices.get(i.item_number)?.unit_price ?? null, note: i.dimensional ? "Pick a length to see its price." : (prices.get(i.item_number)?.note ?? null) }));
 }
 
-/** ABC Supply's catalog at the company's branch, each item with the account's price for one. */
+/**
+ * ABC Supply's catalog at the company's branch, each item with the account's price for one. With
+ * prices=0 the items come back sooner, without them, for asking /materials/prices after.
+ */
 materials.get("/materials/search", requireUser, requireCompany(SALES), async (c) => {
   const query = (c.req.query("q") ?? "").trim().slice(0, 80);
   if (query.length < 2) throw new HttpError(400, "Type at least two letters to search.");
@@ -74,7 +83,9 @@ materials.get("/materials/search", requireUser, requireCompany(SALES), async (c)
   if (!(await allow(c.env, `materials-search:${c.var.companyId}`, SEARCHES_PER_10_MIN, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
   const { client, settings } = await connection(c);
   try {
-    return c.json({ branch_name: settings.branch_name, items: await withPrices(client, settings, await client.searchItems(query, settings.branch, limit)) });
+    const items = await client.searchItems(query, settings.branch, limit);
+    if (c.req.query("prices") === "0") return c.json({ branch_name: settings.branch_name, items: items.map((i) => ({ ...i, uom: i.stocking_uom, unit_price: null, note: null })) });
+    return c.json({ branch_name: settings.branch_name, items: await withPrices(client, settings, items) });
   } catch (error) {
     throw supplierAnswer(error);
   }
@@ -93,14 +104,31 @@ materials.get("/materials/family/:id", requireUser, requireCompany(SALES), async
   }
 });
 
+/** Kept for a while, the oldest dropped first past `max`. */
+function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number) {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > max) map.delete(map.keys().next().value as K);
+}
+
+const MINUTE = 60_000;
+
+/** A company's usual items (no prices): its invoices don't change from minute to minute. */
+const usualKept = new Map<string, { at: number; items: AbcUsualItem[] }>();
+const USUAL_FOR = 30 * MINUTE;
+
 /**
- * What the account buys again and again (ABC's record of its invoices), with today's prices. When
- * ABC won't share it, the catalog says why and the rest of it still works.
+ * What the account buys again and again (ABC's record of its invoices), without prices: the
+ * Catalog asks for those next (/materials/prices). Kept for half an hour. When ABC won't share
+ * it, the catalog says why and the rest of it still works.
  */
 materials.get("/materials/usual", requireUser, requireCompany(SALES), async (c) => {
-  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, SEARCHES_PER_10_MIN, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
   const { client, settings } = await connection(c);
   const none = (note: string) => c.json({ branch_name: settings.branch_name, items: [], note });
+  const key = `${c.var.companyId}:${settings.environment}:${settings.ship_to}:${settings.branch}`;
+  const kept = usualKept.get(key);
+  if (kept && Date.now() - kept.at < USUAL_FOR) return c.json({ branch_name: settings.branch_name, items: kept.items });
+  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, SEARCHES_PER_10_MIN, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
   try {
     const billTo = await abcBillTo(adminClient(c.env), c.var.companyId, client, settings);
     if (!billTo) return none("ABC Supply didn't say which account your purchases are billed to, so it can't show what you usually buy.");
@@ -112,8 +140,8 @@ materials.get("/materials/usual", requireUser, requireCompany(SALES), async (c) 
           : "Nothing yet. ABC lists the items your account was invoiced for at least twice in the last 6 months.",
       );
     }
-    const prices = await client.prices(settings.ship_to, settings.branch, usual.map((u) => ({ id: u.item_number, item_number: u.item_number, quantity: 1, uom: u.uom })), "estimating");
-    return c.json({ branch_name: settings.branch_name, items: usual.map((u) => ({ ...u, unit_price: prices.get(u.item_number)?.unit_price ?? null, note: prices.get(u.item_number)?.note ?? null })) });
+    remember(usualKept, key, { at: Date.now(), items: usual }, 500);
+    return c.json({ branch_name: settings.branch_name, items: usual });
   } catch (error) {
     // Busy or down is worth trying again; anything else ABC said no to, the page explains.
     if (error instanceof AbcProblem && error.status !== 429 && error.status !== 502) return none(`ABC Supply didn't share what you usually buy. ${error.message}`);
@@ -121,10 +149,95 @@ materials.get("/materials/usual", requireUser, requireCompany(SALES), async (c) 
   }
 });
 
-/** ABC's picture of an item, through Crewtavo since ABC wants the app's sign-in for it. */
+/** The account's price for one of each, in the unit asked (keyed "item:unit"), for cards shown before their prices. */
+materials.post("/materials/prices", requireUser, requireCompany(SALES), async (c) => {
+  const body = await readJson(c, z.object({ lines: z.array(z.object({ item_number: z.string().trim().min(1).max(40), uom: z.string().trim().min(1).max(12), length_ft: z.number().positive().max(1000).nullable().optional() })).min(1).max(60) }));
+  if (!(await allow(c.env, `materials-search:${c.var.companyId}`, SEARCHES_PER_10_MIN, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
+  const { client, settings } = await connection(c);
+  try {
+    const lines = body.lines.map((l) => ({ id: `${l.item_number}:${l.uom.toUpperCase()}`, item_number: l.item_number, quantity: 1, uom: l.uom.toUpperCase(), length_ft: l.length_ft ?? null }));
+    return c.json({ prices: Object.fromEntries(await client.prices(settings.ship_to, settings.branch, lines, "estimating")) });
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+});
+
+/** What a card shows of an item besides its name: ABC's picture of it, its brand, color and kind. */
+interface CardLook { image: string | null; brand: string | null; color: string | null; kind: string | null }
+
+/** Each item's look, by item number; null for one ABC doesn't have. Kept a day. */
+const looksKept = new Map<string, { at: number; look: CardLook | null }>();
+const LOOK_FOR = 24 * 60 * MINUTE;
+
+/**
+ * The looks of items the Catalog lists without them (what the account usually buys): one search
+ * for them all, then one by one for any it didn't answer for, a few at a time.
+ */
+async function looksOf(c: Context<AppEnv>, numbers: string[]): Promise<Record<string, CardLook | null>> {
+  const out: Record<string, CardLook | null> = {};
+  const now = Date.now();
+  const missing = numbers.filter((n) => {
+    const kept = looksKept.get(n);
+    if (kept && now - kept.at < LOOK_FOR) out[n] = kept.look;
+    return !(n in out);
+  });
+  if (!missing.length) return out;
+  const { client, settings } = await connection(c);
+  const keep = (n: string, look: CardLook | null) => {
+    out[n] = look;
+    remember(looksKept, n, { at: now, look }, 5000);
+  };
+  const lookOf = (i: AbcItem): CardLook => ({ image: i.image, brand: i.brand, color: i.color, kind: i.kind });
+  const found = await client.itemsByNumber(missing, settings.branch).catch(() => [] as AbcItem[]);
+  for (const item of found) if (missing.includes(item.item_number)) keep(item.item_number, lookOf(item));
+  const rest = missing.filter((n) => !(n in out));
+  for (let i = 0; i < rest.length; i += 4) {
+    await Promise.all(
+      rest.slice(i, i + 4).map(async (n) => {
+        try {
+          keep(n, lookOf(await client.item(n, false)));
+        } catch (error) {
+          // One ABC doesn't have is kept as that; anything else is left to try again next time.
+          if (error instanceof AbcProblem && error.status === 404) keep(n, null);
+        }
+      }),
+    );
+  }
+  return out;
+}
+
+/** The pictures, brands and colors of up to 24 items (?items=a,b,c), for cards listed without them. */
+materials.get("/materials/pictures", requireUser, requireCompany(SALES), async (c) => {
+  const numbers = [...new Set((c.req.query("items") ?? "").split(",").map((n) => n.trim()).filter((n) => /^[A-Za-z0-9._-]{1,40}$/.test(n)))].slice(0, 24);
+  if (!numbers.length) throw new HttpError(400, "Say which items.");
+  try {
+    return c.json({ looks: await looksOf(c, numbers) });
+  } catch (error) {
+    throw supplierAnswer(error);
+  }
+});
+
+/** Pictures made small for cards, by ABC's asset id. About 30 KB each. */
+const thumbnailsKept = new Map<string, { at: number; body: Uint8Array; type: string }>();
+const THUMBNAIL_FOR = 24 * 60 * MINUTE;
+
+/** Forgets everything kept above (for tests, which share one server). */
+export function forgetCatalogMemory() {
+  usualKept.clear();
+  looksKept.clear();
+  thumbnailsKept.clear();
+}
+
+/**
+ * ABC's picture of an item, through Crewtavo since ABC wants the app's sign-in for it, made small
+ * for a card (at most THUMBNAIL_PX). ABC's are up to a megabyte; this is a few dozen kilobytes.
+ */
 materials.get("/materials/images/:asset", requireUser, requireCompany(SALES), async (c) => {
   const asset = c.req.param("asset") ?? "";
   if (!ASSET_ID.test(asset)) throw new HttpError(400, "That isn't an ABC picture.");
+  const headers = (type: string) => ({ "Content-Type": type, "Cache-Control": "private, max-age=86400" });
+  const kept = thumbnailsKept.get(asset);
+  if (kept && Date.now() - kept.at < THUMBNAIL_FOR) return new Response(kept.body, { headers: headers(kept.type) });
   if (!(await allow(c.env, `materials-images:${c.var.companyId}`, 900, 10 * 60))) throw new HttpError(429, "That's a lot of pictures in a few minutes. Wait a little and try again.");
   const { client } = await connection(c);
   let image;
@@ -134,7 +247,10 @@ materials.get("/materials/images/:asset", requireUser, requireCompany(SALES), as
     throw supplierAnswer(error);
   }
   if (!image) throw new HttpError(404, "ABC Supply has no picture of that.");
-  return new Response(image.body, { headers: { "Content-Type": image.type, "Cache-Control": "private, max-age=86400" } });
+  const small = await thumbnail(new Uint8Array(image.body), image.type, THUMBNAIL_PX);
+  // Only small ones are kept: a photo that couldn't be made small isn't held in memory.
+  if (small.body.byteLength <= 200_000) remember(thumbnailsKept, asset, { at: Date.now(), ...small }, 400);
+  return new Response(small.body, { headers: headers(small.type) });
 });
 
 /** One item: its units, and the lengths it's cut to. A price for the unit asked for (and length). */

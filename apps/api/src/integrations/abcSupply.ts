@@ -321,16 +321,41 @@ function lengthInFeet(length: { value?: string | number; uom?: string; uomCode?:
   return /^(in|inch|inches)$/.test(unit) ? Math.round((value / 12) * 1000) / 1000 : value;
 }
 
-/** ABC's API for one app's token. A 401 means the token ran out: get another and call again. */
+/** ABC allows an app 10 calls a second; each company's calls stay under it, a burst of 8 and 8 a second after. */
+const CALLS_PER_SECOND = 8;
+const lanes = new Map<string, { tokens: number; at: number }>();
+
+/** Waits for the company's turn to call ABC. */
+async function pace(lane: string): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    const bucket = lanes.get(lane) ?? { tokens: CALLS_PER_SECOND, at: now };
+    bucket.tokens = Math.min(CALLS_PER_SECOND, bucket.tokens + ((now - bucket.at) / 1000) * CALLS_PER_SECOND);
+    bucket.at = now;
+    lanes.set(lane, bucket);
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.ceil(((1 - bucket.tokens) / CALLS_PER_SECOND) * 1000)));
+  }
+}
+
+/**
+ * ABC's API for one app's token. A 401 means the token ran out: get another and call again.
+ * `lane` (the company) keeps its calls under ABC's limit (pace).
+ */
 export class AbcClient {
   constructor(
     private readonly environment: AbcEnvironment,
     private token: string,
     private readonly fetcher: FetchLike = fetch,
     private readonly renew?: () => Promise<string>,
+    private readonly lane?: string,
   ) {}
 
   private async call<T>(path: string, init: { method?: string; body?: unknown } = {}, retried = false): Promise<T> {
+    if (this.lane) await pace(this.lane);
     const res = await this.fetcher(`${ENVIRONMENTS[this.environment].api}${path}`, {
       method: init.method ?? (init.body === undefined ? "GET" : "POST"),
       headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json", ...(init.body === undefined ? {} : { "Content-Type": "application/json" }) },
@@ -413,9 +438,30 @@ export class AbcClient {
     return (body.items ?? []).map(itemOf).filter((i) => i.item_number && i.active);
   }
 
-  /** One item in full: the lengths it's cut to when it's dimensional, its categories, specs and family. */
-  async item(itemNumber: string): Promise<AbcItemDetail> {
-    const raw = await this.call<RawItem>(`/api/product/v1/items/${encodeURIComponent(itemNumber)}?embed=variations&familyItems=true`);
+  /**
+   * Items by their numbers, at a branch, in one search: their pictures, brands and colors for cards.
+   * ABC's docs show one value per filter, so it may answer for some of them or none; whoever asks
+   * looks the rest up one by one.
+   */
+  async itemsByNumber(numbers: readonly string[], branch: string): Promise<AbcItem[]> {
+    const body = await this.call<{ items?: RawItem[] }>("/api/product/v1/search/items", {
+      body: {
+        filters: [
+          { key: "itemNumber", condition: "equals", values: numbers, joinCondition: "and" },
+          { key: "branchNumber", condition: "equals", values: [branch], joinCondition: null },
+        ],
+        pagination: { itemsPerPage: numbers.length, pageNumber: 1 },
+      },
+    });
+    return (body.items ?? []).map(itemOf).filter((i) => i.item_number);
+  }
+
+  /**
+   * One item in full: the lengths it's cut to when it's dimensional, its categories, specs and
+   * family. Without `full`, only the item (its picture, brand and color), which ABC answers faster.
+   */
+  async item(itemNumber: string, full = true): Promise<AbcItemDetail> {
+    const raw = await this.call<RawItem>(`/api/product/v1/items/${encodeURIComponent(itemNumber)}${full ? "?embed=variations&familyItems=true" : ""}`);
     const item = itemOf(raw);
     if (!item.item_number) throw new AbcProblem("ABC Supply doesn't have that item.", 404);
     const lengths = [...new Set((raw.dimensions?.variations ?? []).map((v) => lengthInFeet(v.length)).filter((n): n is number => n !== null))].sort((a, b) => a - b);
@@ -466,6 +512,7 @@ export class AbcClient {
 
   /** ABC's picture of an item (its docs say a PNG up to 250 px; production sends larger JPEGs), or null when it has none. */
   async image(assetId: string, retried = false): Promise<{ body: ArrayBuffer; type: string } | null> {
+    if (this.lane) await pace(this.lane);
     const res = await this.fetcher(`${ENVIRONMENTS[this.environment].api}/api/product/v1/items/${encodeURIComponent(assetId)}/images`, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "image/png, image/*" },
       signal: providerTimeout(),
@@ -598,7 +645,7 @@ export async function abcConnection(env: Env, admin: Db, companyId: string, fetc
     }
   };
   const fresh = secret?.access_token && secret.expires_at && secret.expires_at - Date.now() > 120_000 ? secret.access_token : await renew();
-  return { client: new AbcClient(settings.environment, fresh, fetcher, renew), settings };
+  return { client: new AbcClient(settings.environment, fresh, fetcher, renew, companyId), settings };
 }
 
 function keysOf(secret: StoredSecret | null): AbcKeys | null {
