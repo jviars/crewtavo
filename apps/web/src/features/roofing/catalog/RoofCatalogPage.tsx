@@ -22,6 +22,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { api } from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import { formatMoneyCents, formatNumber } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { AbcPicture } from "../../materials/AbcPicture";
@@ -213,11 +214,47 @@ function SearchBox({ query, onSearch }: { query: string; onSearch: (text: string
  * A card's price from the prices asked for after the cards showed: undefined while they're coming,
  * then the price, or ABC's reason there's none.
  */
-function priceOf(prices: { data?: Record<string, CardPrice>; isError: boolean }, item: { item_number: string; uom: string }): { price: number | null | undefined; note: string | null } {
-  if (prices.isError) return { price: null, note: "Couldn't get today's price. Open it to try again." };
+function priceOf(prices: { data?: Record<string, CardPrice>; isError: boolean; isFetching: boolean }, item: { item_number: string; uom: string }): { price: number | null | undefined; note: string | null } {
+  if (prices.isError && !prices.isFetching) return { price: null, note: "Couldn't get today's price." };
   if (!prices.data) return { price: undefined, note: null };
   const found = prices.data[priceKey(item)];
   return { price: found?.unit_price ?? null, note: found?.note ?? null };
+}
+
+/** True once `waiting` has lasted `ms`. */
+function useWaitedLong(waiting: boolean, ms: number): boolean {
+  const [long, setLong] = useState(false);
+  useEffect(() => {
+    setLong(false);
+    if (!waiting) return;
+    const timer = setTimeout(() => setLong(true), ms);
+    return () => clearTimeout(timer);
+  }, [waiting, ms]);
+  return waiting && long;
+}
+
+/**
+ * Above the cards while their prices are slow to come, or when they didn't: ABC usually prices in a
+ * second or two, but now and then takes far longer (the server asks it twice before giving up).
+ */
+function PricesNote({ prices }: { prices: ReturnType<typeof useCardPrices> }) {
+  const slow = useWaitedLong(prices.isFetching, 8_000);
+  if (prices.isError && !prices.isFetching) {
+    return (
+      <div className="callout callout-warning" role="alert">
+        <Icon name="alert" size={16} />
+        <span className="grow" style={{ fontWeight: 400 }}>Today's prices didn't come. {errorMessage(prices.error)}</span>
+        <button type="button" className="btn btn-sm" onClick={() => prices.refetch()}><Icon name="refresh" size={14} />Try again</button>
+      </div>
+    );
+  }
+  if (!slow) return null;
+  return (
+    <div className="callout callout-info" role="status">
+      <Icon name="clock" size={16} />
+      <span className="grow" style={{ fontWeight: 400 }}>ABC Supply is slow to send prices right now. Still asking…</span>
+    </div>
+  );
 }
 
 /** One item as a card: its picture, who makes it, its name and color, and the price for one (undefined while it's coming). */
@@ -316,6 +353,7 @@ function Results({ query, title, icon, usedIn, onOpen }: { query: string; title:
           )}
         </div>
       )}
+      {shown.length > 0 && <PricesNote prices={prices} />}
       {results.isPending ? (
         <CardsLoading />
       ) : results.error ? (
@@ -366,6 +404,7 @@ function Usual({ usedIn, onOpen, onCategory }: { usedIn: Map<string, ServiceMate
           <p>From ABC's record of your account's invoices, most often first, at today's prices.</p>
         </div>
       </div>
+      {items.length > 0 && <PricesNote prices={prices} />}
       {usual.isPending ? (
         <CardsLoading />
       ) : usual.error ? (

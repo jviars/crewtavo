@@ -30,6 +30,15 @@ const SCOPES = "account.read location.read product.read pricing.read";
 /** ABC takes up to 50 lines in one price request. */
 const PRICE_LINES = 50;
 
+/**
+ * ABC usually prices a request in under 2.5 s, whatever its size, but now and then one hangs: on
+ * crm.brrhi.com (2026-10-27) the first price requests after a quiet night got no answer in 15 s,
+ * twice in a row, and a minute later took 1 s. So prices get longer to come than other calls, and a
+ * price request with no answer after a few seconds is sent again alongside it (firstAnswer).
+ */
+const PRICE_WAIT_MS = 30_000;
+const PRICE_AGAIN_MS = 6_000;
+
 export interface AbcKeys {
   client_id: string;
   client_secret: string;
@@ -147,6 +156,7 @@ export class AbcProblem extends IntegrationError {
 type FetchLike = typeof fetch;
 
 const NOT_REACHED = "Couldn't reach ABC Supply. Check the server's internet connection and try again.";
+const NOT_ANSWERED = "ABC Supply didn't answer in time. Try again in a minute.";
 const keysRefused = (environment: AbcEnvironment) =>
   environment === "sandbox"
     ? "ABC Supply's sandbox didn't accept that Client ID and secret. Copy both again from your app in ABC's developer portal (Manage Applications, then Manage)."
@@ -245,10 +255,10 @@ interface RawItem {
   familyItems?: Array<{ itemNumber?: string; itemDescription?: string; color?: string | { name?: string | null } | null }> | null;
 }
 
-/** A color, or nothing for ABC's "N/A". */
+/** A color, or nothing for ABC's "N/A", or "Product Color" (the field's own label, shown when it has no color). */
 const colorText = (value: unknown) => {
   const color = text(value);
-  return color && !/^(n\/?a|none|-+)$/i.test(color) ? color : null;
+  return color && !/^(n\/?a|none|-+|product colou?r)$/i.test(color) ? color : null;
 };
 const colorOf = (color: RawItem["color"]) => (typeof color === "string" ? colorText(color) : (colorText(color?.name) ?? colorText(color?.description)));
 
@@ -341,6 +351,47 @@ async function pace(lane: string): Promise<void> {
   }
 }
 
+/** An answer slower than this gets a line in the server's logs. */
+const SLOW_MS = 6_000;
+
+/**
+ * The first answer to `ask`, asked once more when it hasn't come within `after` ms, or right away
+ * when ABC didn't answer or failed (502). ABC turning it down (400, 403, 429) is the answer. Only
+ * for calls that change nothing at ABC, like prices.
+ */
+export function firstAnswer<T>(ask: () => Promise<T>, after: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let asked = 0;
+    let failed = 0;
+    let done = false;
+    const again = () => {
+      asked += 1;
+      if (asked === 2) clearTimeout(timer);
+      ask().then(
+        (answer) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(answer);
+        },
+        (error: unknown) => {
+          failed += 1;
+          if (done) return;
+          if (asked === 1 && error instanceof AbcProblem && error.status === 502) return again();
+          if (failed < asked) return;
+          done = true;
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    };
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      if (!done && asked === 1) again();
+    }, after);
+    again();
+  });
+}
+
 /**
  * ABC's API for one app's token. A 401 means the token ran out: get another and call again.
  * `lane` (the company) keeps its calls under ABC's limit (pace).
@@ -354,15 +405,23 @@ export class AbcClient {
     private readonly lane?: string,
   ) {}
 
-  private async call<T>(path: string, init: { method?: string; body?: unknown } = {}, retried = false): Promise<T> {
+  private async call<T>(path: string, init: { method?: string; body?: unknown; wait?: number } = {}, retried = false): Promise<T> {
     if (this.lane) await pace(this.lane);
+    const started = Date.now();
+    let timedOut = false;
     const res = await this.fetcher(`${ENVIRONMENTS[this.environment].api}${path}`, {
       method: init.method ?? (init.body === undefined ? "GET" : "POST"),
       headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json", ...(init.body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: providerTimeout(),
-    }).catch(() => null);
-    if (!res) throw new AbcProblem(NOT_REACHED, 502);
+      signal: init.wait ? AbortSignal.timeout(init.wait) : providerTimeout(),
+    }).catch((error: unknown) => {
+      timedOut = error instanceof Error && error.name === "TimeoutError";
+      // For the server's logs: a call ABC never answered shows nowhere else.
+      console.warn(`ABC Supply didn't answer ${path}: ${timedOut ? `nothing in ${Math.round((Date.now() - started) / 1000)} s` : String(error)}`);
+      return null;
+    });
+    if (!res) throw new AbcProblem(timedOut ? NOT_ANSWERED : NOT_REACHED, 502);
+    if (Date.now() - started > SLOW_MS) console.warn(`ABC Supply took ${Math.round((Date.now() - started) / 1000)} s to answer ${path} (${res.status})`);
     if (res.status === 401 && this.renew && !retried) {
       this.token = await this.renew();
       return this.call(path, init, true);
@@ -538,21 +597,24 @@ export class AbcClient {
     const out = new Map<string, AbcPrice>();
     for (let i = 0; i < lines.length; i += PRICE_LINES) {
       const chunk = lines.slice(i, i + PRICE_LINES);
-      const body = await this.call<{ lines?: Array<{ id?: string; unitPrice?: number; status?: { code?: string; message?: string } }> }>("/api/pricing/v2/prices", {
-        body: {
-          requestId: `crewtavo-${crypto.randomUUID()}`,
-          shipToNumber: shipTo,
-          branchNumber: branch,
-          purpose,
-          lines: chunk.map((l) => ({
-            id: l.id,
-            itemNumber: l.item_number,
-            quantity: Math.max(1, Math.ceil(l.quantity)),
-            uom: l.uom,
-            ...(l.length_ft ? { length: { value: l.length_ft, uom: "ft" } } : {}),
-          })),
-        },
-      });
+      const ask = () =>
+        this.call<{ lines?: Array<{ id?: string; unitPrice?: number; status?: { code?: string; message?: string } }> }>("/api/pricing/v2/prices", {
+          body: {
+            requestId: `crewtavo-${crypto.randomUUID()}`,
+            shipToNumber: shipTo,
+            branchNumber: branch,
+            purpose,
+            lines: chunk.map((l) => ({
+              id: l.id,
+              itemNumber: l.item_number,
+              quantity: Math.max(1, Math.ceil(l.quantity)),
+              uom: l.uom,
+              ...(l.length_ft ? { length: { value: l.length_ft, uom: "ft" } } : {}),
+            })),
+          },
+          wait: PRICE_WAIT_MS,
+        });
+      const body = await firstAnswer(ask, PRICE_AGAIN_MS);
       for (const line of body.lines ?? []) {
         if (!line.id) continue;
         const ok = (line.status?.code ?? "").toUpperCase() === "OK";

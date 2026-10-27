@@ -217,6 +217,54 @@ describe("ABC Supply", () => {
     expect(prices.get("50")).toEqual({ unit_price: null, note: "Cannot price item B. Call for pricing." });
   });
 
+  it("asks for prices again when ABC hasn't answered in a few seconds, and takes the first answer", async () => {
+    answer({ A: 12 });
+    const answers = abc.getMockImplementation()!;
+    let asked = 0;
+    // The first price request hangs, as production ABC's did; the second answers.
+    abc.mockImplementation((url, init) => (String(url).includes("/pricing/v2/prices") && asked++ === 0 ? new Promise<Response>(() => {}) : answers(url, init)));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pending = new AbcClient("sandbox", "token-1", abc as never).prices("1163698", "18", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }], "estimating");
+      await vi.advanceTimersByTimeAsync(5_900);
+      expect(sent("/pricing/v2/prices")).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await pending).get("1")).toEqual({ unit_price: 12, note: null });
+      const [first, second] = sent("/pricing/v2/prices").map((b) => b.requestId);
+      expect(second).not.toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks for prices again at once when ABC fails, but not when it turns the request down", async () => {
+    answer({ A: 12 });
+    const answers = abc.getMockImplementation()!;
+    let asked = 0;
+    abc.mockImplementation((url, init) => (String(url).includes("/pricing/v2/prices") && asked++ === 0 ? Promise.resolve(new Response("upstream error", { status: 500 })) : answers(url, init)));
+    const client = new AbcClient("sandbox", "token-1", abc as never);
+    const line = [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }];
+    expect((await client.prices("1163698", "18", line)).get("1")!.unit_price).toBe(12);
+    expect(sent("/pricing/v2/prices")).toHaveLength(2);
+
+    abc.mockReset();
+    abc.mockImplementation(async () => Response.json({ errorMessage: "Bad Request : shipToNumber is invalid" }, { status: 400 }));
+    await expect(client.prices("1163698", "18", line)).rejects.toThrow("ABC Supply couldn't use that: shipToNumber is invalid.");
+    expect(sent("/pricing/v2/prices")).toHaveLength(1);
+  });
+
+  it("says ABC didn't answer in time when neither request is answered, and logs it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    abc.mockImplementation(async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    });
+    await expect(new AbcClient("sandbox", "token-1", abc as never).prices("1163698", "18", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }])).rejects.toThrow(
+      "ABC Supply didn't answer in time. Try again in a minute.",
+    );
+    expect(sent("/pricing/v2/prices")).toHaveLength(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^ABC Supply didn't answer \/api\/pricing\/v2\/prices: nothing in \d+ s$/));
+  });
+
   it("gets a new token when ABC says the old one ran out", async () => {
     let calls = 0;
     abc.mockImplementation(async () => (calls++ === 0 ? new Response("", { status: 401 }) : Response.json({ shipTos: [] })));
@@ -309,15 +357,17 @@ describe("ABC Supply's catalog", () => {
   it("reads who makes an item, ABC's category for it, its picture, specs and other colors, and hides retired items", async () => {
     abc.mockImplementation(async (url) => {
       const u = String(url);
-      if (u.includes("/search/items")) return Response.json({ items: [ITEM, { ...ITEM, itemNumber: "OLD1", status: "Inactive" }, { ...ITEM, itemNumber: "02OCTDDGT", supplierName: "OWENS CORNING SALES LLC", color: { name: "N/A" } }] });
+      if (u.includes("/search/items")) return Response.json({ items: [ITEM, { ...ITEM, itemNumber: "OLD1", status: "Inactive" }, { ...ITEM, itemNumber: "02OCTDDGT", supplierName: "OWENS CORNING SALES LLC", color: { name: "N/A" } }, { ...ITEM, itemNumber: "07DRIP", color: { description: "Product Color", name: null } }] });
       return Response.json(ITEM);
     });
     const client = new AbcClient("sandbox", "token-1", abc as never);
     const found = await client.searchItems("timberline", "18");
-    expect(found.map((i) => i.item_number)).toEqual(["02GATZ3CH", "02OCTDDGT"]);
+    expect(found.map((i) => i.item_number)).toEqual(["02GATZ3CH", "02OCTDDGT", "07DRIP"]);
     expect(found[0]).toMatchObject({ brand: "GAF Materials", kind: "Laminated Shingles", image: "IMG-77", family_id: "FAM-HDZ", color: "Charcoal", active: true });
     // ABC's "N/A" isn't a color, and its suppliers' legal names read as brands.
     expect(found[1]).toMatchObject({ brand: "Owens Corning", color: null });
+    // Nor is "Product Color", the label production ABC sends for an item with none.
+    expect(found[2]).toMatchObject({ color: null });
 
     const item = await client.item("02GATZ3CH");
     expect(String(abc.mock.calls.at(-1)![0])).toContain("/items/02GATZ3CH?embed=variations&familyItems=true");
