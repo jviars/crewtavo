@@ -37,11 +37,16 @@ import { signInCodes } from "./routes/signInCodes";
 import { signing } from "./routes/signing";
 import { subOffers } from "./routes/subOffers";
 import { subs } from "./routes/subs";
+import { formInbox, websiteForms } from "./routes/websiteForms";
 import { runTask, TASKS, type TaskName } from "./tasks";
 
 export const app = new Hono<AppEnv>();
 
-app.use(secureHeaders({ crossOriginResourcePolicy: false }));
+const secure = secureHeaders({ crossOriginResourcePolicy: false });
+// A website form's pages (routes/websiteForms.ts) show where the form was, and site builders put
+// their HTML blocks in a frame of their own (Wix, GoDaddy, Google Sites): they hold nothing to protect.
+const framable = secureHeaders({ crossOriginResourcePolicy: false, xFrameOptions: false });
+app.use((c, next) => (c.req.path.startsWith("/f/") ? framable(c, next) : secure(c, next)));
 // Bodies are read into memory, so one huge request could exhaust it. The biggest real one is a
 // quote approval with a drawn signature (a few hundred KB); files go straight to Storage. Calendar
 // files are the exception: their events are read from them (up to 10 MB of text, sent as JSON).
@@ -84,10 +89,13 @@ app.route("/api", push);
 app.route("/api", address);
 app.route("/api", railway);
 app.route("/api", analytics);
+app.route("/api", websiteForms);
 app.route("/", addressWellKnown);
 app.route("/", mcp);
 // Website analytics: the script for the business's website, and its page views (routes/analytics.ts).
 app.route("/", pageViews);
+// Website forms: the address the business's own form sends to (routes/websiteForms.ts).
+app.route("/", formInbox);
 
 /** Scheduled tasks over HTTP, for running one by hand (server.ts's scheduler calls runTask directly). */
 app.on(["GET", "POST"], "/api/cron/:task", async (c) => {

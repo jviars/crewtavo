@@ -45,6 +45,7 @@
     "./pay": "./src/pay.ts",
     "./video": "./src/video.ts",
     "./website": "./src/website.ts",
+    "./websiteForms": "./src/websiteForms.ts",
     "./subs": "./src/subs.ts",
     "./jobPay": "./src/jobPay.ts",
     "./subOffers": "./src/subOffers.ts",

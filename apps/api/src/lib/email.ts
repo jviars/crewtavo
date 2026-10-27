@@ -15,6 +15,8 @@ function buttonLabel(url: string): string {
   if (url.includes("/hub/")) return "View online";
   if (url.includes("/refer/")) return "Request a quote";
   if (url.includes("/api/public/r/")) return "Leave a review";
+  // A website form's message, to the office (services/websiteForms.ts).
+  if (/\/requests\/[0-9a-f-]{36}$/.test(url)) return "Open the request";
   return "Open";
 }
 

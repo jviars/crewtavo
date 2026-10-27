@@ -33,6 +33,7 @@ import { useIsInstalled } from "./installed";
 import { SCREENSHOTS } from "./screenshots";
 import { StripePanel } from "./StripePanel";
 import { TeamChatPanel, useTeamChatSwitch } from "./TeamChatPanel";
+import { WebsiteFormsPanel, useWebsiteFormsSwitch } from "./WebsiteFormsPanel";
 import { WebsitePanel } from "./WebsitePanel";
 
 const GOOGLE_SETTINGS = "https://calendar.google.com/calendar/r/settings";
@@ -131,8 +132,9 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   });
   const chatSwitch = useTeamChatSwitch();
   const analyticsSwitch = useAnalyticsSwitch();
+  const formsSwitch = useWebsiteFormsSwitch();
   // Built-in apps turn on and off in the company's settings.
-  const builtinSwitch = app.id === "website_analytics" ? analyticsSwitch : chatSwitch;
+  const builtinSwitch = app.id === "website_analytics" ? analyticsSwitch : app.id === "website_forms" ? formsSwitch : chatSwitch;
 
   // Uninstall takes this app's own assistants and calendars with it.
   const assistants = connections.filter((c) => assistantAppFor(c.name) === app.id);
@@ -330,6 +332,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           {app.auth === "api_key" && app.id !== "abc_supply" && <KeyCard app={app} onSaved={refresh} />}
           {app.id === "abc_supply" && <AbcSupplyPanel app={app} onChanged={refresh} />}
           {app.id === "website_analytics" && <AnalyticsPanel />}
+          {app.id === "website_forms" && <WebsiteFormsPanel />}
           {app.id === "team_chat" && <TeamChatPanel />}
           {app.auth === "site" && <WebsitePanel app={app} onSaved={refresh} />}
         </>

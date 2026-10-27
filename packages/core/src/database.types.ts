@@ -1752,14 +1752,14 @@ isOneToOne: false
                   ]
                 },"requests": {
                   Row: {
-                    "answers": NonNullable<Json>,"assigned_to": string | null,"client_id": string,"company_id": string,"created_at": string,"created_by": string | null,"details": string | null,"id": string,"intake_form_id": string | null,"number": number | null,"preferred_times": NonNullable<Json>,"promo_code": string | null,"property_id": string | null,"source": string,"status": string,"title": string,"updated_at": string,"web_visit": Json | null
+                    "answers": NonNullable<Json>,"assigned_to": string | null,"client_id": string,"company_id": string,"created_at": string,"created_by": string | null,"details": string | null,"id": string,"intake_form_id": string | null,"number": number | null,"preferred_times": NonNullable<Json>,"promo_code": string | null,"property_id": string | null,"source": string,"status": string,"title": string,"updated_at": string,"web_visit": Json | null,"website_form_id": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id": string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title": string,"updated_at"?: string,"web_visit"?: Json | null
+                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id": string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title": string,"updated_at"?: string,"web_visit"?: Json | null,"website_form_id"?: string | null
                   }
                   Update: {
-                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title"?: string,"updated_at"?: string,"web_visit"?: Json | null
+                    "answers"?: NonNullable<Json>,"assigned_to"?: string | null,"client_id"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"details"?: string | null,"id"?: string,"intake_form_id"?: string | null,"number"?: number | null,"preferred_times"?: NonNullable<Json>,"promo_code"?: string | null,"property_id"?: string | null,"source"?: string,"status"?: string,"title"?: string,"updated_at"?: string,"web_visit"?: Json | null,"website_form_id"?: string | null
                   }
                   Relationships: [
                     {
@@ -1785,6 +1785,12 @@ isOneToOne: false
       columns: ["company_id","property_id"]
 isOneToOne: false
       referencedRelation: "properties"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "requests_website_form_fkey"
+      columns: ["company_id","website_form_id"]
+isOneToOne: false
+      referencedRelation: "website_forms"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -2344,6 +2350,26 @@ isOneToOne: false
                   Relationships: [
                     {
       foreignKeyName: "web_hits_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"website_forms": {
+                  Row: {
+                    "allowed_sites": (string)[],"company_id": string,"created_at": string,"email_to": (string)[],"id": string,"key": string,"name": string,"redirect_url": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "allowed_sites"?: (string)[],"company_id": string,"created_at"?: string,"email_to"?: (string)[],"id"?: string,"key"?: string,"name": string,"redirect_url"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "allowed_sites"?: (string)[],"company_id"?: string,"created_at"?: string,"email_to"?: (string)[],"id"?: string,"key"?: string,"name"?: string,"redirect_url"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "website_forms_company_id_fkey"
       columns: ["company_id"]
 isOneToOne: false
       referencedRelation: "companies"
@@ -3007,6 +3033,12 @@ isOneToOne: false
                            },
 "web_visit_for":
 { Args: { "p_agent": string,"p_company": string,"p_ip": string }; Returns: Json
+                           },
+"website_form_request":
+{ Args: { "p_address"?: Json,"p_answers"?: Json,"p_company_name"?: string,"p_contact"?: Json,"p_details"?: string,"p_email"?: string,"p_form": string,"p_name"?: string,"p_phone"?: string,"p_title"?: string,"p_web_visit"?: Json }; Returns: Json
+                           },
+"website_forms_set_enabled":
+{ Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
                            },
 "withdraw_sub_offer":
 { Args: { "p_pay": string }; Returns: {

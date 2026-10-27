@@ -33,7 +33,7 @@ export const NAV_GROUPS: NavItem[][] = [
   ],
   [
     { to: "/clients", label: "Clients", icon: "clients", keywords: "customers contacts properties addresses" },
-    { to: "/requests", label: "Requests", icon: "requests", keywords: "inquiries leads assessments" },
+    { to: "/requests", label: "Requests", icon: "requests", keywords: "inquiries leads assessments website form messages contact form" },
     { to: "/quotes", label: "Quotes", icon: "quote", roles: ["admin", "office", "estimator"], also: ["/pipeline", "/measure"], keywords: "estimates proposals bids" },
     { to: "/jobs", label: "Jobs", icon: "job", keywords: "work orders projects recurring" },
     { to: "/invoices", label: "Invoices", icon: "invoice", roles: ["admin", "office"], perm: "invoices", also: ["/payouts"], keywords: "billing bills payments" },
@@ -47,7 +47,7 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: "/subs", label: "Subcontractors", icon: "users", roles: ["admin", "office"], perm: "subs", keywords: "subs contractors 1099 w-9 w9 insurance certificates coi liability workers comp audit paperwork vendors" },
     { to: "/equipment", label: "Equipment", icon: "truck", keywords: "trucks mowers trailers tools fleet maintenance" },
     { to: "/kb", label: "Knowledge base", icon: "book", keywords: "sop procedures training how to guides" },
-    { to: "/apps", label: "Apps", icon: "apps", roles: ["admin"], perm: "apps", keywords: "integrations connect app store team chat quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
+    { to: "/apps", label: "Apps", icon: "apps", roles: ["admin"], perm: "apps", keywords: "integrations connect app store team chat website forms formspree contact form quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
   ],
 ];
 
