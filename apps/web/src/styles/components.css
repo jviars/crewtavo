@@ -160,6 +160,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .table td { padding: 12px 16px; border-bottom: 1px solid var(--row-divider); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* A money field in a number column lines up with it, on the right (on the left when the table stacks). */
+.table .num > .input-group { display: inline-flex; vertical-align: middle; }
 .table th.sortable { cursor: pointer; user-select: none; }
 .table th.sortable:hover { color: var(--ink); }
 .row-link { cursor: pointer; }
