@@ -159,6 +159,9 @@ describe("ABC Supply", () => {
 
   it("passes on ABC's own words when it can't use a request, whatever shape they come in", async () => {
     expect(abcSays(JSON.stringify({ message: "Invalid branch" }))).toBe("Invalid branch");
+    expect(abcSays('{\n  "errorMessage": "Bad Request : There was an issue with your request message. required key [requestId] not found"\n}')).toBe(
+      "There was an issue with your request message. required key [requestId] not found",
+    );
     expect(abcSays(JSON.stringify({ type: "https://tools.ietf.org/html/rfc9110#section-15.5.1", title: "One or more validation errors occurred.", status: 400, errors: { "lines[0].uom": ["The uom field is invalid."] }, traceId: "00-abc" }))).toBe(
       "One or more validation errors occurred. The uom field is invalid.",
     );
@@ -204,6 +207,10 @@ describe("ABC Supply", () => {
     const prices = await new AbcClient("sandbox", "token-1", abc as never).prices("1163698", "18", lines);
     expect(sent("/pricing/v2/prices").map((b) => b.lines.length)).toEqual([50, 1]);
     expect(sent("/pricing/v2/prices")[0]).toMatchObject({ shipToNumber: "1163698", branchNumber: "18", purpose: "quoting", lines: expect.arrayContaining([{ id: "0", itemNumber: "A", quantity: 3, uom: "BD" }]) });
+    // Production ABC turns a price request without a requestId down; each one gets its own.
+    const [first, second] = sent("/pricing/v2/prices").map((b) => b.requestId);
+    expect(first).toMatch(/^crewtavo-[0-9a-f-]{36}$/);
+    expect(second).not.toBe(first);
     expect(prices.get("0")).toEqual({ unit_price: 12.35, note: null });
     expect(prices.get("50")).toEqual({ unit_price: null, note: "Cannot price item B. Call for pricing." });
   });

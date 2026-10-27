@@ -147,12 +147,13 @@ function apiProblem(status: number, body: string): AbcProblem {
 
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
 
-const SAYING = /^(message|detail|title|description|reason|error|error_description)$/i;
+const SAYING = /message$|^(detail|title|description|reason|error|error_description)$/i;
 const NOT_SAYING = /^(type|code|status|traceId|instance|path|timestamp|links?|href|url)$/i;
 
 /**
  * Why ABC said no, in its own words. Its error answers aren't documented and come in more than one
- * shape ({"message"}, a validation "errors" map of field to messages, plain text from its gateway).
+ * shape ({"message"}, {"errorMessage": "Bad Request : …"} from pricing, a validation "errors" map
+ * of field to messages, plain text from its gateway).
  */
 export function abcSays(body: string): string | null {
   let json: unknown;
@@ -164,7 +165,8 @@ export function abcSays(body: string): string | null {
   const said: string[] = [];
   const walk = (value: unknown, key: string, inErrors: boolean) => {
     if (typeof value === "string") {
-      if ((SAYING.test(key) || (inErrors && !NOT_SAYING.test(key))) && value.trim() && !/^bad request$/i.test(value.trim())) said.push(value.trim());
+      const words = value.trim().replace(/^bad request\s*:?\s*/i, "");
+      if ((SAYING.test(key) || (inErrors && !NOT_SAYING.test(key))) && words) said.push(words);
     } else if (Array.isArray(value)) value.forEach((v) => walk(v, key, inErrors));
     else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) walk(v, k, inErrors || /^errors?$/i.test(key));
   };
@@ -289,13 +291,18 @@ export class AbcClient {
     return { ...item, lengths };
   }
 
-  /** The account's prices at the branch, 50 lines at a time. A price of 0.00 is ABC's way of saying the branch hasn't priced it. */
+  /**
+   * The account's prices at the branch, 50 lines at a time. A price of 0.00 is ABC's way of saying
+   * the branch hasn't priced it. ABC's docs call requestId optional, but production turns a request
+   * without one down (400, "required key [requestId] not found"); the sandbox doesn't.
+   */
   async prices(shipTo: string, branch: string, lines: readonly AbcPriceLine[], purpose: "estimating" | "quoting" = "quoting"): Promise<Map<string, AbcPrice>> {
     const out = new Map<string, AbcPrice>();
     for (let i = 0; i < lines.length; i += PRICE_LINES) {
       const chunk = lines.slice(i, i + PRICE_LINES);
       const body = await this.call<{ lines?: Array<{ id?: string; unitPrice?: number; status?: { code?: string; message?: string } }> }>("/api/pricing/v2/prices", {
         body: {
+          requestId: `crewtavo-${crypto.randomUUID()}`,
           shipToNumber: shipTo,
           branchNumber: branch,
           purpose,
