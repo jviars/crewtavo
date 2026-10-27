@@ -173,6 +173,26 @@ export const APP_INFO: Record<string, AppInfo> = {
     website: "https://crewtavo.com/docs/connections/website-analytics/",
     open: "/marketing?tab=website",
   },
+  website_forms: {
+    developer: "Crewtavo",
+    tagline: "Your website's own form, sending to Crewtavo",
+    about:
+      "Keep the contact or quote form your website already has, in its own fonts and colors, and change one thing: where it sends. Install, copy your form's address into its action, and every message becomes a request in Crewtavo and an email to the people you choose, with Reply going straight to whoever sent it. Messages from someone you already know land on their client record, found by their email or phone number; anyone new becomes a lead. It works like Formspree, so a Formspree form moves over by changing its address, and it's free and kept in your own Crewtavo.",
+    highlights: [
+      { icon: "code", title: "Any form, any website", text: "Wix, Squarespace, WordPress or hand-written HTML: point the form's action here and it works." },
+      { icon: "requests", title: "Straight into Requests", text: "Each message is a request on the right client, with every field the form asked." },
+      { icon: "mail", title: "In your inbox too", text: "An email for each message to up to five people. Reply, and you're answering the customer." },
+    ],
+    access: [
+      "Take messages sent to your forms' addresses, from your website or any other you allow",
+      "Add requests, and new clients for people it doesn't find by email or phone",
+      "Email each message to the people you list, from your connected email",
+      "Uninstalling stops taking messages and keeps your forms and requests",
+    ],
+    connectsWith: "Your website's form",
+    website: "https://crewtavo.com/docs/connections/website-forms/",
+    open: "/requests?from=website",
+  },
   google_calendar: {
     developer: "Google",
     tagline: "Your Google calendars on the schedule, and visits on Google",

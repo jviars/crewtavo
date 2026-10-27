@@ -42,6 +42,8 @@ export default defineConfig({
       "^/(api|mcp|\\.well-known)(/|$)": { target: API, changeOrigin: true },
       // Website analytics: the script for the business's website and its page views.
       "^/v(\\.js)?$": { target: API, changeOrigin: true },
+      // Website forms: the address the business's own form sends to, and its thank-you page.
+      "^/f/": { target: API, changeOrigin: true },
     },
   },
 });

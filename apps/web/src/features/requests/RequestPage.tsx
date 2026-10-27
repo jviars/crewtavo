@@ -1,4 +1,5 @@
 import { CHANNEL_LABELS } from "@crewtavo/core/analytics";
+import { fieldLabel } from "@crewtavo/core/websiteForms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -21,7 +22,7 @@ import { PropertySelect } from "../clients/ClientForm";
 import type { WebVisit } from "../marketing/website";
 import { PlansCard } from "../plans/PlansCard";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
-import { REQUEST_SOURCES } from "./RequestsPage";
+import { requestSource } from "./RequestsPage";
 
 export function RequestPage() {
   const { id = "" } = useParams();
@@ -38,7 +39,7 @@ export function RequestPage() {
       unwrapOne(
         await supabase()
           .from("requests")
-          .select("id, number, title, details, status, source, answers, promo_code, web_visit, created_at, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code, lat, lng), form:intake_forms(name, questions), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, assignees:visit_assignees(user_id)), quotes(id, number, title, status, total)")
+          .select("id, number, title, details, status, source, website_form_id, answers, promo_code, web_visit, created_at, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code, lat, lng), form:intake_forms(name, questions), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, assignees:visit_assignees(user_id)), quotes(id, number, title, status, total)")
           .eq("id", id)
           .maybeSingle(),
         "This request",
@@ -132,7 +133,7 @@ export function RequestPage() {
       <div className="page-meta">
         <span className="muted">Request #{r.number}</span>
         <EntityStatus kind="request" status={r.status} />
-        <span className="chip">{REQUEST_SOURCES[r.source] ?? r.source}</span>
+        <span className="chip">{requestSource(r)}</span>
       </div>
 
       {r.status === "new" && Date.now() - Date.parse(r.created_at) > 2 * 86_400_000 && (
@@ -148,7 +149,8 @@ export function RequestPage() {
               <dl className="kv" style={{ marginTop: 8 }}>
                 {answers.map(([key, value]) => (
                   <div key={key} style={{ display: "contents" }}>
-                    <dt>{questions[key] ?? statusLabel(key)}</dt>
+                    {/* A website form's answers are under its own field names (Apps → Website Forms). */}
+                    <dt>{questions[key] ?? (r.website_form_id ? fieldLabel(key) : statusLabel(key))}</dt>
                     <dd>{Array.isArray(value) ? value.join(", ") : typeof value === "boolean" ? (value ? "Yes" : "No") : String(value)}</dd>
                   </div>
                 ))}

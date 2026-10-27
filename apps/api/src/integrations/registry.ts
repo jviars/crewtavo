@@ -5,7 +5,8 @@
  *   link      - calendars added by their ICS link (calendar_sources; see integrations/calendars.ts)
  *   connector - the app connects to us (Claude and ChatGPT via MCP at /mcp)
  *   builtin   - part of Crewtavo, turned on or off for the company (team chat: companies.settings.team_chat;
- *               website analytics: companies.settings.website_analytics, routes/analytics.ts)
+ *               website analytics: companies.settings.website_analytics, routes/analytics.ts; website
+ *               forms: companies.settings.website_forms, routes/websiteForms.ts)
  *   site      - the company's website editor, by its address (Sveltia CMS: companies.settings.website, integrations/website.ts)
  * ABC Supply is an api_key app with two keys: its own app's Client ID and secret (integrations/abcSupply.ts).
  */
@@ -15,7 +16,7 @@ import type { Env } from "../env";
 export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "stripe" | "twilio" | "anthropic" | "fal" | "railway" | "abc_supply";
 /** Apps whose calendars are added by link. They're also the calendar_sources.app values (with google_calendar). */
 export type LinkApp = "zoho_calendar" | "outlook_calendar" | "apple_calendar" | "ics_calendar";
-export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "website_analytics" | "sveltia";
+export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "website_analytics" | "website_forms" | "sveltia";
 export type CalendarApp = LinkApp | "google_calendar";
 export const CALENDAR_APPS: readonly CalendarApp[] = ["google_calendar", "zoho_calendar", "outlook_calendar", "apple_calendar", "ics_calendar"];
 
@@ -52,6 +53,15 @@ export const CATALOG: CatalogEntry[] = [
     description: "See who visits your website, where they came from and which pages bring in booking requests, without cookies.",
     auth: "builtin",
     docs: "https://crewtavo.com/docs/connections/website-analytics/",
+    available: () => true,
+  },
+  {
+    id: "website_forms",
+    name: "Crewtavo - Website Forms",
+    category: "Team",
+    description: "Keep your website's own form and point it at Crewtavo: each message lands in Requests and your inbox, like Formspree.",
+    auth: "builtin",
+    docs: "https://crewtavo.com/docs/connections/website-forms/",
     available: () => true,
   },
   {

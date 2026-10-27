@@ -24,6 +24,9 @@ type FilterKey = (typeof FILTERS)[number]["key"];
 
 export const REQUEST_SOURCES: Record<string, string> = { web_form: "Booking form", phone: "Phone", email: "Email", hub: "Client Hub", manual: "In person", assistant: "AI assistant", referral: "Referral" };
 
+/** Where a request came from, as people say it: a message from a website form (Apps → Website Forms) is a web_form request too. */
+export const requestSource = (r: { source: string; website_form_id?: string | null }) => (r.website_form_id ? "Website form" : (REQUEST_SOURCES[r.source] ?? r.source));
+
 /** Who can log a request: the roles the database lets add one (requests_insert). */
 export const canLogRequests = (session: Pick<Session, "role">) => hasRole(session, "admin", "office", "estimator");
 
@@ -37,22 +40,32 @@ export function RequestsPage() {
   // ?new=1 opens the form only for people who can log a request: the installed app's "New request"
   // shortcut is on everyone's phone, and the crew get Requests without a form they can't save.
   const creating = params.get("new") === "1" && canLogRequests(session);
-  const setCreating = (on: boolean) => setParams(on ? { new: "1" } : {}, { replace: true });
+  // ?from=website: only messages from website forms (Apps → Website Forms opens Requests this way).
+  const fromWebsite = params.get("from") === "website";
+  const setParam = (name: string, value: string | null) =>
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      if (value === null) next.delete(name);
+      else next.set(name, value);
+      return next;
+    }, { replace: true });
+  const setCreating = (on: boolean) => setParam("new", on ? "1" : null);
   const statuses = FILTERS.find((f) => f.key === filter)!.statuses;
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
   const counts = useStatusCounts("requests", session.company.id, Object.fromEntries(FILTERS.map((f) => [f.key, f.statuses])));
 
   const requests = useQuery({
-    queryKey: ["requests", session.company.id, filter, term],
+    queryKey: ["requests", session.company.id, filter, term, fromWebsite],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase()
         .from("requests")
-        .select("id, number, title, status, source, created_at, client:clients(id, display_name), property:properties(line1, city)")
+        .select("id, number, title, status, source, website_form_id, created_at, client:clients(id, display_name), property:properties(line1, city)")
         .eq("company_id", session.company.id)
         .in("status", [...statuses])
         .order("created_at", { ascending: false })
         .limit(200);
+      if (fromWebsite) q = q.not("website_form_id", "is", null);
       if (term) q = /^\d+$/.test(term) ? q.eq("number", Number(term)) : q.or(await titleOrClientFilter(session.company.id, term));
       return unwrap(await q);
     },
@@ -81,10 +94,15 @@ export function RequestsPage() {
           {FILTERS.map((f) => (
             <button key={f.key} type="button" className="tab" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
               {f.label}
-              {counts.data && <span className="badge">{counts.data[f.key]}</span>}
+              {counts.data && !fromWebsite && <span className="badge">{counts.data[f.key]}</span>}
             </button>
           ))}
         </div>
+        {fromWebsite && (
+          <button type="button" className="chip" aria-label="Show requests from everywhere" onClick={() => setParam("from", null)}>
+            From website forms <Icon name="x" size={12} />
+          </button>
+        )}
       </div>
       {requests.error && !requests.data ? (
         <div className="card"><ErrorState error={requests.error} onRetry={() => requests.refetch()} /></div>
@@ -92,9 +110,13 @@ export function RequestsPage() {
         <div className="card">
           {term ? (
             <EmptyState icon="search" title="No requests match" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
+          ) : fromWebsite ? (
+            <EmptyState icon="requests" title="Nothing from your website forms here" action={<Button onClick={() => setParam("from", null)}>Show everything</Button>}>
+              Messages people send with your website's forms show up here as they arrive.
+            </EmptyState>
           ) : (
             <EmptyState icon="requests" title={filter === "open" ? "No open requests" : "Nothing here"} action={canSell && filter === "open" && (<><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>New request</Button><Link className="btn" to="/booking">Set up online booking</Link></>)}>
-              {filter === "open" ? "Requests from your booking forms, the Client Hub and referrals land here, along with ones you log by phone." : "No requests have this status."}
+              {filter === "open" ? "Requests from your booking and website forms, the Client Hub and referrals land here, along with ones you log by phone." : "No requests have this status."}
             </EmptyState>
           )}
         </div>
@@ -108,7 +130,7 @@ export function RequestsPage() {
                   <td className="muted tabular" style={{ width: 56 }}>#{r.number}</td>
                   <td>
                     <Link className="cell-link" to={`/requests/${r.id}`} onClick={(e) => e.stopPropagation()}>{r.title}</Link>
-                    <div className="muted small">{REQUEST_SOURCES[r.source] ?? r.source}{r.property ? ` · ${r.property.line1}` : ""}</div>
+                    <div className="muted small">{requestSource(r)}{r.property ? ` · ${r.property.line1}` : ""}</div>
                   </td>
                   <td>{r.client?.display_name}</td>
                   <td title={formatDate(r.created_at)}>

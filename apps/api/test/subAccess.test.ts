@@ -268,6 +268,8 @@ const NOT_SIGNED_IN_ROUTES = [
   "GET /.well-known/crewtavo-instance", "GET /.well-known/oauth-protected-resource", "GET /.well-known/oauth-protected-resource/mcp",
   "GET /.well-known/oauth-authorization-server", "GET /.well-known/oauth-authorization-server/auth/v1", "GET /.well-known/openid-configuration/auth/v1",
   "GET /mcp", "POST /mcp", "GET /v.js", "POST /v",
+  // Website forms: the address a business's own form sends to, and its pages.
+  "OPTIONS /f/:key", "POST /f/:key", "GET /f/:key", "GET /f/:key/thanks",
   // The scheduler, with CRON_SECRET.
   "GET /api/cron/:task", "POST /api/cron/:task",
 ];

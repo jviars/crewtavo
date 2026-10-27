@@ -65,7 +65,7 @@ async function link(c: Parameters<typeof appUrl>[0], kinds: LinkKind[] = ["quote
 }
 
 /** Locate a new property in the background so routing and weather checks work for it. */
-function geocodeLater(c: Parameters<typeof appUrl>[0], propertyId: string, address: { line1: string; city?: string; postal_code?: string }) {
+export function geocodeLater(c: Parameters<typeof appUrl>[0], propertyId: string, address: { line1: string; city?: string; postal_code?: string }) {
   runInBackground(
     c,
     (async () => {

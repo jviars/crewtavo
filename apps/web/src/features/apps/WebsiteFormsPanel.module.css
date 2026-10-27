@@ -1,0 +1,2 @@
+.code { margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--fill); border: 1px solid var(--border); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; user-select: all; }
+.inline { font-size: 13px; padding: 1px 5px; border-radius: 5px; background: var(--fill); overflow-wrap: anywhere; }

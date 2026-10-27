@@ -66,6 +66,8 @@ server.all("/.well-known/*", api);
 // Website analytics: the script on the business's website, and the page views it sends (routes/analytics.ts).
 server.get("/v.js", api);
 server.post("/v", api);
+// Website forms: the address the business's own form sends to, and its thank-you page (routes/websiteForms.ts).
+server.all("/f/*", api);
 
 // Gateway to the instance's Supabase services (lib/gateway.ts).
 if (stack) server.route("/", gateway(env, stack));

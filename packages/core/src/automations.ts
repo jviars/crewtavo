@@ -133,7 +133,8 @@ export const CONDITION_FIELDS: ConditionFieldDef[] = [
   {
     field: "source", label: "Where the request came from", kind: "choice", ops: ["equals", "in", "not_equals"], subjects: ["request"],
     choices: [
-      { value: "web_form", label: "Booking form" }, { value: "hub", label: "Client Hub" }, { value: "referral", label: "Referral" },
+      // Website forms' messages (Apps → Website Forms) are web_form requests too.
+      { value: "web_form", label: "Booking or website form" }, { value: "hub", label: "Client Hub" }, { value: "referral", label: "Referral" },
       { value: "phone", label: "Phone" }, { value: "email", label: "Email" }, { value: "manual", label: "Entered by staff" }, { value: "assistant", label: "AI assistant" },
     ],
   },
