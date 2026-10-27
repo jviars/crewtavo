@@ -354,7 +354,7 @@ function Usual({ usedIn, onOpen, onCategory }: { usedIn: Map<string, ServiceMate
               item={item}
               eyebrow={item.at_branch === false ? "Not at your branch" : item.count ? `On ${formatNumber(item.count)} ${item.count === 1 ? "invoice" : "invoices"} lately` : null}
               price={item.unit_price}
-              unit={uomWord(item.uom)}
+              unit={item.uom_name ?? uomWord(item.uom)}
               note={item.note}
               used={usedIn.has(item.item_number)}
               onOpen={() => onOpen(item.item_number, { item_number: item.item_number, name: item.name })}

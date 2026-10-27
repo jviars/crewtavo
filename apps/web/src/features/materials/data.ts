@@ -57,6 +57,8 @@ export interface UsualItem {
   item_number: string;
   name: string;
   uom: string;
+  /** The unit in words, when ABC gives them. */
+  uom_name: string | null;
   count: number;
   at_branch: boolean | null;
   unit_price: number | null;
@@ -107,7 +109,7 @@ export function useServiceMaterials(serviceIds: string[]) {
 }
 
 /** ABC's unit codes in words, for answers that give only the code (what an account usually buys). */
-const UOM_WORDS: Record<string, string> = { BD: "Bundle", RL: "Roll", PC: "Piece", EA: "Each", BX: "Box", SQ: "Square", LF: "Linear foot", FT: "Foot", TB: "Tube", CT: "Carton", CS: "Case", PL: "Pail", GL: "Gallon", SH: "Sheet", PR: "Pair" };
+const UOM_WORDS: Record<string, string> = { BD: "Bundle", RL: "Roll", PC: "Piece", EA: "Each", BX: "Box", SQ: "Square", LF: "Linear foot", FT: "Foot", TB: "Tube", CT: "Carton", CS: "Case", PA: "Pail", PL: "Pail", GL: "Gallon", SH: "Sheet", PR: "Pair" };
 export const uomWord = (code: string) => UOM_WORDS[code.trim().toUpperCase()] ?? code;
 
 /** A unit's name in the singular, lower case: "bundle". */

@@ -112,7 +112,10 @@ export interface AbcItemDetail extends AbcItem {
 export interface AbcUsualItem {
   item_number: string;
   name: string;
+  /** The unit's code, as pricing takes it: PC. */
   uom: string;
+  /** The unit in words, when ABC gives them: Piece. */
+  uom_name: string | null;
   /** Invoices it was on lately (ABC counts the last 90 days). */
   count: number;
   /** Whether the branch carries it, when ABC says. */
@@ -242,13 +245,46 @@ interface RawItem {
   familyItems?: Array<{ itemNumber?: string; itemDescription?: string; color?: string | { name?: string | null } | null }> | null;
 }
 
-const colorOf = (color: RawItem["color"]) => (typeof color === "string" ? text(color) : (text(color?.name) ?? text(color?.description)));
+/** A color, or nothing for ABC's "N/A". */
+const colorText = (value: unknown) => {
+  const color = text(value);
+  return color && !/^(n\/?a|none|-+)$/i.test(color) ? color : null;
+};
+const colorOf = (color: RawItem["color"]) => (typeof color === "string" ? colorText(color) : (colorText(color?.name) ?? colorText(color?.description)));
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'" };
+
+/**
+ * A category's name without ABC's code in front, and with its HTML entities read:
+ * "000013  -  Steep Slope Roofing (&gt;2/12 Pitch)" is "Steep Slope Roofing (>2/12 Pitch)".
+ */
+const levelName = (value: unknown) => text(text(value)?.replace(/^\d+\s*-\s*/, "").replace(/&(amp|lt|gt|quot|#39|apos);/g, (_, e: string) => ENTITIES[e]!));
+
+const LEGAL_ENDING = /[\s,.]+(sales|llc|l\.l\.c|inc|incorporated|co|corp|corporation|company|ltd|lp|mfg)\.?$/i;
+
+/**
+ * Who makes it, without the company's legal ending, and in ordinary capitals when ABC sends it
+ * shouting: "OWENS CORNING SALES LLC" is "Owens Corning". Short names (GAF, IKO) stay as they are.
+ */
+export function brandOf(value: unknown): string | null {
+  let name = text(value);
+  while (name && LEGAL_ENDING.test(name)) name = name.replace(LEGAL_ENDING, "").trim();
+  if (!name || name !== name.toUpperCase()) return name || null;
+  return name.replace(/[A-Z]+/g, (word) => (word.length <= 3 ? word : word[0] + word.slice(1).toLowerCase()));
+}
 
 /** ABC's categories for an item, from the broadest: product group, category, product type, material. */
 function pathOf(raw: RawItem): string[] {
   const group = raw.hierarchy?.productGroup;
   const levels = [group, group?.category, group?.category?.productType, group?.category?.productType?.materialComposition];
-  return levels.map((level) => text(level?.name) ?? text(level?.description)).filter((name): name is string => Boolean(name));
+  return levels.map((level) => levelName(level?.name) ?? levelName(level?.description)).filter((name): name is string => Boolean(name));
+}
+
+/** A unit as the list of usual items gives it ("PC - PIECE"), as its code (PC) and words (Piece). */
+export function uomOf(value: unknown): { code: string; name: string | null } {
+  const [code, ...rest] = (text(value) ?? "EA").split(/\s+-\s+/);
+  const words = text(rest.join(" - "));
+  return { code: code!.trim().toUpperCase(), name: words ? words[0]!.toUpperCase() + words.slice(1).toLowerCase() : null };
 }
 
 /** An asset id ABC's image call takes: letters, digits and a few separators. */
@@ -266,7 +302,7 @@ function itemOf(raw: RawItem): AbcItem {
     family: text(raw.familyName),
     family_id: text(raw.familyId),
     color: colorOf(raw.color),
-    brand: text(raw.supplierName),
+    brand: brandOf(raw.supplierName),
     // The product type says the most ("Laminated Shingles"); the category is next best.
     kind: path[2] ?? path[1] ?? null,
     image,
@@ -414,10 +450,13 @@ export class AbcClient {
     for (const raw of [...(frequent.items ?? []), ...(recent.items ?? [])]) {
       const number = text(raw.itemNumber);
       if (!number || out.has(number)) continue;
+      // ABC sends the unit here as code and words ("PC - PIECE"); pricing takes only the code.
+      const unit = uomOf(raw.uom);
       out.set(number, {
         item_number: number,
         name: text(raw.itemDescription) ?? number,
-        uom: text(raw.uom)?.toUpperCase() ?? "EA",
+        uom: unit.code,
+        uom_name: unit.name,
         count: Number(raw.count) > 0 ? Number(raw.count) : 0,
         at_branch: typeof raw.isAvailableForBranch === "boolean" ? raw.isAvailableForBranch : null,
       });
@@ -425,7 +464,7 @@ export class AbcClient {
     return [...out.values()];
   }
 
-  /** ABC's picture of an item (a PNG up to 250 px), or null when it has none. */
+  /** ABC's picture of an item (its docs say a PNG up to 250 px; production sends larger JPEGs), or null when it has none. */
   async image(assetId: string, retried = false): Promise<{ body: ArrayBuffer; type: string } | null> {
     const res = await this.fetcher(`${ENVIRONMENTS[this.environment].api}/api/product/v1/items/${encodeURIComponent(assetId)}/images`, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "image/png, image/*" },

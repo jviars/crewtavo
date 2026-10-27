@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { AbcClient, abcSays, requestToken } from "../src/integrations/abcSupply";
+import { AbcClient, abcSays, brandOf, requestToken, uomOf } from "../src/integrations/abcSupply";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
@@ -293,32 +293,35 @@ describe("ABC Supply's catalog", () => {
     marketingDescription: "LayerLock technology for a straighter roof.",
     familyId: "FAM-HDZ",
     familyName: "Timberline HDZ",
-    supplierName: "GAF",
+    supplierName: "GAF MATERIALS LLC",
     status: "Active",
     color: { name: "Charcoal", code: "CH" },
     uoms: [{ name: "Bundle", code: "BD", description: "stocking" }],
     specifications: [{ name: "Exposure", description: "5 5/8 in" }, { name: "Empty", description: "" }],
     images: [{ assetId: "IMG-77", type: "RepresentativeProductImageReference", href: "/product/v1/items/02GATZ3CH/images/IMG-77" }],
-    hierarchy: { productGroup: { name: "Roofing", category: { name: "Shingles", productType: { name: "Laminated Shingles", materialComposition: { name: "Asphalt" } } } } },
+    // As production ABC names them: a code in front, and HTML entities.
+    hierarchy: { productGroup: { name: "0001  -  Steep Slope Products", category: { name: "000013  -  Steep Slope Roofing (&gt;2/12 Pitch)", productType: { name: "000070  -  Laminated Shingles", materialComposition: { name: "Asphalt" } } } } },
     familyItems: [{ itemNumber: "02GATZ3CH", itemDescription: "same one", color: "Charcoal" }, { itemNumber: "02GATZ3WW", itemDescription: "GAF Timberline HDZ Weathered Wood", color: "Weathered Wood" }],
   };
 
   it("reads who makes an item, ABC's category for it, its picture, specs and other colors, and hides retired items", async () => {
     abc.mockImplementation(async (url) => {
       const u = String(url);
-      if (u.includes("/search/items")) return Response.json({ items: [ITEM, { ...ITEM, itemNumber: "OLD1", status: "Inactive" }] });
+      if (u.includes("/search/items")) return Response.json({ items: [ITEM, { ...ITEM, itemNumber: "OLD1", status: "Inactive" }, { ...ITEM, itemNumber: "02OCTDDGT", supplierName: "OWENS CORNING SALES LLC", color: { name: "N/A" } }] });
       return Response.json(ITEM);
     });
     const client = new AbcClient("sandbox", "token-1", abc as never);
     const found = await client.searchItems("timberline", "18");
-    expect(found.map((i) => i.item_number)).toEqual(["02GATZ3CH"]);
-    expect(found[0]).toMatchObject({ brand: "GAF", kind: "Laminated Shingles", image: "IMG-77", family_id: "FAM-HDZ", color: "Charcoal", active: true });
+    expect(found.map((i) => i.item_number)).toEqual(["02GATZ3CH", "02OCTDDGT"]);
+    expect(found[0]).toMatchObject({ brand: "GAF Materials", kind: "Laminated Shingles", image: "IMG-77", family_id: "FAM-HDZ", color: "Charcoal", active: true });
+    // ABC's "N/A" isn't a color, and its suppliers' legal names read as brands.
+    expect(found[1]).toMatchObject({ brand: "Owens Corning", color: null });
 
     const item = await client.item("02GATZ3CH");
     expect(String(abc.mock.calls.at(-1)![0])).toContain("/items/02GATZ3CH?embed=variations&familyItems=true");
     expect(item).toMatchObject({
       about: "LayerLock technology for a straighter roof.",
-      path: ["Roofing", "Shingles", "Laminated Shingles", "Asphalt"],
+      path: ["Steep Slope Products", "Steep Slope Roofing (>2/12 Pitch)", "Laminated Shingles", "Asphalt"],
       specs: [{ name: "Exposure", value: "5 5/8 in" }],
       family_items: [{ item_number: "02GATZ3WW", name: "GAF Timberline HDZ Weathered Wood", color: "Weathered Wood" }],
     });
@@ -333,8 +336,9 @@ describe("ABC Supply's catalog", () => {
       const u = String(url);
       if (u.includes("/oauth2/")) return Response.json({ access_token: "token-1", expires_in: 1800 });
       if (u.includes("/search/accounts")) return Response.json(SHIP_TOS);
-      if (u.includes("/116660/frequents")) return Response.json({ items: [{ itemNumber: "02GATZ3CH", itemDescription: "Timberline HDZ Charcoal", uom: "bd", count: 9, isAvailableForBranch: true }] });
-      if (u.includes("/116660/recents")) return Response.json({ items: [{ itemNumber: "02GATZ3CH", count: 2 }, { itemNumber: "DRIP10", itemDescription: "Drip Edge 10 ft White", uom: "PC", count: 1, isAvailableForBranch: false }] });
+      // As production ABC sends them: the unit as code and words.
+      if (u.includes("/116660/frequents")) return Response.json({ items: [{ itemNumber: "02GATZ3CH", itemDescription: "Timberline HDZ Charcoal", uom: "BD - BUNDLE", count: 9, isAvailableForBranch: true }] });
+      if (u.includes("/116660/recents")) return Response.json({ items: [{ itemNumber: "02GATZ3CH", count: 2 }, { itemNumber: "DRIP10", itemDescription: "Drip Edge 10 ft White", uom: "PC - PIECE", count: 1, isAvailableForBranch: false }] });
       if (u.includes("/pricing/v2/prices")) {
         const body = JSON.parse(String(init?.body));
         return Response.json({ lines: body.lines.map((l: { id: string; itemNumber: string }) => ({ id: l.id, unitPrice: l.itemNumber === "DRIP10" ? 0 : 41.2, status: { code: "OK" } })) });
@@ -345,10 +349,12 @@ describe("ABC Supply's catalog", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       items: [
-        { item_number: "02GATZ3CH", name: "Timberline HDZ Charcoal", uom: "BD", count: 9, at_branch: true, unit_price: 41.2 },
-        { item_number: "DRIP10", uom: "PC", at_branch: false, unit_price: null, note: expect.stringMatching(/hasn't priced/) },
+        { item_number: "02GATZ3CH", name: "Timberline HDZ Charcoal", uom: "BD", uom_name: "Bundle", count: 9, at_branch: true, unit_price: 41.2 },
+        { item_number: "DRIP10", uom: "PC", uom_name: "Piece", at_branch: false, unit_price: null, note: expect.stringMatching(/hasn't priced/) },
       ],
     });
+    // Pricing takes the unit's code alone: "BD - BUNDLE" can't be priced.
+    expect(sent("/pricing/v2/prices")[0].lines.map((l: { uom: string }) => l.uom)).toEqual(["BD", "PC"]);
     expect(String(abc.mock.calls.find(([u]) => String(u).includes("/frequents"))![0])).toContain("/api/product/v1/items/116660/frequents?itemsPerPage=50&pageNumber=1&branchNumber=18");
     // Kept, so the accounts aren't asked for again.
     expect(state.tables.integrations![0]!.settings).toMatchObject({ bill_to: "116660" });
@@ -438,5 +444,16 @@ describe("ABC Supply's catalog", () => {
     // A material that's gone already can't be replaced.
     const missing = await send("/materials/replace", { item_number: "SYN10", links: [{ id: crypto.randomUUID(), per_unit: 1 }] });
     expect(missing.status).toBe(404);
+  });
+
+  it("reads units, brands and colors the way production ABC writes them", () => {
+    expect(uomOf("PC - PIECE")).toEqual({ code: "PC", name: "Piece" });
+    expect(uomOf("bd")).toEqual({ code: "BD", name: null });
+    expect(uomOf(undefined)).toEqual({ code: "EA", name: null });
+    expect(brandOf("OWENS CORNING SALES LLC")).toBe("Owens Corning");
+    expect(brandOf("GAF")).toBe("GAF");
+    expect(brandOf("CERTAINTEED, LLC")).toBe("Certainteed");
+    expect(brandOf("IKO Industries Inc.")).toBe("IKO Industries");
+    expect(brandOf("")).toBeNull();
   });
 });
