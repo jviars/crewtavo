@@ -10,11 +10,12 @@
  * - The price range the homeowner is sent first (from the lowest option to the highest), and the
  *   exact price the salesperson sets on site.
  * - The packages' ABC Supply materials priced again, so a package that follows ABC's prices is
- *   priced at today's materials.
+ *   priced at today's materials, and every material checked with ABC from the Catalog (renamed,
+ *   no longer carried), with the price list's costs following (recostServices).
  */
 import { FormulaError, getPreset, isRoofDrawing, ROOFING_VARIABLE_NAMES, type Section } from "@crewtavo/core";
 import { followPrice, inRangeMode, isSiteAdjustment, optionsRange, priceRange, rangeSettings, type RangeSettings, siteAdjustmentLines, sitePriceAdjustment, siteSubtotal, SITE_ADJUSTMENT_NAME, snapshotLines } from "@crewtavo/core/estimates";
-import { materialsPerUnit, serviceUnitCost, type MaterialLink } from "@crewtavo/core/materials";
+import { keptPrice, materialsPerUnit, serviceUnitCost, unpricedLinks, type MaterialLink } from "@crewtavo/core/materials";
 import { countsOn, optionBaseTotal, toCents } from "@crewtavo/core/money";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Env } from "../env";
@@ -290,7 +291,8 @@ export async function loadPackages(db: Db, companyId: string, packageIds: readon
     let followed: number | null = null;
     if (main && pkg.price_mode === "follow") {
       const own = links.filter((l) => l.service_id === main.id);
-      const price = own.length ? followPrice(materialsPerUnit(own), main.labor_cost, pkg.markup_pct) : 0;
+      // A material the branch never priced would come out as nothing: the roof keeps its price until it has one.
+      const price = own.length && !unpricedLinks(own).length ? followPrice(materialsPerUnit(own), main.labor_cost, pkg.markup_pct) : 0;
       if (price > 0) {
         if (price !== Number(main.unit_price)) followed = price;
         main.unit_price = price;
@@ -616,30 +618,63 @@ export { SITE_PRICE_SET, sitePriceSet } from "@crewtavo/core/estimates";
 
 type PricedLink = MaterialLink & { id: string; service_id: string };
 
+/** How many items a check looks up one by one at ABC (it allows 10 calls a second). */
+const CHECK_ITEMS = 80;
+
+/** Said on a material ABC doesn't carry any more, so the Catalog flags it to replace. */
+export const NOT_CARRIED = "ABC Supply doesn't carry this any more. Replace it in Roofing → Catalog.";
+
 /**
- * Price the materials of every service in the business's packages at its ABC Supply branch today.
- * The price list's costs follow, and so does the roof price of each package that follows ABC.
+ * Price the materials of every service in the business's packages at its ABC Supply branch today
+ * (or, with `all`, every material in the price list). The price list's costs follow, and so does
+ * the roof price of each package that follows ABC. `check` also looks each item up at ABC first:
+ * one ABC renamed takes its new name, and one ABC doesn't carry any more (or no longer sells by
+ * that unit) is marked to replace. Either way, a material ABC won't price keeps its last price.
  */
-export async function pricePackages(env: Env, db: Db, companyId: string) {
-  const [packages, items] = await Promise.all([
-    db.from("roof_packages").select("id, roof_service_id, price_mode, markup_pct").eq("company_id", companyId),
-    db.from("roof_package_items").select("service_id").eq("company_id", companyId),
-  ]);
-  const ids = [...new Set([...must(packages).map((p) => p.roof_service_id), ...must(items).map((i) => i.service_id)].filter((id): id is string => Boolean(id)))];
-  const links = ids.length
-    ? (must(await db.from("service_materials").select("id, service_id, item_number, name, uom, length_ft, per_unit, unit_price").eq("company_id", companyId).in("service_id", ids)) as unknown as PricedLink[])
-    : [];
-  if (!links.length) return { priced_at: null, branch_name: null, services: 0 };
+export async function pricePackages(env: Env, db: Db, companyId: string, { all = false, check = false }: { all?: boolean; check?: boolean } = {}) {
+  let links: PricedLink[];
+  if (all) {
+    links = must(await db.from("service_materials").select("id, service_id, item_number, name, uom, length_ft, per_unit, unit_price").eq("company_id", companyId)) as unknown as PricedLink[];
+  } else {
+    const [packages, items] = await Promise.all([
+      db.from("roof_packages").select("id, roof_service_id, price_mode, markup_pct").eq("company_id", companyId),
+      db.from("roof_package_items").select("service_id").eq("company_id", companyId),
+    ]);
+    const ids = [...new Set([...must(packages).map((p) => p.roof_service_id), ...must(items).map((i) => i.service_id)].filter((id): id is string => Boolean(id)))];
+    links = ids.length
+      ? (must(await db.from("service_materials").select("id, service_id, item_number, name, uom, length_ft, per_unit, unit_price").eq("company_id", companyId).in("service_id", ids)) as unknown as PricedLink[])
+      : [];
+  }
+  if (!links.length) return { priced_at: null, branch_name: null, services: 0, flagged: 0 };
 
   let prices;
   let branchName: string;
+  // What a check found out about each item: its name now, or why it needs replacing.
+  const found = new Map<string, { name?: string; uoms?: string[]; gone?: boolean }>();
   try {
     const { client, settings } = await abcConnection(env, adminClient(env), companyId);
     branchName = settings.branch_name;
+    if (check) {
+      const numbers = [...new Set(links.map((l) => l.item_number))].slice(0, CHECK_ITEMS);
+      for (let i = 0; i < numbers.length; i += 4) {
+        await Promise.all(
+          numbers.slice(i, i + 4).map(async (number) => {
+            try {
+              const item = await client.item(number);
+              found.set(number, item.active ? { name: item.name, uoms: item.uoms.map((u) => u.code) } : { gone: true });
+            } catch (error) {
+              if (error instanceof AbcProblem && error.status === 404) found.set(number, { gone: true });
+              else throw error;
+            }
+          }),
+        );
+      }
+    }
+    const asks = links.filter((l) => !found.get(l.item_number)?.gone);
     prices = await client.prices(
       settings.ship_to,
       settings.branch,
-      links.map((l) => ({ id: l.id, item_number: l.item_number, quantity: 1, uom: l.uom, length_ft: l.length_ft === null || l.length_ft === undefined ? null : Number(l.length_ft) })),
+      asks.map((l) => ({ id: l.id, item_number: l.item_number, quantity: 1, uom: l.uom, length_ft: l.length_ft === null || l.length_ft === undefined ? null : Number(l.length_ft) })),
       "estimating",
     );
   } catch (error) {
@@ -648,29 +683,51 @@ export async function pricePackages(env: Env, db: Db, companyId: string) {
   }
 
   const pricedAt = new Date().toISOString();
+  let flagged = 0;
   for (const link of links) {
-    const price = prices.get(link.id);
+    const item = found.get(link.item_number);
+    const gone = item?.gone === true;
+    const unitGone = !gone && item?.uoms?.length && !item.uoms.includes(link.uom) ? `ABC Supply doesn't sell this by the ${link.uom} any more. Replace it in Roofing → Catalog.` : null;
+    const price = gone ? { unit_price: null, note: NOT_CARRIED } : (prices.get(link.id) ?? null);
     if (!price) continue;
+    const note = unitGone ?? price.note;
+    if (note) flagged += 1;
     // A material ABC won't price today keeps its last price, with ABC's reason beside it.
-    const { error } = await db.from("service_materials").update({ unit_price: price.unit_price ?? (link.unit_price === null || link.unit_price === undefined ? null : Number(link.unit_price)), price_note: price.note, priced_at: pricedAt }).eq("id", link.id).eq("company_id", companyId);
+    const name = item?.name && item.name !== link.name ? { name: item.name.slice(0, 300) } : {};
+    const { error } = await db.from("service_materials").update({ unit_price: keptPrice(price.unit_price, link.unit_price), price_note: note, priced_at: pricedAt, ...name }).eq("id", link.id).eq("company_id", companyId);
     if (error) throw dbError(error);
-    if (price.unit_price !== null) link.unit_price = price.unit_price;
   }
-
   const serviceIds = [...new Set(links.map((l) => l.service_id))];
-  const services = must(await db.from("services").select("id, labor_cost").eq("company_id", companyId).in("id", serviceIds));
-  const labor = new Map(services.map((s) => [s.id, s.labor_cost === null ? null : Number(s.labor_cost)]));
+  await recostServices(db, companyId, serviceIds);
+  return { priced_at: pricedAt, branch_name: branchName, services: serviceIds.length, flagged };
+}
+
+/**
+ * The price list's costs from its materials' last prices: each service's cost per unit, and the
+ * roof price of each package that follows ABC. A package whose roof has a material the branch
+ * never priced keeps its price, since following would leave that material out.
+ */
+export async function recostServices(db: Db, companyId: string, serviceIds: readonly string[]) {
+  if (!serviceIds.length) return;
+  const [linkRows, serviceRows, packageRows] = await Promise.all([
+    db.from("service_materials").select("service_id, per_unit, unit_price").eq("company_id", companyId).in("service_id", [...serviceIds]),
+    db.from("services").select("id, labor_cost").eq("company_id", companyId).in("id", [...serviceIds]),
+    db.from("roof_packages").select("id, roof_service_id, price_mode, markup_pct").eq("company_id", companyId).in("roof_service_id", [...serviceIds]),
+  ]);
+  const links = must(linkRows) as unknown as Array<MaterialLink & { service_id: string }>;
+  const labor = new Map(must(serviceRows).map((s) => [s.id, s.labor_cost === null ? null : Number(s.labor_cost)]));
   const linksOf = (serviceId: string) => links.filter((l) => l.service_id === serviceId);
   for (const serviceId of serviceIds) {
+    if (!linksOf(serviceId).length || !labor.has(serviceId)) continue;
     const { error } = await db.from("services").update({ unit_cost: serviceUnitCost(linksOf(serviceId), labor.get(serviceId) ?? null) }).eq("id", serviceId).eq("company_id", companyId);
     if (error) throw dbError(error);
   }
-  for (const pkg of must(packages)) {
-    if (pkg.price_mode !== "follow" || !pkg.roof_service_id || !linksOf(pkg.roof_service_id).length) continue;
-    const price = followPrice(materialsPerUnit(linksOf(pkg.roof_service_id)), labor.get(pkg.roof_service_id) ?? null, pkg.markup_pct);
+  for (const pkg of must(packageRows)) {
+    const own = pkg.roof_service_id ? linksOf(pkg.roof_service_id) : [];
+    if (pkg.price_mode !== "follow" || !own.length || unpricedLinks(own).length) continue;
+    const price = followPrice(materialsPerUnit(own), labor.get(pkg.roof_service_id!) ?? null, pkg.markup_pct);
     if (!(price > 0)) continue;
-    const { error } = await db.from("services").update({ unit_price: price }).eq("id", pkg.roof_service_id).eq("company_id", companyId);
+    const { error } = await db.from("services").update({ unit_price: price }).eq("id", pkg.roof_service_id!).eq("company_id", companyId);
     if (error) throw dbError(error);
   }
-  return { priced_at: pricedAt, branch_name: branchName, services: serviceIds.length };
 }

@@ -25,7 +25,7 @@ import { NewTakeoffDialog } from "../paving/NewTakeoffDialog";
 import { isRoof, rangeText, roofStage, roofSummary } from "./data";
 import { lowestOption, SIGNED } from "./flow/model";
 import { canSetUpRoofing, packagesKey, setUpRoofing, setupMessage, useRoofPackages } from "./packages";
-import { RoofingTabs } from "./RoofPackagesPage";
+import { RoofingTabs } from "./RoofingTabs";
 
 interface ProjectRow extends TakeoffRow {
   quote: {

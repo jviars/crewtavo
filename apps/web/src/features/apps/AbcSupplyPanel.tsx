@@ -1,15 +1,18 @@
 /**
  * ABC Supply on its app page: step by step to make the business's own app in ABC's developer
  * portal, its Client ID and secret pasted here (checked with ABC before they're kept), then which
- * account and branch prices come from, and a search to look up a price.
+ * account and branch prices come from, and a search to look up a price. Connecting adds Roofing →
+ * Catalog, which this page points to.
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { CATALOG } from "../materials/data";
 import { MaterialSearch } from "../materials/MaterialSearch";
 import type { AppRow, SupplierSettings } from "./catalog";
 
@@ -25,9 +28,15 @@ export function AbcSupplyPanel({ app, onChanged }: { app: AppRow; onChanged: () 
     return (
       <>
         <AccountCard app={app} supplier={supplier} onChanged={onChanged} onChangeKeys={() => setChanging(true)} />
-        <section className="card card-pad stack-sm" aria-labelledby="abc-look-up" style={{ gap: 10 }}>
-          <h2 id="abc-look-up" className="section-title" style={{ fontSize: 17 }}>Look up a price</h2>
-          <span className="muted small">Your price at {supplier.branch_name}, for one of each. Estimates add materials from Roofing → Estimate → Materials.</span>
+        <section className="card card-pad stack-sm" aria-labelledby="abc-catalog" style={{ gap: 10 }}>
+          <div className="row wrap" style={{ gap: 10 }}>
+            <h2 id="abc-catalog" className="section-title grow" style={{ fontSize: 17 }}>Your catalog</h2>
+            <Link className="btn btn-sm btn-primary" to={CATALOG}>Open the Catalog</Link>
+          </div>
+          <span className="muted small">
+            Roofing now has a Catalog: ABC's items at {supplier.branch_name} with your price on each, what your account buys most, every color and size, and your materials checked with ABC in one tap.
+            Or look up a price for one of each here.
+          </span>
           <MaterialSearch />
         </section>
       </>
@@ -39,6 +48,7 @@ export function AbcSupplyPanel({ app, onChanged }: { app: AppRow; onChanged: () 
         <h2 id="abc-setup-title" className="section-title" style={{ fontSize: 17 }}>{changing ? "Change your ABC Supply app" : "Connect your ABC Supply account"}</h2>
         <span className="muted small">
           ABC Supply gives your prices to an app you make in its developer portal, for your company only. It's free and takes about ten minutes, plus a business day or two for ABC to switch on your real prices.
+          Once it's connected, Roofing gets a Catalog: ABC's items at your branch with your prices, what you buy most up front, and your materials kept current.
         </span>
       </div>
       <div className="callout" role="note">

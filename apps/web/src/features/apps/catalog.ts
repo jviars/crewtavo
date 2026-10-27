@@ -357,9 +357,9 @@ export const APP_INFO: Record<string, AppInfo> = {
     developer: "ABC Supply",
     tagline: "Your own material prices in every roofing estimate",
     about:
-      "Connect your ABC Supply account and your estimates price their materials at your branch, at your prices: the shingles, underlayment, drip edge and everything else, in whole bundles, rolls and pieces. Pick each material from ABC's catalog once on the estimate and say how many go into a square or a foot; after that every roof you measure comes out with exactly what to order and what it costs, next to the labor and your margin. It uses an app you make in ABC's developer portal for your own company, so your prices stay between you and ABC.",
+      "Connect your ABC Supply account and your estimates price their materials at your branch, at your prices: the shingles, underlayment, drip edge and everything else, in whole bundles, rolls and pieces. Pick each material from ABC's catalog once and say how many go into a square or a foot; after that every roof you measure comes out with exactly what to order and what it costs, next to the labor and your margin. Connecting also adds a Catalog to Roofing: ABC's items at your branch with your price on each, what your account buys most up front, every color and size with its specs, and your materials checked with ABC in one tap, so one ABC stops carrying is swapped out everywhere it's used. It uses an app you make in ABC's developer portal for your own company, so your prices stay between you and ABC.",
     highlights: [
-      { icon: "search", title: "ABC's catalog", text: "Search ABC's items at your branch with your price on each, and pick the exact color and size." },
+      { icon: "search", title: "A catalog in Roofing", text: "Browse ABC's items at your branch with your price on each: what you buy most, every color and size, and its specs." },
       { icon: "roofing", title: "Priced from the roof", text: "Squares and edges from the measurement become bundles, rolls and pieces, rounded up, at today's prices." },
       { icon: "dollar", title: "Costs you can see", text: "Each material, what it comes to, and the materials total sit next to the labor and the margin." },
     ],
@@ -371,7 +371,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     ],
     connectsWith: "Keys from ABC Supply",
     website: "https://www.abcsupply.com/",
-    open: "/roofing",
+    open: "/roofing/catalog",
   },
   twilio: {
     developer: "Twilio",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describePerUnit, lineUnitCost, materialsPerUnit, orderQuantity, priceMaterials, serviceUnitCost, suggestPerUnit, type MaterialLink } from "../src/materials";
+import { describePerUnit, keptPrice, lineUnitCost, materialsPerUnit, orderQuantity, priceMaterials, serviceUnitCost, suggestPerUnit, unpricedLinks, type MaterialLink } from "../src/materials";
 
 const shingles: MaterialLink = { item_number: "02GASTZ3WW", name: "GAF Timberline HDZ Weathered Wood", uom: "BD", uom_name: "Bundle", per_unit: 3, unit_price: 45.12 };
 const felt: MaterialLink = { item_number: "FELT10", name: "Synthetic underlayment 10 Sq Roll", uom: "RL", uom_name: "Roll", per_unit: 0.1, unit_price: "89.50" };
@@ -54,5 +54,19 @@ describe("materials", () => {
     expect(describePerUnit(1 / 120, "Bundle", "ft")).toBe("1 bundle per 120 ft");
     expect(describePerUnit(1, "Box", "square")).toBe("1 box per square");
     expect(describePerUnit(2, "Box", "ea")).toBe("2 boxes per ea");
+  });
+
+  it("keeps a material's last price when the supplier gives none, and knows which never had one", () => {
+    expect(keptPrice(44.5, 40)).toBe(44.5);
+    expect(keptPrice(null, 40)).toBe(40);
+    expect(keptPrice(null, "40.00")).toBe(40);
+    expect(keptPrice(null, 0)).toBeNull();
+    expect(keptPrice(null, null)).toBeNull();
+    const links = [
+      { item_number: "A", name: "Shingles", uom: "BD", per_unit: 3, unit_price: 40 },
+      { item_number: "B", name: "Starter", uom: "BD", per_unit: 0.1, unit_price: null },
+      { item_number: "C", name: "Felt", uom: "RL", per_unit: 0.1, unit_price: "0.00" },
+    ];
+    expect(unpricedLinks(links).map((l) => l.item_number)).toEqual(["B", "C"]);
   });
 });

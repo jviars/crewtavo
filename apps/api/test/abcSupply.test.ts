@@ -71,7 +71,7 @@ const send = (path: string, body?: unknown, method = body === undefined ? "GET" 
 const KEYS = { client_id: "0oa-client-id", client_secret: "client-secret-value", environment: "sandbox" as const };
 const SHIP_TOS = {
   shipTos: [
-    { name: "EASY ROOFING", number: "1163698", status: "active", address: { city: "MADISON", state: "WI" }, branches: [{ homeBranch: true, number: "18", name: "ABC Supply - Madison, WI" }] },
+    { name: "EASY ROOFING", number: "1163698", status: "active", address: { city: "MADISON", state: "WI" }, billTo: { number: "116660" }, branches: [{ homeBranch: true, number: "18", name: "ABC Supply - Madison, WI" }] },
     { name: "OLD ACCOUNT", number: "999", status: "active", address: {}, branches: [] },
   ],
 };
@@ -180,7 +180,7 @@ describe("ABC Supply", () => {
   it("lists the ship-to accounts it can price for, without retired ones", async () => {
     answer();
     const accounts = await new AbcClient("sandbox", "token-1", abc as never).accounts();
-    expect(accounts).toEqual([{ number: "1163698", name: "EASY ROOFING", city: "MADISON", state: "WI", branches: [{ number: "18", name: "ABC Supply - Madison, WI", home: true }] }]);
+    expect(accounts).toEqual([{ number: "1163698", name: "EASY ROOFING", city: "MADISON", state: "WI", bill_to: "116660", branches: [{ number: "18", name: "ABC Supply - Madison, WI", home: true }] }]);
     expect(sent("/search/accounts")[0].filters).toEqual([{ key: "accountType", condition: "equals", values: ["Ship-To"] }]);
   });
 
@@ -230,7 +230,7 @@ describe("ABC Supply", () => {
     const res = await send("/apps/abc_supply/keys", { client_id: KEYS.client_id, client_secret: KEYS.client_secret, sandbox: true }, "PUT");
     expect(res.status).toBe(200);
     expect(state.tables.integrations).toEqual([
-      expect.objectContaining({ provider: "abc_supply", status: "connected", account_label: "EASY ROOFING · ABC Supply - Madison, WI", settings: expect.objectContaining({ environment: "sandbox", ship_to: "1163698", branch: "18" }) }),
+      expect.objectContaining({ provider: "abc_supply", status: "connected", account_label: "EASY ROOFING · ABC Supply - Madison, WI", settings: expect.objectContaining({ environment: "sandbox", ship_to: "1163698", bill_to: "116660", branch: "18" }) }),
     ]);
     const secret = await decryptJson<{ access_token: string; extra: Record<string, string> }>(env, state.tables.integration_secrets![0]!.ciphertext as string);
     expect(secret).toMatchObject({ access_token: "token-1", extra: KEYS });
@@ -283,5 +283,160 @@ describe("ABC Supply", () => {
 
     const wrongUnit = await send(`/services/${ROOF}/materials`, { item_number: "02GASTZ3WW", uom: "RL", per_unit: 1 });
     expect(wrongUnit.status).toBe(400);
+  });
+});
+
+describe("ABC Supply's catalog", () => {
+  const ITEM = {
+    itemNumber: "02GATZ3CH",
+    itemDescription: "GAF Timberline HDZ Shingles Charcoal 3 Bdl Per Square",
+    marketingDescription: "LayerLock technology for a straighter roof.",
+    familyId: "FAM-HDZ",
+    familyName: "Timberline HDZ",
+    supplierName: "GAF",
+    status: "Active",
+    color: { name: "Charcoal", code: "CH" },
+    uoms: [{ name: "Bundle", code: "BD", description: "stocking" }],
+    specifications: [{ name: "Exposure", description: "5 5/8 in" }, { name: "Empty", description: "" }],
+    images: [{ assetId: "IMG-77", type: "RepresentativeProductImageReference", href: "/product/v1/items/02GATZ3CH/images/IMG-77" }],
+    hierarchy: { productGroup: { name: "Roofing", category: { name: "Shingles", productType: { name: "Laminated Shingles", materialComposition: { name: "Asphalt" } } } } },
+    familyItems: [{ itemNumber: "02GATZ3CH", itemDescription: "same one", color: "Charcoal" }, { itemNumber: "02GATZ3WW", itemDescription: "GAF Timberline HDZ Weathered Wood", color: "Weathered Wood" }],
+  };
+
+  it("reads who makes an item, ABC's category for it, its picture, specs and other colors, and hides retired items", async () => {
+    abc.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/search/items")) return Response.json({ items: [ITEM, { ...ITEM, itemNumber: "OLD1", status: "Inactive" }] });
+      return Response.json(ITEM);
+    });
+    const client = new AbcClient("sandbox", "token-1", abc as never);
+    const found = await client.searchItems("timberline", "18");
+    expect(found.map((i) => i.item_number)).toEqual(["02GATZ3CH"]);
+    expect(found[0]).toMatchObject({ brand: "GAF", kind: "Laminated Shingles", image: "IMG-77", family_id: "FAM-HDZ", color: "Charcoal", active: true });
+
+    const item = await client.item("02GATZ3CH");
+    expect(String(abc.mock.calls.at(-1)![0])).toContain("/items/02GATZ3CH?embed=variations&familyItems=true");
+    expect(item).toMatchObject({
+      about: "LayerLock technology for a straighter roof.",
+      path: ["Roofing", "Shingles", "Laminated Shingles", "Asphalt"],
+      specs: [{ name: "Exposure", value: "5 5/8 in" }],
+      family_items: [{ item_number: "02GATZ3WW", name: "GAF Timberline HDZ Weathered Wood", color: "Weathered Wood" }],
+    });
+
+    await client.family("FAM-HDZ", "18");
+    expect(sent("/search/items").at(-1).filters[0]).toEqual({ key: "productFamilyId", condition: "equals", values: ["FAM-HDZ"], joinCondition: "and" });
+  });
+
+  it("shows what the account usually buys at today's prices, finding its bill-to account the first time", async () => {
+    await roofer();
+    abc.mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u.includes("/oauth2/")) return Response.json({ access_token: "token-1", expires_in: 1800 });
+      if (u.includes("/search/accounts")) return Response.json(SHIP_TOS);
+      if (u.includes("/116660/frequents")) return Response.json({ items: [{ itemNumber: "02GATZ3CH", itemDescription: "Timberline HDZ Charcoal", uom: "bd", count: 9, isAvailableForBranch: true }] });
+      if (u.includes("/116660/recents")) return Response.json({ items: [{ itemNumber: "02GATZ3CH", count: 2 }, { itemNumber: "DRIP10", itemDescription: "Drip Edge 10 ft White", uom: "PC", count: 1, isAvailableForBranch: false }] });
+      if (u.includes("/pricing/v2/prices")) {
+        const body = JSON.parse(String(init?.body));
+        return Response.json({ lines: body.lines.map((l: { id: string; itemNumber: string }) => ({ id: l.id, unitPrice: l.itemNumber === "DRIP10" ? 0 : 41.2, status: { code: "OK" } })) });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    const res = await send("/materials/usual");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      items: [
+        { item_number: "02GATZ3CH", name: "Timberline HDZ Charcoal", uom: "BD", count: 9, at_branch: true, unit_price: 41.2 },
+        { item_number: "DRIP10", uom: "PC", at_branch: false, unit_price: null, note: expect.stringMatching(/hasn't priced/) },
+      ],
+    });
+    expect(String(abc.mock.calls.find(([u]) => String(u).includes("/frequents"))![0])).toContain("/api/product/v1/items/116660/frequents?itemsPerPage=50&pageNumber=1&branchNumber=18");
+    // Kept, so the accounts aren't asked for again.
+    expect(state.tables.integrations![0]!.settings).toMatchObject({ bill_to: "116660" });
+    abc.mockClear();
+    await send("/materials/usual");
+    expect(abc.mock.calls.some(([u]) => String(u).includes("/search/accounts"))).toBe(false);
+
+    // ABC turning it down still leaves the rest of the catalog working, with ABC's reason.
+    abc.mockImplementation(async (url) => (String(url).includes("/oauth2/") ? Response.json({ access_token: "token-1", expires_in: 1800 }) : new Response("", { status: 403 })));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const refused = await send("/materials/usual");
+    expect(refused.status).toBe(200);
+    expect(await refused.json()).toMatchObject({ items: [], note: expect.stringMatching(/didn't share what you usually buy/) });
+  });
+
+  it("passes on ABC's picture of an item, and says when there's none", async () => {
+    await roofer();
+    abc.mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes("/oauth2/")) return Response.json({ access_token: "token-1", expires_in: 1800 });
+      if (u.includes("/items/IMG-77/images")) return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "Content-Type": "image/png" } });
+      return new Response("", { status: 404 });
+    });
+    const res = await send("/materials/images/IMG-77");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/png");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]));
+    expect((await send("/materials/images/NONE")).status).toBe(404);
+    expect((await send("/materials/images/bad%20id")).status).toBe(400);
+  });
+
+  it("keeps a material's last price when ABC won't price it on an estimate, so the roof's cost doesn't drop", async () => {
+    await roofer();
+    answer({ FELT10: 89.5 });
+    const res = await send(`/quotes/${QUOTE}/material-prices`, {});
+    expect(res.status).toBe(200);
+    const [shingles, felt] = state.tables.service_materials!;
+    expect(shingles).toMatchObject({ unit_price: 40, price_note: "Cannot price item 02GASTZ3WW. Call for pricing." });
+    expect(felt).toMatchObject({ unit_price: 89.5, price_note: null });
+    // 3 bundles at the last $40 + 0.1 roll at $89.50 + $180 labor: not $8.95 + $180.
+    expect(state.tables.services!.find((s) => s.id === ROOF)!.unit_cost).toBe(308.95);
+    // The estimate itself says the shingles need a price, rather than counting them as free.
+    expect((state.tables.quote_line_items![0]!.materials as { items: Array<{ unit_price: number | null }> }).items.map((i) => i.unit_price)).toEqual([null, 89.5]);
+  });
+
+  it("checks every material with ABC: renamed ones take the new name, retired ones are flagged and keep their price", async () => {
+    await roofer();
+    abc.mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u.includes("/oauth2/")) return Response.json({ access_token: "token-1", expires_in: 1800 });
+      if (u.includes("/items/02GASTZ3WW")) return Response.json({ itemNumber: "02GASTZ3WW", itemDescription: "GAF Timberline HDZ Weathered Wood", status: "Active", uoms: [{ name: "Bundle", code: "BD", description: "stocking" }] });
+      if (u.includes("/items/FELT10")) return new Response("", { status: 404 });
+      if (u.includes("/pricing/v2/prices")) {
+        const body = JSON.parse(String(init?.body));
+        return Response.json({ lines: body.lines.map((l: { id: string }) => ({ id: l.id, unitPrice: 44, status: { code: "OK" } })) });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await send("/materials/check", {});
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ flagged: 1, services: 1 });
+    const [shingles, felt] = state.tables.service_materials!;
+    expect(shingles).toMatchObject({ name: "GAF Timberline HDZ Weathered Wood", unit_price: 44, price_note: null });
+    expect(felt).toMatchObject({ name: "Underlayment 10 Sq", unit_price: 80, price_note: expect.stringMatching(/doesn't carry this any more/) });
+    // Only the items ABC still has were priced.
+    expect(sent("/pricing/v2/prices")[0].lines.map((l: { itemNumber: string }) => l.itemNumber)).toEqual(["02GASTZ3WW"]);
+    expect(state.tables.services!.find((s) => s.id === ROOF)!.unit_cost).toBe(132 + 8 + 180);
+  });
+
+  it("replaces a material everywhere it's used, with how many of the new one go in each", async () => {
+    await roofer();
+    const [a, b] = [crypto.randomUUID(), crypto.randomUUID()];
+    state.tables.service_materials = [
+      { id: a, company_id: ROOFER, service_id: ROOF, item_number: "FELT10", name: "Underlayment 10 Sq", uom: "RL", uom_name: "Roll", length_ft: null, per_unit: 0.1, unit_price: 80, price_note: "ABC Supply doesn't carry this any more.", sort: 1 },
+      { id: b, company_id: ROOFER, service_id: EDGE, item_number: "FELT10", name: "Underlayment 10 Sq", uom: "RL", uom_name: "Roll", length_ft: null, per_unit: 0.01, unit_price: 80, price_note: "ABC Supply doesn't carry this any more.", sort: 1 },
+    ];
+    answer({ SYN10: 120 });
+    const res = await send("/materials/replace", { item_number: "SYN10", uom: "BD", links: [{ id: a, per_unit: 0.1 }, { id: b, per_unit: 0.02 }] });
+    expect(res.status).toBe(200);
+    expect(state.tables.service_materials).toEqual([
+      expect.objectContaining({ id: a, item_number: "SYN10", name: "Item SYN10", uom: "BD", uom_name: "Bundle", per_unit: 0.1, unit_price: 120, price_note: null }),
+      expect.objectContaining({ id: b, item_number: "SYN10", per_unit: 0.02, unit_price: 120 }),
+    ]);
+    expect(state.tables.services!.find((s) => s.id === ROOF)!.unit_cost).toBe(12 + 180);
+
+    // A material that's gone already can't be replaced.
+    const missing = await send("/materials/replace", { item_number: "SYN10", links: [{ id: crypto.randomUUID(), per_unit: 1 }] });
+    expect(missing.status).toBe(404);
   });
 });

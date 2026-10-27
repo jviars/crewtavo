@@ -3,8 +3,9 @@
  * ABC Supply, Roofing → Estimate → Materials). This is ABC's "Individual Business" integration: the
  * business makes an app in ABC's developer portal (partners-developer.abcsupply.com), pastes that
  * app's Client ID and secret here, and Crewtavo signs in as that app (OAuth client credentials) to
- * read the catalog and the account's prices at its branch. There's no sign-in page to come back
- * to, so it works at every server's address as it is.
+ * read the catalog and the account's prices at its branch, and for Roofing → Catalog, an item's
+ * product family, ABC's picture of it, and what the account buys again and again (ABC's record of
+ * its invoices). There's no sign-in page to come back to, so it works at every server's address as it is.
  *
  * ABC's API terms allow a business's own CRM to price its own work, and forbid comparing ABC's
  * prices with other suppliers', building price databases and reselling them. So prices are asked
@@ -48,6 +49,8 @@ export interface AbcAccount {
   name: string;
   city: string | null;
   state: string | null;
+  /** The bill-to account it's invoiced to: what ABC keeps the account's usual items by. */
+  bill_to?: string | null;
   branches: AbcBranch[];
 }
 
@@ -56,6 +59,8 @@ export interface AbcSettings {
   environment: AbcEnvironment;
   ship_to: string;
   ship_to_name: string;
+  /** The ship-to's bill-to account (missing on connections made before the catalog). */
+  bill_to?: string | null;
   branch: string;
   branch_name: string;
   accounts: AbcAccount[];
@@ -72,12 +77,46 @@ export interface AbcItem {
   item_number: string;
   name: string;
   family: string | null;
+  /** The product family it's one color or size of (GAF Timberline HDZ). */
+  family_id: string | null;
   color: string | null;
+  /** Who makes it (ABC's supplierName): GAF, Owens Corning, CertainTeed. */
+  brand: string | null;
+  /** What kind of product it is in ABC's own categories: its product type, or else its category. */
+  kind: string | null;
+  /** ABC's picture of it (an asset id for /materials/images), when it has one. */
+  image: string | null;
+  /** False when ABC lists it as Inactive: it doesn't sell it any more. */
+  active: boolean;
   /** Cut to length: it needs a length to be priced. */
   dimensional: boolean;
   uoms: AbcUom[];
   /** The unit it's ordered and stocked in (a bundle, not a square). */
   stocking_uom: string;
+}
+
+/** One item in full, for its page in the catalog. */
+export interface AbcItemDetail extends AbcItem {
+  /** The lengths it's cut to, in feet, when it's dimensional. */
+  lengths: number[];
+  /** ABC's longer description, when it has one. */
+  about: string | null;
+  /** ABC's categories, from the broadest: Roofing, Shingles, Laminated. */
+  path: string[];
+  specs: Array<{ name: string; value: string }>;
+  /** The other colors and sizes in its family (not checked against the branch). */
+  family_items: Array<{ item_number: string; name: string; color: string | null }>;
+}
+
+/** An item the account buys again and again, from ABC's own record of its invoices. */
+export interface AbcUsualItem {
+  item_number: string;
+  name: string;
+  uom: string;
+  /** Invoices it was on lately (ABC counts the last 90 days). */
+  count: number;
+  /** Whether the branch carries it, when ABC says. */
+  at_branch: boolean | null;
 }
 
 export interface AbcPriceLine {
@@ -175,25 +214,63 @@ export function abcSays(body: string): string | null {
   return words || null;
 }
 
+/** A level of ABC's product categories (product group, category, product type...). */
+interface RawLevel {
+  name?: string | null;
+  description?: string | null;
+  category?: RawLevel | null;
+  productType?: RawLevel | null;
+  materialComposition?: RawLevel | null;
+}
+
 interface RawItem {
   itemNumber?: string;
   itemDescription?: string;
+  marketingDescription?: string | null;
+  familyId?: string | null;
   familyName?: string;
+  supplierName?: string | null;
+  status?: string | null;
   isDimensional?: boolean;
-  color?: { name?: string | null } | null;
+  // ABC's docs show color as an object; an older shape had a plain string.
+  color?: { name?: string | null; description?: string | null } | string | null;
   uoms?: Array<{ code?: string; name?: string; description?: string }>;
   dimensions?: { variations?: Array<{ length?: { value?: string | number; uom?: string; uomCode?: string } }> };
+  specifications?: Array<{ name?: string | null; code?: string | null; description?: string | null }> | null;
+  images?: Array<{ assetId?: string | null; type?: string | null }> | null;
+  hierarchy?: { productGroup?: RawLevel | null } | null;
+  familyItems?: Array<{ itemNumber?: string; itemDescription?: string; color?: string | { name?: string | null } | null }> | null;
 }
+
+const colorOf = (color: RawItem["color"]) => (typeof color === "string" ? text(color) : (text(color?.name) ?? text(color?.description)));
+
+/** ABC's categories for an item, from the broadest: product group, category, product type, material. */
+function pathOf(raw: RawItem): string[] {
+  const group = raw.hierarchy?.productGroup;
+  const levels = [group, group?.category, group?.category?.productType, group?.category?.productType?.materialComposition];
+  return levels.map((level) => text(level?.name) ?? text(level?.description)).filter((name): name is string => Boolean(name));
+}
+
+/** An asset id ABC's image call takes: letters, digits and a few separators. */
+export const ASSET_ID = /^[A-Za-z0-9._-]{1,120}$/;
 
 function itemOf(raw: RawItem): AbcItem {
   const uoms = (raw.uoms ?? []).flatMap((u): AbcUom[] => (text(u.code) ? [{ code: u.code!.trim().toUpperCase(), name: text(u.name) ?? u.code!.trim(), role: text(u.description)?.toLowerCase() ?? null }] : []));
   // The same unit can be listed once per use (Square for costing and for estimating).
   const unique = uoms.filter((u, i) => uoms.findIndex((v) => v.code === u.code) === i);
+  const path = pathOf(raw);
+  const image = (raw.images ?? []).map((i) => text(i?.assetId)).find((id): id is string => Boolean(id && ASSET_ID.test(id))) ?? null;
   return {
     item_number: raw.itemNumber ?? "",
     name: text(raw.itemDescription) ?? raw.itemNumber ?? "",
     family: text(raw.familyName),
-    color: text(raw.color?.name),
+    family_id: text(raw.familyId),
+    color: colorOf(raw.color),
+    brand: text(raw.supplierName),
+    // The product type says the most ("Laminated Shingles"); the category is next best.
+    kind: path[2] ?? path[1] ?? null,
+    image,
+    active: (text(raw.status) ?? "active").toLowerCase() !== "inactive",
     dimensional: raw.isDimensional === true,
     uoms: unique,
     stocking_uom: uoms.find((u) => u.role === "stocking")?.code ?? unique[0]?.code ?? "EA",
@@ -240,14 +317,14 @@ export class AbcClient {
 
   /** The ship-to accounts this app prices for, with their branches. Retired ones (no branches) are left out, as ABC asks. */
   async accounts(): Promise<AbcAccount[]> {
-    const body = await this.call<{ shipTos?: Array<{ number?: string; name?: string; status?: string; address?: { city?: string; state?: string }; branches?: Array<{ number?: string; name?: string; homeBranch?: boolean; status?: string }> }> }>(
+    const body = await this.call<{ shipTos?: Array<{ number?: string; name?: string; status?: string; address?: { city?: string; state?: string }; billTo?: { number?: string } | null; branches?: Array<{ number?: string; name?: string; homeBranch?: boolean; status?: string }> }> }>(
       "/api/account/v1/search/accounts",
       { body: { filters: [{ key: "accountType", condition: "equals", values: ["Ship-To"] }], pagination: { itemsPerPage: 100, pageNumber: 1 } } },
     );
     return (body.shipTos ?? []).flatMap((s): AbcAccount[] => {
       const branches = (s.branches ?? []).flatMap((b): AbcBranch[] => (text(b.number) ? [{ number: b.number!.trim(), name: text(b.name) ?? `Branch ${b.number}`, home: b.homeBranch === true }] : []));
       if (!text(s.number) || !branches.length || (s.status && s.status.toLowerCase() === "inactive")) return [];
-      return [{ number: s.number!.trim(), name: text(s.name) ?? `Account ${s.number}`, city: text(s.address?.city), state: text(s.address?.state), branches }];
+      return [{ number: s.number!.trim(), name: text(s.name) ?? `Account ${s.number}`, city: text(s.address?.city), state: text(s.address?.state), bill_to: text(s.billTo?.number), branches }];
     });
   }
 
@@ -256,7 +333,7 @@ export class AbcClient {
    * matches the words as one piece of text, so when that finds nothing, the longest word is asked
    * for and the rest are checked here.
    */
-  async searchItems(query: string, branch: string): Promise<AbcItem[]> {
+  async searchItems(query: string, branch: string, limit = 30): Promise<AbcItem[]> {
     const words = query.trim().split(/\s+/).filter(Boolean);
     const byNumber = words.length === 1 && /\d/.test(query) && /^[A-Za-z0-9-]{4,}$/.test(query.trim());
     const search = async (key: "itemDescription" | "itemNumber", value: string) => {
@@ -266,10 +343,11 @@ export class AbcClient {
             { key, condition: "contains", values: [value], joinCondition: "and" },
             { key: "branchNumber", condition: "equals", values: [branch], joinCondition: null },
           ],
-          pagination: { itemsPerPage: 30, pageNumber: 1 },
+          pagination: { itemsPerPage: limit, pageNumber: 1 },
         },
       });
-      return (body.items ?? []).map(itemOf).filter((i) => i.item_number);
+      // ABC asks that items it lists as Inactive aren't shown.
+      return (body.items ?? []).map(itemOf).filter((i) => i.item_number && i.active);
     };
     if (byNumber) {
       const found = await search("itemNumber", query.trim().toUpperCase());
@@ -282,13 +360,87 @@ export class AbcClient {
     return (await search("itemDescription", longest)).filter((i) => lower.every((w) => `${i.name} ${i.family ?? ""} ${i.color ?? ""}`.toLowerCase().includes(w)));
   }
 
-  /** One item, with the lengths it's cut to when it's dimensional. */
-  async item(itemNumber: string): Promise<AbcItem & { lengths: number[] }> {
-    const raw = await this.call<RawItem>(`/api/product/v1/items/${encodeURIComponent(itemNumber)}?embed=variations`);
+  /**
+   * The items in a product family at a branch: the colors and sizes of one product (every
+   * Timberline HDZ color the branch carries).
+   */
+  async family(familyId: string, branch: string): Promise<AbcItem[]> {
+    const body = await this.call<{ items?: RawItem[] }>("/api/product/v1/search/items", {
+      body: {
+        filters: [
+          { key: "productFamilyId", condition: "equals", values: [familyId], joinCondition: "and" },
+          { key: "branchNumber", condition: "equals", values: [branch], joinCondition: null },
+        ],
+        pagination: { itemsPerPage: 60, pageNumber: 1 },
+      },
+    });
+    return (body.items ?? []).map(itemOf).filter((i) => i.item_number && i.active);
+  }
+
+  /** One item in full: the lengths it's cut to when it's dimensional, its categories, specs and family. */
+  async item(itemNumber: string): Promise<AbcItemDetail> {
+    const raw = await this.call<RawItem>(`/api/product/v1/items/${encodeURIComponent(itemNumber)}?embed=variations&familyItems=true`);
     const item = itemOf(raw);
     if (!item.item_number) throw new AbcProblem("ABC Supply doesn't have that item.", 404);
     const lengths = [...new Set((raw.dimensions?.variations ?? []).map((v) => lengthInFeet(v.length)).filter((n): n is number => n !== null))].sort((a, b) => a - b);
-    return { ...item, lengths };
+    const specs = (raw.specifications ?? []).flatMap((spec) => {
+      const name = text(spec?.name) ?? text(spec?.code);
+      const value = text(spec?.description);
+      return name && value ? [{ name, value }] : [];
+    });
+    const familyItems = (raw.familyItems ?? []).flatMap((f) =>
+      text(f?.itemNumber) && f.itemNumber!.trim() !== item.item_number
+        ? [{ item_number: f.itemNumber!.trim(), name: text(f.itemDescription) ?? f.itemNumber!.trim(), color: colorOf(f.color ?? null) }]
+        : [],
+    );
+    const about = text(raw.marketingDescription);
+    return { ...item, lengths, about: about && about !== item.name ? about : null, path: pathOf(raw), specs, family_items: familyItems };
+  }
+
+  /**
+   * What the account buys again and again: ABC's record of items invoiced to it at least twice in
+   * the last 180 days, most often first, then anything else bought in the last 90.
+   */
+  async usual(billTo: string, branch: string): Promise<AbcUsualItem[]> {
+    type Answer = { items?: Array<{ itemNumber?: string; itemDescription?: string; uom?: string; count?: number; isAvailableForBranch?: boolean }> };
+    const query = `itemsPerPage=50&pageNumber=1&branchNumber=${encodeURIComponent(branch)}`;
+    const account = encodeURIComponent(billTo);
+    const [frequent, recent] = await Promise.all([
+      this.call<Answer>(`/api/product/v1/items/${account}/frequents?${query}`),
+      // Recent items only fill in after the frequent ones, so one ABC can't give isn't a reason to fail.
+      this.call<Answer>(`/api/product/v1/items/${account}/recents?${query}`).catch(() => ({ items: [] }) as Answer),
+    ]);
+    const out = new Map<string, AbcUsualItem>();
+    for (const raw of [...(frequent.items ?? []), ...(recent.items ?? [])]) {
+      const number = text(raw.itemNumber);
+      if (!number || out.has(number)) continue;
+      out.set(number, {
+        item_number: number,
+        name: text(raw.itemDescription) ?? number,
+        uom: text(raw.uom)?.toUpperCase() ?? "EA",
+        count: Number(raw.count) > 0 ? Number(raw.count) : 0,
+        at_branch: typeof raw.isAvailableForBranch === "boolean" ? raw.isAvailableForBranch : null,
+      });
+    }
+    return [...out.values()];
+  }
+
+  /** ABC's picture of an item (a PNG up to 250 px), or null when it has none. */
+  async image(assetId: string, retried = false): Promise<{ body: ArrayBuffer; type: string } | null> {
+    const res = await this.fetcher(`${ENVIRONMENTS[this.environment].api}/api/product/v1/items/${encodeURIComponent(assetId)}/images`, {
+      headers: { Authorization: `Bearer ${this.token}`, Accept: "image/png, image/*" },
+      signal: providerTimeout(),
+    }).catch(() => null);
+    if (!res) throw new AbcProblem(NOT_REACHED, 502);
+    if (res.status === 401 && this.renew && !retried) {
+      this.token = await this.renew();
+      return this.image(assetId, true);
+    }
+    if (res.status === 404 || res.status === 400) return null;
+    if (!res.ok) throw apiProblem(res.status, await res.text().catch(() => ""));
+    const type = res.headers.get("Content-Type") ?? "image/png";
+    if (!type.startsWith("image/")) return null;
+    return { body: await res.arrayBuffer(), type };
   }
 
   /**
@@ -361,6 +513,7 @@ export async function connectAbc(env: Env, admin: Db, opts: { companyId: string;
     environment: opts.keys.environment,
     ship_to: choice.account.number,
     ship_to_name: choice.account.name,
+    bill_to: choice.account.bill_to ?? null,
     branch: choice.branch.number,
     branch_name: choice.branch.name,
     accounts,
@@ -422,11 +575,24 @@ export async function chooseAbcAccount(env: Env, admin: Db, companyId: string, c
   const account = accounts.find((a) => a.number === choice.ship_to);
   const branch = account?.branches.find((b) => b.number === choice.branch);
   if (!account || !branch) throw new AbcProblem("That account or branch isn't one this ABC app can price for anymore. Pick another.", 400);
-  const next: AbcSettings = { ...settings, ship_to: account.number, ship_to_name: account.name, branch: branch.number, branch_name: branch.name, accounts };
+  const next: AbcSettings = { ...settings, ship_to: account.number, ship_to_name: account.name, bill_to: account.bill_to ?? null, branch: branch.number, branch_name: branch.name, accounts };
   const { error } = await admin
     .from("integrations")
     .update({ settings: next as never, account_label: labelOf(next), external_account_id: next.ship_to })
     .match({ company_id: companyId, provider: "abc_supply" });
   if (error) throw new IntegrationError(error.message);
   return next;
+}
+
+/**
+ * The bill-to account ABC keeps the account's usual items by. A connection made before the catalog
+ * didn't keep it, so the accounts are asked for once and it's saved.
+ */
+export async function abcBillTo(admin: Db, companyId: string, client: AbcClient, settings: AbcSettings): Promise<string | null> {
+  if (settings.bill_to !== undefined) return settings.bill_to;
+  const accounts = await client.accounts();
+  const billTo = accounts.find((a) => a.number === settings.ship_to)?.bill_to ?? null;
+  const { error } = await admin.from("integrations").update({ settings: { ...settings, bill_to: billTo, accounts } as never }).match({ company_id: companyId, provider: "abc_supply" });
+  if (error) throw new IntegrationError(error.message);
+  return billTo;
 }

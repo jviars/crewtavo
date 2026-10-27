@@ -18,7 +18,7 @@
  */
 import { STARTER_NOTE } from "@crewtavo/core/contracts";
 import { followPrice, marginPct, priceRange, RANGE_ROUNDING, rangeSettings } from "@crewtavo/core/estimates";
-import { materialsPerUnit } from "@crewtavo/core/materials";
+import { materialsPerUnit, unpricedLinks } from "@crewtavo/core/materials";
 import { getPreset, isExampleWarranty, PACKAGE_LIMITS } from "@crewtavo/core/presets";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
@@ -36,8 +36,9 @@ import { packagePicture } from "@/lib/files";
 import { formatMoney, formatMoneyCents, timeAgo } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { useServiceMaterials, useSupplier, type ServiceMaterial } from "../materials/data";
+import { CATALOG_MATERIALS, useServiceMaterials, useSupplier, type ServiceMaterial } from "../materials/data";
 import { MaterialPicker } from "../materials/MaterialPicker";
+import { RoofingTabs } from "./RoofingTabs";
 import {
   cleanHighlights,
   copyName,
@@ -82,18 +83,6 @@ const FORMAT = { whole: formatMoney, cents: formatMoneyCents };
 const money = (n: number) => moneyText(n, FORMAT);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const SERVICES_KEY = (companyId: string) => ["services", companyId, "roof-packages"];
-
-/** Roofing's two screens: the projects and the packages they're priced from. */
-export function RoofingTabs() {
-  const { pathname } = useLocation();
-  const onPackages = pathname.startsWith("/roofing/packages");
-  return (
-    <nav className={`underline-tabs ${styles.tabs}`} aria-label="Roofing">
-      <Link to="/roofing" aria-current={onPackages ? undefined : "page"}>Projects</Link>
-      <Link to="/roofing/packages" aria-current={onPackages ? "page" : undefined}>Packages</Link>
-    </nav>
-  );
-}
 
 // ---------------------------------------------------------------------------------------------
 // The page
@@ -494,7 +483,11 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const perSquareExact = materialsPerUnit(roofLinks);
   const perSquare = round2(perSquareExact);
   const canFollow = roofing && roofLinks.length > 0;
-  const followed = (labor: number | null, markup: number) => followPrice(perSquareExact, labor, markup);
+  // Materials the branch never priced: following would leave them out, so the price holds until they have one.
+  const unpriced = unpricedLinks(roofLinks);
+  // Materials ABC didn't price last time, kept at their last price.
+  const stale = roofLinks.filter((l) => l.price_note && !unpriced.includes(l));
+  const followed = (labor: number | null, markup: number) => (unpriced.length ? undefined : followPrice(perSquareExact, labor, markup));
 
   const savePackage = useMutation({
     mutationKey,
@@ -524,9 +517,13 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
     meta: { success: "Labor and the rest saved" },
     mutationFn: async (labor: number) => {
       await api.put(`/services/${roof!.id}/labor`, { labor_cost: labor });
-      if (pkg.price_mode === "follow") unwrap(await supabase().from("services").update({ unit_price: followed(labor, pkg.markup_pct) }).eq("id", roof!.id));
+      const price = pkg.price_mode === "follow" ? followed(labor, pkg.markup_pct) : undefined;
+      if (price !== undefined) unwrap(await supabase().from("services").update({ unit_price: price }).eq("id", roof!.id));
     },
-    onMutate: (labor) => patchService(roof!.id, { labor_cost: labor, ...(pkg.price_mode === "follow" ? { unit_price: followed(labor, pkg.markup_pct) } : {}) }),
+    onMutate: (labor) => {
+      const price = pkg.price_mode === "follow" ? followed(labor, pkg.markup_pct) : undefined;
+      patchService(roof!.id, { labor_cost: labor, ...(price !== undefined ? { unit_price: price } : {}) });
+    },
     onSettled: () => {
       refresh();
       queryClient.invalidateQueries({ queryKey: ["service-costs", company.id] });
@@ -786,11 +783,25 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
                 </span>
                 <span className={styles.op} aria-hidden="true">=</span>
                 <span className={`${styles.term} ${styles.total}`}>
-                  <span>A square today</span>
-                  <strong>{formatMoneyCents(followed(roof.labor_cost, pkg.markup_pct))}</strong>
+                  <span>{unpriced.length ? "A square, held" : "A square today"}</span>
+                  <strong>{formatMoneyCents(followed(roof.labor_cost, pkg.markup_pct) ?? roof.unit_price)}</strong>
                 </span>
               </div>
-              <p className={styles.note}>Moves with ABC's prices, so every new estimate is priced at today's materials. Estimates already sent and signed keep their price.</p>
+              {unpriced.length ? (
+                <p className="callout callout-warning" style={{ margin: 0 }}>
+                  <span className="grow">
+                    ABC has no price for {unpriced.map((l) => l.name).join(" or ")} at your branch, so this roof stays at {formatMoneyCents(roof.unit_price)} a square instead of leaving it out.
+                    Call the branch for a price, or <Link to={CATALOG_MATERIALS}>replace it in the Catalog</Link>.
+                  </span>
+                </p>
+              ) : (
+                <p className={styles.note}>Moves with ABC's prices, so every new estimate is priced at today's materials. Estimates already sent and signed keep their price.</p>
+              )}
+              {stale.length > 0 && (
+                <p className={styles.note}>
+                  ABC didn't price {stale.map((l) => l.name).join(" or ")} last time ({stale[0]!.price_note!.replace(/\.$/, "")}), so {stale.length === 1 ? "it keeps its" : "they keep their"} last price. <Link to={CATALOG_MATERIALS}>Check it in the Catalog</Link>.
+                </p>
+              )}
             </div>
           ) : (
             <div className="stack-sm">
