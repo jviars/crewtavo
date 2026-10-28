@@ -14,6 +14,7 @@ export interface SopIndexRow {
   updated_at: string;
   audience: string[] | null;
   tags: string[];
+  cover_path: string | null;
 }
 
 /** Who a guide is for: the team's levels (a sub never reads guides). */
@@ -39,7 +40,7 @@ export function useSopIndex() {
     queryKey: ["kb", company.id, "index"],
     queryFn: async () => {
       const [pages, acks] = await Promise.all([
-        supabase().from("sop_pages").select("id, title, category_id, required, status, revision, updated_at, audience, tags").eq("company_id", company.id).order("title").limit(2000),
+        supabase().from("sop_pages").select("id, title, category_id, required, status, revision, updated_at, audience, tags, cover_path").eq("company_id", company.id).order("title").limit(2000),
         supabase().from("sop_acknowledgements").select("page_id, revision").eq("company_id", company.id).eq("user_id", userId),
       ]);
       const rows = unwrap(pages) as SopIndexRow[];

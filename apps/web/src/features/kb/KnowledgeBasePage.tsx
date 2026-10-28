@@ -13,6 +13,7 @@ import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { CategoriesDialog } from "./CategoriesDialog";
 import { guideFinder } from "./finder";
+import { GuideCover } from "./GuideCover";
 import { useCategories, useIsEditor, useSopIndex, type SopIndexRow } from "./kbData";
 
 interface Answer { answer: string; sources: Array<{ id: string; title: string }> }
@@ -72,9 +73,9 @@ export function KnowledgeBasePage() {
     const listed = find(term)
       .map((id) => byId.get(id))
       .filter((p) => p !== undefined)
-      .map((p) => ({ id: p.id, title: p.title, category: names.get(p.category_id ?? "") ?? null, required: p.required, acknowledged: index.data?.isRead(p) ?? false, snippet: snippet.get(p.id) ?? null }));
+      .map((p) => ({ id: p.id, title: p.title, category: names.get(p.category_id ?? "") ?? null, required: p.required, acknowledged: index.data?.isRead(p) ?? false, snippet: snippet.get(p.id) ?? null, cover: p.cover_path }));
     const seen = new Set(listed.map((h) => h.id));
-    return [...listed, ...server.filter((r) => !seen.has(r.id)).map((r) => ({ id: r.id, title: r.title, category: r.category, required: r.required, acknowledged: r.acknowledged, snippet: r.snippet }))].slice(0, 30);
+    return [...listed, ...server.filter((r) => !seen.has(r.id)).map((r) => ({ id: r.id, title: r.title, category: r.category, required: r.required, acknowledged: r.acknowledged, snippet: r.snippet, cover: byId.get(r.id)?.cover_path ?? null }))].slice(0, 30);
   }, [searching, term, query, results.data, results.isPlaceholderData, find, pages, categories.data, index.data]);
   const fullTextPending = searching && (query !== term || results.isFetching);
   const countFor = (id: string | null) => pages.filter((p) => p.category_id === id).length;
@@ -145,7 +146,7 @@ export function KnowledgeBasePage() {
             {hits.length === 0 && !index.isPending && !fullTextPending && !results.error && <EmptyState compact icon="search" title="No matches" />}
             {hits.map((hit) => (
               <Link key={hit.id} to={`/kb/${hit.id}`} className="card-row" style={{ alignItems: "flex-start" }}>
-                <span className="kb-doc"><Icon name="file" size={16} /></span>
+                {hit.cover ? <GuideCover path={hit.cover} className="guide-thumb" /> : <span className="kb-doc"><Icon name="file" size={16} /></span>}
                 <span className="grow stack-sm" style={{ gap: 3, minWidth: 0 }}>
                   <span className="row wrap" style={{ gap: 8 }}><strong>{hit.title}</strong>{hit.required && <span className="pill" data-tone={hit.acknowledged ? "success" : "warning"}>{hit.acknowledged ? "Read" : "Required"}</span>}</span>
                   <span className="muted small">{[hit.category, hit.snippet].filter(Boolean).join(" · ")}</span>
@@ -158,7 +159,7 @@ export function KnowledgeBasePage() {
         <section className="stack-sm" aria-labelledby="kb-category">
           <button type="button" className="back-link" style={{ border: 0, background: "none", padding: 0, marginBottom: 0 }} onClick={() => set({ category: null })}><Icon name="arrowLeft" size={14} />All categories</button>
           <h2 id="kb-category" className="section-title">{category.name}</h2>
-          <PageList pages={pages.filter((p) => p.category_id === (category.id === "none" ? null : category.id))} loading={index.isPending} error={index.error} retry={() => index.refetch()} isRead={index.data?.isRead} empty={editor ? <Link className="btn btn-primary" to={`/kb/new${category.id !== "none" ? `?category=${category.id}` : ""}`}><Icon name="plus" size={16} />Write the first guide</Link> : undefined} />
+          <GuideCards pages={pages.filter((p) => p.category_id === (category.id === "none" ? null : category.id))} loading={index.isPending} error={index.error} retry={() => index.refetch()} isRead={index.data?.isRead} empty={editor ? <Link className="btn btn-primary" to={`/kb/new${category.id !== "none" ? `?category=${category.id}` : ""}`}><Icon name="plus" size={16} />Write the first guide</Link> : undefined} />
         </section>
       ) : (
         <>
@@ -192,7 +193,7 @@ export function KnowledgeBasePage() {
           {pages.length > 0 && (
             <section className="stack-sm" aria-labelledby="kb-recent">
               <h2 id="kb-recent" className="section-title">Recently updated</h2>
-              <PageList pages={[...pages].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 6)} loading={false} isRead={index.data?.isRead} showCategory={categories.data} />
+              <GuideCards pages={[...pages].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 6)} loading={false} isRead={index.data?.isRead} showCategory={categories.data} />
             </section>
           )}
         </>
@@ -206,24 +207,34 @@ function PageRowsSkeleton() {
   return <Loading label="Loading">{[0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton width={32} height={32} radius={8} /><span className="grow stack-sm"><Skeleton width="40%" /><Skeleton width="70%" height={10} /></span></div>)}</Loading>;
 }
 
-function PageList({ pages, loading, error, retry, isRead, empty, showCategory }: { pages: SopIndexRow[]; loading: boolean; error?: unknown; retry?: () => void; isRead?: (p: SopIndexRow) => boolean; empty?: React.ReactNode; showCategory?: Array<{ id: string; name: string }> }) {
+/** Guides as cards: the cover photo (or a book) over the title. */
+function GuideCards({ pages, loading, error, retry, isRead, empty, showCategory }: { pages: SopIndexRow[]; loading: boolean; error?: unknown; retry?: () => void; isRead?: (p: SopIndexRow) => boolean; empty?: React.ReactNode; showCategory?: Array<{ id: string; name: string }> }) {
   if (error) return <div className="card"><ErrorState compact error={error} onRetry={retry} /></div>;
-  if (loading) return <div className="card"><PageRowsSkeleton /></div>;
+  if (loading) {
+    return (
+      <Loading label="Loading guides">
+        <div className="guide-cards">{[0, 1, 2].map((i) => <div key={i} className="card guide-card"><span className="guide-cover" /><span className="guide-card-body"><Skeleton width="70%" /><Skeleton width="45%" height={10} /></span></div>)}</div>
+      </Loading>
+    );
+  }
   if (!pages.length) return <div className="card"><EmptyState compact icon="file" title="No guides here yet" action={empty} /></div>;
   return (
-    <div className="card">
+    <div className="guide-cards">
       {pages.map((p) => {
         const read = isRead?.(p);
         return (
-          <Link key={p.id} to={`/kb/${p.id}`} className="card-row">
-            <span className="kb-doc"><Icon name="file" size={16} /></span>
-            <span className="grow stack-sm" style={{ gap: 2, minWidth: 0 }}>
-              <strong className="ellipsis">{p.title}</strong>
+          <Link key={p.id} to={`/kb/${p.id}`} className="card guide-card">
+            <GuideCover path={p.cover_path} />
+            <span className="guide-card-body">
+              <strong className="guide-card-title">{p.title}</strong>
               <span className="muted small">{showCategory && <>{showCategory.find((c) => c.id === p.category_id)?.name ?? "Uncategorized"} · </>}Updated {timeAgo(p.updated_at)}{p.revision > 1 && ` · Revision ${p.revision}`}</span>
+              {(p.status === "draft" || (p.required && p.status === "published")) && (
+                <span className="row wrap" style={{ gap: 6, marginTop: 4 }}>
+                  {p.status === "draft" && <span className="pill">Draft</span>}
+                  {p.required && p.status === "published" && <span className="pill" data-tone={read ? "success" : "warning"}>{read ? <><Icon name="check" size={12} strokeWidth={3} />Read</> : "Required"}</span>}
+                </span>
+              )}
             </span>
-            {p.status === "draft" && <span className="pill">Draft</span>}
-            {p.required && p.status === "published" && <span className="pill" data-tone={read ? "success" : "warning"}>{read ? <><Icon name="check" size={12} strokeWidth={3} />Read</> : "Required"}</span>}
-            <Icon name="chevronRight" size={16} />
           </Link>
         );
       })}

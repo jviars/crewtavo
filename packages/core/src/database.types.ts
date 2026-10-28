@@ -2024,14 +2024,14 @@ isOneToOne: false
                   ]
                 },"sop_pages": {
                   Row: {
-                    "audience": (Database["public"]['Enums']["member_role"])[] | null,"body": NonNullable<Json>,"body_html": string,"body_text": string,"category_id": string | null,"company_id": string,"created_at": string,"id": string,"required": boolean,"revision": number,"search": unknown,"status": string,"tags": (string)[],"title": string,"updated_at": string,"updated_by": string | null
+                    "audience": (Database["public"]['Enums']["member_role"])[] | null,"body": NonNullable<Json>,"body_html": string,"body_text": string,"category_id": string | null,"company_id": string,"cover_path": string | null,"created_at": string,"id": string,"required": boolean,"revision": number,"search": unknown,"status": string,"tags": (string)[],"title": string,"updated_at": string,"updated_by": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id": string,"created_at"?: string,"id"?: string,"required"?: boolean,"revision"?: number,"search"?: never,"status"?: string,"tags"?: (string)[],"title": string,"updated_at"?: string,"updated_by"?: string | null
+                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id": string,"cover_path"?: string | null,"created_at"?: string,"id"?: string,"required"?: boolean,"revision"?: number,"search"?: never,"status"?: string,"tags"?: (string)[],"title": string,"updated_at"?: string,"updated_by"?: string | null
                   }
                   Update: {
-                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id"?: string,"created_at"?: string,"id"?: string,"required"?: boolean,"revision"?: number,"search"?: never,"status"?: string,"tags"?: (string)[],"title"?: string,"updated_at"?: string,"updated_by"?: string | null
+                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id"?: string,"cover_path"?: string | null,"created_at"?: string,"id"?: string,"required"?: boolean,"revision"?: number,"search"?: never,"status"?: string,"tags"?: (string)[],"title"?: string,"updated_at"?: string,"updated_by"?: string | null
                   }
                   Relationships: [
                     {

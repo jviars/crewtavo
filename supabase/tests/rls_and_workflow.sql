@@ -105,6 +105,10 @@ update public.sop_pages set body = '{"type":"doc","content":[{"type":"paragraph"
 select test.check((select revision from public.sop_pages where id = :'sop_a') = 2, 'editing a page bumps its revision');
 select test.check((select count(*) from public.sop_revisions where page_id = :'sop_a') = 2, 'every revision is kept');
 select test.check((select count(*) from public.search_sops(:'company_a', 'mat temperature')) = 1, 'full-text search finds the SOP');
+update public.sop_pages set cover_path = :'company_a' || '/kb/cover.jpg' where id = :'sop_a';
+select test.check((select revision from public.sop_pages where id = :'sop_a') = 2, 'a new cover photo is not a new revision');
+select test.expect_error(format('update public.sop_pages set cover_path = %L where id = %L', 'b0000000-0000-0000-0000-000000000000/kb/cover.jpg', :'sop_a'), 'a cover photo comes from the company''s own folder');
+select test.expect_error(format('update public.sop_pages set cover_path = %L where id = %L', :'company_a' || '/receipts/cover.jpg', :'sop_a'), 'a cover photo comes from the knowledge base folder');
 
 select test.check((public.dashboard(:'company_a') -> 'workflow' -> 'quotes' ->> 'draft')::int = 1, 'dashboard counts draft quotes');
 select test.check((public.dashboard(:'company_a') -> 'today' ->> 'total')::int = 1, 'dashboard lists today''s visit');
