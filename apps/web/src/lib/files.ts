@@ -139,6 +139,9 @@ export async function packagePicture(file: File): Promise<Blob | null> {
   }
 }
 
+/** A guide's cover photo (sop_pages.cover_path): the same JPEG as a package's picture. */
+export const coverPicture = packagePicture;
+
 /** A file's contents as base64, for sending a small picture as JSON. */
 export function base64Of(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

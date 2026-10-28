@@ -16,6 +16,7 @@ import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { hasContent, htmlToText, sanitizeHtml, withSections } from "@/lib/html";
 import { useSession } from "@/lib/session";
 import { GuideContents, goToSection, useCurrentSection } from "./GuideContents";
+import { GuideCover } from "./GuideCover";
 import { ROLE_LABELS, useIsEditor } from "./kbData";
 
 interface TeamMember { user_id: string; role: string; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null }
@@ -35,7 +36,7 @@ export function SopPage() {
       unwrap(
         await supabase()
           .from("sop_pages")
-          .select("id, title, body_html, updated_at, updated_by, revision, tags, required, status, audience, category:sop_categories(id, name)")
+          .select("id, title, body_html, cover_path, updated_at, updated_by, revision, tags, required, status, audience, category:sop_categories(id, name)")
           .eq("id", pageId)
           .maybeSingle(),
       ),
@@ -56,6 +57,8 @@ export function SopPage() {
     meta: { success: "Guide deleted" },
     mutationFn: async () => unwrap(await supabase().from("sop_pages").delete().eq("id", pageId)),
     onSuccess: () => {
+      const cover = page.data?.cover_path;
+      if (cover) void supabase().storage.from("files").remove([cover]);
       refresh();
       navigate("/kb", { replace: true });
     },
@@ -135,6 +138,7 @@ export function SopPage() {
       <div className="sop-reader">
         <div className="sop-layout">
           <div className="sop-main">
+            {sop.cover_path && <GuideCover path={sop.cover_path} className="sop-cover no-print" />}
             {sections.length > 0 && (
               <details ref={inlineContents} className="card sop-toc-inline no-print">
                 <summary>On this page<span className="muted"> · {sections.length} sections</span></summary>

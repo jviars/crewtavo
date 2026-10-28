@@ -6,17 +6,20 @@ import { useBlocker, useNavigate, useParams, useSearchParams } from "react-route
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
 import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
 import { RichTextEditor } from "@/components/ui/RichTextEditor";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
 import { TagInput } from "@/components/ui/TagInput";
 import { ApiError, supabase, unwrap } from "@/lib/api";
+import { coverPicture, uploadFile } from "@/lib/files";
 import { hasContent, htmlToText } from "@/lib/html";
 import { useSession } from "@/lib/session";
+import { GuideCover } from "./GuideCover";
 import { ROLE_LABELS, useCategories, useIsEditor } from "./kbData";
 
-interface Draft { title: string; category_id: string; status: "draft" | "published"; required: boolean; audience: string[]; tags: string[]; html: string }
+interface Draft { title: string; category_id: string; status: "draft" | "published"; required: boolean; audience: string[]; tags: string[]; html: string; cover_path: string | null }
 
 // Required reading is for the team below admin; a sub never reads guides.
 const ROLES = STAFF.filter((r) => r !== "owner" && r !== "admin");
@@ -31,7 +34,7 @@ export function SopEditorPage() {
     queryKey: ["kb", company.id, "edit", pageId],
     enabled: Boolean(pageId),
     gcTime: 0,
-    queryFn: async () => unwrap(await supabase().from("sop_pages").select("id, title, category_id, status, required, audience, tags, body_html, updated_at, revision").eq("id", pageId!).maybeSingle()),
+    queryFn: async () => unwrap(await supabase().from("sop_pages").select("id, title, category_id, status, required, audience, tags, body_html, cover_path, updated_at, revision").eq("id", pageId!).maybeSingle()),
   });
   useDocumentTitle(pageId ? "Edit guide" : "New guide");
 
@@ -40,8 +43,8 @@ export function SopEditorPage() {
   if (pageId && (existing.error || !existing.data)) return <PageError error={existing.error ?? new ApiError("This guide doesn't exist, or it was deleted.", 404)} onRetry={existing.error ? () => existing.refetch() : undefined} back={<BackLink to="/kb">Knowledge base</BackLink>} />;
   const e = existing.data;
   const initial: Draft = e
-    ? { title: e.title, category_id: e.category_id ?? "", status: e.status as Draft["status"], required: e.required, audience: (e.audience as string[] | null) ?? [], tags: e.tags, html: e.body_html }
-    : { title: "", category_id: params.get("category") ?? "", status: "published", required: false, audience: [], tags: [], html: "" };
+    ? { title: e.title, category_id: e.category_id ?? "", status: e.status as Draft["status"], required: e.required, audience: (e.audience as string[] | null) ?? [], tags: e.tags, html: e.body_html, cover_path: e.cover_path }
+    : { title: "", category_id: params.get("category") ?? "", status: "published", required: false, audience: [], tags: [], html: "", cover_path: null };
   return <Editor key={pageId ?? "new"} pageId={pageId ?? null} initial={initial} loadedAt={e?.updated_at ?? null} categories={categories.data ?? []} />;
 }
 
@@ -54,7 +57,9 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
   const [touched, setTouched] = useState(false);
   const text = useRef(htmlToText(initial.html));
   const titleRef = useRef<HTMLInputElement>(null);
-  const dirty = JSON.stringify(draft) !== saved;
+  // A cover photo picked here is only uploaded when the guide is saved.
+  const [cover, setCover] = useState<{ file: File; url: string } | null>(null);
+  useEffect(() => () => { if (cover) URL.revokeObjectURL(cover.url); }, [cover]);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
   const save = useMutation({
@@ -66,6 +71,8 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
         throw new Error("Give the guide a title.");
       }
       if (draft.required && draft.status === "published" && !hasContent(draft.html)) throw new Error("Add some content before making this required reading.");
+      const uploaded = cover ? await uploadFile(company.id, "kb", cover.file) : null;
+      const cover_path = uploaded ?? draft.cover_path;
       const row = {
         title,
         category_id: draft.category_id || null,
@@ -76,14 +83,22 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
         body: { type: "html", html: draft.html },
         body_html: draft.html,
         body_text: text.current,
+        cover_path,
       };
-      if (pageId) {
-        // Don't overwrite someone else's save made while this was open.
-        const rows = unwrap(await supabase().from("sop_pages").update(row).eq("id", pageId).eq("updated_at", loadedAt!).select("id, updated_at"));
-        if (!rows.length) throw new Error("Someone else saved this guide while you were editing. Copy your changes, reload the page, and apply them again.");
-        return { id: pageId };
+      try {
+        if (pageId) {
+          // Don't overwrite someone else's save made while this was open.
+          const rows = unwrap(await supabase().from("sop_pages").update(row).eq("id", pageId).eq("updated_at", loadedAt!).select("id, updated_at"));
+          if (!rows.length) throw new Error("Someone else saved this guide while you were editing. Copy your changes, reload the page, and apply them again.");
+        }
+        const id = pageId ?? unwrap(await supabase().from("sop_pages").insert({ ...row, company_id: company.id }).select("id").single()).id;
+        // The cover it had isn't kept in its revisions, so it can go.
+        if (initial.cover_path && initial.cover_path !== cover_path) void supabase().storage.from("files").remove([initial.cover_path]);
+        return { id };
+      } catch (error) {
+        if (uploaded) void supabase().storage.from("files").remove([uploaded]);
+        throw error;
       }
-      return unwrap(await supabase().from("sop_pages").insert({ ...row, company_id: company.id }).select("id").single());
     },
     onSuccess: (r) => {
       setSaved(JSON.stringify(draft));
@@ -93,6 +108,7 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
     },
   });
 
+  const dirty = JSON.stringify(draft) !== saved || (cover !== null && !save.isSuccess);
   const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !save.isSuccess && currentLocation.pathname !== nextLocation.pathname);
   useEffect(() => {
     if (blocker.state !== "blocked") return;
@@ -161,6 +177,14 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
           />
         </div>
         <aside className="narrow card card-pad stack" style={{ gap: 16 }}>
+          <CoverField
+            path={draft.cover_path}
+            preview={cover?.url ?? null}
+            onChange={(picked) => {
+              setCover(picked);
+              if (!picked) set("cover_path", null);
+            }}
+          />
           <Field label="Category">
             <select className="select" value={draft.category_id} onChange={(ev) => set("category_id", ev.target.value)}>
               <option value="">Uncategorized</option>
@@ -195,5 +219,50 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
         </aside>
       </div>
     </form>
+  );
+}
+
+/** The cover photo, shown on the guide's card in the knowledge base and across the top of the guide: picked (or dropped) here, saved with the guide. */
+function CoverField({ path, preview, onChange }: { path: string | null; preview: string | null; onChange: (picked: { file: File; url: string } | null) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [opening, setOpening] = useState(false);
+  const [over, setOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    setOpening(true);
+    const jpeg = await coverPicture(file);
+    setOpening(false);
+    if (!jpeg) return setError("Crewtavo can't open that picture here. Try a JPEG or PNG.");
+    onChange({ file: new File([jpeg], "cover.jpg", { type: "image/jpeg" }), url: URL.createObjectURL(jpeg) });
+  };
+  return (
+    <Field label="Cover photo" optional error={error} hint="Shows on the guide's card in the knowledge base and across the top of the guide.">
+      {preview || path ? (
+        <>
+          <GuideCover path={path} src={preview} className="cover-preview" />
+          <div className="row wrap" style={{ gap: 8 }}>
+            <Button size="sm" icon="image" loading={opening} onClick={() => input.current?.click()}>Change photo</Button>
+            <Button size="sm" variant="ghost" disabled={opening} onClick={() => { setError(null); onChange(null); }}>Remove</Button>
+          </div>
+        </>
+      ) : (
+        <button
+          type="button"
+          className="dropzone"
+          data-over={over || undefined}
+          disabled={opening}
+          onClick={() => input.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => { e.preventDefault(); setOver(false); void pick(e.dataTransfer.files[0]); }}
+        >
+          <Icon name="image" size={20} />
+          <span className="small strong">{opening ? "Opening the photo…" : "Add a cover photo"}</span>
+        </button>
+      )}
+      <input ref={input} type="file" accept="image/*,.heic,.heif" hidden onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; void pick(file); }} />
+    </Field>
   );
 }
