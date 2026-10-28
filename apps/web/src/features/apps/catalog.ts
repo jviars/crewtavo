@@ -193,6 +193,26 @@ export const APP_INFO: Record<string, AppInfo> = {
     website: "https://crewtavo.com/docs/connections/website-forms/",
     open: "/requests?from=website",
   },
+  careers: {
+    developer: "Crewtavo",
+    tagline: "Job applications from your website, résumés and all",
+    about:
+      "Keep the careers page and Apply form your website already has, in its own fonts and colors, and change one thing: where it sends. Install, copy your form's address into its action, and every application lands in Applicants, a new place in the sidebar for the office: when they applied, the position, when they can start, their availability, pay, experience and driver's license, and their résumé. The people you choose get an email for each one, with Reply going straight to the applicant. Move each one from New to Interview to Hired, rate them, set the interview and keep notes. Applicants never become clients, and only owners, admins and office staff with the hiring area see them.",
+    highlights: [
+      { icon: "user", title: "Applicants in the sidebar", text: "Everyone who applied, newest first, with where each one stands and who's waiting to hear back." },
+      { icon: "file", title: "Résumés kept private", text: "Files come in with the application, and only the people who hire can open them." },
+      { icon: "mail", title: "In your inbox too", text: "An email for each application to up to five people. Reply, and you're answering the applicant." },
+    ],
+    access: [
+      "Take applications sent to your careers forms' addresses, with up to 3 files each",
+      "Add applicants, seen only by owners, admins and office staff with the hiring area",
+      "Email each application to the people you list, from your connected email",
+      "Uninstalling stops taking applications and keeps your forms and applicants",
+    ],
+    connectsWith: "Your website's Apply form",
+    website: "https://crewtavo.com/docs/connections/careers/",
+    open: "/applicants",
+  },
   google_calendar: {
     developer: "Google",
     tagline: "Your Google calendars on the schedule, and visits on Google",

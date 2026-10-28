@@ -1,7 +1,7 @@
 import { ADMINS, canMakeResetLink, LEVEL_SUMMARY, type Role } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -30,7 +30,15 @@ interface InviteSent { emailed: boolean; reason: string | null; link: string | n
 export function TeamSettings() {
   const session = useSession();
   const queryClient = useQueryClient();
-  const [inviting, setInviting] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // A hired applicant's "Invite to your team" (features/careers/ApplicantPage.tsx) opens the invite filled in.
+  const handed = (location.state as { invite?: { name: string; email: string } } | null)?.invite;
+  const [inviting, setInviting] = useState(Boolean(handed));
+  const stopInviting = () => {
+    setInviting(false);
+    if (handed) navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  };
   const [resetting, setResetting] = useState<Member | null>(null);
   const [resending, setResending] = useState<Member | null>(null);
   const [photoFor, setPhotoFor] = useState<string | null>(null);
@@ -141,7 +149,7 @@ export function TeamSettings() {
           </table>
         </div>
       )}
-      {inviting && <InviteDialog onClose={() => setInviting(false)} />}
+      {inviting && <InviteDialog prefill={handed} onClose={stopInviting} />}
       {resetting && <ResetPasswordDialog member={resetting} onClose={() => setResetting(null)} />}
       {resending && <ResendInviteDialog member={resending} onClose={() => setResending(null)} />}
       {photoMember && <PhotoDialog member={photoMember} onClose={() => setPhotoFor(null)} />}
@@ -232,11 +240,11 @@ function ResetPasswordDialog({ member, onClose }: { member: Member; onClose: () 
   );
 }
 
-function InviteDialog({ onClose }: { onClose: () => void }) {
+function InviteDialog({ onClose, prefill }: { onClose: () => void; prefill?: { name: string; email: string } }) {
   const session = useSession();
   const queryClient = useQueryClient();
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState(prefill?.email ?? "");
+  const [name, setName] = useState(prefill?.name ?? "");
   const roles = useCompanyRoles();
   const [choice, setChoice] = useState<string | null>(null);
   const employee = roles.data?.find((r) => r.base_role === "field_crew");

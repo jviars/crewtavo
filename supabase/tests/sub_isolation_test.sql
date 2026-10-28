@@ -476,7 +476,7 @@ select t1070.check(array(
   select p.proname || '(' || oidvectortypes(p.proargtypes) || ')' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'execute') order by 1) = array[
   'accept_terms(uuid, text)', 'answer_sub_offer(uuid, boolean, text, integer, uuid)', 'apply_promo_code(text, uuid, text, uuid, uuid[])',
-  'apply_quote_options(uuid, jsonb, text, uuid[], jsonb)', 'campaign_audience(uuid, jsonb)',
+  'apply_quote_options(uuid, jsonb, text, uuid[], jsonb)', 'campaign_audience(uuid, jsonb)', 'careers_set_enabled(uuid, boolean)',
   'change_sub_offer(uuid, jsonb, timestamp with time zone)', 'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
   'chat_save_roles(uuid, jsonb, jsonb)', 'chat_set_enabled(uuid, boolean)', 'company_basics(uuid)', 'convert_quote_to_job(uuid)',
   'create_company(text, text, text)', 'create_invoice_for_job(uuid, text, numeric)', 'dashboard(uuid)', 'duplicate_quote(uuid)',
@@ -487,7 +487,7 @@ select t1070.check(array(
   'promo_code_usage(uuid)', 'put_quote_package(uuid, uuid, jsonb, boolean)', 'remove_promo_code(text, uuid)', 'remove_quote_option(uuid, uuid)',
   'search_sops(uuid, text, integer, boolean)', 'send_sub_offer(uuid, timestamp with time zone)', 'set_sub_reminders(uuid, boolean)',
   'set_sub_sign_in_countries(uuid, text[])', 'sign_quote(uuid, jsonb, uuid, numeric)', 'sub_1099_totals(uuid, integer)', 'sub_wc_audit(uuid, date, date)', 'time_entry_places(uuid, uuid[])', 'visit_contact(uuid)', 'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',
-  'withdraw_sub_offer(uuid)']::text[],
+  'website_forms_set_enabled(uuid, boolean)', 'withdraw_sub_offer(uuid)']::text[],
   'the functions a signed-in person can call are the known list (a new one needs a decision about subs, here)');
 -- Signing in with a code, by text or by email (20261025005001_sign_in_codes.sql,
 -- 20261025006001_email_sign_in_codes.sql), is the server's alone, which is why none of it is on the

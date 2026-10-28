@@ -1,4 +1,3 @@
-import { CHANNEL_LABELS } from "@crewtavo/core/analytics";
 import { fieldLabel } from "@crewtavo/core/websiteForms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -20,6 +19,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { ContactLine } from "../clients/ContactsCard";
 import { PropertySelect } from "../clients/ClientForm";
 import type { WebVisit } from "../marketing/website";
+import { WebVisitRows } from "../marketing/WebVisitRows";
 import { PlansCard } from "../plans/PlansCard";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
 import { requestSource } from "./RequestsPage";
@@ -247,17 +247,5 @@ function EditRequestDialog({ request, onClose, onSaved }: { request: { id: strin
         </div>
       </form>
     </Dialog>
-  );
-}
-
-/** A booking-form request: the website visit that brought it in (Website Analytics). */
-function WebVisitRows({ visit }: { visit: WebVisit }) {
-  return (
-    <>
-      <dt>Came from</dt>
-      <dd>{visit.source}{visit.channel !== "direct" && CHANNEL_LABELS[visit.channel] ? ` (${CHANNEL_LABELS[visit.channel].toLowerCase()})` : ""}{visit.campaign ? `, campaign ${visit.campaign}` : ""}</dd>
-      <dt>First page</dt>
-      <dd style={{ overflowWrap: "anywhere" }}>{visit.landing_page}{visit.page !== visit.landing_page ? `, then booked from ${visit.page}` : ""}</dd>
-    </>
   );
 }

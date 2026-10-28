@@ -2,7 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "./api";
 
-type CountTable = "requests" | "quotes" | "jobs" | "invoices" | "campaigns";
+type CountTable = "requests" | "quotes" | "jobs" | "invoices" | "campaigns" | "job_applicants";
 
 /** Number of records in each status group, for the filter tabs. */
 export function useStatusCounts(table: CountTable, companyId: string, groups: Record<string, readonly string[] | null>) {

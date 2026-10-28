@@ -52,6 +52,7 @@ export const PERMISSIONS = [
   { key: "apps", label: "Connect apps" },
   { key: "equipment", label: "Manage equipment and maintenance" },
   { key: "subs", label: "Subcontractors, their paperwork and pay" },
+  { key: "hiring", label: "Job applicants and hiring" },
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number]["key"];
 

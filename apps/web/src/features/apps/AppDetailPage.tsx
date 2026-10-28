@@ -133,8 +133,9 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   const chatSwitch = useTeamChatSwitch();
   const analyticsSwitch = useAnalyticsSwitch();
   const formsSwitch = useWebsiteFormsSwitch();
+  const careersSwitch = useWebsiteFormsSwitch("careers");
   // Built-in apps turn on and off in the company's settings.
-  const builtinSwitch = app.id === "website_analytics" ? analyticsSwitch : app.id === "website_forms" ? formsSwitch : chatSwitch;
+  const builtinSwitch = app.id === "website_analytics" ? analyticsSwitch : app.id === "website_forms" ? formsSwitch : app.id === "careers" ? careersSwitch : chatSwitch;
 
   // Uninstall takes this app's own assistants and calendars with it.
   const assistants = connections.filter((c) => assistantAppFor(c.name) === app.id);
@@ -333,6 +334,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           {app.id === "abc_supply" && <AbcSupplyPanel app={app} onChanged={refresh} />}
           {app.id === "website_analytics" && <AnalyticsPanel />}
           {app.id === "website_forms" && <WebsiteFormsPanel />}
+          {app.id === "careers" && <WebsiteFormsPanel kind="careers" />}
           {app.id === "team_chat" && <TeamChatPanel />}
           {app.auth === "site" && <WebsitePanel app={app} onSaved={refresh} />}
         </>

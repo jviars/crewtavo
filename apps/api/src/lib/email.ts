@@ -17,6 +17,8 @@ function buttonLabel(url: string): string {
   if (url.includes("/api/public/r/")) return "Leave a review";
   // A website form's message, to the office (services/websiteForms.ts).
   if (/\/requests\/[0-9a-f-]{36}$/.test(url)) return "Open the request";
+  // A careers form's application, to the office (services/careers.ts).
+  if (/\/applicants\/[0-9a-f-]{36}$/.test(url)) return "Open the application";
   return "Open";
 }
 

@@ -12,7 +12,7 @@ export interface NavItem {
   except?: string[]; // screens under this one that are a section of their own (not highlighted here)
   also?: string[]; // other screens that count as this section (highlighted in the sidebar)
   keywords?: string; // other words people search for it by
-  feature?: "team_chat" | "website"; // only while the business has this app on (Apps)
+  feature?: "team_chat" | "website" | "careers"; // only while the business has this app on (Apps)
   trade?: string; // only for businesses set up for this trade (companies.trade_preset)
 }
 
@@ -44,10 +44,11 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: "/finance", label: "Finance", icon: "finance", roles: ["admin", "office"], perm: ["reports", "invoices"], keywords: "reports revenue profit payments money collected net volume fees deposits owed goal" },
     { to: "/metrics", label: "Metrics", icon: "metrics", roles: ["admin", "office"], perm: "reports", keywords: "reports analytics numbers sales conversion lead sources visits hours team clients" },
     { to: "/timesheets", label: "Timesheets", icon: "clock", keywords: "time clock hours payroll" },
+    { to: "/applicants", label: "Applicants", icon: "user", roles: ["admin", "office"], perm: "hiring", feature: "careers", keywords: "careers jobs hiring applications apply candidates resumes cv interviews employment" },
     { to: "/subs", label: "Subcontractors", icon: "users", roles: ["admin", "office"], perm: "subs", keywords: "subs contractors 1099 w-9 w9 insurance certificates coi liability workers comp audit paperwork vendors" },
     { to: "/equipment", label: "Equipment", icon: "truck", keywords: "trucks mowers trailers tools fleet maintenance" },
     { to: "/kb", label: "Knowledge base", icon: "book", keywords: "sop procedures training how to guides" },
-    { to: "/apps", label: "Apps", icon: "apps", roles: ["admin"], perm: "apps", keywords: "integrations connect app store team chat website forms formspree contact form quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
+    { to: "/apps", label: "Apps", icon: "apps", roles: ["admin"], perm: "apps", keywords: "integrations connect app store team chat website forms formspree contact form careers job applications hiring quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
   ],
 ];
 
@@ -124,7 +125,7 @@ export function navVisible(session: { role: string; permissions: readonly string
   return [item.perm ?? []].flat().every((p) => session.permissions.includes(p));
 }
 
-/** An app the business turned on in Apps: companies.settings.team_chat.enabled, or .website.enabled once its editor is added. */
+/** An app the business turned on in Apps: companies.settings.team_chat.enabled, .careers.enabled, or .website.enabled once its editor is added. */
 export function featureOn(settings: Record<string, unknown> | null | undefined, feature: NonNullable<NavItem["feature"]>): boolean {
   return (settings?.[feature] as { enabled?: boolean } | undefined)?.enabled === true;
 }
