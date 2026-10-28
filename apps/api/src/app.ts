@@ -37,7 +37,7 @@ import { signInCodes } from "./routes/signInCodes";
 import { signing } from "./routes/signing";
 import { subOffers } from "./routes/subOffers";
 import { subs } from "./routes/subs";
-import { formInbox, websiteForms } from "./routes/websiteForms";
+import { formInbox, formTooLarge, websiteForms } from "./routes/websiteForms";
 import { runTask, TASKS, type TaskName } from "./tasks";
 
 export const app = new Hono<AppEnv>();
@@ -49,12 +49,20 @@ const framable = secureHeaders({ crossOriginResourcePolicy: false, xFrameOptions
 app.use((c, next) => (c.req.path.startsWith("/f/") ? framable(c, next) : secure(c, next)));
 // Bodies are read into memory, so one huge request could exhaust it. The biggest real one is a
 // quote approval with a drawn signature (a few hundred KB); files go straight to Storage. Calendar
-// files are the exception: their events are read from them (up to 10 MB of text, sent as JSON).
+// files are the exception: their events are read from them (up to 10 MB of text, sent as JSON). So
+// is an application to a careers form, which sends its résumé with it (up to 3 files of 10 MB each,
+// packages/core/src/careers.ts): a website's form can't upload to Storage first.
 const tooLarge = (c: Context) => c.json({ error: "That's too large to send." }, 413);
 const smallBody = bodyLimit({ maxSize: 2 * 1024 * 1024, onError: tooLarge });
 const calendarFile = bodyLimit({ maxSize: 12 * 1024 * 1024, onError: tooLarge });
 const CALENDAR_FILE = /^\/api\/calendars\/(file|[0-9a-f-]{36}\/file)$/i;
-app.use((c, next) => (c.req.method === "POST" && CALENDAR_FILE.test(c.req.path) ? calendarFile(c, next) : smallBody(c, next)));
+const formPost = bodyLimit({ maxSize: 32 * 1024 * 1024, onError: (c) => formTooLarge(c) });
+const FORM_ADDRESS = /^\/f\/[a-z0-9]{8,32}$/;
+app.use((c, next) => {
+  if (c.req.method !== "POST") return smallBody(c, next);
+  if (CALENDAR_FILE.test(c.req.path)) return calendarFile(c, next);
+  return FORM_ADDRESS.test(c.req.path) ? formPost(c, next) : smallBody(c, next);
+});
 // MCP clients may run in a browser (for example the MCP Inspector).
 app.use(
   "/mcp",

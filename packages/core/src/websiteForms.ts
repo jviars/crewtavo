@@ -20,7 +20,7 @@ export const MAX_FIELDS = 60;
 export const MAX_VALUE = 5000;
 export const MAX_TOTAL = 50_000;
 
-type Role = "name" | "first" | "last" | "email" | "phone" | "company" | "line1" | "line2" | "city" | "region" | "postal_code" | "message";
+export type Role = "name" | "first" | "last" | "email" | "phone" | "company" | "line1" | "line2" | "city" | "region" | "postal_code" | "message";
 
 // Spellings as they're compared: lower-case, letters and digits only ("E-mail Address" is emailaddress).
 const SPELLINGS: Record<Role, string[]> = {
@@ -41,7 +41,10 @@ const ROLE_OF = new Map<string, Role>(Object.entries(SPELLINGS).flatMap(([role, 
 /** Captcha answers other form services' widgets add. */
 const CAPTCHAS = new Set(["g-recaptcha-response", "h-captcha-response", "cf-turnstile-response", "frc-captcha-solution"]);
 
-const spelling = (name: string) => name.replace(/\[\]$/, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+/** A field's name as names are compared: lower-case, letters and digits only. */
+export const spelling = (name: string) => name.replace(/\[\]$/, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+/** What a field is, by its name: "E-mail Address" is the email. Careers reads its own on top (careers.ts). */
+export const fieldRole = (name: string): Role | undefined => ROLE_OF.get(spelling(name));
 const text = (value: FieldValue | undefined) => (Array.isArray(value) ? value.join(", ") : (value ?? "")).trim();
 
 export interface Submission {
@@ -112,7 +115,7 @@ export function readSubmission(fields: Array<[string, FieldValue]>): ReadResult 
       continue;
     }
     kept.push([name, value]);
-    const role = ROLE_OF.get(spelling(name));
+    const role = fieldRole(name);
     // The first field for each part wins; a second one (a confirm-email field) is an answer.
     if (role && found[role] === undefined) {
       found[role] = text(value);

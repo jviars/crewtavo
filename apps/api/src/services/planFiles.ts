@@ -1,12 +1,14 @@
 /**
- * The daily "plans" task: tidies Plans and files (supabase/migrations/20261019001700_plan_files.sql)
- * and subs' paperwork (20261025001001_subcontractors.sql).
+ * The daily "plans" task: tidies Plans and files (supabase/migrations/20261019001700_plan_files.sql),
+ * subs' paperwork (20261025001001_subcontractors.sql) and applicants' résumés (20261028000100_careers.sql).
  *   - A file whose property, request, quote and job were all deleted (a spam request, say) is on
  *     nothing anyone can open: its file and row go.
  *   - A file uploaded but never recorded (a booking form closed before its files were recorded, an
  *     upload cut off before its row was saved) goes once it's a day old.
  *   - The same for a sub's paperwork: a file sent by link that was never recorded, or one left
  *     behind when its sub was deleted, goes once it's a day old.
+ *   - And for an applicant's files: one stored for an application that then wasn't kept, or left
+ *     behind when the applicant was deleted, goes once it's a day old.
  */
 import type { Db } from "../lib/supabase";
 
@@ -92,6 +94,29 @@ export async function tidySubFiles(admin: Db, now = Date.now()): Promise<{ unrec
   let unrecorded = 0;
   for (const { id } of companies ?? []) {
     for (const sub of await subfolders(files, `${id}/subs`)) unrecorded += await sweepFolder(files, `${id}/subs/${sub}`, known, now);
+  }
+  return { unrecorded };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** An applicant's files with no row: stored for an application that wasn't kept, or left by a deleted applicant. */
+export async function tidyApplicantFiles(admin: Db, now = Date.now()): Promise<{ unrecorded: number }> {
+  const files = admin.storage.from("files");
+  const { data: companies, error } = await admin.from("companies").select("id").limit(1000);
+  if (error) throw new Error(error.message);
+  let unrecorded = 0;
+  for (const { id } of companies ?? []) {
+    // Each applicant's folder is named by their id, and their row lists the files in it.
+    for (const applicant of await subfolders(files, `${id}/applicants`)) {
+      if (!UUID.test(applicant)) continue;
+      const known = async () => {
+        const { data, error: lookup } = await admin.from("job_applicants").select("files").eq("id", applicant).maybeSingle();
+        if (lookup) throw new Error(lookup.message);
+        return new Set(((data?.files ?? []) as Array<{ path?: string }>).map((f) => f.path ?? ""));
+      };
+      unrecorded += await sweepFolder(files, `${id}/applicants/${applicant}`, known, now);
+    }
   }
   return { unrecorded };
 }

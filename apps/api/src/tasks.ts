@@ -13,7 +13,7 @@ import { adminClient, type Db } from "./lib/supabase";
 import { runAddressTask } from "./services/address";
 import { rollUpVisits } from "./services/analytics";
 import { checkHosting } from "./services/hosting";
-import { tidyPlanFiles, tidySubFiles } from "./services/planFiles";
+import { tidyApplicantFiles, tidyPlanFiles, tidySubFiles } from "./services/planFiles";
 import { keepRailwayAlive } from "./services/railway";
 import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
@@ -67,7 +67,7 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return checkHosting(env, adminClient(env));
     case "plans": {
       const admin = adminClient(env);
-      return { ...(await tidyPlanFiles(admin)), subs: await tidySubFiles(admin) };
+      return { ...(await tidyPlanFiles(admin)), subs: await tidySubFiles(admin), applicants: await tidyApplicantFiles(admin) };
     }
     case "routes":
       return autoRoutes(env);

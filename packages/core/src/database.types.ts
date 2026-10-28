@@ -880,6 +880,32 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"job_applicants": {
+                  Row: {
+                    "answers": NonNullable<Json>,"availability": string | null,"company_id": string,"created_at": string,"created_by": string | null,"desired_pay": string | null,"drivers_license": string | null,"email": string | null,"experience": string | null,"files": NonNullable<Json>,"heard_from": string | null,"id": string,"interview_at": string | null,"location": string | null,"message": string | null,"name": string,"notes": string | null,"phone": string | null,"position": string | null,"rating": number | null,"start_date": string | null,"status": string,"status_changed_at": string,"updated_at": string,"web_visit": Json | null,"website_form_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "answers"?: NonNullable<Json>,"availability"?: string | null,"company_id": string,"created_at"?: string,"created_by"?: string | null,"desired_pay"?: string | null,"drivers_license"?: string | null,"email"?: string | null,"experience"?: string | null,"files"?: NonNullable<Json>,"heard_from"?: string | null,"id"?: string,"interview_at"?: string | null,"location"?: string | null,"message"?: string | null,"name": string,"notes"?: string | null,"phone"?: string | null,"position"?: string | null,"rating"?: number | null,"start_date"?: string | null,"status"?: string,"status_changed_at"?: string,"updated_at"?: string,"web_visit"?: Json | null,"website_form_id"?: string | null
+                  }
+                  Update: {
+                    "answers"?: NonNullable<Json>,"availability"?: string | null,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"desired_pay"?: string | null,"drivers_license"?: string | null,"email"?: string | null,"experience"?: string | null,"files"?: NonNullable<Json>,"heard_from"?: string | null,"id"?: string,"interview_at"?: string | null,"location"?: string | null,"message"?: string | null,"name"?: string,"notes"?: string | null,"phone"?: string | null,"position"?: string | null,"rating"?: number | null,"start_date"?: string | null,"status"?: string,"status_changed_at"?: string,"updated_at"?: string,"web_visit"?: Json | null,"website_form_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "job_applicants_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "job_applicants_form_fkey"
+      columns: ["company_id","website_form_id"]
+isOneToOne: false
+      referencedRelation: "website_forms"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"job_financials": {
                   Row: {
                     "company_id": string,"contract_total": number,"job_id": string,"updated_at": string
@@ -2358,14 +2384,14 @@ isOneToOne: false
                   ]
                 },"website_forms": {
                   Row: {
-                    "allowed_sites": (string)[],"company_id": string,"created_at": string,"email_to": (string)[],"id": string,"key": string,"name": string,"redirect_url": string | null,"updated_at": string
+                    "allowed_sites": (string)[],"company_id": string,"created_at": string,"email_to": (string)[],"id": string,"key": string,"kind": string,"name": string,"redirect_url": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "allowed_sites"?: (string)[],"company_id": string,"created_at"?: string,"email_to"?: (string)[],"id"?: string,"key"?: string,"name": string,"redirect_url"?: string | null,"updated_at"?: string
+                    "allowed_sites"?: (string)[],"company_id": string,"created_at"?: string,"email_to"?: (string)[],"id"?: string,"key"?: string,"kind"?: string,"name": string,"redirect_url"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "allowed_sites"?: (string)[],"company_id"?: string,"created_at"?: string,"email_to"?: (string)[],"id"?: string,"key"?: string,"name"?: string,"redirect_url"?: string | null,"updated_at"?: string
+                    "allowed_sites"?: (string)[],"company_id"?: string,"created_at"?: string,"email_to"?: (string)[],"id"?: string,"key"?: string,"kind"?: string,"name"?: string,"redirect_url"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -2426,6 +2452,9 @@ isOneToOne: false
 { Args: { "p_audience": Json,"p_company_id": string }; Returns: {
               "client_id": string,"display_name": string,"email": string
             }[]
+                           },
+"careers_set_enabled":
+{ Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
                            },
 "change_sub_offer":
 { Args: { "p_lines": Json,"p_pay": string,"p_respond_by"?: string }; Returns: {
@@ -2631,6 +2660,9 @@ isOneToOne: false
 { Args: { "p_company_id": string,"p_limit"?: number,"p_query": string }; Returns: {
               "client_id": string,"id": string,"kind": string,"number": number,"status": string,"subtitle": string,"title": string
             }[]
+                           },
+"job_application":
+{ Args: { "p_answers"?: Json,"p_details"?: Json,"p_email"?: string,"p_files"?: Json,"p_form": string,"p_id": string,"p_name"?: string,"p_phone"?: string,"p_web_visit"?: Json }; Returns: Json
                            },
 "job_material_costs":
 { Args: { "p_job": string }; Returns: {

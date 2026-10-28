@@ -1,12 +1,12 @@
 /**
  * The daily "plans" task (services/planFiles.ts), with PostgREST and Storage stubbed through fetch:
- * files on nothing go, and uploads never recorded go once they're a day old (plans, and subs'
- * paperwork).
+ * files on nothing go, and uploads never recorded go once they're a day old (plans, subs'
+ * paperwork and applicants' résumés).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { adminClient } from "../src/lib/supabase";
-import { tidyPlanFiles, tidySubFiles } from "../src/services/planFiles";
+import { tidyApplicantFiles, tidyPlanFiles, tidySubFiles } from "../src/services/planFiles";
 
 const env: Env = { SUPABASE_URL: "https://example.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", SUPABASE_SECRET_KEY: "sb_secret_test" };
 const NOW = Date.parse("2026-10-20T04:20:00Z");
@@ -97,6 +97,54 @@ describe("tidying subs' paperwork", () => {
   it("removes nothing when it can't tell what's recorded", async () => {
     const calls = serveSubs(true);
     await expect(tidySubFiles(adminClient(env), NOW)).rejects.toThrow("timeout");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+});
+
+describe("tidying applicants' files", () => {
+  const KEPT = "a0000000-0000-4000-8000-000000000001";
+  const GONE = "a0000000-0000-4000-8000-000000000002";
+  // co-1/applicants holds a kept applicant's folder (their résumé, a stray, an upload on its way) and a deleted one's.
+  function serveApplicants(lookupFails = false) {
+    const calls: Call[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const body = typeof init?.body === "string" && init.body ? JSON.parse(init.body) : undefined;
+      const call: Call = { method: (init?.method ?? "GET").toUpperCase(), path: url.pathname, search: url.searchParams, body };
+      calls.push(call);
+      if (call.path === "/rest/v1/companies") return Response.json([{ id: "co-1" }]);
+      if (call.path === "/rest/v1/job_applicants") {
+        if (lookupFails) return Response.json({ code: "57014", message: "timeout", details: null, hint: null }, { status: 500 });
+        return Response.json(call.search.get("id") === `eq.${KEPT}` ? [{ files: [{ path: `co-1/applicants/${KEPT}/1.pdf` }] }] : []);
+      }
+      if (call.path === "/storage/v1/object/list/files") {
+        if (body.prefix === "co-1/applicants") return Response.json([{ id: null, name: KEPT }, { id: null, name: GONE }, { id: null, name: "not-an-applicant" }]);
+        if (body.prefix === `co-1/applicants/${KEPT}`) {
+          return Response.json([
+            { id: "o1", name: "1.pdf", created_at: hoursAgo(72) },
+            { id: "o2", name: "2.docx", created_at: hoursAgo(30) },
+            { id: "o3", name: "3.pdf", created_at: hoursAgo(2) },
+          ]);
+        }
+        if (body.prefix === `co-1/applicants/${GONE}`) return Response.json([{ id: "o4", name: "1.pdf", created_at: hoursAgo(500) }]);
+        return Response.json([]);
+      }
+      return Response.json([]);
+    });
+    return calls;
+  }
+
+  it("removes day-old files no applicant lists, and those of deleted applicants", async () => {
+    const calls = serveApplicants();
+    expect(await tidyApplicantFiles(adminClient(env), NOW)).toEqual({ unrecorded: 2 });
+    const removed = calls.filter((c) => c.path === "/storage/v1/object/files" && c.method === "DELETE").map((c) => c.body.prefixes);
+    expect(removed).toEqual([[`co-1/applicants/${KEPT}/2.docx`], [`co-1/applicants/${GONE}/1.pdf`]]);
+    expect(calls.some((c) => c.body?.prefix === "co-1/applicants/not-an-applicant")).toBe(false);
+  });
+
+  it("removes nothing when it can't tell what's recorded", async () => {
+    const calls = serveApplicants(true);
+    await expect(tidyApplicantFiles(adminClient(env), NOW)).rejects.toThrow("timeout");
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 });
