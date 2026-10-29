@@ -620,6 +620,32 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"drive_folders": {
+                  Row: {
+                    "company_id": string,"created_at": string,"created_by": string | null,"deleted_at": string | null,"deleted_by": string | null,"id": string,"name": string,"parent_id": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"created_by"?: string | null,"deleted_at"?: string | null,"deleted_by"?: string | null,"id"?: string,"name": string,"parent_id"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"created_by"?: string | null,"deleted_at"?: string | null,"deleted_by"?: string | null,"id"?: string,"name"?: string,"parent_id"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "drive_folders_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "drive_folders_company_id_parent_id_fkey"
+      columns: ["company_id","parent_id"]
+isOneToOne: false
+      referencedRelation: "drive_folders"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"equipment": {
                   Row: {
                     "company_id": string,"created_at": string,"crew_id": string | null,"id": string,"kind": string,"make": string | null,"meter": string,"meter_read_on": string | null,"meter_reading": number | null,"model": string | null,"name": string,"notes": string | null,"photo_path": string | null,"plate": string | null,"purchased_on": string | null,"serial": string | null,"status": string,"updated_at": string,"year": number | null
@@ -1450,14 +1476,14 @@ isOneToOne: false
                   ]
                 },"plan_files": {
                   Row: {
-                    "archived": boolean,"company_id": string,"content_type": string | null,"created_at": string,"created_by": string | null,"crew_visible": boolean,"file_name": string,"id": string,"job_id": string | null,"notes": string | null,"path": string,"property_id": string | null,"quote_id": string | null,"replaces_id": string | null,"request_id": string | null,"revision": string | null,"size_bytes": number | null,"superseded_at": string | null,"title": string,"updated_at": string
+                    "archived": boolean,"company_id": string,"content_type": string | null,"created_at": string,"created_by": string | null,"crew_visible": boolean,"deleted_at": string | null,"deleted_by": string | null,"file_name": string,"folder_id": string | null,"id": string,"job_id": string | null,"notes": string | null,"path": string,"property_id": string | null,"quote_id": string | null,"replaces_id": string | null,"request_id": string | null,"revision": string | null,"size_bytes": number | null,"superseded_at": string | null,"title": string,"trashed_from": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "archived"?: boolean,"company_id": string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"crew_visible"?: boolean,"file_name": string,"id"?: string,"job_id"?: string | null,"notes"?: string | null,"path": string,"property_id"?: string | null,"quote_id"?: string | null,"replaces_id"?: string | null,"request_id"?: string | null,"revision"?: string | null,"size_bytes"?: number | null,"superseded_at"?: string | null,"title": string,"updated_at"?: string
+                    "archived"?: boolean,"company_id": string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"crew_visible"?: boolean,"deleted_at"?: string | null,"deleted_by"?: string | null,"file_name": string,"folder_id"?: string | null,"id"?: string,"job_id"?: string | null,"notes"?: string | null,"path": string,"property_id"?: string | null,"quote_id"?: string | null,"replaces_id"?: string | null,"request_id"?: string | null,"revision"?: string | null,"size_bytes"?: number | null,"superseded_at"?: string | null,"title": string,"trashed_from"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "archived"?: boolean,"company_id"?: string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"crew_visible"?: boolean,"file_name"?: string,"id"?: string,"job_id"?: string | null,"notes"?: string | null,"path"?: string,"property_id"?: string | null,"quote_id"?: string | null,"replaces_id"?: string | null,"request_id"?: string | null,"revision"?: string | null,"size_bytes"?: number | null,"superseded_at"?: string | null,"title"?: string,"updated_at"?: string
+                    "archived"?: boolean,"company_id"?: string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"crew_visible"?: boolean,"deleted_at"?: string | null,"deleted_by"?: string | null,"file_name"?: string,"folder_id"?: string | null,"id"?: string,"job_id"?: string | null,"notes"?: string | null,"path"?: string,"property_id"?: string | null,"quote_id"?: string | null,"replaces_id"?: string | null,"request_id"?: string | null,"revision"?: string | null,"size_bytes"?: number | null,"superseded_at"?: string | null,"title"?: string,"trashed_from"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -1489,6 +1515,12 @@ isOneToOne: false
       columns: ["company_id","replaces_id"]
 isOneToOne: false
       referencedRelation: "plan_files"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "plan_files_folder_fk"
+      columns: ["company_id","folder_id"]
+isOneToOne: false
+      referencedRelation: "drive_folders"
       referencedColumns: ["company_id","id"]
     },{
       foreignKeyName: "plan_files_request_fk"
@@ -2068,6 +2100,32 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"storage_allowances": {
+                  Row: {
+                    "company_id": string,"created_at": string,"created_by": string | null,"id": string,"limit_bytes": number,"role_key": string | null,"updated_at": string,"user_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"limit_bytes": number,"role_key"?: string | null,"updated_at"?: string,"user_id"?: string | null
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"limit_bytes"?: number,"role_key"?: string | null,"updated_at"?: string,"user_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "storage_allowances_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "storage_allowances_company_id_user_id_fkey"
+      columns: ["company_id","user_id"]
+isOneToOne: true
+      referencedRelation: "memberships"
+      referencedColumns: ["company_id","user_id"]
+    }
+                  ]
                 },"stripe_invoices": {
                   Row: {
                     "amount_due": number,"company_id": string,"created_at": string,"detached_at": string | null,"hosted_url": string | null,"id": string,"invoice_id": string | null,"livemode": boolean,"number": string | null,"origin": string,"processing_at": string | null,"status": string,"stripe_account": string | null,"stripe_id": string | null,"tip_amount": number,"updated_at": string
@@ -2204,6 +2262,26 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "visits"
       referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"trashed_files": {
+                  Row: {
+                    "company_id": string,"content_type": string | null,"deleted_at": string,"deleted_by": string | null,"file_name": string | null,"id": string,"label": string | null,"path": string,"restore": Json | null,"size_bytes": number | null,"source": string,"source_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"content_type"?: string | null,"deleted_at"?: string,"deleted_by"?: string | null,"file_name"?: string | null,"id"?: string,"label"?: string | null,"path": string,"restore"?: Json | null,"size_bytes"?: number | null,"source": string,"source_id"?: string | null
+                  }
+                  Update: {
+                    "company_id"?: string,"content_type"?: string | null,"deleted_at"?: string,"deleted_by"?: string | null,"file_name"?: string | null,"id"?: string,"label"?: string | null,"path"?: string,"restore"?: Json | null,"size_bytes"?: number | null,"source"?: string,"source_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "trashed_files_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
     }
                   ]
                 },"user_signatures": {
@@ -2625,6 +2703,44 @@ isOneToOne: false
 "dashboard":
 { Args: { "p_company": string }; Returns: Json
                            },
+"drive_clients":
+{ Args: { "p_company": string,"p_limit"?: number,"p_query"?: string }; Returns: {
+              "client_id": string,"client_name": string,"files": number,"updated_at": string
+            }[]
+                           },
+"drive_list":
+{ Args: { "p_company": string,"p_id"?: string,"p_limit"?: number,"p_query"?: string,"p_scope": string }; Returns: {
+              "archived": boolean,"client_id": string,"client_name": string,"content_type": string,"created_at": string,"created_by": string,"created_by_name": string,"crew_visible": boolean,"file_name": string,"folder_id": string,"folder_name": string,"id": string,"job_id": string,"job_number": number,"job_title": string,"notes": string,"path": string,"property_id": string,"property_label": string,"quote_id": string,"quote_number": number,"quote_title": string,"replaces_id": string,"request_id": string,"request_title": string,"revision": string,"size_bytes": number,"title": string,"updated_at": string,"versions": number
+            }[]
+                           },
+"drive_restore":
+{ Args: { "p_id": string,"p_kind": string }; Returns: string
+                           },
+"drive_root":
+{ Args: { "p_company": string }; Returns: string
+                           },
+"drive_set_enabled":
+{ Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
+                           },
+"drive_trash":
+{ Args: { "p_company": string }; Returns: {
+              "content_type": string,"deleted_at": string,"deleted_by": string,"deleted_by_name": string,"detail": string,"id": string,"kind": string,"name": string,"path": string,"purge_at": string,"restore": string,"size_bytes": number,"versions": number
+            }[]
+                           },
+"drive_trash_file":
+{ Args: { "p_file": string }; Returns: number
+                           },
+"drive_trash_folder":
+{ Args: { "p_folder": string }; Returns: number
+                           },
+"drive_trash_version":
+{ Args: { "p_file": string }; Returns: string
+                           },
+"drive_versions":
+{ Args: { "p_file": string }; Returns: {
+              "archived": boolean,"client_id": string,"client_name": string,"content_type": string,"created_at": string,"created_by": string,"created_by_name": string,"crew_visible": boolean,"file_name": string,"folder_id": string,"folder_name": string,"id": string,"job_id": string,"job_number": number,"job_title": string,"notes": string,"path": string,"property_id": string,"property_label": string,"quote_id": string,"quote_number": number,"quote_title": string,"replaces_id": string,"request_id": string,"request_title": string,"revision": string,"size_bytes": number,"title": string,"updated_at": string,"versions": number
+            }[]
+                           },
 "duplicate_quote":
 { Args: { "p_quote": string }; Returns: string
                            },
@@ -3007,6 +3123,23 @@ isOneToOne: false
 "start_automation_run":
 { Args: { "p_id": number,"p_token": string }; Returns: boolean
                            },
+"storage_overview":
+{ Args: { "p_company": string }; Returns: Json
+                           },
+"storage_set_allowance":
+{ Args: { "p_company": string,"p_limit_bytes": number,"p_role": string,"p_user": string }; Returns: undefined
+                           },
+"storage_set_default":
+{ Args: { "p_basis": string,"p_bytes": number,"p_company": string }; Returns: undefined
+                           },
+"storage_set_limit":
+{ Args: { "p_company": string,"p_limit_bytes"?: number,"p_mode": string }; Returns: Json
+                           },
+"storage_snapshot":
+{ Args: { "p_company": string,"p_user": string }; Returns: {
+              "company_limit": number,"company_used": number,"user_is_owner": boolean,"user_limit": number,"user_used": number
+            }[]
+                           },
 "stripe_import_invoice":
 { Args: { "p_company": string,"p_data": Json,"p_quiet"?: boolean }; Returns: string
                            },
@@ -3041,6 +3174,24 @@ isOneToOne: false
 "time_entry_places":
 { Args: { "p_company": string,"p_entries": (string)[] }; Returns: {
               "id": string,"in_place": Json,"out_place": Json,"site": Json
+            }[]
+                           },
+"trash_copied_to_drive":
+{ Args: { "p_company": string,"p_id": string }; Returns: string
+                           },
+"trash_delete_forever":
+{ Args: { "p_company": string,"p_items": Json }; Returns: {
+              "id": string,"kind": string,"paths": (string)[]
+            }[]
+                           },
+"trash_purge":
+{ Args: { "p_cutoff": string,"p_limit"?: number }; Returns: {
+              "company_id": string,"deleted": number,"paths": (string)[],"source": string
+            }[]
+                           },
+"unrecorded_files":
+{ Args: { "p_limit"?: number }; Returns: {
+              "company_id": string,"paths": (string)[]
             }[]
                            },
 "user_id_for_email":

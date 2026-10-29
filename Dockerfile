@@ -12,7 +12,9 @@ COPY apps/api/package.json apps/api/
 COPY packages/core/package.json packages/core/
 RUN npm ci --no-audit --no-fund
 COPY . .
-RUN npm run build:server
+# The web build (the Word editor's bundle and its source map especially) needs more than Node's
+# default heap in a container.
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build:server
 
 FROM node:22-alpine
 WORKDIR /app

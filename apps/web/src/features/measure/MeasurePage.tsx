@@ -756,11 +756,20 @@ export function MeasurePage() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // ----- Leaving with unsaved shapes ------------------------------------------------------------
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname);
+  // ----- Leaving with unsaved shapes, or unsaved changes to the plan open in the viewer -----------
+  // The one check for both: the viewer leaves it to this one (the router heeds only one at a time).
+  const planTitle = plan.shown?.file.title ?? "the plan";
+  const leaveBody = useRef("");
+  leaveBody.current =
+    dirty && plan.viewerDirty
+      ? `The shapes you drew since the last save, and your changes to ${planTitle}, will be lost.`
+      : plan.viewerDirty
+        ? `Your changes to ${planTitle} will be lost.`
+        : "The shapes you drew since the last save will be lost.";
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => (dirty || plan.viewerDirty) && currentLocation.pathname !== nextLocation.pathname);
   useEffect(() => {
     if (blocker.state !== "blocked") return;
-    confirm({ title: "Leave without saving?", body: "The shapes you drew since the last save will be lost.", confirmLabel: "Leave", danger: true }).then((ok) => (ok ? blocker.proceed() : blocker.reset()));
+    confirm({ title: "Leave without saving?", body: leaveBody.current, confirmLabel: "Leave", danger: true }).then((ok) => (ok ? blocker.proceed() : blocker.reset()));
   }, [blocker]);
   useEffect(() => {
     const onUnload = (e: BeforeUnloadEvent) => dirty && e.preventDefault();
@@ -919,9 +928,9 @@ export function MeasurePage() {
           : undefined,
         snapshot_path: snapshot,
       });
-      return { result, snapshot, pictureProblem, previous: saved?.snapshot_path ?? null, swapped: pictureOn !== shown ? pictureOn : null, planSig };
+      return { result, snapshot, pictureProblem, swapped: pictureOn !== shown ? pictureOn : null, planSig };
     },
-    onSuccess: ({ result, snapshot, pictureProblem, previous, swapped, planSig: savedPlanSig }) => {
+    onSuccess: ({ result, snapshot, pictureProblem, swapped, planSig: savedPlanSig }) => {
       setSavedSignature(signature);
       setPlanSavedSig(savedPlanSig);
       setSaved((s) => ({
@@ -932,8 +941,7 @@ export function MeasurePage() {
         show_on_invoice: s?.show_on_invoice ?? false,
         snapshot_path: snapshot ?? s?.snapshot_path ?? null,
       }));
-      // The old picture is replaced; tidy it away (best effort: only some roles may delete files).
-      if (snapshot && previous && previous !== snapshot) void supabase().storage.from("files").remove([previous]);
+      // A replaced picture goes to the Trash by itself (out of sight there) and the server deletes it later.
       queryClient.invalidateQueries({ queryKey: ["measurements"] });
       if (ctx?.ids.quote) queryClient.invalidateQueries({ queryKey: ["quote", ctx.ids.quote] });
       if (ctx?.ids.request) queryClient.invalidateQueries({ queryKey: ["request", ctx.ids.request] });

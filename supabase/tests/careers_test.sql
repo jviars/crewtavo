@@ -1,7 +1,8 @@
 -- Database tests for Careers: only owners and admins who connect apps install it, the first install
 -- makes a Job application form (and Website Forms still makes its own contact form after it), an
 -- application lands in Applicants with a notice to the people who see them, and only owners, admins
--- and office staff with the hiring area see applicants and their résumés.
+-- and office staff with the hiring area see applicants and their résumés. A résumé taken off an
+-- applicant goes in the Trash (20261028000300_drive.sql); nobody signed in deletes the stored file.
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -171,8 +172,12 @@ delete from storage.objects where name like '%/applicants/%';
 select set_config('request.jwt.claims', '{"sub": "ca110000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 select cat.check((select count(*) = 1 from storage.objects where name like '%/applicants/%'), 'and neither of them removed it');
 delete from storage.objects where name like '%/applicants/%';
-select cat.check((select count(*) = 0 from storage.objects where name like '%/applicants/%'), 'office staff remove it');
+select cat.check((select count(*) = 1 from storage.objects where name like '%/applicants/%'), 'nor can office staff: nobody signed in deletes a stored file');
+update public.job_applicants set files = '[]' where id = 'b0b00000-0000-0000-0000-000000000001';
 commit;
+select cat.check((select source = 'applicant_file' and file_name = 'resume.pdf' and restore ->> 'applicant_id' = 'b0b00000-0000-0000-0000-000000000001'
+  from public.trashed_files where path = :'co' || '/applicants/b0b00000-0000-0000-0000-000000000001/resume.pdf'),
+  'a résumé taken off the applicant goes in the Trash, ready to go back on them');
 
 -- ===== Deleting the form keeps its applicants ==================================================
 begin;

@@ -13,7 +13,8 @@ export const NOTIFICATION_TOPICS = [
   { key: "jobs", label: "My jobs", hint: "Job offers, and what you're owed and paid" },
   { key: "alerts", label: "Other alerts", hint: "From your company's automations, like a quote being approved" },
   { key: "chat", label: "Team chat", hint: "When someone @mentions you or your role" },
-  // Owners and admins of a Crewtavo on Railway only (services/hosting.ts).
+  // Owners and admins: Railway's warnings (services/hosting.ts) and storage nearing its limit
+  // (services/storageUsage.ts). Off Railway, Settings → Profile calls it "Storage".
   { key: "hosting", label: "Railway", hint: "Before the trial runs out, or when the bill goes over the plan or storage fills up" },
 ] as const;
 export type NotificationTopic = (typeof NOTIFICATION_TOPICS)[number]["key"];
@@ -28,7 +29,9 @@ export const DEFAULT_NOTIFICATION_PREFS: Record<NotificationChannel, Notificatio
   push: ["schedule", "client", "equipment", "subs", "jobs", "time", "alerts", "chat", "hosting"],
 };
 
-/** notifications.kind -> topic. Automations use the subject's type (quote, invoice...) as the kind. */
+/**
+ * notifications.kind -> topic. Automations use the subject's type (quote, invoice...) as the kind.
+ */
 export function notificationTopic(kind: string): NotificationTopic {
   if (kind === "schedule" || kind === "client" || kind === "equipment" || kind === "time" || kind === "chat" || kind === "hosting" || kind === "subs" || kind === "jobs") return kind;
   return "alerts";

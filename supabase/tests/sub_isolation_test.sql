@@ -118,7 +118,7 @@ insert into public.checklist_responses (company_id, visit_id, template_id, answe
 insert into public.attachments (company_id, owner_type, owner_id, path, file_name) values
   (:'co', 'visit', :'v1', :'co' || '/visit/' || :'v1' || '/d1070000-0000-0000-0000-0000000000a1.jpg', 'before.jpg'),
   (:'co', 'visit', :'v2', :'co' || '/visit/' || :'v2' || '/d1070000-0000-0000-0000-0000000000a2.jpg', 'after.jpg'),
-  (:'co', 'job', :'j1', :'co' || '/jobs/' || :'j1' || '/d1070000-0000-0000-0000-0000000000a3.pdf', 'contract.pdf');
+  (:'co', 'job', :'j1', :'co' || '/job/' || :'j1' || '/d1070000-0000-0000-0000-0000000000a3.pdf', 'contract.pdf');
 insert into public.plan_files (company_id, job_id, title, path, file_name, crew_visible) values
   (:'co', :'j1', 'Roof plan', :'co' || '/plans/d1070000-0000-0000-0000-0000000000b1.pdf', 'roof.pdf', true),
   (:'co', :'j1', 'Signed contract', :'co' || '/plans/d1070000-0000-0000-0000-0000000000b2.pdf', 'contract.pdf', false),
@@ -215,7 +215,7 @@ insert into storage.objects (bucket_id, name, owner) values
   ('files', :'co' || '/visit/' || :'va' || '/d1070000-0000-0000-0000-0000000000a4.jpg', 'd1070000-0000-0000-0000-000000000002'),
   ('files', :'co' || '/visit/' || :'v2' || '/d1070000-0000-0000-0000-0000000000a2.jpg', 'd1070000-0000-0000-0000-000000000004'),
   ('files', :'co' || '/visit/' || :'v3' || '/d1070000-0000-0000-0000-0000000000a5.jpg', 'd1070000-0000-0000-0000-000000000006'),
-  ('files', :'co' || '/jobs/' || :'j1' || '/d1070000-0000-0000-0000-0000000000a3.pdf', 'd1070000-0000-0000-0000-000000000001'),
+  ('files', :'co' || '/job/' || :'j1' || '/d1070000-0000-0000-0000-0000000000a3.pdf', 'd1070000-0000-0000-0000-000000000001'),
   ('files', :'co' || '/plans/d1070000-0000-0000-0000-0000000000b1.pdf', 'd1070000-0000-0000-0000-000000000001'),
   ('files', :'co' || '/plans/d1070000-0000-0000-0000-0000000000b2.pdf', 'd1070000-0000-0000-0000-000000000001'),
   ('files', :'co' || '/plans/d1070000-0000-0000-0000-0000000000b3.pdf', 'd1070000-0000-0000-0000-000000000001'),
@@ -271,6 +271,9 @@ insert into public.terms_acceptances (company_id, user_id, role, version) values
 insert into public.web_address (company_id, domain) values (:'co', 'oscar.example');
 insert into public.web_daily (company_id, day, kind, key) values (:'co', current_date, 'total', '');
 insert into public.web_hits (company_id, day, visitor, path, entry, device) values (:'co', current_date, 'v1', '/', true, 'phone');
+insert into public.drive_folders (company_id, name) values (:'co', 'Company files');
+insert into public.trashed_files (company_id, path, source, label) values (:'co', :'co' || '/receipts/d1070000-0000-0000-0000-0000000000d8.jpg', 'receipt', 'Receipt');
+insert into public.storage_allowances (company_id, role_key, limit_bytes) values (:'co', 'field_crew', 1000000000);
 -- Cy's clocked time on the roof visit, with where he clocked in: what time_entry_places gives the
 -- people who check time, and never a sub (below).
 insert into public.time_entries (company_id, user_id, visit_id, job_id, category, started_at, ended_at, in_place) values
@@ -479,14 +482,19 @@ select t1070.check(array(
   'apply_quote_options(uuid, jsonb, text, uuid[], jsonb)', 'campaign_audience(uuid, jsonb)', 'careers_set_enabled(uuid, boolean)',
   'change_sub_offer(uuid, jsonb, timestamp with time zone)', 'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
   'chat_save_roles(uuid, jsonb, jsonb)', 'chat_set_enabled(uuid, boolean)', 'company_basics(uuid)', 'convert_quote_to_job(uuid)',
-  'create_company(text, text, text)', 'create_invoice_for_job(uuid, text, numeric)', 'dashboard(uuid)', 'duplicate_quote(uuid)',
+  'create_company(text, text, text)', 'create_invoice_for_job(uuid, text, numeric)', 'dashboard(uuid)',
+  'drive_clients(uuid, text, integer)', 'drive_list(uuid, text, uuid, text, integer)', 'drive_restore(text, uuid)', 'drive_root(uuid)',
+  'drive_set_enabled(uuid, boolean)', 'drive_trash(uuid)', 'drive_trash_file(uuid)', 'drive_trash_folder(uuid)', 'drive_trash_version(uuid)',
+  'drive_versions(uuid)', 'duplicate_quote(uuid)',
   'equipment_conflicts(uuid, uuid[], date, timestamp with time zone, timestamp with time zone, uuid)', 'global_search(uuid, text, integer)',
   'job_material_costs(uuid)', 'job_pay_accept(uuid, uuid[])', 'job_pay_cancel(uuid)', 'job_pay_costs(uuid[])', 'job_pay_covers(uuid, uuid, uuid)', 'job_pay_mark_done(uuid, date)',
   'job_pay_mark_paid(uuid[], text, date, text, numeric)', 'job_pay_start(uuid, uuid, uuid, uuid[])', 'job_pay_suggest(uuid, uuid, uuid, uuid[])',
   'job_pay_unmark_paid(uuid[])', 'job_scope(uuid)', 'marketing_summary(uuid)', 'material_choices(uuid)', 'my_crew_ids(uuid)', 'my_sub_offers(boolean, uuid)', 'my_sub_pay_totals(uuid)',
   'promo_code_usage(uuid)', 'put_quote_package(uuid, uuid, jsonb, boolean)', 'remove_promo_code(text, uuid)', 'remove_quote_option(uuid, uuid)',
   'search_sops(uuid, text, integer, boolean)', 'send_sub_offer(uuid, timestamp with time zone)', 'set_sub_reminders(uuid, boolean)',
-  'set_sub_sign_in_countries(uuid, text[])', 'sign_quote(uuid, jsonb, uuid, numeric)', 'sub_1099_totals(uuid, integer)', 'sub_wc_audit(uuid, date, date)', 'time_entry_places(uuid, uuid[])', 'visit_contact(uuid)', 'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',
+  'set_sub_sign_in_countries(uuid, text[])', 'sign_quote(uuid, jsonb, uuid, numeric)',
+  'storage_overview(uuid)', 'storage_set_allowance(uuid, uuid, text, bigint)', 'storage_set_limit(uuid, text, bigint)', 'sub_1099_totals(uuid, integer)', 'sub_wc_audit(uuid, date, date)', 'time_entry_places(uuid, uuid[])',
+  'trash_delete_forever(uuid, jsonb)', 'visit_contact(uuid)', 'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',
   'website_forms_set_enabled(uuid, boolean)', 'withdraw_sub_offer(uuid)']::text[],
   'the functions a signed-in person can call are the known list (a new one needs a decision about subs, here)');
 -- Signing in with a code, by text or by email (20261025005001_sign_in_codes.sql,
@@ -497,6 +505,10 @@ select t1070.check(not exists (select 1 from unnest(array['public.sign_in_code_s
     'public.sub_sign_ins_for_phone(text)', 'public.sub_sign_ins_for_email(text)', 'public.tidy_sign_in_codes()', 'public.sub_notice_contacts(uuid[])']) as f
   where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
   'signing in with a code, by text or by email, and where a sub''s notices go, are the server''s alone');
+-- So are the storage gateway's check before an upload and the default limit (20261028000400_storage_limits.sql).
+select t1070.check(not exists (select 1 from unnest(array['public.storage_snapshot(uuid, uuid)', 'public.storage_set_default(uuid, bigint, text)']) as f
+  where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
+  'the storage check before an upload, and the default limit, are the server''s alone');
 
 -- The owner sees where Cy clocked in, so the check on a sub below is about a real entry with a place.
 begin;
@@ -547,6 +559,23 @@ select t1070.check(not exists (select 1 from public.global_search(:'co', 'Ann'))
   and not exists (select 1 from public.search_sops(:'co', 'ladder')) and not exists (select 1 from public.campaign_audience(:'co', '{}'))
   and not exists (select 1 from public.promo_code_usage(:'co')),
   'search, guides, marketing audiences and promo codes find nothing');
+-- Drive is the team's: its lists show a sub nothing (not even the plan they can open), and its
+-- switch, Company files and the Trash refuse them.
+select t1070.check(not exists (select 1 from public.drive_list(:'co', 'recent')) and not exists (select 1 from public.drive_list(:'co', 'search', null, 'roof'))
+  and not exists (select 1 from public.drive_clients(:'co')) and not exists (select 1 from public.drive_trash(:'co'))
+  and not exists (select 1 from public.drive_versions((select id from public.plan_files limit 1))),
+  'drive_list, drive_clients, drive_versions and drive_trash find nothing');
+select t1070.expect_error(format('select public.drive_set_enabled(%L, true)', :'co'), 'drive_set_enabled refuses');
+select t1070.expect_error(format('select public.drive_root(%L)', :'co'), 'drive_root refuses');
+select t1070.expect_error(format('select public.drive_trash_file(%L)', (select id from public.plan_files limit 1)), 'drive_trash_file refuses, though they see the plan');
+select t1070.expect_error(format('select public.drive_trash_version(%L)', (select id from public.plan_files limit 1)), 'drive_trash_version refuses');
+select t1070.expect_error(format('select public.drive_trash_folder(%L)', (select id from public.drive_folders limit 1)), 'drive_trash_folder finds no folder');
+select t1070.expect_error(format('select public.drive_restore(%L, %L)', 'other', gen_random_uuid()), 'drive_restore finds nothing to restore');
+select t1070.expect_error(format('select * from public.trash_delete_forever(%L, %L)', :'co', '[]'), 'trash_delete_forever refuses');
+-- Storage is the team's: how much is used, and its limits.
+select t1070.expect_error(format('select public.storage_overview(%L)', :'co'), 'storage_overview refuses');
+select t1070.expect_error(format('select public.storage_set_limit(%L, %L)', :'co', 'none'), 'storage_set_limit refuses');
+select t1070.expect_error(format('select public.storage_set_allowance(%L, %L, null, 1)', :'co', 'd1070000-0000-0000-0000-000000000005'), 'storage_set_allowance refuses');
 select t1070.check((select (public.marketing_summary(:'co') ->> 'opted_out')::int = 0
   and (public.dashboard(:'co') -> 'receivables' ->> 'total')::numeric = 0
   and (public.dashboard(:'co') -> 'workflow' -> 'quotes' ->> 'draft')::int = 0
@@ -658,7 +687,7 @@ select t1070.expect_error(format('insert into public.attachments (company_id, ow
 select t1070.expect_error(format('insert into public.attachments (company_id, owner_type, owner_id, path, file_name) values (%L, %L, %L, %L, %L)',
   :'co', 'visit', :'v1', :'co' || '/subs/d1070000-0000-0000-0000-0000000000c2/w9.pdf', 'w9.pdf'), 'and a photo on their visit is a file in its folder, not someone''s paperwork');
 select t1070.expect_error(format('insert into public.attachments (company_id, owner_type, owner_id, path, file_name) values (%L, %L, %L, %L, %L)',
-  :'co', 'job', :'j1', :'co' || '/jobs/' || :'j1' || '/x.pdf', 'x.pdf'), 'or a file on the job itself');
+  :'co', 'job', :'j1', :'co' || '/job/' || :'j1' || '/x.pdf', 'x.pdf'), 'or a file on the job itself');
 select t1070.expect_error(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'co' || '/visit/' || :'v2' || '/x.jpg', 'd1070000-0000-0000-0000-000000000005'),
   'files go only in their own visits'' folders');
 select t1070.expect_error(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'other' || '/visit/' || :'pv' || '/x.jpg', 'd1070000-0000-0000-0000-000000000005'),
@@ -671,8 +700,11 @@ select t1070.check(t1070.changed(format('delete from public.attachments where pa
   'they take back a photo they added');
 select t1070.check(t1070.changed(format('delete from public.attachments where path = %L', :'co' || '/visit/' || :'v1' || '/d1070000-0000-0000-0000-0000000000a1.jpg')) = 0,
   'not one someone else took');
-select t1070.check(t1070.changed(format('delete from storage.objects where name = %L', :'co' || '/visit/' || :'v1' || '/d1070000-0000-0000-0000-0000000000e1.jpg')) = 1,
-  'but take back their own, as the crew can');
+select t1070.check(t1070.changed(format('delete from storage.objects where name = %L', :'co' || '/visit/' || :'v1' || '/d1070000-0000-0000-0000-0000000000e1.jpg')) = 0,
+  'nobody signed in deletes a stored file, their own photo included');
+reset role;
+select t1070.check((select source = 'visit_photo' and deleted_by = 'd1070000-0000-0000-0000-000000000005' from public.trashed_files
+  where path = :'co' || '/visit/' || :'v1' || '/d1070000-0000-0000-0000-0000000000e1.jpg'), 'the photo they took back is in the Trash, for the server to delete');
 rollback;
 
 -- ===== Their paperwork ============================================================================
@@ -715,8 +747,8 @@ insert into public.sub_documents (company_id, subcontractor_id, kind, path) valu
   (:'co', 'd1070000-0000-0000-0000-0000000000c1', 'w9', :'co' || '/subs/d1070000-0000-0000-0000-0000000000c1/w9-signed.heic');
 select t1070.check((select count(*) from public.sub_documents where uploaded_via = 'sub' and verified_at is null and kind in ('license', 'w9')) = 2,
   'a license can run longer, and a W-9 has no end date: both waiting for the office');
-select t1070.check(t1070.changed(format('delete from storage.objects where name = %L', :'co' || '/subs/d1070000-0000-0000-0000-0000000000c1/page.html')) = 1,
-  'a file of theirs that the database turned down can be tidied away');
+select t1070.check(t1070.changed(format('delete from storage.objects where name = %L', :'co' || '/subs/d1070000-0000-0000-0000-0000000000c1/page.html')) = 0,
+  'a file of theirs that the database turned down stays for the server to tidy away (nobody signed in deletes a stored file)');
 select t1070.check((select state = 'expiring' and waiting from public.sub_paperwork where requirement = 'liability'),
   'the checked one still counts until the office checks the new one, and the new one shows as waiting');
 select t1070.expect_error(format('insert into public.sub_documents (company_id, subcontractor_id, kind, path, verified_at) values (%L, %L, %L, %L, now())',

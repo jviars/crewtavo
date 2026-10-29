@@ -1,4 +1,5 @@
 /** One sub: their W-9 and insurance with what's current, their other papers and history, their pay and rates, their details and their sign-in. */
+import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { PAPERWORK_REQUIREMENTS, subDocumentLabel, taxClassificationLabel } from "@crewtavo/core/subs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -15,6 +16,8 @@ import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatDate, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
+import { storedUndoToast, TRASH_PATH } from "../drive/trash";
 import { fileSize } from "../plans/plans";
 import { documentTitle, endsText, inOrder, insuranceWarning, isInsurance, kindsFor, needsAttention, paperworkChip, type PaperworkRow } from "./paperwork";
 import { RatesCard } from "./RatesCard";
@@ -57,15 +60,14 @@ function SubDetail() {
   });
   const access = useSubAccess(session.company.id, id);
   const remove = useMutation({
-    meta: { success: "Sub deleted" },
+    // Through the server, so their sign-in goes too: every phone it's on is signed out. Their
+    // documents go with them, and the database moves the documents' files to the Trash.
     mutationFn: async () => {
-      const paths = (documents.data ?? []).map((d) => d.path);
-      // Through the server, so their sign-in goes too: every phone it's on is signed out.
       await api.delete(`/subs/${id}`);
-      // Their documents went with them; their files are only tidiness.
-      if (paths.length) await supabase().storage.from("files").remove(paths).catch(() => undefined);
+      return (documents.data ?? []).length > 0;
     },
-    onSuccess: () => {
+    onSuccess: (hadPaperwork) => {
+      toast.success("Sub deleted", hadPaperwork ? { description: `Their paperwork is in the Trash for ${TRASH_DAYS} days.`, action: { label: "Open the Trash", onClick: () => navigate(TRASH_PATH) } } : undefined);
       refreshSubs(queryClient);
       navigate("/subs", { replace: true });
     },
@@ -78,9 +80,11 @@ function SubDetail() {
     onSuccess: () => refreshSubs(queryClient),
   });
   const removeDoc = useMutation({
-    meta: { success: "Document deleted" },
     mutationFn: deleteSubDocument,
-    onSuccess: () => refreshSubs(queryClient),
+    onSuccess: (_, doc) => {
+      refreshSubs(queryClient);
+      storedUndoToast("Document deleted", session.company.id, doc.path, () => refreshSubs(queryClient));
+    },
   });
 
   if (item.isPending) return <DetailSkeleton />;
@@ -96,7 +100,7 @@ function SubDetail() {
   const attention = s.active && paperwork.data && needsAttention(statuses);
 
   const askDelete = async (d: SubDocument) => {
-    const body = d.superseded_at ? "Its file is deleted too." : "Its file is deleted too. If it replaced an older one, the older one counts again.";
+    const body = d.superseded_at ? `Its file goes to the Trash for ${TRASH_DAYS} days.` : `Its file goes to the Trash for ${TRASH_DAYS} days. If it replaced an older one, the older one counts again.`;
     if (await confirm({ title: d.kind === "w9" ? "Delete this W-9?" : "Delete this document?", body, confirmLabel: "Delete", danger: true })) removeDoc.mutate(d);
   };
   const docMenu = (d: SubDocument): MenuEntry[] => [
@@ -140,7 +144,7 @@ function SubDetail() {
                   danger: true,
                   onSelect: async () => {
                     const signIn = access.data && access.data.state !== "none" ? " Their sign-in is removed too, and they're signed out." : "";
-                    const body = (docs.length ? "Their paperwork is deleted too. To keep it for your records, turn them off instead." : "This can't be undone.") + signIn;
+                    const body = (docs.length ? `Their paperwork is deleted too (its files stay in the Trash for ${TRASH_DAYS} days). To keep it for your records, turn them off instead.` : "This can't be undone.") + signIn;
                     if (await confirm({ title: `Delete ${s.name}?`, body, confirmLabel: "Delete", danger: true, typeToConfirm: docs.length ? "delete" : undefined })) remove.mutate();
                   },
                 },

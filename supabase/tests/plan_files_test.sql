@@ -1,7 +1,8 @@
 -- Database tests for plans and files: a file on a quote takes the quote's property and goes on the
 -- job when the quote becomes one, new versions supersede the old and crews only see current files
 -- marked for them, crew leads add files but can't reach office-only ones, the crew on the job hears
--- about new ones, and taking a version out puts the history back together.
+-- about new ones, a version moved to the Trash puts the one before back, and a version deleted for
+-- good (by the server) puts the history back together.
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -127,28 +128,32 @@ select tpf.check((select property_id = :'prop' from public.plan_files where id =
 insert into public.plan_files (company_id, replaces_id, title, path, file_name) values (:'co', :'sections', 'Pavement sections', tpf.path(:'co'), 'C-501 rev.pdf') returning id as sections2 \gset
 select tpf.check((select count(*) from public.plan_files where id = :'sections') = 0, 'and a new version (the old one drops out of sight)');
 select tpf.expect_error(format('insert into public.plan_files (company_id, replaces_id, title, path, file_name) values (%L, %L, %L, %L, %L)', :'co', :'bid', 'Bid form', tpf.path(:'co'), 'bid2.pdf'), 'but not a version of an office-only file');
+select tpf.expect_error(format('select public.drive_trash_file(%L)', :'site2'), 'the crew lead can''t move the office''s files to the Trash');
 delete from public.plan_files where id = :'site2';
 commit;
-select tpf.check((select count(*) from public.plan_files where id = :'site2') = 1, 'the crew lead can''t remove the office''s files');
+select tpf.check((select count(*) from public.plan_files where id = :'site2' and deleted_at is null) = 1, 'or delete them');
 
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "ef000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 delete from public.plan_files where id = :'sketch';
-select tpf.check((select count(*) from public.plan_files where id = :'sketch') = 0, 'but removes one they added');
+select tpf.check((select count(*) from public.plan_files where id = :'sketch') = 1, 'nobody deletes a file outright, not even one they added');
+select tpf.check(public.drive_trash_file(:'sketch') = 1, 'but the crew lead moves one they added to the Trash');
+select tpf.check((select count(*) from public.plan_files where id = :'sketch') = 0, 'out of sight');
 commit;
 
 -- ===== Taking versions out ====================================================================
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "ef000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
-delete from public.plan_files where id = :'sections2';
-select tpf.check((select superseded_at is null from public.plan_files where id = :'sections'), 'removing the current version makes the one before current again');
+select tpf.check(public.drive_trash_version(:'sections2') = :'sections', 'the current version goes in the Trash on its own');
+select tpf.check((select superseded_at is null from public.plan_files where id = :'sections'), 'and the one before is the current one again');
 
 insert into public.plan_files (company_id, replaces_id, title, path, file_name) values (:'co', :'site2', 'Site plan', tpf.path(:'co'), 'C-101 rev C.pdf') returning id as site3 \gset
-delete from public.plan_files where id = :'site2';
 commit;
-select tpf.check((select replaces_id = :'site' from public.plan_files where id = :'site3'), 'removing a version in the middle joins the history up');
+-- The server deleting a version in the middle (as a whole company going does) joins the history up.
+delete from public.plan_files where id = :'site2';
+select tpf.check((select replaces_id = :'site' from public.plan_files where id = :'site3'), 'deleting a version in the middle joins the history up');
 select tpf.check((select superseded_at is null from public.plan_files where id = :'site3') and (select superseded_at is not null from public.plan_files where id = :'site'), 'and the newest is still the current one');
 
 -- ===== Change orders ==========================================================================

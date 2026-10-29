@@ -6,15 +6,27 @@
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import type { Env } from "../env";
+import { STORAGE_PAUSED, storageWritesPaused } from "../services/storageBucket";
 import { guardAssistant, guardConsent } from "./assistants";
 import { authMetadata, signsIdTokens, withoutOpenId } from "./authMetadata";
 import { guardSignIn, isGuessable } from "./signInGuard";
 import type { Stack } from "./stack";
+import { guardStorage, routedPath, snapshotsFrom, verifiedClaims, type SnapshotSource } from "./storageLimits";
+import { adminClient } from "./supabase";
 import { connectionOf, visitorIp } from "./visitor";
 
 type Gateway = { Bindings: HttpBindings };
 
-export function gateway(env: Env, stack: Stack) {
+/**
+ * `storage`: where the storage limits' numbers come from (the database, unless a test says
+ * otherwise). `jwtSecret`: what the instance's services sign tokens with (JWT_SECRET, which stack
+ * mode always has), so the limits know who's really uploading.
+ */
+export function gateway(
+  env: Env,
+  stack: Stack,
+  { storage = snapshotsFrom(() => adminClient(env)), jwtSecret = (env as Env & { JWT_SECRET?: string }).JWT_SECRET }: { storage?: SnapshotSource; jwtSecret?: string } = {},
+) {
   const routes = new Hono<Gateway>();
   const visitor = (c: Context<Gateway>) => visitorIp(env, c.req.raw.headers, connectionOf(c.env));
   // Auth's discovery documents, fixed for AI assistants' connectors (lib/authMetadata.ts).
@@ -42,16 +54,91 @@ export function gateway(env: Env, stack: Stack) {
   });
   routes.all("/rest/v1/*", (c) => guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c))));
   routes.all("/storage/v1/*", async (c) => {
+    // While storage switches between the volume and a bucket, uploads are turned away for a minute
+    // or two so none land in the place being left (services/storageBucket.ts). Opening files,
+    // signing links to them, listing and deleting carry on.
+    if (storageWritesPaused() && storesFile(c.req.raw)) {
+      return c.json({ statusCode: "503", error: "Moving", message: STORAGE_PAUSED }, 503, { "Retry-After": "30" });
+    }
+    if (storesThroughS3(c.req.raw)) {
+      return c.json({ statusCode: "403", error: "Forbidden", message: "Crewtavo doesn't take files through Storage's S3 address. Upload them in Crewtavo." }, 403);
+    }
+    if (copiesAsPerson(c.req.raw, jwtSecret)) {
+      return c.json({ statusCode: "403", error: "Forbidden", message: "Crewtavo copies and moves stored files itself. Upload the file where you want it instead." }, 403);
+    }
     if (unsizedUpload(c.req.raw)) {
       return c.json({ statusCode: "411", error: "Length Required", message: "Send the file's size (Content-Length) with the upload, or send it as a form." }, 411);
     }
     // The upload's size goes along: Storage checks a file sent as the bare body against
     // FILE_SIZE_LIMIT by it (a form's file it checks as it arrives).
     const request = c.req.raw;
-    const res = await guardAssistant(env, request, "/storage/v1", (r) => forward(r, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" }, true));
+    const send = (r: Request) => forward(r, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" }, true);
+    // A signed-in person's upload over the company's storage limit, or their own, is refused before
+    // anything is stored (lib/storageLimits.ts).
+    const res = await guardAssistant(env, request, "/storage/v1", (r) => (storesFile(r) ? guardStorage(storage, jwtSecret, r, send) : send(r)));
     return safeFile(request, res);
   });
   return routes;
+}
+
+/**
+ * The POSTs to Storage that only read: a signed link to one file (sign/<bucket>/<name>) or to
+ * several (sign/<bucket>), and a folder's listing (list/<bucket>, list-v2/<bucket>). Exactly these
+ * routes and only as POSTs: Storage's router takes anything else under them (a PUT, or a longer
+ * path) as an upload into a bucket named "sign" or "list".
+ */
+const READS_BY_POST = /^\/storage\/v1\/object\/(?:sign\/[^/]+(?:\/.+)?|list\/[^/]+|list-v2\/[^/]+)$/;
+
+/**
+ * Whether a request to Storage can put a file where Storage keeps them: an upload (POST or PUT to
+ * object/<bucket>/<name>), a signed upload (object/upload/sign/...), a resumable one
+ * (upload/resumable), a copy or a move (object/copy, object/move), and anything else that isn't
+ * known to only read or delete. These wait while storage switches over. Opening a file (GET),
+ * checking one or a resumable upload's progress (HEAD), signing links and listing (the POSTs
+ * above), and deleting carry on. The path is checked as it's forwarded, still encoded, so a
+ * disguised one never passes as a read; and a method named in X-HTTP-Method-Override is checked
+ * too (Storage goes by the request's own method, but this only has to be cautious).
+ */
+export function storesFile(request: Request): boolean {
+  const path = new URL(request.url).pathname;
+  const override = request.headers.get("x-http-method-override");
+  return [request.method, ...(override ? [override] : [])].some((method) => {
+    const verb = method.trim().toUpperCase();
+    if (["GET", "HEAD", "OPTIONS", "DELETE"].includes(verb)) return false;
+    return !(verb === "POST" && READS_BY_POST.test(path));
+  });
+}
+
+/** Storage's S3 address (s3/...), as Storage's router reads the path. */
+const S3 = /^\/storage\/v1\/s3(?:\/|$)/;
+
+/**
+ * A request that may store a file through Storage's S3 address. Storage takes those from anyone
+ * signed in (their token as the S3 session token, with the public anon key), and they'd go in
+ * past the storage limits (lib/storageLimits.ts), which only know Crewtavo's own ways of
+ * uploading. Nothing in Crewtavo uploads that way, so here it's for reading only.
+ */
+export function storesThroughS3(request: Request): boolean {
+  if (!storesFile(request)) return false;
+  const path = routedPath(new URL(request.url).pathname);
+  return path !== null && S3.test(path);
+}
+
+/** Storage's copy and move (object/copy, object/move), as its router reads the path. */
+const COPY_OR_MOVE = /^\/storage\/v1\/object\/(?:copy|move)\/?$/;
+
+/**
+ * A copy or a move asked for by anyone but this server. Crewtavo copies and moves stored files only
+ * as itself (Drive's restore from the Trash, for one), and a person's copy would put a file into a
+ * folder the storage limits guard without the limits seeing it (lib/storageLimits.ts), so people
+ * can't.
+ */
+export function copiesAsPerson(request: Request, secret: string | null | undefined): boolean {
+  if (!storesFile(request)) return false;
+  const path = routedPath(new URL(request.url).pathname);
+  if (path === null || !COPY_OR_MOVE.test(path)) return false;
+  const token = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  return verifiedClaims(token, secret)?.role !== "service_role";
 }
 
 /** Stored files a browser may show in place: PDFs and photos. Not SVG drawings, which can run scripts. */

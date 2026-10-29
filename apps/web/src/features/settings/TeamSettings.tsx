@@ -1,4 +1,5 @@
 import { ADMINS, canMakeResetLink, LEVEL_SUMMARY, type Role } from "@crewtavo/core/roles";
+import { formatBytes } from "@crewtavo/core/storage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -20,6 +21,8 @@ import { RatesCard } from "../subs/RatesCard";
 import { handlesTeamPay, useTeamRateCounts } from "../subs/payData";
 import { PhotoButtons } from "./ProfilePhoto";
 import { choiceFor, patchFor, roleChoices, roleName, useCompanyRoles } from "./roles";
+import { limitable, setsAllowances, useStorageOverview, type StoragePerson } from "./storage";
+import { AllowanceDialog } from "./StorageSettings";
 
 export interface Member { user_id: string; role: Role; role_id: string | null; active: boolean; labor_rate: number | null; profile: { full_name: string; email: string | null; color: string | null; avatar_url: string | null } | null }
 /** Someone invited who hasn't set up their account yet, and when their latest link went out. */
@@ -43,6 +46,7 @@ export function TeamSettings() {
   const [resending, setResending] = useState<Member | null>(null);
   const [photoFor, setPhotoFor] = useState<string | null>(null);
   const [ratesFor, setRatesFor] = useState<Member | null>(null);
+  const [storageFor, setStorageFor] = useState<{ member: Member; usage: StoragePerson | undefined } | null>(null);
   // Piece rates (per square, per job, per day) are pay, for the office with job costs, as hourly pay is.
   const pieceRates = handlesTeamPay(session);
   const rateCounts = useTeamRateCounts(session.company.id, pieceRates);
@@ -62,6 +66,9 @@ export function TeamSettings() {
     },
   });
   const isOwner = session.role === "owner";
+  // A storage limit of their own, which only owners set (Settings → Storage has who's using what).
+  const storage = useStorageOverview(setsAllowances(session));
+  const storageOf = new Map((storage.data?.by_person ?? []).flatMap((p) => (p.user_id ? [[p.user_id, p] as const] : [])));
   const members = [...(team.data ?? [])].sort((a, b) => Number(b.active) - Number(a.active) || (a.profile?.full_name ?? "").localeCompare(b.profile?.full_name ?? ""));
   // Your own photo, and for those who manage the team, anyone's (an owner's only by an owner).
   const canSetPhoto = (m: Member) => m.user_id === session.userId || (ADMINS.includes(session.role) && can(session, "team") && (isOwner || m.role !== "owner"));
@@ -110,6 +117,13 @@ export function TeamSettings() {
                           ) : m.active && !me && can(session, "team") && canMakeResetLink(session.role, m.role) && (
                             <button type="button" className="link-btn small" onClick={() => setResetting(m)}>Reset password</button>
                           )}
+                          {isOwner && storage.data && m.active && limitable(m) && (
+                            <div>
+                              <button type="button" className="link-btn small" style={{ textAlign: "left" }} onClick={() => setStorageFor({ member: m, usage: storageOf.get(m.user_id) })} aria-label={`Storage limit for ${name}`}>
+                                {storageLink(storageOf.get(m.user_id))}
+                              </button>
+                            </div>
+                          )}
                         </span>
                       </div>
                     </td>
@@ -153,6 +167,15 @@ export function TeamSettings() {
       {resetting && <ResetPasswordDialog member={resetting} onClose={() => setResetting(null)} />}
       {resending && <ResendInviteDialog member={resending} onClose={() => setResending(null)} />}
       {photoMember && <PhotoDialog member={photoMember} onClose={() => setPhotoFor(null)} />}
+      {storageFor && (
+        <AllowanceDialog
+          target={{ user: storageFor.member.user_id }}
+          name={storageFor.member.profile?.full_name || storageFor.member.profile?.email || "this person"}
+          current={storageFor.usage?.limit_source === "person" ? storageFor.usage.limit_bytes : null}
+          roleLimit={storageFor.usage?.limit_source === "role" ? storageFor.usage.limit_bytes : null}
+          onClose={() => setStorageFor(null)}
+        />
+      )}
       {ratesFor && (
         <Dialog open onClose={() => setRatesFor(null)} title={ratesFor.profile?.full_name ? `Piece rates for ${ratesFor.profile.full_name}` : "Piece rates"} size="lg" description="Pay per square, per job or per day, on top of or instead of their hourly cost. Pay on a job is filled in from these, and goes into their pay period once the work is done.">
           <div className="dialog-body">
@@ -163,6 +186,12 @@ export function TeamSettings() {
       )}
     </div>
   );
+}
+
+/** A person's storage limit, as the link to change it says it: their own, their role's, or none yet. */
+function storageLink(usage: StoragePerson | undefined): string {
+  if (!usage?.limit_bytes) return "Storage limit";
+  return `Storage: ${formatBytes(usage.limit_bytes)}${usage.limit_source === "role" ? " (role)" : ""}`;
 }
 
 /** Someone's photo, from their avatar in the list: shown wherever the team sees them. */

@@ -107,13 +107,45 @@ async function refreshAndSave(env: Env, admin: Db, companyId: string, secret: St
     return fresh;
   } catch (error) {
     // A refused refresh token won't work later either; anything else (Railway unreachable) might.
-    if (error instanceof RailwayError && error.status >= 400 && error.status < 500) await lapsed(admin, companyId, error);
+    if (error instanceof RailwayError && error.status >= 400 && error.status < 500) {
+      // Unless another server (or the daily task) refreshed it meanwhile and saved the new one: Railway
+      // refused the old refresh token, not the connection.
+      const latest = await loadSecret(env, admin, companyId, "railway").catch(() => null);
+      if (latest?.access_token && latest.refresh_token && latest.refresh_token !== secret.refresh_token) {
+        return { method: "oauth", token: latest.access_token, refresh_token: latest.refresh_token, expires_at: latest.expires_at };
+      }
+      await lapsed(admin, companyId, error);
+    }
     throw error;
   }
 }
 
+/** Reads of Railway access under way in this server, by company. */
+const reading = new Map<string, Promise<RailwayAccess | null>>();
+
+/**
+ * One read of a company's Railway access at a time in this server, shared by everyone who asks
+ * meanwhile (Settings → Web address and Hosting, a files move, uploads, the daily task). Login with
+ * Railway's refresh token changes on every refresh and Railway takes each one only once, so two
+ * refreshes at once would both send the same one, and the one Railway refused would mark the
+ * connection lapsed although the other had just saved new tokens.
+ */
+function oneAtATime(companyId: string, read: () => Promise<RailwayAccess | null>): Promise<RailwayAccess | null> {
+  const going = reading.get(companyId);
+  if (going) return going;
+  const shared: Promise<RailwayAccess | null> = read().finally(() => {
+    if (reading.get(companyId) === shared) reading.delete(companyId);
+  });
+  reading.set(companyId, shared);
+  return shared;
+}
+
 /** Usable Railway access for this company, refreshed when it's about to run out; null without any. */
-export async function railwayAccess(env: Env, admin: Db, companyId: string): Promise<RailwayAccess | null> {
+export function railwayAccess(env: Env, admin: Db, companyId: string): Promise<RailwayAccess | null> {
+  return oneAtATime(companyId, () => readRailwayAccess(env, admin, companyId));
+}
+
+async function readRailwayAccess(env: Env, admin: Db, companyId: string): Promise<RailwayAccess | null> {
   const [secret, { data: row }] = await Promise.all([
     loadSecret(env, admin, companyId, "railway"),
     admin.from("integrations").select("status").match({ company_id: companyId, provider: "railway" }).maybeSingle(),
@@ -197,7 +229,8 @@ export async function keepRailwayAlive(env: Env, admin: Db): Promise<{ refreshed
     if (!secret?.refresh_token || secret.extra?.method === "token") continue;
     if (Date.now() - Number(secret.extra?.refreshed_at ?? 0) < KEEP_ALIVE_MS) continue;
     try {
-      await refreshAndSave(env, admin, company_id, secret, { method: "oauth", token: secret.access_token ?? "", refresh_token: secret.refresh_token });
+      // As a read of the access, so a page asking at the same moment waits for this refresh rather than sending the same refresh token.
+      await oneAtATime(company_id, () => refreshAndSave(env, admin, company_id, secret, { method: "oauth", token: secret.access_token ?? "", refresh_token: secret.refresh_token }));
       refreshed++;
     } catch {
       failed++;

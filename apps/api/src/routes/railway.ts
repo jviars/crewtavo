@@ -10,6 +10,9 @@
  *   GET    /api/railway/usage     what Railway charges, for Settings → Hosting (?fresh=1 to ask Railway now)
  *   GET    /api/railway/uploads   the largest file the storage service takes
  *   POST   /api/railway/uploads   raise it to 200 MB and restart storage
+ *   GET    /api/railway/storage   where photos and files are kept (the volume or a bucket), and a move's progress (?fresh=1 to ask Railway now)
+ *   POST   /api/railway/storage/move       move them into a Railway bucket, or carry on with a move waiting on Railway
+ *   POST   /api/railway/storage/move-back  move them back to the volume
  * Only owners and admins, only in an instance on Railway.
  */
 import { ADMINS } from "@crewtavo/core";
@@ -27,6 +30,8 @@ import { authorizationUrl, exchangeCode, pkce, RailwayError } from "../integrati
 import { addressOverview, adoptRailway, stopAutomatic } from "../services/address";
 import { forgetHosting, hostingOverview } from "../services/hosting";
 import { connectRailwayLater, forgetRailway, noteRailwayError, railwayClient, saveRailwayAccess, setRailwaySetup } from "../services/railway";
+import { startStorageMove, storageOverview } from "../services/storageBucket";
+import { keepStorageDefault } from "../services/storageUsage";
 import { raiseUploadLimit, uploadLimit } from "../services/uploads";
 
 export const railway = new Hono<AppEnv>();
@@ -103,6 +108,8 @@ railway.delete("/railway", ...admins, async (c) => {
   const admin = adminClient(c.env);
   await forgetRailway(c.env, admin, c.var.companyId);
   forgetHosting();
+  // With Railway gone there's nothing to follow, so the default storage limit goes too.
+  await keepStorageDefault(c.env, admin, c.var.companyId, { access: null, force: true });
   await stopAutomatic(admin, c.var.companyId);
   return c.json(await addressOverview(c.env, admin, c.var.companyId));
 });
@@ -110,6 +117,11 @@ railway.delete("/railway", ...admins, async (c) => {
 /** The largest file this Crewtavo takes, and raising it to 200 MB for plan sets (services/uploads.ts). */
 railway.get("/railway/uploads", ...admins, async (c) => c.json(await uploadLimit(c.env, adminClient(c.env), c.var.companyId).catch(plain)));
 railway.post("/railway/uploads", ...admins, async (c) => c.json(await raiseUploadLimit(c.env, adminClient(c.env), c.var.companyId).catch(plain)));
+
+/** Settings → Hosting → Files storage: the volume or a Railway bucket, and moving between them (services/storageBucket.ts). */
+railway.get("/railway/storage", ...admins, async (c) => c.json(await storageOverview(c.env, adminClient(c.env), c.var.companyId, { fresh: c.req.query("fresh") === "1" }).catch(plain)));
+railway.post("/railway/storage/move", ...admins, async (c) => c.json(await startStorageMove(c.env, adminClient(c.env), c.var.companyId, "to_bucket").catch(plain)));
+railway.post("/railway/storage/move-back", ...admins, async (c) => c.json(await startStorageMove(c.env, adminClient(c.env), c.var.companyId, "to_volume").catch(plain)));
 
 /** The setup step after "Set up your business" is over, either way. */
 railway.post("/railway/setup", ...admins, async (c) => {

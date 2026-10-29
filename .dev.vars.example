@@ -31,6 +31,8 @@ CRON_SECRET=
 # ZOHO_ACCOUNTS_URL=https://accounts.zoho.com
 # GOOGLE_CLIENT_ID=
 # GOOGLE_CLIENT_SECRET=
+# Import from Google Drive (Crewtavo - Drive): a browser key with the Picker API, for GOOGLE_CLIENT_ID's project.
+# GOOGLE_PICKER_API_KEY=
 # STRIPE_SECRET_KEY=
 # STRIPE_WEBHOOK_SECRET=
 # RESEND_API_KEY=

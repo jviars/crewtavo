@@ -47,8 +47,11 @@ create table storage.objects (
   bucket_id text references storage.buckets (id),
   name text not null,
   owner uuid,
-  metadata jsonb -- Storage fills it in once the file is stored: mimetype, size and so on
+  metadata jsonb, -- Storage fills it in once the file is stored: mimetype, size and so on
+  created_at timestamptz default now()
 );
+-- Storage's own index for finding a folder's files (storage limits look a company's up with it).
+create index idx_objects_bucket_id_name on storage.objects (bucket_id, name collate "C");
 alter table storage.objects enable row level security;
 grant usage on schema storage to authenticated, service_role;
 grant select, insert, update, delete on storage.objects to authenticated;

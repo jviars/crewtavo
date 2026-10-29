@@ -6,12 +6,15 @@
  *     signal. Pages come from the network when possible and from the cache when not; the built
  *     files under /assets/ never change, so they're kept. Data and the API are left to the app,
  *     which keeps the crew's day on the phone and queues their changes until they're back online.
+ *     Stored files (/storage/) are never kept: a file moved to the Trash or deleted must stop
+ *     opening, and each link to one is new.
  *   - Updates waiting: the app sends the crew's queued changes while it's on the screen
  *     (src/lib/offline.ts). Where there's Background Sync (Android), it asks to hear when the phone
  *     has signal; if Crewtavo isn't on the screen then, a notification says how many are waiting
  *     and opens the app.
  */
-const CACHE = "crewtavo-app-v1";
+// A new name empties what older versions kept (stored pictures, before /storage/ was left out).
+const CACHE = "crewtavo-app-v2";
 const OFFLINE = new URL(self.location.href).searchParams.get("cache") === "1";
 const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/favicon.svg"];
 // Shared with src/lib/offline.ts (SYNC_TAG, WAITING_CACHE).
@@ -45,7 +48,7 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (/^\/(api|mcp|\.well-known|hub|book|u|refer)(\/|$)/.test(url.pathname)) return;
+  if (/^\/(api|mcp|\.well-known|storage|hub|book|u|refer)(\/|$)/.test(url.pathname)) return;
 
   if (request.mode === "navigate") {
     // Network first so a deploy shows up at once; the saved app when there's no signal.

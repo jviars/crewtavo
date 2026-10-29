@@ -8,7 +8,9 @@
 .icon[data-kind="image"] { background: var(--info-tint); color: var(--info); }
 .body { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .title { color: inherit; font-weight: 700; overflow-wrap: anywhere; text-decoration: none; }
-a.title:hover { color: var(--green-dark); }
+/* The name opens the file in the viewer. */
+button.title { justify-self: start; padding: 0; border: 0; background: none; text-align: left; }
+a.title:hover, button.title:hover { color: var(--green-dark); }
 .meta { color: var(--text-3); font-size: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .notes { margin: 2px 0 0; color: var(--text-2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -19,7 +21,7 @@ a.title:hover { color: var(--green-dark); }
 .older { display: grid; gap: 6px; margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--fill); }
 .olderRow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; }
 .olderRow > span:first-child { flex: 1; min-width: 160px; color: var(--text-2); }
-.olderRow a { font-weight: 600; }
+.olderRow a, .olderRow button { font-weight: 600; }
 
 .group { margin: 14px 0 0; color: var(--text-3); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
 .group:first-child { margin-top: 0; }

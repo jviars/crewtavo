@@ -1,0 +1,127 @@
+/*
+ * The file viewer: a full-screen layer over the app for PDFs, Word documents, pictures and text.
+ * iPad landscape first (the toolbar fits on one line there); on a phone the toolbar wraps and the
+ * buttons lose their words. Finger-sized (44px) on touch screens. Tokens only, so dark mode follows;
+ * the pages themselves stay white paper.
+ */
+
+.viewer {
+  position: fixed; inset: 0; z-index: 95;
+  display: flex; flex-direction: column;
+  background: var(--page); color: var(--ink);
+  outline: none; overscroll-behavior: contain;
+  animation: fade-in var(--dur) ease-out;
+}
+
+/* ---------- Header ---------- */
+.head {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  min-height: calc(60px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--divider); background: var(--surface);
+}
+.headText { flex: 1; min-width: 0; display: grid; gap: 2px; padding: 8px 0; }
+.title { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; color: var(--text-3); font-size: 12px; }
+.meta > span:last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.headActions { flex: none; display: flex; align-items: center; gap: 8px; }
+.close { width: 44px; height: 44px; color: var(--text-2); }
+.close:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------- Toolbar ---------- */
+.toolbar {
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+  padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--divider); background: var(--surface);
+}
+.group { display: flex; align-items: center; gap: 2px; }
+.tool {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-width: 40px; height: 40px; padding: 0 9px;
+  border: 0; border-radius: 9px; background: none; color: var(--text-2);
+  font: inherit; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.tool:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
+.tool:focus-visible { outline: none; box-shadow: var(--ring); }
+.tool[aria-pressed="true"] { background: var(--green-solid); color: #fff; }
+.tool:disabled { opacity: 0.4; cursor: default; }
+.zoomLabel { min-width: 48px; text-align: center; font-size: 13px; font-weight: 700; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pageInput { width: 56px; height: 36px; padding: 0 6px; text-align: center; font-variant-numeric: tabular-nums; }
+.pageCount { padding: 0 6px 0 4px; color: var(--text-3); font-size: 13px; white-space: nowrap; }
+
+/* Color swatches: a ring around the one in use. */
+.swatch {
+  width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer;
+  display: grid; place-items: center; -webkit-tap-highlight-color: transparent;
+}
+.swatch::before { content: ""; width: 22px; height: 22px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15); }
+.swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--green); }
+.swatch:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* ---------- Where the file goes ---------- */
+.stage { position: relative; flex: 1; min-height: 0; background: var(--fill-2); overflow: hidden; }
+.pane { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.paneBody { position: relative; flex: 1; min-height: 0; }
+
+/* Messages and loading, in the middle of the stage. */
+.center {
+  position: absolute; inset: 0; z-index: 2; overflow-y: auto;
+  display: grid; place-items: center;
+  padding: 24px max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: var(--fill-2);
+}
+.message { width: min(460px, 100%); }
+/* A letter-size sheet that fits the stage on an iPad held either way. */
+.loadingSheet { display: grid; gap: 14px; width: min(560px, 100%, calc((100dvh - 200px) * 8.5 / 11)); }
+.paper { display: grid; gap: 16px; align-content: start; aspect-ratio: 8.5 / 11; padding: 9% 10%; border-radius: 4px; background: var(--surface); box-shadow: var(--shadow-md); overflow: hidden; }
+
+/* PDF: pdf.js lays the pages out inside; its container must be absolutely positioned. */
+.pdfScroller { position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; outline: none; }
+.pdfScroller :global(.pdfViewer) { padding: 8px 0 calc(16px + env(safe-area-inset-bottom)); }
+
+/* Word preview: the sandboxed frame fills the stage. */
+.frameScroller { position: absolute; inset: 0; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--fill-2); }
+.frame { display: block; width: 100%; height: 100%; border: 0; color-scheme: light; }
+
+/* Word editor: it fills its box and brings its own toolbar. */
+.docxEdit { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.docxEdit > * { flex: 1; min-height: 0; }
+
+/* Pictures: dragged and zoomed with transforms. */
+.imageStage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; outline: none; }
+.imageStage[data-dragging] { cursor: grabbing; }
+.imageStage:focus-visible { box-shadow: inset var(--ring); }
+.image { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; background: #fff; box-shadow: var(--shadow-md); -webkit-user-drag: none; }
+
+/* Text files. */
+.text {
+  position: absolute; inset: 0; margin: 0; overflow: auto; overscroll-behavior: contain;
+  padding: 20px max(20px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  background: var(--surface); color: var(--ink);
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4;
+}
+
+/*
+ * The Word editor opens its font and style lists at the end of <body>: they go above the viewer.
+ * (Their own stacking order is kept inside this box.)
+ */
+:global(body > .docx-editor) { position: relative; z-index: 1000; }
+
+/* ---------- Touch screens and narrow ones ---------- */
+@media (pointer: coarse) {
+  .tool, .swatch { min-width: 44px; height: 44px; }
+  .swatch { width: 44px; }
+  .pageInput { height: 40px; }
+  .headActions :global(.btn) { height: 44px; }
+}
+@media (max-width: 700px) {
+  .toolLabel { display: none; }
+  .toolbar { gap: 4px 8px; }
+}
+@media (max-width: 600px) {
+  .head { gap: 8px; padding-left: max(14px, env(safe-area-inset-left)); }
+  .wide { display: none; }
+  .headActions { gap: 4px; }
+}

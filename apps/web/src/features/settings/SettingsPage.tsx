@@ -22,6 +22,7 @@ import { ProfileSettings } from "./ProfileSettings";
 import { RolesSettings } from "./RolesSettings";
 import { ScheduleSettings } from "./ScheduleSettings";
 import { settingsGroups, type SettingsTab } from "./sections";
+import { StorageSettings } from "./StorageSettings";
 import { TeamSettings } from "./TeamSettings";
 import { TemplateSettings } from "./TemplateSettings";
 import { WebAddressSettings } from "./WebAddressSettings";
@@ -69,6 +70,7 @@ export function SettingsPage() {
           {tab === "schedule" && <ScheduleSettings />}
           {tab === "address" && <WebAddressSettings />}
           {tab === "hosting" && <HostingSettings />}
+          {tab === "storage" && <StorageSettings />}
           {tab === "team" && <TeamSettings />}
           {tab === "roles" && <RolesSettings />}
           {tab === "crews" && <CrewSettings />}

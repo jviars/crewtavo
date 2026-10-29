@@ -3,6 +3,7 @@
  * where it stands, a rating, the interview, notes, and the other times they applied. Once they're
  * hired, inviting them to the team is a click away for people who manage it.
  */
+import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { ADMINS } from "@crewtavo/core/roles";
 import { APPLICANT_STATUSES, applicantStatusLabel, DETAIL_LABELS, FILE_ACCEPT, fileLabel, fileSize, isResume, type ApplicantFile, type ApplicantStatus } from "@crewtavo/core/careers";
 import { fieldLabel } from "@crewtavo/core/websiteForms";
@@ -22,7 +23,9 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { can, useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
 import { ContactLine } from "../clients/ContactsCard";
+import { storedUndoToast, TRASH_PATH } from "../drive/trash";
 import { WebVisitRows } from "../marketing/WebVisitRows";
 import { APPLICANT_FIELDS, APPLICANT_TONES, deleteApplicant, fileLinks, filesJson, isWaiting, otherApplications, refreshApplicants, seesApplicants, uploadApplicantFile, type Applicant } from "./applicants";
 import styles from "./Applicants.module.css";
@@ -85,25 +88,26 @@ function ApplicantDetail() {
     mutationFn: async (file: File) => {
       const added = await uploadApplicantFile(companyId, id, file, a!.files.some((f) => isResume(f, a!.files)) ? "attachment" : "resume");
       const { error } = await supabase().from("job_applicants").update({ files: filesJson([...a!.files, added]) }).eq("id", id);
-      if (error) {
-        await supabase().storage.from("files").remove([added.path]);
-        throw new Error(/check constraint/i.test(error.message) ? "An applicant can have up to 5 files. Remove one first." : error.message);
-      }
+      // The stored file has no row then, and the server tidies it away after a day.
+      if (error) throw new Error(/check constraint/i.test(error.message) ? "An applicant can have up to 5 files. Remove one first." : error.message);
     },
     onSuccess: () => refreshApplicants(queryClient),
   });
+  // The file goes to the Trash (the database moves it), so Undo can put it back on the applicant.
   const removeFile = useMutation({
-    meta: { success: "File removed" },
     mutationFn: async (file: ApplicantFile) => {
       unwrap(await supabase().from("job_applicants").update({ files: filesJson(a!.files.filter((f) => f.path !== file.path)) }).eq("id", id));
-      await supabase().storage.from("files").remove([file.path]);
     },
-    onSuccess: () => refreshApplicants(queryClient),
+    onSuccess: (_, file) => {
+      refreshApplicants(queryClient);
+      storedUndoToast("File removed", companyId, file.path, () => refreshApplicants(queryClient));
+    },
   });
   const remove = useMutation({
-    meta: { success: "Applicant deleted" },
     mutationFn: () => deleteApplicant(a!),
     onSuccess: () => {
+      const files = a!.files.length;
+      toast.success("Applicant deleted", files ? { description: `Their ${files === 1 ? "file is" : "files are"} in the Trash for ${TRASH_DAYS} days.`, action: { label: "Open the Trash", onClick: () => navigate(TRASH_PATH) } } : undefined);
       refreshApplicants(queryClient);
       navigate("/applicants", { replace: true });
     },
@@ -121,7 +125,7 @@ function ApplicantDetail() {
   const askDelete = async () => {
     const ok = await confirm({
       title: `Delete ${a.name}'s application?`,
-      body: a.files.length ? "Their résumé and other files are deleted too. This can't be undone." : "This can't be undone.",
+      body: a.files.length ? `This can't be undone. Their résumé and other files go to the Trash for ${TRASH_DAYS} days.` : "This can't be undone.",
       confirmLabel: "Delete",
       danger: true,
     });
@@ -241,7 +245,7 @@ function ApplicantDetail() {
                       variant="ghost"
                       icon="trash"
                       aria-label={`Remove ${f.name}`}
-                      onClick={async () => (await confirm({ title: `Remove ${f.name}?`, body: "The file is deleted. This can't be undone.", confirmLabel: "Remove", danger: true })) && removeFile.mutate(f)}
+                      onClick={async () => (await confirm({ title: `Remove ${f.name}?`, body: `It goes to the Trash for ${TRASH_DAYS} days.`, confirmLabel: "Remove", danger: true })) && removeFile.mutate(f)}
                     />
                   </div>
                 );

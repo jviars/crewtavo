@@ -5,7 +5,7 @@
 import { addDays } from "@crewtavo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { runTask } from "../src/tasks";
+import { CRON_TASKS, runTask } from "../src/tasks";
 
 const env: Env = {
   SUPABASE_URL: "https://example.supabase.co",
@@ -135,5 +135,27 @@ describe("hourly upkeep", () => {
     const quiet = serve((call) => (call.path === "rpc/emit_sub_document_alerts" ? [] : call.path === "rpc/clock_upkeep" ? { reminded: 0, stopped: 0 } : 0));
     await runTask("followups", { ...texting, APP_URL: undefined });
     expect(quiet.find((c) => c.path === "rpc/emit_sub_document_alerts")?.body).toEqual({ p_can_text: false, p_can_email: false });
+  });
+});
+
+describe("the Trash", () => {
+  it("is emptied every night, after the plans sweep, of what's been there 30 days", async () => {
+    expect(CRON_TASKS["35 4 * * *"]).toEqual(["trash"]);
+    expect(CRON_TASKS["20 4 * * *"]).toEqual(["plans"]);
+    const calls = serve(() => []);
+    expect(await runTask("trash", env)).toEqual({ files: 0, folders: 0, other: 0, kept: 0 });
+    // The database decides what's due (plan files, then Drive's folders, then files from the rest of
+    // Crewtavo); nothing is removed when nothing is.
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["POST rpc/trash_purge"]);
+    expect(calls[0]!.body).toEqual({ p_cutoff: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), p_limit: 1000 });
+  });
+});
+
+describe("the nightly tidy-up", () => {
+  it("also removes guide covers and quote and visit photos nobody recorded", async () => {
+    const calls = serve((call) => (call.path === "companies" ? [] : call.path === "rpc/unrecorded_files" ? [{ company_id: "co-1", paths: ["co-1/kb/stray.jpg"] }] : []));
+    expect(await runTask("plans", env)).toEqual({ unrecorded: 0, subs: { unrecorded: 0 }, applicants: { unrecorded: 0 }, photos: { unrecorded: 1, kept: 0 } });
+    expect(calls.find((c) => c.path === "rpc/unrecorded_files")?.body).toEqual({ p_limit: 1000 });
+    expect(calls.filter((c) => c.method === "DELETE").map((c) => c.body)).toEqual([{ prefixes: ["co-1/kb/stray.jpg"] }]);
   });
 });

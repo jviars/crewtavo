@@ -173,11 +173,11 @@ select t2.expect_error('select labor_rate from public.memberships', 'crew can''t
 
 -- ===== Crew activity feed and files ===========================================================
 select t2.check((select count(*) from public.activity where verb like 'quote.%') = 0, 'crew don''t see sales activity');
-insert into public.attachments (company_id, owner_type, owner_id, path, file_name) values (:'co', 'job', :'co', :'co' || '/job/x/photo.jpg', 'photo.jpg') returning id as mine \gset
+insert into public.attachments (company_id, owner_type, owner_id, path, file_name) values (:'co', 'job', :'co', :'co' || '/job/' || :'co' || '/photo.jpg', 'photo.jpg') returning id as mine \gset
 commit;
 
 insert into public.attachments (company_id, owner_type, owner_id, path, file_name, created_by)
-values (:'co', 'job', :'co', :'co' || '/job/x/receipt.jpg', 'receipt.jpg', 'c0000000-0000-0000-0000-000000000001');
+values (:'co', 'job', :'co', :'co' || '/job/' || :'co' || '/receipt.jpg', 'receipt.jpg', 'c0000000-0000-0000-0000-000000000001');
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "c0000000-0000-0000-0000-000000000002", "role": "authenticated"}', true);

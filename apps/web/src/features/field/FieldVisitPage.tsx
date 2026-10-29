@@ -20,6 +20,7 @@ import { signedUrls, uploadFile } from "@/lib/files";
 import { addressLine, formatDateTime, timeAgo } from "@/lib/format";
 import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { storedUndoToast } from "../drive/trash";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
@@ -368,13 +369,19 @@ function Photos({ visitId }: { visitId: string }) {
     onSuccess: (r) => r.saved && toast.success(`${r.saved} ${r.saved === 1 ? "photo" : "photos"} added`),
     onSettled: () => setUploading(0),
   });
+  const refreshPhotos = () => queryClient.invalidateQueries({ queryKey: ["photos", visitId] });
+  // The photo goes to the Trash with its row (the database moves it), so Undo can put it back. A
+  // sub has no Trash to take it from: the office can.
   const remove = useMutation({
-    meta: { success: "Photo removed" },
     mutationFn: async (p: { id: string; path: string }) => {
-      unwrap(await supabase().from("attachments").delete().eq("id", p.id));
-      await supabase().storage.from("files").remove([p.path]);
+      const gone = unwrap(await supabase().from("attachments").delete().eq("id", p.id).select("id"));
+      if (!gone.length) throw new Error("You can only remove photos you added. Ask the office to remove this one.");
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["photos", visitId] }),
+    onSuccess: (_, p) => {
+      void refreshPhotos();
+      if (isSub(session)) toast.success("Photo removed");
+      else storedUndoToast("Photo removed", company.id, p.path, () => void refreshPhotos());
+    },
   });
   return (
     <section className="card card-pad stack-sm">

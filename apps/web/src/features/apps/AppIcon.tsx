@@ -20,6 +20,7 @@ const LOGOS: Record<string, string> = {
   website_analytics: crewtavoLogo,
   website_forms: crewtavoLogo,
   careers: crewtavoLogo,
+  drive: crewtavoLogo,
   google_calendar: googleCalendarLogo,
   zoho_calendar: zohoLogo,
   outlook_calendar: outlookLogo,

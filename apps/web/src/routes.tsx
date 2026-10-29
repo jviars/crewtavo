@@ -60,6 +60,8 @@ const screens = {
   subs: () => import("@/features/subs/SubsPage"),
   sub: () => import("@/features/subs/SubPage"),
   subReports: () => import("@/features/subs/SubReportsPage"),
+  // Light on its own: its viewer, editors and Google's scripts load when they're first used.
+  drive: () => import("@/features/drive/DrivePage"),
 } satisfies Record<string, Loader>;
 
 /** The measuring tool pulls in map libraries, so it's only fetched when opened. */
@@ -165,6 +167,9 @@ export const routes: RouteObject[] = [
           { path: "subs/1099", ...page(screens.subReports, "YearEndPage") },
           { path: "subs/workers-comp", ...page(screens.subReports, "WorkersCompPage") },
           { path: "subs/:id", ...page(screens.sub, "SubPage") },
+          { path: "drive", ...page(screens.drive, "DrivePage") },
+          // Every deleted file in Crewtavo, not only Drive's: open even when Drive isn't installed.
+          { path: "drive/trash", ...page(screens.drive, "DriveTrashPage") },
           { path: "*", element: <NotFound /> },
         ],
       },

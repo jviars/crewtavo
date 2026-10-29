@@ -90,6 +90,9 @@ services:
       FILE_STORAGE_BACKEND_PATH: /var/lib/storage
       # 200 MB per file: plan sets run big (apps/web/src/features/plans/plans.ts).
       FILE_SIZE_LIMIT: 209715200
+      # A resumable upload (apps/web/src/lib/resumable.ts) can carry on for a day rather than
+      # Storage's default hour, for crews on patchy signal.
+      TUS_URL_EXPIRY_MS: 86400000
       TENANT_ID: crewtavo
       REGION: local
       GLOBAL_S3_BUCKET: crewtavo

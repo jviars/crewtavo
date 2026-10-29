@@ -496,18 +496,40 @@ describe("the service worker, offline (production builds)", () => {
     let online = true;
     const caches = new FakeCaches();
     const network = vi.fn(async () => (online ? new Response('{"name":"Crewtavo","v":2}') : Promise.reject(new TypeError("Failed to fetch"))));
-    await (await caches.open("crewtavo-app-v1")).put("/manifest.webmanifest", new Response('{"name":"Crewtavo","v":1}'));
+    await (await caches.open("crewtavo-app-v2")).put("/manifest.webmanifest", new Response('{"name":"Crewtavo","v":1}'));
     const sw = loadServiceWorker({ caches, offline: true, network });
     const request = { url: "https://crew.example.com/manifest.webmanifest", method: "GET", mode: "cors" };
 
     const fresh = (await sw.dispatch("fetch", { request })) as Response;
     expect(await fresh.text()).toBe('{"name":"Crewtavo","v":2}');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(caches.entries("crewtavo-app-v1")["/manifest.webmanifest"]).toBe('{"name":"Crewtavo","v":2}');
+    expect(caches.entries("crewtavo-app-v2")["/manifest.webmanifest"]).toBe('{"name":"Crewtavo","v":2}');
 
     online = false;
     const saved = (await sw.dispatch("fetch", { request })) as Response;
     expect(await saved.text()).toBe('{"name":"Crewtavo","v":2}');
+  });
+
+  it("never keeps a stored file, so one moved to the Trash stops opening; pictures of the app itself are still kept", async () => {
+    const caches = new FakeCaches();
+    const network = vi.fn(async () => new Response("picture"));
+    const sw = loadServiceWorker({ caches, offline: true, network });
+    const stored = { url: "https://crew.example.com/storage/v1/object/sign/files/c1/plans/f1.png?token=abc", method: "GET", mode: "cors" };
+    expect(await sw.dispatch("fetch", { request: stored })).toBe("unhandled");
+    expect(network).not.toHaveBeenCalled();
+
+    const icon = { url: "https://crew.example.com/icon-192.png", method: "GET", mode: "no-cors" };
+    expect(await ((await sw.dispatch("fetch", { request: icon })) as Response).text()).toBe("picture");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(Object.keys(caches.entries("crewtavo-app-v2"))).toEqual(["/icon-192.png"]);
+  });
+
+  it("empties what the last version kept when this one takes over (stored pictures among it)", async () => {
+    const caches = new FakeCaches();
+    await (await caches.open("crewtavo-app-v1")).put("/storage/v1/object/sign/files/c1/visit/v1/p.png", new Response("old"));
+    const sw = loadServiceWorker({ caches, offline: true });
+    await sw.dispatch("activate");
+    expect(await caches.keys()).not.toContain("crewtavo-app-v1");
   });
 });
 

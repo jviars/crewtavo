@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEv
 import { fromEditable, matchMentions, type Mentionable } from "@crewtavo/core/chat";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
 import { api, supabase } from "@/lib/api";
 import { uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
@@ -60,6 +61,7 @@ export function Composer({
 }) {
   const session = useSession();
   const queryClient = useQueryClient();
+  const storageFull = useStorageFull();
   const saved = drafts.get(channel.id);
   const [text, setText] = useState(saved?.text ?? "");
   const [picked, setPicked] = useState<MentionOption[]>(saved?.picked ?? []);
@@ -203,14 +205,22 @@ export function Composer({
   const addPhotos = (list: FileList | null) => {
     const chosen = [...(list ?? [])].filter((f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name)).slice(0, MAX_PHOTOS - uploads.length);
     if (files.current) files.current.value = "";
-    for (const file of chosen) {
+    // Photos turned away for space are told about once, together, with why and who can make room.
+    const refused = new RefusedForSpace();
+    const sent = chosen.map((file) => {
       const id = crypto.randomUUID();
       setUploads((u) => [...u, { id, name: file.name, preview: URL.createObjectURL(file), status: "uploading" }]);
-      uploadFile(session.company.id, `chat/${channel.id}`, file).then(
+      return uploadFile(session.company.id, `chat/${channel.id}`, file).then(
         (path) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done", path } : x))),
-        () => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "error" } : x))),
+        (error: unknown) => {
+          setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "error" } : x)));
+          refused.add(error, file.name, file.size);
+        },
       );
-    }
+    });
+    void Promise.all(sent).then(() => {
+      if (refused.first) storageFull(refused.first, refused.title());
+    });
   };
 
   if (!channel.can_post) {

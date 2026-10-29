@@ -27,6 +27,12 @@ export interface AppConfig {
    * (its own sender or some company's mailbox). For the whole instance, never one business.
    */
   features: { ai: boolean; payments: boolean; email: boolean; sms: boolean; emailCodes?: boolean; roofInsights: boolean; devMail?: boolean; findPaving?: boolean };
+  /**
+   * Import from Google Drive (Drive's Google Picker), when the deployment sets GOOGLE_CLIENT_ID and
+   * GOOGLE_PICKER_API_KEY: the OAuth client, the browser key and the Cloud project number. All public.
+   * Optional because a copy of the config saved by an older Crewtavo doesn't have it.
+   */
+  googlePicker?: { clientId: string; apiKey: string; appId: string } | null;
 }
 
 /**

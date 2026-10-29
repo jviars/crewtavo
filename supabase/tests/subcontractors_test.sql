@@ -612,8 +612,8 @@ select set_config('request.jwt.claims', '{"sub": "c1060000-0000-0000-0000-000000
 update storage.objects set owner = 'c1060000-0000-0000-0000-000000000003' where name like '%/subs/%';
 delete from storage.objects where name in (:'co' || '/subs/' || :'blue' || '/dina.pdf', :'co' || '/subs/' || :'apex' || '/server.pdf');
 commit;
-select t1060.check((select count(*) from storage.objects where name in (:'co' || '/subs/' || :'blue' || '/dina.pdf', :'co' || '/subs/' || :'apex' || '/server.pdf')) = 0,
-  'the office with the subs area removes a file in a sub''s folder, whoever put it there (the server too)');
+select t1060.check((select count(*) from storage.objects where name in (:'co' || '/subs/' || :'blue' || '/dina.pdf', :'co' || '/subs/' || :'apex' || '/server.pdf')) = 2,
+  'nobody signed in removes a file in a sub''s folder, not even the office with the subs area (paperwork taken out goes in the Trash)');
 select t1060.check((select owner = 'c1060000-0000-0000-0000-000000000001' from storage.objects where name = :'co' || '/subs/' || :'apex' || '/w9.pdf'), 'and no one changes one in place');
 
 -- ===== Notification settings ===================================================================
@@ -622,5 +622,8 @@ insert into public.notification_prefs (company_id, user_id, email, sms, push) va
 select t1060.check(true, 'and can come by email and text too');
 
 -- A sub that's removed takes its paperwork with it.
+select count(*) as cedar_docs from public.sub_documents where subcontractor_id = :'cedar' \gset
 delete from public.subcontractors where id = :'cedar';
 select t1060.check((select count(*) from public.sub_documents where subcontractor_id = :'cedar') = 0, 'removing a sub removes its paperwork');
+select t1060.check((select count(*) from public.trashed_files where source = 'sub_document' and source_id = :'cedar') = :cedar_docs and :cedar_docs > 0,
+  'and its files go in the Trash');

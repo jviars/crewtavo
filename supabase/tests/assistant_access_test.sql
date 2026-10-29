@@ -309,7 +309,8 @@ select t1040.check((select count(*) = 1 from storage.objects where name = :'co' 
 select t1040.as_request(:'owner', :'full', 'POST', '/object/files');
 select t1040.check(t1040.error_of(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'co' || '/notes/new.txt', :'owner')) = 'none', 'one with full access can upload');
 delete from storage.objects where name = :'co' || '/notes/kept.txt';
-select t1040.check((select count(*) = 0 from storage.objects where name = :'co' || '/notes/kept.txt'), 'and delete');
+select t1040.check((select count(*) = 1 from storage.objects where name = :'co' || '/notes/kept.txt'),
+  'but not delete: nobody signed in deletes a stored file (the server deletes them from the Trash)');
 rollback;
 
 \o
