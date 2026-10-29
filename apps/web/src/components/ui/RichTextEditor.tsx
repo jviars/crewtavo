@@ -122,7 +122,7 @@ export function RichTextEditor({
 
   const tool = (icon: IconName, title: string, onClick: () => void, pressed?: boolean, disabled?: boolean) => (
     <button type="button" className="rte-btn" title={title} aria-label={title} aria-pressed={pressed} disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={onClick}>
-      <Icon name={icon} size={16} strokeWidth={pressed ? 2.4 : 2} />
+      <Icon name={icon} size={16} strokeWidth={pressed ? 2 : undefined} />
     </button>
   );
   // A guide's headings sit under its title (h2, h3); a contract section's under the section's own title (h3, h4).

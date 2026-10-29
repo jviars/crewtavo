@@ -33,7 +33,7 @@ test("a crew member works a visit from My day on a phone", async ({ as, data }) 
 
   // On the way, then started, from the card itself.
   await card.getByRole("button", { name: "On my way" }).click();
-  await expect(card).toContainText("En route");
+  await expect(card).toContainText("On the way");
   await card.getByRole("button", { name: "Start" }).click();
   await expect(card).toContainText("In progress");
 

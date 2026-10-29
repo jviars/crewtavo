@@ -161,7 +161,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
           return (
             <div key={g.name}>
               <button type="button" className={s.category} aria-expanded={open} onClick={() => toggle(g.name)}>
-                <Icon name="chevronDown" size={12} strokeWidth={3} />
+                <Icon name="chevronDown" size={12} strokeWidth={2} />
                 <span>{g.name}</span>
               </button>
               {g.channels.filter((c) => open || c.id === current || c.mentions > 0).map((c) => (

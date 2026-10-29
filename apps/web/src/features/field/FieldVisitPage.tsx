@@ -14,7 +14,7 @@ import { MapsLink } from "@/components/ui/MapsLink";
 import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
-import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { StatusPill, statusText, visitTone } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
 import { addressLine, formatDateTime, timeAgo } from "@/lib/format";
@@ -134,7 +134,7 @@ export function FieldVisitPage() {
       <div className="stack-sm">
         <h1 className="page-title">{v.title}</h1>
         <div className="row wrap">
-          <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+          <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
           <span className="muted">{v.starts_at ? formatDateTime(v.starts_at) : v.scheduled_on ? "Anytime today" : "Not scheduled"}</span>
           {v.series_total && v.series_total > 1 && <span className="chip chip-blue">Day {v.series_day} of {v.series_total}</span>}
           {clocks && minutes > 0 && <span className="chip"><Icon name="clock" size={12} />You: {formatDuration(minutes)}</span>}
@@ -384,7 +384,7 @@ function Photos({ visitId }: { visitId: string }) {
         {photos.data?.map((p) => (
           <div key={p.id} className="thumb">
             {p.url ? <a href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt={p.caption ?? p.file_name} loading="lazy" /></a> : <span className="muted small">Unavailable</span>}
-            {canRemove(p) && <button type="button" className="thumb-x" aria-label="Remove photo" onClick={async () => (await confirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true })) && remove.mutate(p)}><Icon name="x" size={12} strokeWidth={3} /></button>}
+            {canRemove(p) && <button type="button" className="thumb-x" aria-label="Remove photo" onClick={async () => (await confirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true })) && remove.mutate(p)}><Icon name="x" size={12} strokeWidth={2} /></button>}
           </div>
         ))}
         {Array.from({ length: uploading }, (_, i) => <div key={`u${i}`} className="thumb" style={{ display: "grid", placeItems: "center" }}><span className="spinner" style={{ width: 20, height: 20, color: "var(--text-3)" }} /></div>)}

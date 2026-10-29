@@ -9,7 +9,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -124,7 +124,7 @@ export function HomePage() {
                         </span>
                         {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 700 }}>Weather: {v.hold_reason.split(";")[0]}</span>}
                       </span>
-                      <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                      <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
                     </button>
                   ))
                 )}

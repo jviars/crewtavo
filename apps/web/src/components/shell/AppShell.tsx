@@ -1,14 +1,17 @@
 import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useNavigation, useViewTransitionState } from "react-router-dom";
 import { supabase } from "@/lib/api";
+import { usePresence } from "@/lib/motion";
 import { isSub, useSession } from "@/lib/session";
 import { prefetchScreens } from "@/routes";
 import { Face, initials } from "../ui/Avatar";
 import { Icon } from "../ui/Icon";
 import { confirm } from "../ui/Confirm";
 import { Menu } from "../ui/Menu";
+import { TaskIsland } from "../ui/TaskIsland";
+import { topLayerProps, useSpace, useTopLayer } from "../ui/topLayer";
 import { CommandPalette, openPalette } from "./CommandPalette";
 import { useChatBadge, useChatLive } from "@/features/chat/data";
 import { useMyJobs, waitingCount } from "@/features/field/myJobsData";
@@ -16,6 +19,7 @@ import { signOutNote, subCodeWays } from "@/features/auth/textCode";
 import { createItems, mobileTabs, NAV_GROUPS, navVisible, settingsItem, subCanOpen, type NavItem } from "./nav";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
+import { RestartBanner } from "./RestartBanner";
 
 function useVisibleGroups(): NavItem[][] {
   const session = useSession();
@@ -51,6 +55,22 @@ function useOnline() {
     };
   }, []);
   return online;
+}
+
+/**
+ * In the top layer like the toasts, so an open dialog's backdrop doesn't cover it. The restart
+ * banner sits below it (--offline-space).
+ */
+function OfflinePill() {
+  const ref = useRef<HTMLDivElement>(null);
+  useTopLayer(ref, true);
+  useSpace(ref, "--offline-space", true, 8);
+  return (
+    <div ref={ref} className="offline-banner" role="status" {...topLayerProps}>
+      <Icon name="wifiOff" size={16} />
+      You're offline. Visit updates are saved and sent when you reconnect; other changes need a connection.
+    </div>
+  );
 }
 
 // Fields that don't bring up the phone's keyboard (or a picker in its place).
@@ -101,6 +121,9 @@ export function AppShell() {
   const tabs = mobileTabs(session);
   // A sub has My day, My jobs, My paperwork and their profile: no search, Create, messages or More.
   const sub = isSub(session);
+  // The More sheet stays a moment after it closes, to slide back down.
+  const moreVisible = moreOpen && !sub;
+  const moreShown = usePresence(moreVisible);
   // A sub on a sign-in Crewtavo made for them has no password: to get back in they ask for a code by
   // text or email, or, when neither goes out or their record has nothing to send it to, a new link
   // from the office. So they're asked first, and told how. (Someone's own account has its password.)
@@ -159,12 +182,8 @@ export function AppShell() {
   return (
     <div className="shell">
       <div className="route-progress" data-active={navigation.state !== "idle" || undefined} aria-hidden="true" />
-      {!online && (
-        <div className="offline-banner" role="status">
-          <Icon name="wifiOff" size={16} />
-          You're offline. Visit updates are saved and sent when you reconnect; other changes need a connection.
-        </div>
-      )}
+      {!online && <OfflinePill />}
+      <RestartBanner />
 
       <aside className="sidebar" aria-label="Primary">
         <Link to={sub ? "/field" : "/"} className="brand" aria-label="Crewtavo home" viewTransition>
@@ -255,10 +274,10 @@ export function AppShell() {
         )}
       </nav>
 
-      {moreOpen && !sub && (
+      {moreShown && (
         <>
-          <div className="sheet-backdrop" onClick={() => setMoreOpen(false)} />
-          <div className="sheet" role="dialog" aria-label="All sections">
+          <div className="sheet-backdrop" data-leaving={!moreVisible || undefined} onClick={() => setMoreOpen(false)} />
+          <div className="sheet" role="dialog" aria-label="All sections" data-leaving={!moreVisible || undefined}>
             <MobileCreate onDone={() => setMoreOpen(false)} />
             <nav className="nav">
               {[...groups.flat(), settings].map((item) => (
@@ -274,6 +293,7 @@ export function AppShell() {
       )}
 
       {!sub && <CommandPalette />}
+      <TaskIsland />
     </div>
   );
 }

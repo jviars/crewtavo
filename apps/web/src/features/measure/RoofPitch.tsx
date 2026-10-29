@@ -141,7 +141,7 @@ export function MeasurePitch({
         {roofs && <Button size="sm" icon="layers" onClick={() => setOpen("lidar")}>From lidar (free)</Button>}
         <Button size="sm" icon="smartphone" onClick={() => setOpen("phone")}>Phone on the roof</Button>
         <Button size="sm" icon="camera" onClick={() => setOpen("photo")}>From a photo</Button>
-        {config.features.roofInsights && near && <Button size="sm" icon="sparkle" onClick={() => setOpen("google")}>Ask Google</Button>}
+        {config.features.roofInsights && near && <Button size="sm" icon="globe" onClick={() => setOpen("google")}>Ask Google</Button>}
       </div>
       {open === "lidar" && roofs && (
         roofs.length ? (

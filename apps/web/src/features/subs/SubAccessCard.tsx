@@ -195,7 +195,7 @@ function SignInLinkDialog({ result, who, phone, email, onClose }: { result: Sign
       <div className="dialog-body">
         {(result.texted || result.emailed) && (
           <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
-            <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+            <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
           </div>
         )}
         {message && <p style={{ margin: 0 }}>{message}</p>}

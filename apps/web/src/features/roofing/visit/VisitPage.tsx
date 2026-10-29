@@ -367,7 +367,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
     <button type="button" className={`btn btn-primary ${styles.bigButton}`} disabled={!ready} aria-busy={sitePrice.isPending || undefined} onClick={review}>
       {sitePrice.isPending && <Spinner size={18} />}
       {editor.busy ? "Saving your changes…" : (blocker ?? (invalid ? "Fix the price to go on" : "Review and sign"))}
-      {!sitePrice.isPending && !editor.busy && !invalid && !blocker && <Icon name="arrowRight" size={19} strokeWidth={2.5} />}
+      {!sitePrice.isPending && !editor.busy && !invalid && !blocker && <Icon name="arrowRight" size={19} strokeWidth={2} />}
     </button>
   );
   const changeCount = changes?.length ?? 0;
@@ -428,7 +428,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
     <>
       {range && quote.range_accepted_at ? (
         <p className={`callout callout-good ${styles.strip}`}>
-          <Icon name="check" size={20} strokeWidth={2.5} />
+          <Icon name="check" size={20} strokeWidth={2} />
           <span>
             {first || "They"} said yes to <strong>{rangeWords(range.low, range.high)}</strong> on {shortDay(quote.range_accepted_at, tz)}.
           </span>
@@ -453,7 +453,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
         <>
           <RangeBar low={range.low} high={range.high} value={shownTotals.total} />
           <p className={styles.rangeNote} data-where={position.where}>
-            <Icon name={position.where === "above" ? "alert" : "check"} size={18} strokeWidth={2.4} />
+            <Icon name={position.where === "above" ? "alert" : "check"} size={18} />
             {note.text}
           </p>
         </>

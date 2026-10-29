@@ -127,7 +127,7 @@ function InvoicesPageScreen() {
           {term ? (
             <EmptyState icon="search" title="No invoices match" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
           ) : (
-            <EmptyState icon="invoice" title={filter === "open" ? "Nothing waiting on payment" : filter === "overdue" ? "Nothing past due" : "Nothing here"} action={filter === "open" && <Link className="btn" to="/jobs">Find jobs to invoice</Link>}>
+            <EmptyState icon="invoice" title={filter === "open" ? "Nothing awaiting payment" : filter === "overdue" ? "Nothing past due" : "Nothing here"} action={filter === "open" && <Link className="btn" to="/jobs">Find jobs to invoice</Link>}>
               {filter === "open"
                 ? "Invoice finished jobs from the job page, or create a standalone invoice."
                 : filter === "overdue"

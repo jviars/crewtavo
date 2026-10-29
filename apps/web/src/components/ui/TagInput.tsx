@@ -1,7 +1,7 @@
 import { useId, useState, type KeyboardEvent } from "react";
 import { Icon } from "./Icon";
 
-/** Tags as removable chips. Enter or comma adds; Backspace on an empty field removes the last. */
+/** Tags, each removable (square and outlined, so a tag never looks like a status). Enter or comma adds; Backspace on an empty field removes the last. */
 export function TagInput({ value, onChange, suggestions = [], placeholder = "Add a tag", max = 20 }: { value: string[]; onChange: (tags: string[]) => void; suggestions?: string[]; placeholder?: string; max?: number }) {
   const [draft, setDraft] = useState("");
   const listId = useId();
@@ -24,11 +24,11 @@ export function TagInput({ value, onChange, suggestions = [], placeholder = "Add
   };
   const remaining = suggestions.filter((s) => !value.some((v) => v.toLowerCase() === s.toLowerCase()));
   return (
-    <div className="input" style={{ height: "auto", minHeight: 38, display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 8px", alignItems: "center" }} onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement)?.focus()}>
+    <div className="input" style={{ height: "auto", minHeight: "var(--control)", display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 8px", alignItems: "center" }} onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement)?.focus()}>
       {value.map((tag) => (
-        <span key={tag} className="chip">
+        <span key={tag} className="tag">
           {tag}
-          <button type="button" aria-label={`Remove ${tag}`} onClick={() => onChange(value.filter((t) => t !== tag))}><Icon name="x" size={10} strokeWidth={3} /></button>
+          <button type="button" aria-label={`Remove ${tag}`} onClick={() => onChange(value.filter((t) => t !== tag))}><Icon name="x" size={10} strokeWidth={2} /></button>
         </span>
       ))}
       <input

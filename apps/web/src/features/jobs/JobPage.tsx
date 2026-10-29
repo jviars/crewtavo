@@ -11,7 +11,7 @@ import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
-import { EntityStatus, StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { EntityStatus, StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatDate, formatDateTime, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
@@ -224,7 +224,7 @@ export function JobPage() {
                       </span>
                       {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 700 }}>Weather: {v.hold_reason}</span>}
                     </span>
-                    <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                    <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
                     {canDispatch && !["completed", "cancelled"].includes(v.status) && (
                       <Button size="sm" variant="ghost" icon="check" aria-label={`Complete ${v.title}`} title="Mark complete" loading={completeVisit.isPending && completeVisit.variables === v.id} onClick={(e) => { e.stopPropagation(); completeVisit.mutate(v.id); }} />
                     )}

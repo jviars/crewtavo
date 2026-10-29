@@ -135,7 +135,7 @@ export function PaperworkPage() {
 
             {sent.length > 0 && (
               <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }} role="status">
-                <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+                <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
                 <h1 style={{ fontSize: 22, fontWeight: 800 }}>Thanks, it's in</h1>
                 <p style={{ margin: 0 }}>{data.company.name} got {askingFor(sent.map((label) => ({ label })))}. They'll check {sent.length === 1 ? "it" : "them"} and get in touch if anything's missing.</p>
                 {allSent && <Button variant="ghost" onClick={() => setSent([])}>Send something else</Button>}

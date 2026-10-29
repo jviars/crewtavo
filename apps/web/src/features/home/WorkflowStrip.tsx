@@ -25,7 +25,7 @@ export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Das
       key: "requests", label: "Requests", icon: "requests", to: "/requests", color: "var(--req)", textColor: "var(--req-text)",
       count: requests.new, caption: "New",
       rows: [
-        { label: "Assessment complete", value: String(requests.assessment_complete) },
+        { label: "Assessment done", value: String(requests.assessment_complete) },
         { label: "Overdue", value: String(requests.overdue) },
       ],
     },

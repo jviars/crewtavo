@@ -162,7 +162,7 @@ export function ClientPage() {
       <div className="page-meta">
         <EntityStatus kind="client" status={c.status} />
         {c.company_name && c.company_name !== c.display_name && <span className="muted">{c.company_name}</span>}
-        {c.tags.map((t) => <span key={t} className="chip">{t}</span>)}
+        {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
         {c.marketing_opt_out && <span className="chip chip-amber">Unsubscribed from marketing</span>}
       </div>
       {c.status === "archived" && (
@@ -240,11 +240,11 @@ export function ClientPage() {
               {work.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton width={40} /><Skeleton width="45%" /><span className="grow" /><Skeleton width={84} height={22} radius={999} /></div>)}
               {work.error && <ErrorState compact error={work.error} onRetry={() => work.refetch()} />}
               {work.data && tab === "requests" && (
-                <WorkList empty="No requests yet." rows={work.data.requests.map((r) => ({ to: `/requests/${r.id}`, number: r.number, title: r.title, right: formatDate(r.created_at), status: <EntityStatus kind="request" status={r.status} /> }))} />
+                <WorkList empty="No requests yet" rows={work.data.requests.map((r) => ({ to: `/requests/${r.id}`, number: r.number, title: r.title, right: formatDate(r.created_at), status: <EntityStatus kind="request" status={r.status} /> }))} />
               )}
               {work.data && tab === "quotes" && (
                 <WorkList
-                  empty="No quotes yet."
+                  empty="No quotes yet"
                   rows={work.data.quotes.map((q) => {
                     const price = listPrice(q);
                     return { to: `/quotes/${q.id}`, number: q.number, title: q.title, right: price.from ? `From ${formatMoney(price.amount)}` : formatMoney(price.amount), status: <EntityStatus kind="quote" status={q.status} /> };
@@ -252,10 +252,10 @@ export function ClientPage() {
                 />
               )}
               {work.data && tab === "jobs" && (
-                <WorkList empty="No jobs yet." rows={work.data.jobs.map((j) => ({ to: `/jobs/${j.id}`, number: j.number, title: j.title, right: j.kind === "recurring" ? "Recurring" : canSell ? formatMoney(j.financials?.contract_total ?? 0) : "", status: <EntityStatus kind="job" status={j.status} /> }))} />
+                <WorkList empty="No jobs yet" rows={work.data.jobs.map((j) => ({ to: `/jobs/${j.id}`, number: j.number, title: j.title, right: j.kind === "recurring" ? "Recurring" : canSell ? formatMoney(j.financials?.contract_total ?? 0) : "", status: <EntityStatus kind="job" status={j.status} /> }))} />
               )}
               {work.data && tab === "invoices" && (
-                <WorkList empty="No invoices yet." rows={work.data.invoices.map((i) => ({ to: `/invoices/${i.id}`, number: i.number, title: i.due_on ? `Due ${formatDate(i.due_on)}` : "Invoice", right: formatMoney(i.balance_due > 0 ? i.balance_due : i.total), status: <EntityStatus kind="invoice" status={i.status} /> }))} />
+                <WorkList empty="No invoices yet" rows={work.data.invoices.map((i) => ({ to: `/invoices/${i.id}`, number: i.number, title: i.due_on ? `Due ${formatDate(i.due_on)}` : "Invoice", right: formatMoney(i.balance_due > 0 ? i.balance_due : i.total), status: <EntityStatus kind="invoice" status={i.status} /> }))} />
               )}
             </div>
           </section>

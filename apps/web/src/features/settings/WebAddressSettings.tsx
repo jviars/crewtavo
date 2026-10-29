@@ -215,7 +215,7 @@ export function AddressSteps({ overview, returnTo, choosing, onChoosing, checkin
           const state = i === current ? "current" : done[i] ? "done" : "todo";
           return (
             <li key={step.title} data-state={state} aria-current={state === "current" ? "step" : undefined}>
-              <span className={styles.dot} aria-hidden="true">{state === "done" ? <Icon name="check" size={14} strokeWidth={3} /> : i + 1}</span>
+              <span className={styles.dot} aria-hidden="true">{state === "done" ? <Icon name="check" size={14} strokeWidth={2} /> : i + 1}</span>
               <div className="stack-sm" style={{ gap: 2, minWidth: 0 }}>
                 <strong className={styles.stepTitle}>{step.title}{state === "done" && <span className="sr-only">: done</span>}</strong>
                 {state === "current" ? <div className={styles.stepNow}>{now(i)}</div> : <span className="muted small" style={{ overflowWrap: "anywhere" }}>{state === "done" ? summaries[i] : step.ahead}</span>}
@@ -323,7 +323,7 @@ function DomainChoice({ railway, buying, onBuying, onUseMine }: { railway: Railw
               onBuying(true);
             }}
           >
-            <span className={styles.choiceIcon}><Icon name="sparkle" size={20} /></span>
+            <span className={styles.choiceIcon}><Icon name="card" size={20} /></span>
             <strong>No, get me one</strong>
             <span className="muted small">Buy one on Railway, billed to your Railway account. Railway connects it for you.</span>
             <StatusPill label="Nothing to set up" tone="good" />
@@ -682,7 +682,7 @@ function Progress({ overview, change }: { overview: AddressOverview; change: Add
         const state = item.done ? "done" : item.failed ? "failed" : i === current ? "current" : "todo";
         return (
           <li key={item.label} data-state={state}>
-            <span className={styles.mark} aria-hidden="true">{item.done ? <Icon name="check" size={13} strokeWidth={3} /> : item.failed ? <Icon name="x" size={13} strokeWidth={3} /> : null}</span>
+            <span className={styles.mark} aria-hidden="true">{item.done ? <Icon name="check" size={13} strokeWidth={2} /> : item.failed ? <Icon name="x" size={13} strokeWidth={2} /> : null}</span>
             {item.label}
             <span className="sr-only">{item.done ? ": done" : item.failed ? ": failed" : ": not yet"}</span>
           </li>
@@ -1052,7 +1052,7 @@ export function Done({ overview, change, onChange }: { overview: AddressOverview
   return (
     <>
       <section className="card card-pad stack" style={{ justifyItems: "center", textAlign: "center" }}>
-        <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+        <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
         <h2 className={styles.title}>Crewtavo is now at <a href={url}>{url}</a></h2>
         <div className="row wrap" style={{ justifyContent: "center" }}>
           {window.location.origin !== url && <a className="btn btn-primary" href={url}>Open the new address</a>}

@@ -6,9 +6,16 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public code?: string,
+    /** The form field the problem belongs to ("email", "phone", "slug", "name"), so it can show under that field. */
+    public field?: string,
   ) {
     super(message);
   }
+}
+
+/** The message for a form field when the error is about that field, else null: <Field error={fieldError(save.error, "email")}>. */
+export function fieldError(error: unknown, field: string): string | null {
+  return error instanceof ApiError && error.field === field ? error.message : null;
 }
 
 interface DbErrorLike {
@@ -23,13 +30,16 @@ export function friendlyDbError(error: DbErrorLike): ApiError {
   const code = error.code ?? "";
   const raw = error.message ?? "";
   if (code === "42501" || /row-level security/i.test(raw)) return new ApiError("You don't have permission to do that.", 403, code);
-  if (code === "23505") return new ApiError(duplicateMessage(error), 409, code);
+  if (code === "23505") {
+    const field = duplicateField(error);
+    return new ApiError(duplicateMessage(field), 409, code, field);
+  }
   if (code === "23503") {
     return /update or delete/i.test(raw)
       ? new ApiError("It's still used by other records, so it can't be deleted. Archive it instead.", 409, code)
       : new ApiError("That refers to something that no longer exists. Refresh and try again.", 400, code);
   }
-  if (code === "23502") return new ApiError("Please fill in all the required fields.", 400, code);
+  if (code === "23502") return new ApiError("Fill in all the required fields.", 400, code);
   if (code === "23514") return new ApiError("One of the values isn't allowed. Check the form and try again.", 400, code);
   if (code === "22P02" || code === "22007" || code === "22008") return new ApiError("Something you entered doesn't look right. Check the form and try again.", 400, code);
   if (code === "22003") return new ApiError("A number is too large.", 400, code);
@@ -48,11 +58,22 @@ export function friendlyDbError(error: DbErrorLike): ApiError {
   return new ApiError("Something went wrong saving that. Try again.", 500, code);
 }
 
-function duplicateMessage(error: DbErrorLike): string {
+/**
+ * Which field clashed in a unique index, read from the columns in its details, as in
+ * "Key (company_id, email)=(…) already exists." (the values after "=" are left out, since they can say anything),
+ * or else from the index's name in the message.
+ */
+function duplicateField(error: DbErrorLike): string | undefined {
   const details = error.details ?? "";
-  if (/email/i.test(details)) return "Someone with that email already exists.";
-  if (/slug/i.test(details)) return "That web address is taken. Try another.";
-  if (/name/i.test(details)) return "Something with that name already exists.";
+  const columns = /^Key \((.*?)\)=\(/.exec(details)?.[1] ?? (details || /unique constraint "([^"]+)"/.exec(error.message ?? "")?.[1] || "");
+  return ["email", "phone", "slug", "name"].find((field) => new RegExp(field, "i").test(columns));
+}
+
+function duplicateMessage(field: string | undefined): string {
+  if (field === "email") return "Someone with that email already exists.";
+  if (field === "phone") return "Someone with that phone number already exists.";
+  if (field === "slug") return "That web address is taken. Try another.";
+  if (field === "name") return "Something with that name already exists.";
   return "That already exists.";
 }
 
@@ -60,7 +81,7 @@ export const OFFLINE = "No internet connection. Check your Wi-Fi or signal and t
 
 /** Messages meant for developers (stack traces, code errors, database internals) never reach people. */
 const TECHNICAL = /undefined|null|NaN|\bTypeError\b|is not a function|is not defined|Cannot read|Unexpected token|JSON|syntax|status code|\bfetch\b|PGRST|violates|relation "|column "|constraint|\bjwt\b|\btoken\b|\[object|ECONN|ETIMEDOUT|\bHTTP\b/i;
-const looksTechnical = (message: string) => TECHNICAL.test(message) || message.length > 300;
+export const looksTechnical = (message: string) => TECHNICAL.test(message) || message.length > 300;
 
 /** Any thrown value -> a message for a toast or an inline error. */
 export function errorMessage(error: unknown): string {

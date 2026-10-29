@@ -115,7 +115,7 @@ export function BookingFormPage() {
         )}
         {view.data && submit.data && (
           <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 32 }}>
-            <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+            <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
             <h1 style={{ fontSize: 24, fontWeight: 800 }}>Thanks, {contact.name.trim().split(" ")[0]}!</h1>
             <p style={{ margin: 0 }}>{view.data.company.name} got your request (reference #{submit.data.reference}) and will be in touch soon.</p>
             {submit.data.sentFiles > 0 && <p className="muted" style={{ margin: 0 }}>{submit.data.sentFiles === 1 ? "Your file came with it." : `Your ${submit.data.sentFiles} files came with it.`}</p>}
@@ -281,7 +281,7 @@ function QuestionField({ q, value, invalid, onChange }: { q: Question; value: un
               const on = q.type === "multi_choice" ? list.includes(o) : value === o;
               return (
                 <button key={o} type="button" className="tab" aria-pressed={on} style={{ height: 38, padding: "0 14px" }} onClick={() => onChange(q.type === "multi_choice" ? (on ? list.filter((x) => x !== o) : [...list, o]) : o)}>
-                  {on && <Icon name="check" size={13} strokeWidth={3} />}{o}
+                  {on && <Icon name="check" size={13} strokeWidth={2} />}{o}
                 </button>
               );
             })}

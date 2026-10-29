@@ -11,7 +11,7 @@ import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
-import { EntityStatus, StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { EntityStatus, StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
@@ -174,7 +174,7 @@ export function RequestPage() {
                     <strong>{v.title}</strong>
                     <span className="muted text-sm" style={{ display: "block" }}>{v.starts_at ? formatDateTime(v.starts_at, session.company.timezone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}</span>
                   </span>
-                  <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                  <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
                 </button>
               ))}
             </div>

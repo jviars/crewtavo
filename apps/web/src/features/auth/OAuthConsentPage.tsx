@@ -99,7 +99,7 @@ export function OAuthConsentPage() {
       </div>
       <span className="muted small strong" style={{ marginBottom: -10 }}>Can look at</span>
       <ul className={styles.scopes} aria-label="Can look at">
-        {CAN.map((c) => <li key={c}><Icon name="check" size={15} strokeWidth={2.6} />{c}</li>)}
+        {CAN.map((c) => <li key={c}><Icon name="check" size={15} strokeWidth={2} />{c}</li>)}
       </ul>
       <span className="muted small" style={{ marginTop: -8 }}>It starts out read only. Choose what it can change in Crewtavo, under Settings → AI assistants.</span>
       {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}

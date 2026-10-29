@@ -92,7 +92,7 @@ export function SignaturePad({ value, onChange, label = "Sign here", disabled = 
           onPointerCancel={up}
           style={{ display: "block", width: "100%", height, background: "#fff", border: "1px solid var(--border)", borderRadius: 10, touchAction: "none", cursor: disabled ? "not-allowed" : "crosshair" }}
         />
-        {empty && <span aria-hidden="true" style={{ position: "absolute", left: 14, bottom: 12, right: 14, borderTop: "1px solid #c9c7c0", paddingTop: 4, color: "#8a8780", fontSize: 12, pointerEvents: "none" }}>{label}</span>}
+        {empty && <span aria-hidden="true" style={{ position: "absolute", left: 14, bottom: 12, right: 14, borderTop: "1px solid #c9c7c0", paddingTop: 4, color: "#6b6963", fontSize: 12, pointerEvents: "none" }}>{label}</span>}
       </div>
       {!empty && <Button size="sm" variant="ghost" icon="x" style={{ justifySelf: "start" }} onClick={clear}>Clear</Button>}
     </div>

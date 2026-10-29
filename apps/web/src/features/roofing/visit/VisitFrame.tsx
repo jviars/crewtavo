@@ -52,7 +52,7 @@ export function VisitFrame({ title, subtitle, back, me = true, pageTitle, childr
         <div className={styles.side}>
           {back && (
             <Link to={back.to} className={styles.back} onClick={back.onClick} aria-label={back.label}>
-              <Icon name="chevronLeft" size={20} strokeWidth={2.2} />
+              <Icon name="chevronLeft" size={20} />
               <span className={styles.backText} aria-hidden="true">{back.label}</span>
             </Link>
           )}

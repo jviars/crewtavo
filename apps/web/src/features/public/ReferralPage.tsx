@@ -51,7 +51,7 @@ export function ReferralPage() {
             </header>
             {submit.isSuccess ? (
               <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 32 }}>
-                <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+                <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
                 <h1 style={{ fontSize: 22 }}>Thanks, we'll be in touch</h1>
                 <p className="muted" style={{ margin: 0 }}>{view.data.company.name} will contact you soon about your request (reference #{submit.data.reference}).</p>
               </div>

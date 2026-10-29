@@ -352,7 +352,7 @@ function InvoicePaper({ invoice }: { invoice: DocumentInvoice & { client: { disp
 }
 
 const STRIPE_STATUS: Record<string, string> = {
-  open: "Waiting on payment",
+  open: "Awaiting payment",
   processing: "Bank payment on its way",
   paid: "Paid",
   void: "Voided",

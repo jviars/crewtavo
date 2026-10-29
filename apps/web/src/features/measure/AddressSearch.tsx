@@ -114,7 +114,7 @@ export function AddressSearch({
   return (
     <form className="measure-find" onSubmit={submit} role="search">
       <div className="input-group address-search" ref={box}>
-        <span className="addon">{busy || (suggest.isFetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={15} />}</span>
+        <span className="addon">{busy || (suggest.isFetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={14} />}</span>
         <input
           name="address"
           className="input"

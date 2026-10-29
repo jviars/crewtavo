@@ -386,7 +386,7 @@ export function ContractSettings() {
             title="No contract sections yet"
             action={
               <>
-                <Button variant="primary" icon="sparkle" loading={addStarters.isPending} onClick={() => addStarters.mutate()}>Add example sections</Button>
+                <Button variant="primary" icon="clipboard" loading={addStarters.isPending} onClick={() => addStarters.mutate()}>Add example sections</Button>
                 <Button icon="plus" onClick={() => setEditing("new")}>Write your own</Button>
               </>
             }

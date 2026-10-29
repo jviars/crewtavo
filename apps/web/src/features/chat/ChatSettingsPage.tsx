@@ -213,7 +213,7 @@ function RolesTab({ data }: { data: SettingsData }) {
               {CHAT_COLORS.map((c) => (
                 <button key={c.key} type="button" className="icon-btn" style={{ width: 44, height: 44, borderRadius: "50%" }} aria-label={c.label} aria-pressed={setting.color === c.key} title={c.label} onClick={() => setSetting({ color: c.key })}>
                   <span style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", background: roleColor(c.key), color: "var(--page)", boxShadow: setting.color === c.key ? "0 0 0 2px var(--surface), 0 0 0 4px var(--ink)" : "inset 0 0 0 1px rgba(0,0,0,.08)" }}>
-                    {setting.color === c.key && <Icon name="check" size={15} strokeWidth={3} />}
+                    {setting.color === c.key && <Icon name="check" size={15} strokeWidth={2} />}
                   </span>
                 </button>
               ))}

@@ -1401,7 +1401,7 @@ function ImageryBanner({
     const s = banner.state;
     return (
       <div className="measure-banner measure-banner-good" role="status">
-        <Icon name="sparkle" size={16} />
+        <Icon name="image" size={16} />
         <span className="grow"><strong>Sharper imagery here.</strong> {s.name}'s free state imagery: {s.detail} · {s.flown}.</span>
         <Button size="sm" variant="primary" onClick={() => onUse(stateId(s))}>Use it</Button>
         <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => onDismiss(s.state)} aria-label="Not now"><Icon name="x" size={14} /></button>

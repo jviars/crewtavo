@@ -231,7 +231,7 @@ function GuideCards({ pages, loading, error, retry, isRead, empty, showCategory 
               {(p.status === "draft" || (p.required && p.status === "published")) && (
                 <span className="row wrap" style={{ gap: 6, marginTop: 4 }}>
                   {p.status === "draft" && <span className="pill">Draft</span>}
-                  {p.required && p.status === "published" && <span className="pill" data-tone={read ? "success" : "warning"}>{read ? <><Icon name="check" size={12} strokeWidth={3} />Read</> : "Required"}</span>}
+                  {p.required && p.status === "published" && <span className="pill" data-tone={read ? "success" : "warning"}>{read ? <><Icon name="check" size={12} strokeWidth={2} />Read</> : "Required"}</span>}
                 </span>
               )}
             </span>

@@ -31,7 +31,7 @@ import {
   type EquipmentLog,
 } from "./equipmentData";
 
-const LOG_ICON: Record<EquipmentLog["kind"], IconName> = { service: "check", repair: "job", reading: "gauge", note: "note" };
+const LOG_ICON: Record<EquipmentLog["kind"], IconName> = { service: "check", repair: "wrench", reading: "gauge", note: "note" };
 
 export function EquipmentDetailPage() {
   const { id = "" } = useParams();
@@ -152,7 +152,7 @@ export function EquipmentDetailPage() {
             {!retired && <Button variant="primary" icon="check" onClick={() => setDialog({ log: "service" })}>Log work</Button>}
             <Menu
               items={[
-                { label: "Log a repair", icon: "job", hidden: retired, onSelect: () => setDialog({ log: "repair" }) },
+                { label: "Log a repair", icon: "wrench", hidden: retired, onSelect: () => setDialog({ log: "repair" }) },
                 { label: "Add a note", icon: "note", onSelect: () => setDialog({ log: "note" }) },
                 { separator: true, hidden: !canManage },
                 { label: "Edit details", icon: "edit", hidden: !canManage, onSelect: () => setDialog("edit") },

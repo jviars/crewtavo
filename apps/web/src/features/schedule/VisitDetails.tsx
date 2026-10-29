@@ -11,7 +11,7 @@ import { Icon } from "@/components/ui/Icon";
 import { MapsLink } from "@/components/ui/MapsLink";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatTime } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
@@ -67,7 +67,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
         {v && (
           <>
             <div className="row wrap" style={{ gap: 6 }}>
-              <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+              <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
               {v.kind !== "job" && <span className="chip">{statusLabel(v.kind)}</span>}
               {v.route_order && v.status === "scheduled" && <span className="chip"><Icon name="navigation" size={12} />Stop {v.route_order}</span>}
               {v.time_fixed && v.starts_at && <span className="chip chip-blue"><Icon name="lock" size={12} />Fixed time</span>}

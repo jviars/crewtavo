@@ -203,7 +203,7 @@ function Photo({ photo, n, canDelete, onDelete }: { photo: QuotePhoto; n: number
             if (await confirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true })) onDelete();
           }}
         >
-          <Icon name="x" size={12} strokeWidth={3} />
+          <Icon name="x" size={12} strokeWidth={2} />
         </button>
       )}
     </span>

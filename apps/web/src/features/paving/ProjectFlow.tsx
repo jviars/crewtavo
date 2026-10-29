@@ -233,7 +233,7 @@ export function FlowProgress<Id extends string>({ steps, step }: { steps: Readon
         return (
           <li key={s.id} data-state={done ? "done" : s.id === step ? "current" : "todo"}>
             <a href={`#${s.id}`} aria-current={s.id === step ? "step" : undefined} onClick={(e) => { e.preventDefault(); scrollToStep(s.id); }}>
-              <span className="paving-progress-dot">{done ? <Icon name="check" size={14} strokeWidth={3} /> : i + 1}</span>
+              <span className="paving-progress-dot">{done ? <Icon name="check" size={14} strokeWidth={2} /> : i + 1}</span>
               <span>{s.label}</span>
             </a>
           </li>
@@ -289,7 +289,7 @@ export function StepCard({ id, n, title, status, done, current, children }: { id
   return (
     <section id={id} className="card paving-step-card" data-current={current || undefined} aria-labelledby={`${id}-title`} style={{ scrollMarginTop: 16 }}>
       <div className="card-head">
-        <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={14} strokeWidth={3} /> : n}</span>
+        <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={14} strokeWidth={2} /> : n}</span>
         <h2 id={`${id}-title`}>{title}</h2>
         <span className="muted small">{status}</span>
       </div>

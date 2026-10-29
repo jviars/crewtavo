@@ -12,7 +12,7 @@ import { MapsLink, RouteMapsLink } from "@/components/ui/MapsLink";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
 import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
@@ -165,7 +165,7 @@ export function FieldTodayPage() {
               <div className="row">
                 {v.route_order != null && <span className="chip chip-green">Stop {v.route_order}</span>}
                 <span className="chip">{v.starts_at ? time(v.starts_at) : v.route_order != null ? "Anytime" : `Stop ${i + 1}`}</span>
-                <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
                 {v.kind !== "job" && <span className="chip">{statusLabel(v.kind)}</span>}
                 {v.series_total && v.series_total > 1 && <span className="chip chip-blue">Day {v.series_day} of {v.series_total}</span>}
               </div>

@@ -108,7 +108,7 @@ export function SopPage() {
         actions={
           <>
             {sop.required && sop.status === "published" && (acknowledged ? (
-              <span className="pill" data-tone="success" style={{ height: 36, padding: "0 14px" }}><Icon name="check" size={14} strokeWidth={3} />You've read this</span>
+              <span className="pill" data-tone="success" style={{ height: 36, padding: "0 14px" }}><Icon name="check" size={14} strokeWidth={2} />You've read this</span>
             ) : (
               <Button variant="primary" icon="check" loading={acknowledge.isPending} disabled={reads.isPending} onClick={() => acknowledge.mutate()}>I've read this</Button>
             ))}
@@ -133,7 +133,7 @@ export function SopPage() {
         {sop.status === "draft" && <span className="pill" data-tone="warning">Draft · only the office can see this</span>}
         {sop.required && <span className="pill" data-tone="warning">Required reading{sop.audience?.length ? ` for ${sop.audience.map((r) => ROLE_LABELS[r] ?? r).join(", ")}` : ""}</span>}
         <span className="muted small">Revision {sop.revision} · Updated {timeAgo(sop.updated_at)}{sop.updated_by && team.data ? ` by ${name(sop.updated_by)}` : ""}</span>
-        {sop.tags.map((t) => <Link key={t} to={`/kb?q=${encodeURIComponent(t)}`} className="chip no-print" title="Guides tagged with this">{t}</Link>)}
+        {sop.tags.map((t) => <Link key={t} to={`/kb?q=${encodeURIComponent(t)}`} className="tag no-print" title="Guides tagged with this">{t}</Link>)}
       </div>
       <div className="sop-reader">
         <div className="sop-layout">

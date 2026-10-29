@@ -251,7 +251,7 @@ function SignInCountries() {
         {countries.map((code) => (
           <span key={code} className="chip">
             {countryLabel(code)}
-            <button type="button" aria-label={`Stop texting codes to ${countryLabel(code)}`} disabled={save.isPending} onClick={() => save.mutate(countries.filter((c) => c !== code))}><Icon name="x" size={10} strokeWidth={3} /></button>
+            <button type="button" aria-label={`Stop texting codes to ${countryLabel(code)}`} disabled={save.isPending} onClick={() => save.mutate(countries.filter((c) => c !== code))}><Icon name="x" size={10} strokeWidth={2} /></button>
           </span>
         ))}
       </div>

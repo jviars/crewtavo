@@ -22,6 +22,7 @@ import { api, ApiError, companyFeatures, loadConfig, setActiveCompany, supabase,
 import { forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, pendingFieldActions, startOfflineCache } from "./offline";
 import { setSessionExpiredHandler } from "./queryClient";
 import { toast } from "./toast";
+import { flushUndos } from "./undo";
 
 /**
  * The active company. A sub gets only its basics (company_basics() in the database): no slug, trade
@@ -290,6 +291,8 @@ export function SessionProvider({ children, requireCompany = true }: { children:
         danger: true,
       }));
     if (!ok) return false;
+    // A delete still showing its Undo goes through now, while the person is still signed in.
+    await flushUndos();
     signingOut.current = true;
     await supabase().auth.signOut().catch(() => undefined);
     // Still set: no SIGNED_OUT came (the sign-in needed refreshing and that didn't get through).

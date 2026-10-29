@@ -195,7 +195,7 @@ export function ClientsPage() {
                       {c.properties[0] ? [c.properties[0].line1, c.properties[0].city].filter(Boolean).join(", ") : <span className="muted">—</span>}
                       {c.properties.length > 1 && <span className="muted"> +{c.properties.length - 1}</span>}
                     </td>
-                    <td><div className="row wrap" style={{ gap: 4 }}>{c.tags.slice(0, 3).map((t) => <span key={t} className="chip">{t}</span>)}{c.tags.length > 3 && <span className="chip">+{c.tags.length - 3}</span>}</div></td>
+                    <td><div className="row wrap" style={{ gap: 4 }}>{c.tags.slice(0, 3).map((t) => <span key={t} className="tag">{t}</span>)}{c.tags.length > 3 && <span className="tag">+{c.tags.length - 3}</span>}</div></td>
                     <td><EntityStatus kind="client" status={c.status} /></td>
                   </tr>
                 ))}

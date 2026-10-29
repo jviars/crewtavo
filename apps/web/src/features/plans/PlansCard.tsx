@@ -5,7 +5,7 @@
  * property", so next year's restripe has last year's striping plan.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -18,10 +18,8 @@ import { supabase, unwrap } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import {
-  canMap, fileSize, isAbort, isImage, isPdf, PLAN_FIELDS, planEntries, planMeta, titleFromFileName, TooLargeError, uploadPlanFile, usePlanLinks,
-  type PlanEntry, type PlanFile, type Upload,
-} from "./plans";
+import { canMap, fileSize, isImage, isPdf, PLAN_FIELDS, planEntries, planMeta, usePlanLinks, type PlanEntry, type PlanFile } from "./plans";
+import { addPlanFiles, usePlanUploads, type PlanTarget } from "./planUploads";
 import styles from "./plans.module.css";
 import { useTooLarge } from "./UploadLimit";
 
@@ -31,17 +29,7 @@ export type PlansScope =
   | { kind: "job"; id: string; propertyId: string | null }
   | { kind: "client"; properties: Array<{ id: string; label: string }> };
 
-/** Where a new file goes: the request, quote or job (the database adds the property), or a property. */
-type Target = { request_id?: string; quote_id?: string; job_id?: string; property_id?: string };
 const COLUMN = { request: "request_id", quote: "quote_id", job: "job_id" } as const;
-
-interface Sending {
-  key: string;
-  name: string;
-  size: number;
-  progress: number;
-  abort: () => void;
-}
 
 const scopeKey = (scope: PlansScope) => (scope.kind === "client" ? ["client", scope.properties.map((p) => p.id).join(",")] : [scope.kind, scope.id, scope.propertyId ?? ""]);
 
@@ -73,63 +61,47 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
   const entries = planEntries(rows);
   const links = usePlanLinks(rows);
   const [showArchived, setShowArchived] = useState(false);
-  const [sending, setSending] = useState<Sending[]>([]);
+  // Uploads carry on when the card goes (planUploads.ts): back on this screen, it shows them again.
+  const card = scopeKey(scope).join(":");
+  const sending = usePlanUploads(card);
   const [editing, setEditing] = useState<PlanFile | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const pickFor = useRef<{ target: Target; replaces: PlanFile | null } | null>(null);
+  const pickFor = useRef<{ target: PlanTarget; replaces: PlanFile | null } | null>(null);
   const tooLarge = useTooLarge();
+  // Whether the card is still on the screen when its uploads finish: if not, the task island says how they went.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["plans"] });
 
   // ----- Adding files -------------------------------------------------------------------------
-  async function send(list: File[], target: Target, replaces: PlanFile | null = null) {
-    let added = 0;
-    let lastId: string | null = null;
-    for (const file of list) {
-      const key = crypto.randomUUID();
-      const upload: Upload = uploadPlanFile(session.company.id, file, (progress) => setSending((s) => s.map((u) => (u.key === key ? { ...u, progress } : u))));
-      setSending((s) => [...s, { key, name: file.name, size: file.size, progress: 0, abort: upload.abort }]);
-      try {
-        const path = await upload.promise;
-        const { data, error } = await supabase()
-          .from("plan_files")
-          .insert({
-            company_id: session.company.id,
-            ...target,
-            replaces_id: replaces?.id ?? null,
-            title: replaces?.title ?? titleFromFileName(file.name),
-            path,
-            file_name: file.name.slice(0, 255),
-            content_type: (file.type || null)?.slice(0, 150) ?? null,
-            size_bytes: file.size,
-            crew_visible: replaces?.crew_visible ?? true,
-          })
-          .select("id")
-          .single();
-        if (error) {
-          void supabase().storage.from("files").remove([path]);
-          throw new Error(error.message);
-        }
-        added++;
-        lastId = data.id;
-      } catch (error) {
-        if (isAbort(error)) continue;
-        if (error instanceof TooLargeError) tooLarge.report(error);
-        else toast.error(`${file.name}: ${error instanceof Error ? error.message : "Couldn't add it."}`);
-      } finally {
-        setSending((s) => s.filter((u) => u.key !== key));
-      }
-    }
-    refresh();
-    if (!added) return;
-    if (replaces) {
-      const id = lastId;
-      toast.success(`New version of ${replaces.title} added`, {
-        description: "It's the current one now. The crew only sees this version.",
-        action: id ? { label: "Add a label", onClick: () => openEditor(id) } : undefined,
-      });
-    } else toast.success(added === 1 ? "File added" : `${added} files added`);
+  function send(list: File[], target: PlanTarget, replaces: PlanFile | null = null) {
+    void addPlanFiles({
+      companyId: session.company.id,
+      card,
+      files: list,
+      target,
+      replaces,
+      screen: {
+        tooLarge: (error) => mounted.current && tooLarge.report(error),
+        failed: (name, message) => mounted.current && toast.error(`${name}: ${message}`),
+        added: (added, lastId) => {
+          if (!mounted.current) return;
+          if (replaces) {
+            toast.success(`New version of ${replaces.title} added`, {
+              description: "It's the current one now. The crew only sees this version.",
+              action: lastId ? { label: "Add a label", onClick: () => openEditor(lastId) } : undefined,
+            });
+          } else toast.success(added === 1 ? "File added" : `${added} files added`);
+        },
+      },
+    });
   }
 
   async function openEditor(id: string) {
@@ -137,14 +109,14 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
     if (row) setEditing(row);
   }
 
-  const pick = (target: Target, replaces: PlanFile | null = null) => {
+  const pick = (target: PlanTarget, replaces: PlanFile | null = null) => {
     pickFor.current = { target, replaces };
     picker.current?.click();
   };
-  const defaultTarget = (propertyId?: string): Target | null =>
+  const defaultTarget = (propertyId?: string): PlanTarget | null =>
     scope.kind !== "client" ? { [COLUMN[scope.kind]]: scope.id } : propertyId ? { property_id: propertyId } : scope.properties.length === 1 ? { property_id: scope.properties[0].id } : null;
 
-  const dropProps = (zone: string, target: Target | null) =>
+  const dropProps = (zone: string, target: PlanTarget | null) =>
     canAdd && target
       ? {
           onDragOver: (e: DragEvent) => {
@@ -159,7 +131,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
             e.preventDefault();
             setDropOn(null);
             const list = [...e.dataTransfer.files];
-            if (list.length) void send(list, target);
+            if (list.length) send(list, target);
           },
         }
       : {};
@@ -224,7 +196,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
 
   const visible = entries.filter((e) => showArchived || !e.file.archived);
   const archivedCount = entries.filter((e) => e.file.archived).length;
-  const groups: Array<{ key: string; label: string | null; entries: PlanEntry[]; target: Target | null; empty?: ReactNode }> =
+  const groups: Array<{ key: string; label: string | null; entries: PlanEntry[]; target: PlanTarget | null; empty?: ReactNode }> =
     scope.kind === "client"
       ? scope.properties.map((p) => ({
           key: p.id,
@@ -280,7 +252,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
             e.target.value = "";
             const ask = pickFor.current;
             if (!list.length || !ask) return;
-            void send(ask.replaces ? list.slice(0, 1) : list, ask.target, ask.replaces);
+            send(ask.replaces ? list.slice(0, 1) : list, ask.target, ask.replaces);
           }}
         />
         {files.isPending && <div className="stack-sm"><Skeleton width="60%" /><Skeleton width="40%" /></div>}
@@ -291,10 +263,10 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
               <div key={u.key} className={styles.upload} role="status">
                 <div className={styles.uploadHead}>
                   <span title={u.name}>{u.name}</span>
-                  <span className="muted small tabular">{u.progress >= 1 ? "Saving…" : `${Math.round(u.progress * 100)}% of ${fileSize(u.size)}`}</span>
-                  {u.progress < 1 && <Button size="sm" variant="ghost" icon="x" aria-label={`Stop uploading ${u.name}`} onClick={u.abort} />}
+                  <span className="muted small tabular">{u.progress === null ? `Waiting · ${fileSize(u.size)}` : u.progress >= 1 ? "Saving…" : `${Math.round(u.progress * 100)}% of ${fileSize(u.size)}`}</span>
+                  {(u.progress ?? 0) < 1 && <Button size="sm" variant="ghost" icon="x" aria-label={`Stop uploading ${u.name}`} onClick={u.stop} />}
                 </div>
-                <div className="progress" aria-hidden="true"><span style={{ width: `${Math.round(u.progress * 100)}%` }} /></div>
+                <div className="progress" aria-hidden="true"><span style={{ width: `${Math.round((u.progress ?? 0) * 100)}%` }} /></div>
               </div>
             ))}
           </div>

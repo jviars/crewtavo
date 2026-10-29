@@ -147,7 +147,7 @@ function Tile({ service, row, start, price, editor, onAdd, onShow }: { service: 
     <article className={styles.tile} data-on={line ? "" : undefined}>
       <button type="button" className={styles.pic} aria-label={tapLabel} disabled={adding} onClick={tap}>
         <ServicePicture name={service.name} picture={service.picture} />
-        {line && <span className={styles.badge}>{howMany ?? <Icon name="check" size={16} strokeWidth={3.2} />}</span>}
+        {line && <span className={styles.badge}>{howMany ?? <Icon name="check" size={16} strokeWidth={2.25} />}</span>}
       </button>
       <div className={styles.body}>
         <span className={styles.text}>
@@ -156,28 +156,28 @@ function Tile({ service, row, start, price, editor, onAdd, onShow }: { service: 
         </span>
         {!line ? (
           <button type="button" className={styles.add} disabled={adding} aria-busy={adding || undefined} onClick={onAdd}>
-            {adding ? <Spinner size={17} /> : <Icon name="plus" size={17} strokeWidth={2.8} />}
+            {adding ? <Spinner size={16} /> : <Icon name="plus" size={16} strokeWidth={2} />}
             {start && start > 1 ? `Add ${countText(start)}` : "Add"}
           </button>
         ) : stepper ? (
           <div className={styles.stepper}>
             <button type="button" className={styles.step} aria-label={row!.lessLabel} disabled={saving} onClick={() => editor.dec(line)}>
-              <Icon name="minus" size={18} strokeWidth={2.6} />
+              <Icon name="minus" size={18} strokeWidth={2} />
             </button>
             <span className={styles.count} aria-live="polite" aria-label={row!.quantity ?? undefined}>{howMany}</span>
             <button type="button" className={styles.step} aria-label={row!.moreLabel} disabled={saving || !row!.more} onClick={() => editor.inc(line)}>
-              <Icon name="plus" size={18} strokeWidth={2.6} />
+              <Icon name="plus" size={18} strokeWidth={2} />
             </button>
           </div>
         ) : (
           <div className={styles.onIt}>
             <span className={styles.onText}>
-              <Icon name="check" size={16} strokeWidth={2.8} />
+              <Icon name="check" size={16} strokeWidth={2.25} />
               {money(row!.amount)}
             </span>
             {row!.less && (
               <button type="button" className={styles.step} aria-label={row!.lessLabel} disabled={saving} onClick={() => editor.dec(line)}>
-                <Icon name="minus" size={18} strokeWidth={2.6} />
+                <Icon name="minus" size={18} strokeWidth={2} />
               </button>
             )}
           </div>

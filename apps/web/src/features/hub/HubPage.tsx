@@ -329,7 +329,7 @@ function HubSkeleton() {
 function Done({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }}>
-      <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+      <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
       <h2 style={{ fontSize: 20, fontWeight: 800 }}>{title}</h2>
       {children && <p className="muted" style={{ margin: 0, maxWidth: 440 }}>{children}</p>}
       {action && <div className="no-print" style={{ marginTop: 6 }}>{action}</div>}
@@ -396,7 +396,7 @@ function OptionCard({ option, price, picked, onPick, words, disabled = false }: 
         {option.highlights.length > 0 && (
           <ul className={styles.highlights}>
             {option.highlights.map((h, i) => (
-              <li key={i}><Icon name="check" size={14} strokeWidth={3} /><span>{h}</span></li>
+              <li key={i}><Icon name="check" size={14} strokeWidth={2} /><span>{h}</span></li>
             ))}
           </ul>
         )}
@@ -579,7 +579,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                     <h2>{shown ? `What's included with ${shown.name}` : "What's included"}</h2>
                     <ul className={styles.checks}>
                       {range.included.map((item) => (
-                        <li key={item}><span className={styles.tick}><Icon name="check" size={13} strokeWidth={3.5} /></span><span>{item}</span></li>
+                        <li key={item}><span className={styles.tick}><Icon name="check" size={13} strokeWidth={2.25} /></span><span>{item}</span></li>
                       ))}
                     </ul>
                   </section>
@@ -616,7 +616,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
               <div className={cx(styles.card, styles.next, !accepted && "no-print")} data-done={accepted || undefined}>
                 {accepted ? (
                   <div ref={thanks} tabIndex={-1} className={styles.thanks}>
-                    <span className={styles.thanksMark}><Icon name="check" size={22} strokeWidth={3} /></span>
+                    <span className={styles.thanksMark}><Icon name="check" size={22} strokeWidth={2.5} /></span>
                     <strong>{first ? `Thanks, ${first}. We'll call you soon.` : "Thanks. We'll call you soon."}</strong>
                     <p>{words.thanks}</p>
                     {!data.preview && <button type="button" className={cx(styles.noteBtn, "no-print")} onClick={onAsk}>Send {company.name} a note</button>}
@@ -959,7 +959,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
                 <li key={s} aria-current={s === current ? "step" : undefined} data-done={i < at || undefined}>
                   {i < at ? (
                     <button type="button" onClick={() => goTo(s)}>
-                      <span className="hub-step-n"><Icon name="check" size={13} strokeWidth={3} /></span>
+                      <span className="hub-step-n"><Icon name="check" size={13} strokeWidth={2} /></span>
                       {STEP_LABELS[s]}
                       <span className="sr-only"> (done, go back)</span>
                     </button>

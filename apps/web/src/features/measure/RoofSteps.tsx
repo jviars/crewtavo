@@ -102,5 +102,5 @@ export function RoofSteps({
 }
 
 function Dot({ n, done }: { n: number; done: boolean }) {
-  return <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={13} strokeWidth={3} /> : n}</span>;
+  return <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={13} strokeWidth={2} /> : n}</span>;
 }

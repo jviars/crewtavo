@@ -72,7 +72,7 @@ export function InvoiceSummary({ onPick }: { onPick: (filter: "open" | "overdue"
   if (!s) return <div className="stat-row">{[0, 1, 2].map((i) => <div key={i} className="card stat"><Skeleton width="50%" height={11} /><Skeleton width="70%" height={24} /><Skeleton width="100%" height={40} style={{ marginTop: 10 }} /></div>)}</div>;
   return (
     <div className="stat-row">
-      {stat("Waiting on payment", s.owed, `${s.owedCount} ${s.owedCount === 1 ? "invoice" : "invoices"}`, "open", "owed")}
+      {stat("Awaiting payment", s.owed, `${s.owedCount} ${s.owedCount === 1 ? "invoice" : "invoices"}`, "open", "owed")}
       {stat("Past due", s.late, s.lateCount ? `${s.lateCount} ${s.lateCount === 1 ? "invoice" : "invoices"}` : "Nothing late", "overdue", "pastDue", s.lateCount ? "bad" : undefined)}
       {stat("Collected, last 30 days", s.collected, "Payments received", "paid", "collected")}
     </div>

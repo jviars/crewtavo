@@ -2,6 +2,7 @@
  * An address or a Directions button that opens the person's maps app: the one they chose to always
  * use on this device, or else a sheet to pick one (Apple Maps, Google Maps, Waze, and on Android any
  * installed app). A route button does the same for a whole day's stops. See lib/maps.ts.
+ * Without a className it's an address in the app's link style (.address-link).
  */
 import { Fragment, useState, type ReactNode } from "react";
 import { copyText } from "@/lib/clipboard";
@@ -9,7 +10,7 @@ import { MAPS_LABELS, mapsApps, mapsUrl, placeText, rememberApp, rememberedApp, 
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
 
-export function MapsLink({ place, className, title, children }: { place: Place; className?: string; title?: string; children: ReactNode }) {
+export function MapsLink({ place, className = "address-link", title, children }: { place: Place; className?: string; title?: string; children: ReactNode }) {
   const [choosing, setChoosing] = useState(false);
   const app = rememberedApp();
   if (app) {

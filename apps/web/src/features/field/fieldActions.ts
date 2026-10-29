@@ -102,8 +102,15 @@ export async function saveVisitNotes(v: { visitId: string; notes: string | null;
   await api.patch(`/visits/${v.visitId}`, { notes: v.notes }, { companyId: v.companyId });
 }
 
+/**
+ * Field actions wait for signal ("online" mode): with none, React Query pauses them and lib/offline.ts
+ * keeps them on the phone. Every other save fails at once instead (lib/queryClient.ts).
+ */
+const WAIT_FOR_SIGNAL = { networkMode: "online" } as const;
+
 export function registerFieldActions(queryClient: QueryClient) {
   queryClient.setMutationDefaults(["visit-status"], {
+    ...WAIT_FOR_SIGNAL,
     mutationFn: async (v: VisitStatusChange) => {
       const result = await setVisitStatus(v);
       // Their clock was turned off: what this phone knows about them (GET /me) is out of date.
@@ -111,6 +118,6 @@ export function registerFieldActions(queryClient: QueryClient) {
       return result;
     },
   });
-  queryClient.setMutationDefaults(["checklist-save"], { mutationFn: (v: ChecklistSave) => saveChecklist(v) });
-  queryClient.setMutationDefaults(["visit-notes"], { mutationFn: (v: { visitId: string; notes: string | null }) => saveVisitNotes(v) });
+  queryClient.setMutationDefaults(["checklist-save"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: ChecklistSave) => saveChecklist(v) });
+  queryClient.setMutationDefaults(["visit-notes"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: { visitId: string; notes: string | null }) => saveVisitNotes(v) });
 }

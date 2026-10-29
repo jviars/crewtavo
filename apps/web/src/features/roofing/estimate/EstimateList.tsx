@@ -114,7 +114,7 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
                 const only = onlyHere(s, "quick");
                 return (
                   <button key={s.id} type="button" className={styles.chip} disabled={adding} aria-busy={adding || undefined} aria-label={`Add ${s.name}, ${price}${only ? `, ${only.toLowerCase()}` : ""}`} onClick={() => editor.addService(s, s.quantity, whereTo(s, "quick"))}>
-                    {adding ? <Spinner size={size === "large" ? 17 : 15} /> : <Icon name="plus" size={size === "large" ? 17 : 15} strokeWidth={2.8} />}
+                    {adding ? <Spinner size={size === "large" ? 16 : 14} /> : <Icon name="plus" size={size === "large" ? 16 : 14} strokeWidth={2} />}
                     {s.name}
                     <small>{only ? `${price} · ${only}` : price}</small>
                   </button>
@@ -188,13 +188,13 @@ function Row({ row, editor, onEdit }: { row: EstimateRow; editor?: EstimateEdito
       <span className={styles.controls}>
         {editor && line && row.less && (
           <button type="button" className={styles.round} aria-label={row.lessLabel} disabled={saving} onClick={() => editor.dec(line)}>
-            <Icon name="minus" size={16} strokeWidth={2.5} />
+            <Icon name="minus" size={16} />
           </button>
         )}
         {editor && line && row.quantity !== null && <span className={styles.qty} aria-live="polite">{row.quantity}</span>}
         {editor && line && (row.kind === "count" || row.kind === "layers") && (
           <button type="button" className={styles.round} aria-label={row.moreLabel} disabled={saving || !row.more} onClick={() => editor.inc(line)}>
-            <Icon name="plus" size={16} strokeWidth={2.5} />
+            <Icon name="plus" size={16} />
           </button>
         )}
         {!editor && row.quantity !== null && !removed && <span className={styles.qty}>{row.quantity}</span>}

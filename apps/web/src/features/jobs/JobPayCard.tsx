@@ -24,7 +24,7 @@ import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { StatusPill, statusLabel } from "@/components/ui/StatusPill";
+import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -397,7 +397,7 @@ function VisitPicker({ visits, covered, onToggle, disabled, hint }: { visits: re
               <input type="checkbox" checked={covered.includes(v.id)} disabled={disabled} onChange={(e) => onToggle(v.id, e.target.checked)} />
               <span className="grow">
                 {v.title}
-                <span className="muted small" style={{ display: "block" }}>{v.scheduled_on ? formatDate(v.scheduled_on) : "Not scheduled"} · {statusLabel(v.status)}</span>
+                <span className="muted small" style={{ display: "block" }}>{v.scheduled_on ? formatDate(v.scheduled_on) : "Not scheduled"} · {statusText("visit", v.status)}</span>
               </span>
             </label>
           ))}

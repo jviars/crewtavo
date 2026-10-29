@@ -266,9 +266,10 @@ function stopSaving(userId: string) {
 export function startOfflineCache(queryClient: QueryClient, userId: string, keepQueries: boolean): () => void {
   // Added to the defaults registerFieldActions set (setMutationDefaults replaces, so call this after it), before restoring any.
   // The screens send field actions with these too (no mutationFn of their own), so every request out is noted.
+  // "online" mode is what makes them wait for signal: every other save fails at once (lib/queryClient.ts).
   for (const key of OFFLINE_MUTATIONS) {
     const defaults = queryClient.getMutationDefaults([key]);
-    queryClient.setMutationDefaults([key], { ...defaults, ...FIELD_RETRY, ...(defaults.mutationFn && { mutationFn: noteSending(defaults.mutationFn) }) });
+    queryClient.setMutationDefaults([key], { ...defaults, networkMode: "online", ...FIELD_RETRY, ...(defaults.mutationFn && { mutationFn: noteSending(defaults.mutationFn) }) });
   }
   restore(queryClient, userId);
 

@@ -219,7 +219,7 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
                 {editable && (
                   <li>
                     <button type="button" className={styles.addPkg} onClick={() => create.mutate()} disabled={create.isPending}>
-                      <Icon name="plus" size={16} strokeWidth={2.5} />Add a package
+                      <Icon name="plus" size={16} />Add a package
                     </button>
                   </li>
                 )}
@@ -919,7 +919,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
                       else addItem.mutate({ serviceId: service.id, kind: "quick" });
                     }}
                   >
-                    <Icon name={on ? "check" : "plus"} size={15} strokeWidth={3} />
+                    <Icon name={on ? "check" : "plus"} size={15} strokeWidth={2} />
                     {service.name}
                     <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
                   </button>
@@ -931,7 +931,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
             <div className={styles.chips}>
               {chips.filter((c) => c.on).map(({ service }) => (
                 <span key={service.id} className={styles.quick} data-on="">
-                  <Icon name="check" size={15} strokeWidth={3} />
+                  <Icon name="check" size={15} strokeWidth={2} />
                   {service.name}
                   <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
                 </span>

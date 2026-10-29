@@ -1,6 +1,7 @@
 /**
  * Skeleton placeholders shaped like the content that's loading. They fade in after a short delay
- * (.skeleton-wrap), so fast loads never flash a placeholder.
+ * (.skeleton-wrap), so fast loads never flash a placeholder, and after three seconds a caption says
+ * it's taking longer than usual (.skeleton-slow, all CSS).
  */
 import type { CSSProperties } from "react";
 
@@ -16,11 +17,15 @@ export function SkeletonText({ lines = 3, lastWidth = "60%" }: { lines?: number;
   );
 }
 
+/** Shown over the top of a skeleton that's still up after three seconds; out of the flow, so nothing moves. */
+const SlowCaption = () => <span className="skeleton-slow" aria-hidden="true">Taking longer than usual…</span>;
+
 /** Wrapper that announces loading to screen readers and delays the fade-in. */
 export function Loading({ children, label = "Loading", className }: { children: React.ReactNode; label?: string; className?: string }) {
   return (
     <div className={className ? `skeleton-wrap ${className}` : "skeleton-wrap"} role="status" aria-live="polite" aria-busy="true">
       <span className="sr-only">{label}…</span>
+      <SlowCaption />
       {children}
     </div>
   );
@@ -125,7 +130,8 @@ export function ShellSkeleton() {
       </aside>
       <div className="main">
         <div className="topbar" aria-hidden="true"><div className="business"><Skeleton width={30} height={30} radius={8} /><Skeleton width={140} height={13} /></div></div>
-        <div className="content" style={{ animation: "none" }}>
+        <div className="content" style={{ animation: "none", position: "relative" }}>
+          <SlowCaption />
           <Skeleton width={160} height={14} />
           <Skeleton width={340} height={38} style={{ marginTop: -14 }} />
           <div className="card" style={{ height: 150 }} />

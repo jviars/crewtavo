@@ -374,7 +374,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                     >
                       <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
                       {name}
-                      {on && <Icon name="check" size={12} strokeWidth={3} />}
+                      {on && <Icon name="check" size={12} strokeWidth={2} />}
                     </button>
                   );
                 })}
@@ -397,7 +397,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                     <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: "var(--text-3)" }}><Face name={x.name} /></span>
                     {x.name}
                     {off && <span className="muted small">Can't sign in now</span>}
-                    {on && <Icon name="check" size={12} strokeWidth={3} />}
+                    {on && <Icon name="check" size={12} strokeWidth={2} />}
                   </button>
                 );
               })}
@@ -417,7 +417,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                   <button key={m.id} type="button" className="tab" aria-pressed={on} disabled={shop && !on} title={shop ? "In the shop" : undefined} onClick={() => setEquipment(on ? picked.filter((x) => x !== m.id) : [...picked, m.id])}>
                     <Icon name="truck" size={13} />
                     {m.name}{shop ? " (in the shop)" : ""}
-                    {on && <Icon name="check" size={12} strokeWidth={3} />}
+                    {on && <Icon name="check" size={12} strokeWidth={2} />}
                   </button>
                 );
               })}

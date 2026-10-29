@@ -12,7 +12,7 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { statusLabel } from "@/components/ui/StatusPill";
+import { statusText } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { formatTime } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -136,10 +136,10 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
             <ol className="route-list" aria-label="Stops in order">
               {p.started.map((s) => (
                 <li key={s.id} className="route-stop" data-started>
-                  <span className="route-num"><Icon name="check" size={12} strokeWidth={3} /></span>
+                  <span className="route-num"><Icon name="check" size={12} strokeWidth={2} /></span>
                   <span style={{ minWidth: 0 }}>
                     <strong>{s.title}</strong>
-                    <span className="muted small" style={{ display: "block" }}>{statusLabel(s.status)}{s.address ? ` · ${s.address}` : ""}</span>
+                    <span className="muted small" style={{ display: "block" }}>{statusText("visit", s.status)}{s.address ? ` · ${s.address}` : ""}</span>
                   </span>
                   <span />
                 </li>

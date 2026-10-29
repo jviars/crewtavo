@@ -92,7 +92,7 @@ export function TeamSettings() {
                         {canSetPhoto(m) ? (
                           <button type="button" className="avatar avatar-edit" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }} onClick={() => setPhotoFor(m.user_id)} aria-label={me ? "Your photo" : `${name}'s photo`} title={m.profile?.avatar_url ? "Change photo" : "Add a photo"}>
                             <Face name={name} photo={m.profile?.avatar_url} />
-                            <span className="avatar-edit-badge" aria-hidden="true"><Icon name="camera" size={9} strokeWidth={2.5} /></span>
+                            <span className="avatar-edit-badge" aria-hidden="true"><Icon name="camera" size={9} /></span>
                           </button>
                         ) : (
                           <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
@@ -208,7 +208,7 @@ function ResetPasswordDialog({ member, onClose }: { member: Member; onClose: () 
         <div className="dialog-body">
           {reset.data.emailed ? (
             <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
-              <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+              <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
               <p style={{ margin: 0 }}>We emailed {member.profile?.email ?? first} a link to choose a new password.</p>
               {session.config.features.devMail && <span className="muted small">Test mode: the email is in the local Mailpit inbox (http://localhost:56324).</span>}
             </div>
@@ -300,7 +300,7 @@ function InviteResult({ sent, message, onClose }: { sent: InviteSent; message: s
   return (
     <div className="dialog-body">
       <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
-        <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+        <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
         <p style={{ margin: 0 }}>{message}</p>
         {session.config.features.devMail && sent.emailed && <span className="muted small">Test mode: the email is in the local Mailpit inbox (http://localhost:56324).</span>}
       </div>

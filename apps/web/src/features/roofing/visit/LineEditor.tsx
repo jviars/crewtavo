@@ -61,7 +61,7 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
           <label htmlFor={`${id}-qty`}>How many</label>
           <div className={styles.qtyRow}>
             <button type="button" className={styles.qtyStep} aria-label="One fewer" onClick={() => step(-1)}>
-              <Icon name="minus" size={18} strokeWidth={2.5} />
+              <Icon name="minus" size={18} strokeWidth={2} />
             </button>
             <input
               id={`${id}-qty`}
@@ -75,7 +75,7 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
               onChange={(e) => setQuantity(e.target.value)}
             />
             <button type="button" className={styles.qtyStep} aria-label="One more" onClick={() => step(1)}>
-              <Icon name="plus" size={18} strokeWidth={2.5} />
+              <Icon name="plus" size={18} strokeWidth={2} />
             </button>
           </div>
           {q === null && <span className={styles.priceError} role="alert">Type how many, like 3.</span>}
