@@ -1,6 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { monthLabel, type CalendarEvent } from "../src/features/schedule/CalendarEventDialog";
-import { place, type GridVisit } from "../src/features/schedule/TimeGrid";
+import { fitBlock, place, TimeRange, type GridVisit } from "../src/features/schedule/TimeGrid";
 import { entrySpan } from "../src/features/timesheets/entrySpan";
 
 const tz = "America/New_York";
@@ -22,6 +24,35 @@ describe("double bookings on the schedule", () => {
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("x", "cancelled", "09:00", "11:00")])).toEqual({ a: false });
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("b", "scheduled", "09:00", "11:00", "crew-2")])).toEqual({ a: false, b: false });
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00", null), visit("b", "scheduled", "09:00", "11:00", null)])).toEqual({ a: false, b: false });
+  });
+});
+
+describe("what a visit block has room for", () => {
+  const all = { time: true, people: true, client: true };
+
+  it("gives the shortest block its title alone, on one whole line", () => {
+    expect(fitBlock(22, all)).toEqual({ time: false, title: 1, people: false, hold: false, client: false });
+  });
+
+  it("keeps the time on a row of its own, with the people after the title when they have no row", () => {
+    expect(fitBlock(34, all)).toMatchObject({ time: true, title: 1, people: false });
+    expect(fitBlock(46, all)).toMatchObject({ time: true, title: 1, people: "inline" });
+  });
+
+  it("gives taller blocks the people's row, then the client, then more of the title", () => {
+    expect(fitBlock(58, all)).toMatchObject({ people: "row", client: false, title: 1 });
+    expect(fitBlock(70, all)).toMatchObject({ people: "row", client: true, title: 1 });
+    expect(fitBlock(200, all).title).toBe(3);
+  });
+});
+
+describe("time ranges on the schedule", () => {
+  const html = (start: string, end?: string) => renderToStaticMarkup(createElement(TimeRange, { start, end }));
+
+  it("writes AM or PM once when both ends share it, keeping the start's for narrow blocks", () => {
+    expect(html("1:30 PM", "2:30 PM")).toBe('1:30<span class="tg-ampm"> PM</span><span class="tg-end"> – 2:30 PM</span>');
+    expect(html("11:30 AM", "12:30 PM")).toBe('11:30<span> AM</span><span class="tg-end"> – 12:30 PM</span>');
+    expect(html("9 AM")).toBe("9<span> AM</span>");
   });
 });
 

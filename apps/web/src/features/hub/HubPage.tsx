@@ -16,7 +16,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, typ
 import { flushSync } from "react-dom";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
-import { FormError } from "@/components/ui/Field";
+import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { BrandMark } from "@/components/shell/BrandMark";
@@ -235,9 +235,9 @@ export function HubPage() {
                 <span className="stack-xs"><strong>{d.company.name}</strong><span className="hub-meta">{d.kind === "client" ? "Your account" : d.kind === "quote" ? `Quote #${d.quote.number}` : `Invoice #${d.invoice.number}`}</span></span>
               </div>
             )}
-            {d.company.phone && <a className="hub-icon-btn no-print" href={`tel:${d.company.phone}`} aria-label={`Call ${d.company.name}`}><Icon name="phone" size={19} /></a>}
-            {!preview && <button type="button" className="hub-icon-btn no-print" onClick={() => setMessaging({})} aria-label={`Message ${d.company.name}`}><Icon name="messages" size={19} /></button>}
-            {d.kind !== "client" && <button type="button" className="hub-icon-btn no-print" onClick={print} aria-label="Print or save as PDF"><Icon name="printer" size={19} /></button>}
+            {d.company.phone && <a className="hub-icon-btn no-print" href={`tel:${d.company.phone}`} aria-label={`Call ${d.company.name}`}><Icon name="phone" size={20} /></a>}
+            {!preview && <button type="button" className="hub-icon-btn no-print" onClick={() => setMessaging({})} aria-label={`Message ${d.company.name}`}><Icon name="messages" size={20} /></button>}
+            {d.kind !== "client" && <button type="button" className="hub-icon-btn no-print" onClick={print} aria-label="Print or save as PDF"><Icon name="printer" size={20} /></button>}
           </div>
         </header>
       )}
@@ -261,7 +261,7 @@ export function HubPage() {
             {d.kind === "invoice" && <InvoiceHub token={token} data={d} onChanged={() => view.refetch()} printing={printable} />}
             {d.kind === "client" && <ClientPortal token={token} data={d} hubFetch={hubFetch} onMessage={(visit) => setMessaging({ visit })} />}
             <footer className="public-foot hub-foot">
-              <span><Icon name="lock" size={12} /> Private link{clientName ? ` for ${clientName}` : ""}. Please don't share it.</span>
+              <span><Icon name="lock" size={12} /> Private link{clientName ? ` for ${clientName}` : ""}. Keep it to yourself.</span>
               <span className="hub-powered">Powered by <BrandMark size={13} /> <strong>Crewtavo</strong></span>
             </footer>
           </>
@@ -330,7 +330,7 @@ function Done({ title, children, action }: { title: string; children?: ReactNode
   return (
     <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }}>
       <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
-      <h2 style={{ fontSize: 20, fontWeight: 800 }}>{title}</h2>
+      <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>{title}</h2>
       {children && <p className="muted" style={{ margin: 0, maxWidth: 440 }}>{children}</p>}
       {action && <div className="no-print" style={{ marginTop: 6 }}>{action}</div>}
     </div>
@@ -344,7 +344,7 @@ function QuoteHub({ token, data, onChanged, printing, onPrint }: { token: string
   if (data.quote.total == null) {
     return (
       <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 800 }}>This estimate isn't open anymore</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>This estimate isn't open anymore</h2>
         <p className="muted" style={{ margin: 0, maxWidth: 440 }}>Still thinking about it? Send {data.company.name} a message with the button at the top, and they'll get back to you.</p>
       </div>
     );
@@ -741,7 +741,7 @@ function SignedQuote({ token, data, printing, onPrint }: { token: string; data: 
         title={`${signed ? "Signed" : "Approved"}${when ? ` on ${formatDate(dateIn(when, tz))}` : ""}`}
         action={<Button icon="printer" onClick={onPrint}>Print or save PDF</Button>}
       >
-        Thank you! {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}
+        Thank you. {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}
       </Done>
       <section className="hub-document" aria-label={`${signed ? "Signed estimate" : "Estimate"} #${q.number}`}>
         <DocumentSheet {...doc} headingLevel={3} />
@@ -918,7 +918,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
     <>
       <section className="card card-pad stack-sm">
         <span className="muted">Quote #{q.number}{q.client ? ` for ${q.client.display_name}` : ""}</span>
-        <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>{q.title}</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{q.title}</h1>
         {q.property && <span className="muted">{q.property.line1}{q.property.city ? `, ${q.property.city}` : ""}</span>}
         {q.message && <p className="pre-wrap" style={{ margin: "8px 0 0" }}>{q.message}</p>}
       </section>
@@ -940,10 +940,10 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
         <section className="card card-pad stack no-print">
           <h2 className="hub-step-title">Request changes</h2>
           <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); requestChanges.mutate(); }}>
-            <label className="field">What would you like changed?<textarea className="textarea" value={changes} onChange={(e) => setChanges(e.target.value)} required minLength={3} maxLength={2000} placeholder="Could you add the side walkway? Can we start after the 15th?" /></label>
+            <Field label="What would you like changed?" requiredMessage="Tell us what you'd like changed, and we'll update the quote."><textarea className="textarea" value={changes} onChange={(e) => setChanges(e.target.value)} required minLength={3} maxLength={2000} placeholder="Could you add the side walkway? Can we start after the 15th?" /></Field>
             <FormError error={requestChanges.error} />
             <div className="hub-step-actions">
-              <Button type="submit" size="lg" icon="send" loading={requestChanges.isPending} disabled={changes.trim().length < 3}>Send request</Button>
+              <Button type="submit" size="lg" icon="send" loading={requestChanges.isPending}>Send request</Button>
               <Button size="lg" variant="ghost" onClick={() => setMode("approve")}>Back to the quote</Button>
             </div>
           </form>
@@ -1043,7 +1043,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
                 <div className="callout callout-info"><Icon name="eye" size={18} /><div className="grow">Preview: your client signs here.</div></div>
               ) : (
                 <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); approve.mutate(); }}>
-                  <label className="field">Your full name<input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={120} autoComplete="name" /></label>
+                  <Field label="Your full name" requiredMessage="Enter your full name, as you'd sign it."><input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={120} autoComplete="name" /></Field>
                   <div className="field">
                     <span>Your signature</span>
                     <SignaturePad value={signature} onChange={setSignature} label="Sign with your finger or mouse" />
@@ -1170,7 +1170,7 @@ function LinesCard({ token, data, lines, optionId, chosen, onChoose, editable, t
           </div>
         )}
         {totals.tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(totals.tax)}</span></div>}
-        <div className="line grand" style={{ fontSize: 22 }}><span>Total</span><span>{formatMoneyCents(totals.total)}</span></div>
+        <div className="line grand" style={{ fontSize: 24 }}><span>Total</span><span>{formatMoneyCents(totals.total)}</span></div>
         {deposit > 0 && <div className="line"><span>Deposit to book</span><span>{formatMoneyCents(deposit)}</span></div>}
         {q.valid_until && <div className="line"><span>Valid until</span><span className={expired ? "text-danger" : undefined}>{formatDate(q.valid_until)}</span></div>}
       </div>
@@ -1193,7 +1193,7 @@ function InitialsCard({ sections, initials, onInitials, initialed, onInitial }: 
   return (
     <section className="card card-pad stack no-print" aria-labelledby={id}>
       <div className="stack-xs">
-        <h3 id={id} style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Your initials</h3>
+        <h3 id={id} style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>Your initials</h3>
         <p className="muted small" style={{ margin: 0 }}>
           {sections.length === 1 ? "One section asks for your initials." : `${sections.length} sections ask for your initials.`} Draw them once, then add them to each.
         </p>
@@ -1215,7 +1215,7 @@ function InitialsCard({ sections, initials, onInitials, initialed, onInitial }: 
                   <Button size="sm" variant="ghost" onClick={() => onInitial(s, false)}>Remove<span className="sr-only"> my initials from {title}</span></Button>
                 </>
               ) : (
-                <Button size="sm" variant="primary" icon="pen" disabled={!initials} onClick={() => onInitial(s, true)}>Add my initials<span className="sr-only"> to {title}</span></Button>
+                <Button size="sm" icon="pen" disabled={!initials} onClick={() => onInitial(s, true)}>Add my initials<span className="sr-only"> to {title}</span></Button>
               )}
             </div>
           );
@@ -1238,7 +1238,7 @@ function TermsToRead({ contract }: { contract: QuoteContract }) {
   return (
     <section className="card card-pad stack hub-terms-read no-print" aria-labelledby={id}>
       <div className="stack-xs">
-        <h3 id={id} style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Read the terms</h3>
+        <h3 id={id} style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>Read the terms</h3>
         <p className="muted small" style={{ margin: 0 }}>The words on the pages above, in a size that's easy to read.</p>
       </div>
       {terms && <p className="pre-wrap" style={{ margin: 0 }}>{terms}</p>}
@@ -1276,10 +1276,10 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
     <>
       <section className="card card-pad stack-sm">
         <span className="muted">Invoice #{inv.number}{inv.client ? ` for ${inv.client.display_name}` : ""}{inv.subject ? ` · ${inv.subject}` : ""}</span>
-        <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em" }}>{balance > 0 ? `${formatMoneyCents(balance)} due` : "Paid in full"}</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{balance > 0 ? `${formatMoneyCents(balance)} due` : "Paid in full"}</h1>
         <span className={late ? "text-danger strong" : "muted"}>Issued {formatDate(inv.issued_on)}{inv.due_on ? ` · due ${formatDate(inv.due_on)}` : " · due on receipt"}</span>
       </section>
-      {params.get("paid") === "1" && <Done title="Thank you!">Your payment is processing. You'll get a receipt by email.</Done>}
+      {params.get("paid") === "1" && <Done title="Thank you">Your payment is processing. You'll get a receipt by email.</Done>}
       <HubDrawings token={token} drawings={data.drawings} />
       <section className="card">
         {inv.lines.map((l, i) => (
@@ -1336,7 +1336,7 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
                 {tipChoice === "custom" && (
                   <span className="input-group" style={{ maxWidth: 180 }}><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" aria-label="Tip amount" value={customTip} onChange={(e) => setCustomTip(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
                 )}
-                {tip > 0 && <span className="muted small">{formatMoneyCents(tip)} tip. Thank you!</span>}
+                {tip > 0 && <span className="muted small">{formatMoneyCents(tip)} tip. Thank you.</span>}
               </section>
             )}
             <Button variant="primary" size="lg" icon="lock" loading={pay.isPending} onClick={() => pay.mutate()}>Pay {formatMoneyCents(balance + tip)} by card or bank</Button>
@@ -1398,7 +1398,7 @@ function HubDiscount({ token, promo, discount, canChange, canAdd = canChange, ch
         entering ? (
           <form className="promo-entry no-print" onSubmit={(e: FormEvent) => { e.preventDefault(); if (code.trim()) apply.mutate(); }}>
             <input className="input mono grow" aria-label="Promo code" placeholder="Promo code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={24} autoFocus autoCapitalize="characters" />
-            <Button type="submit" variant="primary" loading={apply.isPending} disabled={!code.trim()}>Apply</Button>
+            <Button type="submit" loading={apply.isPending} disabled={!code.trim()}>Apply</Button>
           </form>
         ) : (
           <div className="line no-print"><button type="button" className="btn btn-sm btn-ghost" onClick={() => setEntering(true)}><Icon name="tag" size={14} />Have a promo code?</button></div>

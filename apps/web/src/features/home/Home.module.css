@@ -1,0 +1,21 @@
+/* Collected by week: a bar a week with its date under it, the latest week's amount over its bar and
+   another week's on hover. A bar's height is --h (0 to 1) of the tallest. */
+.bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin: 6px 0 4px; }
+.week { display: grid; gap: 6px; justify-items: center; min-width: 0; }
+.track { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; width: 100%; height: 84px; }
+.amount { font-size: var(--fs-11); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: 0; transition: opacity var(--dur-fast); }
+.bar { width: 100%; max-width: 40px; height: calc(64px * var(--h, 0)); min-height: 2px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: color-mix(in srgb, var(--green) 32%, transparent); transition: height var(--dur-slow) var(--ease-out), background var(--dur-fast); }
+.label { font-size: var(--fs-11); color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.week[data-latest] .amount, .week:hover .amount { opacity: 1; }
+.week[data-latest] .bar, .week:hover .bar { background: var(--green); }
+/* Pointing at another week trades the latest week's amount for that one's. */
+.bars:hover .week[data-latest]:not(:hover) .amount { opacity: 0; }
+.bars:hover .week[data-latest]:not(:hover) .bar { background: color-mix(in srgb, var(--green) 32%, transparent); }
+
+/* Set up Crewtavo: each step a row, a ring that fills with a check when it's done. */
+.step { align-items: center; }
+.mark { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--border-strong); color: #fff; flex: none; transition: background var(--dur), border-color var(--dur); }
+.step[data-done] .mark { background: var(--green); border-color: var(--green); }
+.stepTitle { display: block; font-weight: 600; }
+.step[data-done] .stepTitle { color: var(--text-3); text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 50%, transparent); }
+@media (prefers-reduced-motion: reduce) { .bar { transition: background var(--dur-fast); } }

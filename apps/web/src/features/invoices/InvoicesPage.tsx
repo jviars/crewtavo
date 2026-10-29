@@ -1,15 +1,15 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue, useEffect, useState, type FormEvent } from "react";
+import { useDeferredValue, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
-import { EntityStatus } from "@/components/ui/StatusPill";
+import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { addDaysIso, formatDate, formatMoney, todayIn } from "@/lib/format";
@@ -18,13 +18,14 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { InvoiceSummary, ReadyToInvoice, RemindAllButton } from "./InvoiceTools";
 
+// Each filter is named for its status ("open" is everything still owed, under the sent status's name).
 const FILTERS = [
-  { key: "open", label: "Awaiting payment", statuses: ["sent", "partially_paid", "overdue"] },
-  { key: "overdue", label: "Past due", statuses: ["overdue"] },
-  { key: "draft", label: "Draft", statuses: ["draft"] },
-  { key: "paid", label: "Paid", statuses: ["paid"] },
-  { key: "written_off", label: "Written off", statuses: ["written_off"] },
-  { key: "void", label: "Void", statuses: ["void"] },
+  { key: "open", label: statusText("invoice", "sent"), statuses: ["sent", "partially_paid", "overdue"] },
+  { key: "overdue", label: statusText("invoice", "overdue"), statuses: ["overdue"] },
+  { key: "draft", label: statusText("invoice", "draft"), statuses: ["draft"] },
+  { key: "paid", label: statusText("invoice", "paid"), statuses: ["paid"] },
+  { key: "written_off", label: statusText("invoice", "written_off"), statuses: ["written_off"] },
+  { key: "void", label: statusText("invoice", "void"), statuses: ["void"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
 
@@ -179,14 +180,10 @@ function NewInvoiceDialog({ open, onClose, onCreated }: { open: boolean; onClose
   const settings = company.settings as { payment_terms_days?: number; default_tax_rate?: number };
   const [client, setClient] = useState<PickedClient>(null);
   const [subject, setSubject] = useState("");
-  useEffect(() => {
-    if (open) {
-      setClient(null);
-      setSubject("");
-    }
-  }, [open]);
+  // Said under the client picker once Create is pressed without one.
+  const [noClient, setNoClient] = useState(false);
   const create = useMutation({
-    meta: { inline: true, success: "Draft invoice created. Add line items next." },
+    meta: { inline: true, success: "Draft invoice created", tone: "invoice" },
     mutationFn: async () => {
       const today = todayIn(company.timezone);
       return unwrap(
@@ -210,14 +207,25 @@ function NewInvoiceDialog({ open, onClose, onCreated }: { open: boolean; onClose
     },
   });
   return (
-    <Dialog open={open} onClose={onClose} title="New invoice">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client) create.mutate(); }}>
-        <Field label="Client"><ClientPicker value={client} onChange={setClient} /></Field>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="New invoice"
+      onExited={() => {
+        setClient(null);
+        setSubject("");
+        setNoClient(false);
+        create.reset();
+      }}
+    >
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client) create.mutate(); else setNoClient(true); }}>
+        <Field label="Client" error={noClient && !client ? "Choose who this invoice is for." : null}><ClientPicker value={client} onChange={setClient} /></Field>
         <Field label="Subject" optional><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} placeholder="Salt delivery, March services…" /></Field>
         <FormError error={create.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={create.isPending} disabled={!client}>Create invoice</Button>
+          <Button type="submit" variant="primary" loading={create.isPending}>Create invoice</Button>
         </div>
       </form>
     </Dialog>

@@ -4,7 +4,7 @@
  * and the package say which), and the business's other sections, to add to this job only
  * (quotes.section_ids). Once it's signed it lists what was signed: the template's terms and the
  * sections, as the approval kept them. With no sections in the library it's left out, except for a
- * way to write some for the people who can.
+ * tip to write some, shown once to each person who can (ContractTermsTip).
  * The library and its helpers are in settings/ContractSettings.tsx; core contracts.ts puts the
  * sections together (resolveSections), the same way the paper, the Client Hub and the iPad do.
  */
@@ -15,7 +15,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
 import { CardSkeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
+import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, useSession } from "@/lib/session";
 import { readApproval, type ApprovalSection } from "../documents/build";
@@ -140,17 +140,7 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
   if (library.isPending || isPending) return <CardSkeleton lines={3} />;
   if (library.error) return <div className="card"><ErrorState compact title="Your contract sections couldn't load" error={library.error} onRetry={() => library.refetch()} /></div>;
   const rows = library.data;
-  if (!rows.length) {
-    if (!managesSettings) return null;
-    return (
-      <div className={`card card-pad ${styles.setup}`}>
-        <Icon name="file" size={18} />
-        <span className="grow">
-          Print your own contract terms with your estimates, like payment, your warranty and the right to cancel. <Link to="/settings?tab=contracts">Set them up</Link>
-        </span>
-      </div>
-    );
-  }
+  if (!rows.length) return managesSettings ? <ContractTermsTip /> : null;
 
   const { printing, others } = quoteSections({ library: rows, template, optionSectionIds, quoteSectionIds: ids });
   const terms = template.terms.trim();
@@ -174,7 +164,7 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
               ))}
             </ul>
           ) : (
-            <p className={styles.note}>Nothing from your template{optionSectionIds ? " or this option" : ""} yet.</p>
+            <EmptyState inline title={`Nothing from your template${optionSectionIds ? " or this option" : ""} yet`} />
           )}
         </div>
         {others.length > 0 && (
@@ -200,7 +190,7 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
                 ))}
               </ul>
             ) : (
-              <p className={styles.note}>None.</p>
+              <EmptyState inline title="None added" />
             )}
           </div>
         )}
@@ -213,17 +203,64 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
 function Item({ title, meta, initials }: { title: string; meta: string; initials: string | null }) {
   return (
     <li className={styles.item}>
-      <Icon name="file" size={15} />
+      <Icon name="file" size={14} />
       <span className={styles.pick}>
         {title}
         <span className={styles.meta}>{meta}</span>
         {initials && (
           <span className={styles.initials}>
-            <Icon name="pen" size={13} />
+            <Icon name="pen" size={14} />
             {initials}
           </span>
         )}
       </span>
     </li>
+  );
+}
+
+/**
+ * Whether this person has had the contract-terms tip, in this business. There's no per-person store
+ * for tips, so it's kept on this device; without storage (private mode) it can show again next visit.
+ */
+const tipKey = (companyId: string, userId: string) => `crewtavo.tip.contract-terms.${companyId}.${userId}`;
+function tipSeen(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+function markTipSeen(key: string) {
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    // Private mode: it may show once more.
+  }
+}
+
+/**
+ * "Print your own contract terms…", for people who can set them up while the business has none: shown
+ * once, the first time a quote has none to print, and then not again (× puts it away at once). Home's
+ * setup list keeps the step after that, so a quote never carries it for long.
+ */
+function ContractTermsTip() {
+  const { company, userId } = useSession();
+  const key = tipKey(company.id, userId);
+  // Read as it first shows, so it stays for this visit even though it's marked seen straight away.
+  const [shown, setShown] = useState(() => !tipSeen(key));
+  useEffect(() => {
+    if (shown) markTipSeen(key);
+  }, [shown, key]);
+  if (!shown) return null;
+  return (
+    <div className={`card card-pad ${styles.setup}`}>
+      <Icon name="file" size={20} />
+      <span className="grow">
+        Print your own contract terms with your estimates, like payment, your warranty and the right to cancel. <Link to="/settings?tab=contracts">Set them up</Link>
+      </span>
+      <button type="button" className="icon-btn" aria-label="Don't show this again" title="Don't show this again" onClick={() => setShown(false)}>
+        <Icon name="x" size={16} />
+      </button>
+    </div>
   );
 }

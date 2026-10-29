@@ -2,10 +2,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { ClientPicker, PropertySelect, type PickedClient } from "../clients/ClientForm";
+import { ClientRequired } from "../quotes/NewQuoteDialog";
 
 /** Log a request that came in by phone, email or in person. */
 export function NewRequestDialog({ open, onClose, onCreated, initialClient = null }: { open: boolean; onClose: () => void; onCreated: (id: string) => void; initialClient?: PickedClient }) {
@@ -16,18 +17,9 @@ export function NewRequestDialog({ open, onClose, onCreated, initialClient = nul
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
   const [source, setSource] = useState("phone");
-  useEffect(() => {
-    if (open) {
-      setClient(initialClient);
-      setTitle("");
-      setDetails("");
-      setPropertyId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
   useEffect(() => setPropertyId(null), [client?.id]);
   const create = useMutation({
-    meta: { inline: true, success: "Request created" },
+    meta: { inline: true, success: "Request created", tone: "request" },
     mutationFn: async () =>
       unwrap(
         await supabase()
@@ -42,12 +34,25 @@ export function NewRequestDialog({ open, onClose, onCreated, initialClient = nul
       onCreated(id);
     },
   });
+  // Cleared once it has animated out, so it opens fresh next time without blinking the last one.
+  const reset = () => {
+    setClient(initialClient);
+    setTitle("");
+    setDetails("");
+    setPropertyId(null);
+    create.reset();
+  };
   return (
-    <Dialog open={open} onClose={onClose} title="New request">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client) create.mutate(); }}>
-        <Field label="Client"><ClientPicker value={client} onChange={setClient} /></Field>
+    <Dialog open={open} onClose={onClose} onExited={reset} title="New request">
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client && title.trim()) create.mutate(); }}>
+        <Field label="Client" requiredMessage="Pick a client, or type a name to add a new one.">
+          <ClientPicker value={client} onChange={setClient} />
+          <ClientRequired client={client} />
+        </Field>
         {client && <Field label="Property"><PropertySelect clientId={client.id} value={propertyId} onChange={setPropertyId} /></Field>}
-        <Field label="What do they need?"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} placeholder="Driveway estimate, gutter repair…" /></Field>
+        <Field label="What do they need?" requiredMessage="Say what they need, like a driveway estimate.">
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} placeholder="Driveway estimate, gutter repair…" />
+        </Field>
         <Field label="Details" optional><textarea className="textarea" value={details} onChange={(e) => setDetails(e.target.value)} maxLength={4000} /></Field>
         <Field label="How did it come in?">
           <select className="select" value={source} onChange={(e) => setSource(e.target.value)}>
@@ -58,8 +63,9 @@ export function NewRequestDialog({ open, onClose, onCreated, initialClient = nul
         </Field>
         <FormError error={create.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={create.isPending} disabled={!client || !title.trim()}>Create request</Button>
+          <Button type="submit" variant="primary" loading={create.isPending}>Create request</Button>
         </div>
       </form>
     </Dialog>

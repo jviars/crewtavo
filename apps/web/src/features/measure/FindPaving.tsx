@@ -121,12 +121,12 @@ export function FindPaving({
 
   return (
     <>
-      <Button size="sm" variant="primary" icon="sparkle" disabled={!ready} onClick={onStart}>
+      <Button size="sm" icon="sparkle" disabled={!ready} onClick={onStart}>
         Find paving
       </Button>
       <span className="muted small">Put a box round a lot, then press Outline. Free.</span>
       <button type="button" className="link-btn small" disabled={!ready} onClick={() => setOpen(true)}>
-        {connected ? "Find everything in view with fal.ai" : "Or find everything in view, with fal.ai"}
+        Find everything in view with fal.ai
       </button>
       {open && (
         <Dialog open onClose={() => !run.isPending && setOpen(false)} title="Find everything in view" description="With fal.ai: all the asphalt and concrete on the aerial at once, and the stalls counted." size="md">

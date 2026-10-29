@@ -13,7 +13,9 @@ import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 
 export interface RuleRow {
@@ -126,7 +128,6 @@ function RuleList({ rules }: { rules: ReturnType<typeof useQuery<RuleRow[]>> }) 
     onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
   });
   const duplicate = useMutation({
-    meta: { success: "Rule copied. It's off until you turn it on." },
     mutationFn: async (r: RuleRow) =>
       unwrap(
         await supabase()
@@ -135,8 +136,12 @@ function RuleList({ rules }: { rules: ReturnType<typeof useQuery<RuleRow[]>> }) 
           .select("id")
           .single(),
       ),
-    onSuccess: (row) => navigate(`/automations/${row.id}`),
+    onSuccess: (row) => {
+      toast.success("Rule copied", { description: "It's off until you turn it on." });
+      navigate(`/automations/${row.id}`);
+    },
   });
+  const list = useListAnimation<HTMLDivElement>();
   const remove = useMutation({
     meta: { success: "Rule deleted" },
     mutationFn: async (id: string) => unwrap(await supabase().from("automation_rules").delete().eq("id", id)),
@@ -148,12 +153,12 @@ function RuleList({ rules }: { rules: ReturnType<typeof useQuery<RuleRow[]>> }) 
   if (!rules.data?.length) {
     return (
       <div className="card">
-        <EmptyState icon="bolt" title="No rules yet" action={<Button variant="primary" icon="plus" onClick={() => navigate("/automations/new")}>Create a rule</Button>} />
+        <EmptyState icon="bolt" title="No rules yet" action={<Button icon="plus" onClick={() => navigate("/automations/new")}>Create a rule</Button>} />
       </div>
     );
   }
   return (
-    <div className="stack">
+    <div className="stack" ref={list}>
       {rules.data.map((r) => {
         const trigger = triggerDef(r.trigger);
         return (
@@ -161,7 +166,7 @@ function RuleList({ rules }: { rules: ReturnType<typeof useQuery<RuleRow[]>> }) 
             <input type="checkbox" className="switch" style={{ marginTop: 3 }} checked={r.enabled} aria-label={r.enabled ? `Turn off ${r.name}` : `Turn on ${r.name}`} onChange={(e) => toggle.mutate({ id: r.id, enabled: e.target.checked })} />
             <Link to={`/automations/${r.id}`} className="grow" style={{ color: "inherit", minWidth: 0 }}>
               <div className="row wrap" style={{ gap: 8 }}>
-                <strong style={{ fontSize: 15 }}>{r.name}</strong>
+                <strong style={{ fontSize: 16 }}>{r.name}</strong>
                 {trigger && <span className="chip">{trigger.group}</span>}
                 {!r.enabled && <span className="chip">Off</span>}
               </div>
@@ -224,7 +229,7 @@ export function RunHistory({ ruleId }: { ruleId?: string }) {
       <div className="card">
         {runs.isPending && <div className="card-pad"><CardSkeleton lines={3} title={false} /></div>}
         {runs.error && <ErrorState compact error={runs.error} onRetry={() => runs.refetch()} />}
-        {runs.data?.length === 0 && <EmptyState compact icon="history" title={filter === "all" ? "Nothing has run yet" : filter === "failed" ? "No failures" : "Nothing waiting"} />}
+        {runs.data?.length === 0 && <EmptyState inline title={filter === "all" ? "Nothing has run yet" : filter === "failed" ? "No failures" : "Nothing waiting"} />}
         {runs.data?.map((r) => {
           const result = (Array.isArray(r.result) ? r.result : []) as Array<{ type: string; ok: boolean; detail: string }>;
           const rule = r.rule as { id: string; name: string } | null;

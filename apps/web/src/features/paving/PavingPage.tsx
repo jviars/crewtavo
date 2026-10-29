@@ -79,7 +79,7 @@ export function PavingPage() {
       <ol className="paving-steps" aria-label="How a paving job goes">
         {STEPS.map((step, i) => (
           <li key={step.id}>
-            <span className="paving-step-icon"><Icon name={step.icon} size={18} /></span>
+            <span className="paving-step-icon"><Icon name={step.icon} size={20} /></span>
             <span className="paving-step-text">
               <strong>{i + 1}. {step.label}</strong>
               <span className="muted small">{step.text}</span>
@@ -104,7 +104,7 @@ export function PavingPage() {
           <ErrorState error={projects.error} onRetry={() => projects.refetch()} />
         ) : !rows.length ? (
           <div className="card">
-            <EmptyState icon="area" title="No paving takeoffs yet" action={canSell && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>Start a takeoff</Button>}>
+            <EmptyState icon="area" title="No paving takeoffs yet" action={canSell && <Button icon="plus" onClick={() => setParams({ new: "1" })}>Start a takeoff</Button>}>
               Pick a client and an address, outline the asphalt and mark the striping on the aerial, and the quantities price themselves into a proposal.
             </EmptyState>
           </div>
@@ -128,7 +128,7 @@ export function PavingPage() {
                         <span className="small">{measuredSummary(r)}</span>
                         <div className="muted small">{[q.options?.length ? `${q.options.length} options` : null, timeAgo(r.updated_at)].filter(Boolean).join(" · ")}</div>
                       </td>
-                      <td className="num">{from !== null ? <span title="Its cheapest option">From {formatMoney(from)}</span> : q.lines.length ? formatMoney(q.total) : <span className="muted">Not priced</span>}</td>
+                      <td className="num">{from !== null ? <span title="Its cheapest option">From {formatMoney(from)}</span> : q.lines.length ? formatMoney(q.total) : <span className="muted" title="Not priced yet">—</span>}</td>
                       <td><StatusPill label={stage.label} tone={stage.tone} /></td>
                     </tr>
                   );
@@ -173,18 +173,18 @@ function PriceBook() {
   if (!services.data) return null;
   return (
     <section className="card card-pad stack-sm" aria-labelledby="paving-price-book" style={{ gap: 10 }}>
-      <h2 id="paving-price-book" className="section-title" style={{ fontSize: 17 }}>Price book</h2>
+      <h2 id="paving-price-book" className="section-title" style={{ fontSize: 16 }}>Price book</h2>
       <span className="muted small">
         Each takeoff item prices from a service in your price list with a formula, like sealcoat from <code>sealcoat_sqft</code> or striping from <code>stripe_ft</code>.
         Set your own prices and costs there, and the margin shows on every estimate.
       </span>
       {missing.length > 0 ? (
         <div className="row wrap" style={{ gap: 10 }}>
-          <Button variant="primary" icon="plus" loading={add.isPending} onClick={() => add.mutate()}>Add {missing.length} standard paving {missing.length === 1 ? "service" : "services"}</Button>
+          <Button icon="plus" loading={add.isPending} onClick={() => add.mutate()}>Add {missing.length} standard {missing.length === 1 ? "service" : "services"}</Button>
           <span className="muted small">{missing.slice(0, 4).map((s) => s.name).join(", ")}{missing.length > 4 ? ` and ${missing.length - 4} more` : ""}</span>
         </div>
       ) : (
-        <span className="small row" style={{ gap: 6 }}><Icon name="check" size={15} /> Your price list has every standard paving service.</span>
+        <span className="small row" style={{ gap: 6 }}><Icon name="check" size={14} /> Your price list has every standard paving service.</span>
       )}
       <Link to="/settings?tab=prices" className="link-btn small" style={{ justifySelf: "start" }}>Open the price list</Link>
     </section>

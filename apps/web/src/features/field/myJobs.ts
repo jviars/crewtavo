@@ -122,9 +122,9 @@ export function answerState(online: boolean, offer: Pick<SubOffer, "can_answer">
   return { disabled: false, note: null };
 }
 
-/** After an answer: what they're told. */
+/** After an answer: what they're told (a toast: no closing period). */
 export function answeredToast(accept: boolean, o: Pick<SubOffer, "is_change" | "job_title" | "agreed_total">): string {
-  if (o.is_change) return accept ? `New price accepted for ${o.job_title}.` : `Declined. ${o.job_title} stays at ${moneyShort(o.agreed_total)}.`;
-  return accept ? `It's yours. ${o.job_title} is on My day for the days it's on.` : "Declined. We've told the office.";
+  if (o.is_change) return accept ? `New price accepted for ${o.job_title}` : `New price declined, ${o.job_title} stays at ${moneyShort(o.agreed_total)}`;
+  return accept ? `${o.job_title} accepted, it's on My day` : "Job declined, the office knows";
 }
 

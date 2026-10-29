@@ -18,14 +18,16 @@ import { countsOn, optionLabels, type TotalsPromo } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { EntityStatus, StatusPill } from "@/components/ui/StatusPill";
+import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addressLine, formatDate, formatMoney, formatMoneyCents, formatNumber, timeAgo } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { usePictures } from "../measure/drawings";
 import { QUOTE_OPTIONS_EMBED, sortOptions, type QuoteOptionRow } from "../quotes/options";
@@ -90,7 +92,11 @@ export interface FlowTrade<Id extends string = StepId> {
 export interface TakeoffProps { takeoff: TakeoffRow; picture?: string; editLink: string | null }
 export interface EstimateProps { quote: Quote; takeoff: TakeoffRow; editable: boolean; onChanged: () => void }
 
-export const scrollToStep = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+/** Glides to a step's card, or jumps there for someone who prefers less motion. */
+export const scrollToStep = (id: string) => {
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.getElementById(id)?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+};
 
 /** Where the map opens for a project: its roof or lot, else a new drawing at the property. */
 export function measureLinkFor(trade: Pick<FlowTrade<string>, "id">, quote: { id: string; property: { id: string } | null }, takeoff: { id: string } | null): string {
@@ -183,7 +189,7 @@ export function ProjectFlow({ trade, takeoffView, estimateView }: { trade: FlowT
       <p className="page-subtitle">{[q.client?.display_name, q.property ? addressLine(q.property) : null, q.number ? `Quote #${q.number}` : null].filter(Boolean).join(" · ")}</p>
 
       <FlowProgress steps={steps} step={step} />
-      {q.status === "lost" && <div className="callout callout-danger" role="status"><Icon name="alert" size={18} /><span className="grow">This proposal was marked lost.</span></div>}
+      {q.status === "lost" && <div className="callout callout-danger" role="status"><Icon name="alert" size={20} /><span className="grow">This proposal was marked lost.</span></div>}
 
       <div className="stack" style={{ gap: 16 }}>
         <StepCard id="takeoff" n={1} title={label("takeoff")} status={takeoff ? `Updated ${timeAgo(takeoff.updated_at)}` : "Not measured yet"} done={Boolean(takeoff)}>
@@ -243,10 +249,10 @@ export function FlowProgress<Id extends string>({ steps, step }: { steps: Readon
   );
 }
 
-/** The first step before anything's measured: what to do, and the way to the map. */
+/** The first step before anything's measured: one line saying what to do, and the way to the map. */
 export function TakeoffEmpty({ trade, measureLink }: { trade: Pick<FlowTrade<string>, "takeoff">; measureLink: string | null }) {
   return (
-    <EmptyState compact icon="area" title={trade.takeoff.empty} action={measureLink && <Link className="btn btn-primary" to={measureLink}><Icon name="area" size={16} /> {trade.takeoff.start}</Link>}>
+    <EmptyState inline title={trade.takeoff.empty} action={measureLink && <Link className="btn" to={measureLink}>{trade.takeoff.start}</Link>}>
       {trade.takeoff.text}
     </EmptyState>
   );
@@ -278,9 +284,9 @@ export function InvoiceStepBody({ job, seesInvoices, invoices }: { job: { id: st
 
 function proposalStatus(q: Quote): string {
   if (q.status === "approved" || q.status === "converted") return `Signed${q.approved_at ? ` ${formatDate(q.approved_at)}` : ""}${q.approval?.name ? ` by ${q.approval.name}` : ""}`;
-  if (q.status === "changes_requested") return "Changes requested";
+  if (q.status === "changes_requested") return statusText("quote", q.status);
   if (q.status === "sent") return `Sent${q.sent_at ? ` ${formatDate(q.sent_at)}` : ""}, waiting on the client`;
-  if (q.status === "lost") return "Lost";
+  if (q.status === "lost") return statusText("quote", q.status);
   return q.lines.length ? "Ready to send" : "After the estimate";
 }
 
@@ -313,11 +319,13 @@ export function EstimateLines({ quote, optionId = null, optionLabel = null }: { 
   const choices = quote.options.length ? new Map([...groups.keys()].map((id) => [id, "Pick one"])) : groups;
   const signed = quote.status === "approved" || quote.status === "converted";
   const choiceNote = (selected: boolean) => (signed ? (selected ? "the client's pick" : "not picked") : selected ? "shown first" : "the client can pick it");
+  // Lines slide in and out as services are ticked above.
+  const linesRef = useListAnimation<HTMLTableSectionElement>();
   return (
     <div className="stack-sm">
       <table className="table paving-estimate">
         <thead><tr><th>On the estimate</th><th className="num">Qty</th><th className="num">Price</th><th className="num">Cost</th><th className="num">Total</th><th className="num">Margin</th></tr></thead>
-        <tbody>
+        <tbody ref={linesRef}>
           {lines.map((l) => {
             const total = Number(l.quantity) * Number(l.unit_price);
             const lineCost = l.unit_cost != null ? Number(l.quantity) * Number(l.unit_cost) : null;
@@ -340,12 +348,12 @@ export function EstimateLines({ quote, optionId = null, optionLabel = null }: { 
         </tbody>
       </table>
       <dl className="paving-totals">
-        {materials !== null && <div><dt>Materials</dt><dd>{formatMoney(materials)}{materialsPartial ? "+" : ""}</dd></div>}
-        <div><dt>Cost</dt><dd>{costKnown ? formatMoney(cost) : `${formatMoney(cost)}+`}</dd></div>
-        <div><dt>Price</dt><dd>{formatMoney(price)}</dd></div>
-        <div><dt>Profit</dt><dd data-good={profit > 0 || undefined}>{costKnown ? formatMoney(profit) : "—"}</dd></div>
-        <div><dt>Margin</dt><dd>{margin === null ? "—" : `${margin}%`}</dd></div>
-        <div><dt>Total with tax</dt><dd>{formatMoney(total)}</dd></div>
+        {materials !== null && <div><dt>Materials</dt><dd><AnimatedNumber value={materials} format={MONEY} />{materialsPartial ? "+" : ""}</dd></div>}
+        <div><dt>Cost</dt><dd><AnimatedNumber value={cost} format={MONEY} />{costKnown ? "" : "+"}</dd></div>
+        <div><dt>Price</dt><dd><AnimatedNumber value={price} format={MONEY} /></dd></div>
+        <div><dt>Profit</dt><dd data-good={profit > 0 || undefined}>{costKnown ? <AnimatedNumber value={profit} format={MONEY} /> : "—"}</dd></div>
+        <div><dt>Margin</dt><dd>{margin === null ? "—" : <><AnimatedNumber value={margin} />%</>}</dd></div>
+        <div><dt>Total with tax</dt><dd><AnimatedNumber value={total} format={MONEY} /></dd></div>
       </dl>
       {!signed && quote.options.length > 0 && optionLabel ? (
         <span className="muted small">
@@ -357,7 +365,7 @@ export function EstimateLines({ quote, optionId = null, optionLabel = null }: { 
       {!costKnown && <span className="muted small">Add costs to your services in the price list to see the profit on every line.</span>}
       <div className="row wrap" style={{ gap: 8 }}>
         <Link className="btn" to={`/quotes/${quote.id}`}>Adjust on the quote</Link>
-        <a className="btn btn-primary" href="#proposal" onClick={(e) => { e.preventDefault(); scrollToStep("proposal"); }}>Next: Proposal <Icon name="arrowRight" size={15} /></a>
+        <a className="btn" href="#proposal" onClick={(e) => { e.preventDefault(); scrollToStep("proposal"); }}>See the proposal <Icon name="arrowRight" size={16} /></a>
       </div>
     </div>
   );
@@ -370,7 +378,6 @@ function Proposal({ quote, takeoff, sheet, canSell, onChanged }: { quote: Quote;
     onSuccess: ({ link }) => window.open(link, "_blank", "noopener"),
   });
   const showSheet = useMutation({
-    meta: { success: (_: unknown, on: boolean) => (on ? `The client will see the ${sheet.name} on the proposal` : `The ${sheet.name} is hidden from the client`) },
     mutationFn: async (on: boolean) => unwrap(await supabase().from("measurements").update({ show_on_quote: on, quote_id: quote.id }).eq("id", takeoff!.id)),
     onSuccess: onChanged,
   });
@@ -388,7 +395,7 @@ function Proposal({ quote, takeoff, sheet, canSell, onChanged }: { quote: Quote;
       )}
       {signed && quote.approval?.signature && <img src={quote.approval.signature} alt={`Signature of ${quote.approval.name ?? "the client"}`} className="paving-signature" />}
       <div className="row wrap" style={{ gap: 8 }}>
-        <Button icon="eye" loading={preview.isPending} onClick={() => preview.mutate()}>Preview what the client sees</Button>
+        <Button icon="eye" loading={preview.isPending} onClick={() => preview.mutate()}>Preview the proposal</Button>
         {canSell && !signed && quote.status !== "lost" && <Button variant="primary" icon="send" onClick={() => setSending(true)}>{quote.status === "draft" ? "Send the proposal" : "Send it again"}</Button>}
       </div>
       <span className="muted small">
@@ -404,7 +411,7 @@ function Proposal({ quote, takeoff, sheet, canSell, onChanged }: { quote: Quote;
 function Schedule({ quote, job, canSell, onChanged }: { quote: Quote; job: Quote["jobs"][number] | null; canSell: boolean; onChanged: () => void }) {
   const navigate = useNavigate();
   const convert = useMutation({
-    meta: { success: "Job created. Schedule the work next." },
+    meta: { success: "Job created", tone: "job" },
     mutationFn: () => api.post<{ job_id: string }>(`/quotes/${quote.id}/convert`),
     onSuccess: (res) => {
       onChanged();
@@ -437,10 +444,10 @@ function Schedule({ quote, job, canSell, onChanged }: { quote: Quote; job: Quote
   return (
     <div className="stack-sm">
       <Button variant={signed ? "primary" : undefined} icon="job" loading={convert.isPending} disabled={!quote.lines.length || quote.status === "lost"} onClick={() => convert.mutate()} style={{ justifySelf: "start" }}>
-        {signed ? "Create the job" : "Create the job now"}
+        Create the job
       </Button>
       <span className="muted small">{signed ? "The estimate's lines become the job's scope." : "Usually once the client signs. You can start it now if they said yes another way."}</span>
-      {quote.status === "approved" && <StatusPill label="Signed" tone="good" />}
+      {quote.status === "approved" && <EntityStatus kind="quote" status={quote.status} />}
     </div>
   );
 }

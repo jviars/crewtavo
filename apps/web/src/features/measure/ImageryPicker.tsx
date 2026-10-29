@@ -64,7 +64,7 @@ export function ImageryPicker({
     return (
       <div key={value}>
         <button type="button" role="menuitemradio" aria-checked={selected} className="imagery-option" disabled={Boolean(note)} onClick={() => pick(value)}>
-          <span className="imagery-check" aria-hidden="true">{selected && <Icon name="check" size={15} />}</span>
+          <span className="imagery-check" aria-hidden="true">{selected && <Icon name="check" size={14} />}</span>
           <span className="grow">
             <strong>{name}{value === opening && <span className="chip imagery-chip">Default</span>}</strong>
             <span className="muted small">{detail}</span>
@@ -97,7 +97,7 @@ export function ImageryPicker({
         title="Change the imagery under the map"
         onClick={() => requestAnimationFrame(place)}
       >
-        <Icon name="layers" size={15} />
+        <Icon name="layers" size={14} />
         <span className="imagery-button-label">{label}</span>
         {overlays.length > 0 && <span className="badge">{overlays.length}</span>}
         <Icon name="chevronDown" size={14} />
@@ -131,7 +131,7 @@ export function ImageryPicker({
           <>
             <div className="menu-sep" role="separator" />
             <button type="button" role="menuitem" className="imagery-option" onClick={() => { close(); onMakeDefault(choice); }}>
-              <span className="imagery-check" aria-hidden="true"><Icon name="star" size={15} /></span>
+              <span className="imagery-check" aria-hidden="true"><Icon name="star" size={14} /></span>
               <span className="grow">
                 <strong>Open Measure on {choiceName(choice)} every time</strong>
                 <span className="muted small">Just for you, on this device. Change it in Settings › Profile.</span>

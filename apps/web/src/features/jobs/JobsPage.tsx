@@ -21,6 +21,9 @@ const FILTERS = [
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
 
+/** What an empty filter says, in the filter's own words. */
+const EMPTY_TITLES: Record<FilterKey, string> = { active: "No active jobs", invoice: "No jobs to invoice", completed: "No completed jobs", archived: "No archived jobs" };
+
 export function JobsPage() {
   const session = useSession();
   const { company } = session;
@@ -84,8 +87,9 @@ export function JobsPage() {
           {term || kind ? (
             <EmptyState icon="search" title="No jobs match" action={<Button onClick={() => { setSearch(""); setKind(""); }}>Clear filters</Button>} />
           ) : (
-            <EmptyState icon="job" title={filter === "active" ? "No active jobs" : "Nothing here"} action={canSell && filter === "active" && (<><Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>New job</Button><Link className="btn" to="/quotes">Go to quotes</Link></>)}>
-              {filter === "active" ? "Jobs come from approved quotes, or create one directly for work that doesn't need a quote." : "No jobs have this status."}
+            // New job is the page header's green button, so the empty state points to quotes instead of repeating it.
+            <EmptyState icon="job" title={EMPTY_TITLES[filter]} action={canSell && filter === "active" && <Link className="btn" to="/quotes">Go to quotes</Link>}>
+              {filter !== "active" ? null : canSell ? "Jobs come from approved quotes. For work that doesn't need one, create the job directly with New job." : "Jobs come from approved quotes."}
             </EmptyState>
           )}
         </div>
@@ -107,7 +111,7 @@ export function JobsPage() {
                       <div className="muted small">{j.client?.display_name}{j.property ? ` · ${j.property.line1}` : ""}</div>
                     </td>
                     <td>
-                      {next?.scheduled_on ? formatDate(next.scheduled_on) : <span className="muted">Nothing scheduled</span>}
+                      {next?.scheduled_on ? formatDate(next.scheduled_on) : <span className="muted">—</span>}
                       <div className="small">
                         <span className="muted">{done}/{j.visits.length} done{j.kind === "recurring" ? " · recurring" : ""}</span>
                         {late > 0 && <span className="text-danger strong"> · {late} overdue</span>}

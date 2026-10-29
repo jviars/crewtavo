@@ -479,7 +479,7 @@ function RailwayDomainList({ domains }: { domains: Railway["domains"] }) {
               <strong style={{ overflowWrap: "anywhere" }}>{d.domain}</strong>
               <span className="muted small">{d.verified && d.certificate === "issued" ? "Ready to use" : "Railway is still setting it up. You can choose it now."}</span>
             </span>
-            <Button size="sm" variant="primary" loading={use.isPending && use.variables === d.domain} onClick={() => use.mutate(d.domain)}>Use this domain</Button>
+            <Button size="sm" loading={use.isPending && use.variables === d.domain} onClick={() => use.mutate(d.domain)}>Use this domain</Button>
           </li>
         ))}
       </ul>
@@ -805,11 +805,11 @@ export function RailwayTokenForm({ tokensUrl, onLogin, intro }: { tokensUrl: str
         <li>Copy the token and paste it here.</li>
       </ol>
       <Field label="Project token">
-        <input className="input" type="password" value={token} onChange={(e) => { setToken(e.target.value); save.reset(); }} autoComplete="off" spellCheck={false} maxLength={500} />
+        <input className="input" type="password" value={token} onChange={(e) => { setToken(e.target.value); save.reset(); }} autoComplete="off" spellCheck={false} maxLength={500} required />
       </Field>
       <FormError error={save.error} />
       <div className="row wrap" style={{ gap: 12 }}>
-        <Button type="submit" variant="primary" loading={save.isPending} disabled={!token.trim()}>Connect</Button>
+        <Button type="submit" variant="primary" loading={save.isPending}>Connect</Button>
         {onLogin && <button type="button" className="link-btn small" onClick={onLogin}>Log in with Railway instead</button>}
       </div>
     </form>
@@ -972,7 +972,7 @@ function recordsMessage(change: AddressChange, records: DnsRecordCheck[]): strin
     "",
     ...records.flatMap((r, i) => [`${i + 1}. Type: ${r.type}`, `   Name: ${r.host}`, `   Value: ${r.value ?? "the value Railway shows for it"}`, ""]),
     ...(provider.hostNote ? [provider.hostNote, ""] : []),
-    "Crewtavo checks them by itself and switches over once they're in. Thanks!",
+    "Crewtavo checks them by itself and switches over once they're in. Thanks.",
   ].join("\n");
 }
 
@@ -1001,11 +1001,11 @@ function CloudflareAdd({ onAdded }: { onAdded: (count: number) => void }) {
         <li>Paste it here. Crewtavo uses it once to add the records, set to DNS only, and doesn't keep it.</li>
       </ol>
       <Field label="Cloudflare token">
-        <input className="input" type="password" value={token} onChange={(e) => { setToken(e.target.value); add.reset(); }} autoComplete="off" spellCheck={false} maxLength={500} />
+        <input className="input" type="password" value={token} onChange={(e) => { setToken(e.target.value); add.reset(); }} autoComplete="off" spellCheck={false} maxLength={500} required />
       </Field>
       <FormError error={add.error} />
       <div className="row wrap">
-        <Button type="submit" variant="primary" icon="check" loading={add.isPending} disabled={!token.trim()}>Add them for me</Button>
+        <Button type="submit" variant="primary" icon="check" loading={add.isPending}>Add them for me</Button>
       </div>
     </form>
   );

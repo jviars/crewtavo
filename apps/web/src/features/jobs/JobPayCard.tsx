@@ -17,16 +17,19 @@ import { insuranceWarning, insuranceWarningItems, insuranceWarningText, isChange
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { MarkPaidDialog, type ToPay } from "../subs/MarkPaidDialog";
 import { RatesCard } from "../subs/RatesCard";
@@ -122,7 +125,11 @@ function usePayees(enabled: { subs: boolean; team: boolean }) {
 }
 type Payees = ReturnType<typeof usePayees>;
 
-export function JobPayCard({ job, visits, lines = [] }: { job: { id: string; number: number | null; title: string; archived: boolean }; visits: readonly JobVisit[]; lines?: readonly JobLine[] }) {
+/**
+ * The job page shows it once the job has pay, or opens it with Add pay up (startAdding) from its add
+ * buttons; onAddClosed tells it that dialog has closed, so an empty card can go again.
+ */
+export function JobPayCard({ job, visits, lines = [], startAdding = false, onAddClosed }: { job: { id: string; number: number | null; title: string; archived: boolean }; visits: readonly JobVisit[]; lines?: readonly JobLine[]; startAdding?: boolean; onAddClosed?: () => void }) {
   const session = useSession();
   const subsArea = handlesSubPay(session);
   const teamArea = handlesTeamPay(session);
@@ -131,8 +138,9 @@ export function JobPayCard({ job, visits, lines = [] }: { job: { id: string; num
   const [open, setOpen] = useState<string | null>(null);
   // Adding pay: for anyone, or for a sub (offering the job to someone else after an offer ended,
   // for the visits that offer covered).
-  const [adding, setAdding] = useState<null | "any" | { elsewhere: readonly string[] }>(null);
+  const [adding, setAdding] = useState<null | "any" | { elsewhere: readonly string[] }>(startAdding ? "any" : null);
   const [showOver, setShowOver] = useState(false);
+  const listRef = useListAnimation<HTMLDivElement>();
   if (!subsArea && !teamArea) return null;
 
   const list = [...(pays.data ?? [])].sort(byPayOrder);
@@ -142,27 +150,24 @@ export function JobPayCard({ job, visits, lines = [] }: { job: { id: string; num
   const total = Math.round(agreed.reduce((s, p) => s + agreedAmount(p) * 100, 0)) / 100;
   const openPay = list.find((p) => p.id === open);
   const twice = overCounted(list, lines);
-  const addButton = !job.archived && <Button size="sm" icon="plus" onClick={() => setAdding("any")}>Add pay</Button>;
 
   return (
     <section className="stack">
       <div className="section-head">
         <h2 className="section-title">Sub and crew pay</h2>
-        {list.length > 0 && <span className="muted small">{agreed.length ? `${formatMoneyCents(total)} agreed` : ""}</span>}
-        {list.length > 0 && addButton}
+        {agreed.length > 0 && <span className="muted small"><AnimatedNumber value={total} format={MONEY_CENTS} /> agreed</span>}
+        {!job.archived && <Button size="sm" icon="plus" onClick={() => setAdding("any")}>Add pay</Button>}
       </div>
       {twice.map((w) => (
-        <div key={w} className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow small" style={{ fontWeight: 400 }}>{w}</div></div>
+        <div key={w} className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow small" style={{ fontWeight: 400 }}>{w}</div></div>
       ))}
-      <div className="card">
+      <div className="card" ref={listRef}>
         {pays.isPending ? (
           <div className="card-row"><Skeleton width="50%" /></div>
         ) : pays.error ? (
           <div className="card-row"><ErrorState compact error={pays.error} onRetry={() => pays.refetch()} /></div>
         ) : list.length === 0 ? (
-          <EmptyState compact icon="dollar" title="No sub or crew pay yet" action={addButton}>
-            {subsArea ? "What you pay a sub for this job, or what someone on your team earns on it per square, per job or per day." : "What someone on your team earns on this job per square, per job or per day."}
-          </EmptyState>
+          <EmptyState inline title="No sub or crew pay yet" />
         ) : (
           <>
             {shown.length === 0 && <div className="card-row"><span className="muted small">Nothing in play: it was all cancelled or turned down.</span></div>}
@@ -207,10 +212,14 @@ export function JobPayCard({ job, visits, lines = [] }: { job: { id: string; num
           payees={payees}
           areas={adding !== "any" ? { subs: true, team: false } : { subs: subsArea, team: teamArea }}
           elsewhere={adding !== "any" ? adding.elsewhere : undefined}
-          onClose={() => setAdding(null)}
+          onClose={() => {
+            setAdding(null);
+            onAddClosed?.();
+          }}
           onOpen={(id) => {
             setAdding(null);
             setOpen(id);
+            onAddClosed?.();
           }}
         />
       )}
@@ -254,6 +263,8 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
   const startCovered = elsewhere ? [...elsewhere] : null;
   const [covered, setCovered] = useState<string[] | null>(startCovered);
   const [rates, setRates] = useState(false);
+  // Add pay stays pressable: pressed before choosing someone, the field says so.
+  const [tried, setTried] = useState(false);
   const payee: PayeeRef = kind === "sub" ? { subcontractor_id: payeeId || null } : { user_id: payeeId || null };
   const existing = pays.find((p) => isLivePay(p.status) && (kind === "sub" ? p.subcontractor_id === payeeId : p.user_id === payeeId));
   // Until the office picks, the database covers the visits it says here (theirs, by sign-in or crew),
@@ -267,8 +278,9 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
   const start = useMutation({
     meta: { inline: true, success: "Pay added as a draft" },
     mutationFn: () => startPay({ job_id: job.id, ...payee, visit_ids: covered }),
-    onSuccess: (pay) => {
-      refreshPay(queryClient, job.id);
+    // Opened once the job's pay has it, so the pay dialog has something to show.
+    onSuccess: async (pay) => {
+      await refreshPay(queryClient, job.id);
       onOpen(pay.id);
     },
   });
@@ -281,7 +293,7 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
   const shownVisits = visits.filter((v) => v.status !== "cancelled");
 
   return (
-    <Dialog open onClose={onClose} title={elsewhere ? "Offer to someone else" : "Add pay"} size="lg" description={kind === "sub" ? "Filled in from their rates. You can change the lines before you send it or agree it." : "Filled in from their rates. You can change the lines before you agree it."}>
+    <Dialog open onClose={onClose} title={elsewhere ? "Offer someone else" : "Add pay"} size="lg" description={kind === "sub" ? "Filled in from their rates. You can change the lines before you send it or agree it." : "Filled in from their rates. You can change the lines before you agree it."}>
       <div className="dialog-body">
         {areas.subs && areas.team && (
           <div className="segmented" role="group" aria-label="Who it's for" style={{ justifySelf: "start" }}>
@@ -289,8 +301,12 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
             <button type="button" aria-pressed={kind === "team"} onClick={() => { setKind("team"); setPayeeId(""); setCovered(startCovered); }}>Someone on your team</button>
           </div>
         )}
-        <Field label={kind === "sub" ? "Sub" : "Team member"} hint={kind === "sub" && elsewhere ? "Subs with their paperwork in order come first. It covers the same visits as the offer that ended." : undefined}>
-          {loadingChoices ? <Skeleton height={36} /> : (
+        <Field
+          label={kind === "sub" ? "Sub" : "Team member"}
+          error={tried && !payeeId ? (kind === "sub" ? "Choose the sub it's for." : "Choose who it's for.") : null}
+          hint={kind === "sub" && elsewhere ? "Subs with their paperwork in order come first. It covers the same visits as the offer that ended." : undefined}
+        >
+          {loadingChoices ? <Skeleton height={38} /> : (
             <select className="select" value={payeeId} onChange={(e) => { setPayeeId(e.target.value); setCovered(startCovered); }}>
               <option value="">{kind === "sub" ? "Choose a sub" : "Choose someone"}</option>
               {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -302,7 +318,7 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
         )}
         {existing ? (
           <div className="callout callout-info">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow" style={{ fontWeight: 400 }}>They already have pay on this job ({payStatusLabel(existing.status).toLowerCase()}, {formatMoneyCents(existing.total)}).</div>
             <Button size="sm" onClick={() => onOpen(existing.id)}>Open it</Button>
           </div>
@@ -310,7 +326,7 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
           <>
             {warning && (
               <div className="callout callout-warning">
-                <Icon name="alert" size={18} />
+                <Icon name="alert" size={20} />
                 <div className="grow small" style={{ fontWeight: 400 }}>{warning} <Link to={`/subs/${payeeId}`}>Their paperwork</Link></div>
               </div>
             )}
@@ -361,7 +377,8 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
         <FormError error={start.error} />
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" icon="plus" disabled={!payeeId || Boolean(existing)} loading={start.isPending} onClick={() => start.mutate()}>Add pay</Button>
+          {/* Someone who already has pay here gets Open it in the box above instead. */}
+          <Button variant="primary" icon="plus" disabled={Boolean(existing)} loading={start.isPending} onClick={() => (payeeId ? start.mutate() : setTried(true))}>Add pay</Button>
         </div>
       </div>
       {rates && kind === "team" && payeeId && <TeamRatesDialog userId={payeeId} name={payees.nameOf({ user_id: payeeId })} onClose={() => setRates(false)} />}
@@ -440,8 +457,11 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
   const signIns = who === "sub" ? (suggestion.data?.sign_ins ?? (pay.status === "offered" ? 1 : undefined)) : null;
   const refresh = () => refreshPay(queryClient, job.id);
   const change = isChangeOffer(pay);
+  // Lines and notes save as they lose focus: "Saving…", then "Saved" beside the status, no toast.
+  const save = useSaveStatus();
 
   const updateLine = useMutation({
+    meta: { inline: true },
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<{ description: string; quantity: number; rate: number }> }) => unwrap(await supabase().from("job_pay_lines").update(patch).eq("id", id)),
     // The typed values stay up until the saved ones are back, so nothing flickers.
     onSuccess: async (_r, v) => {
@@ -466,7 +486,7 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
     onSuccess: refresh,
   });
   const saveNotes = useMutation({
-    meta: { success: "Notes saved" },
+    meta: { inline: true },
     mutationFn: async (value: string | null) => unwrap(await supabase().from("job_pay").update({ notes: value }).eq("id", pay.id)),
     onSuccess: refresh,
   });
@@ -533,17 +553,18 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
           <StatusPill label={chip.label} tone={chip.tone} />
           <span className="chip">{who === "sub" ? "Sub" : "Team"}</span>
           <span className="muted small grow">{offerNote ?? payStatusLine(pay, tz, finishedOn(visits, covered, tz))}</span>
+          <SaveStatus status={save.status} />
           {who === "sub" && pay.subcontractor_id && <Link className="small" to={`/subs/${pay.subcontractor_id}`}>Their page</Link>}
         </div>
         {warning && (
           <div className="callout callout-warning">
-            <Icon name="alert" size={18} />
+            <Icon name="alert" size={20} />
             <div className="grow small" style={{ fontWeight: 400 }}>{warning}</div>
           </div>
         )}
         {cutShortNote(pay, visits) && (
           <div className="callout callout-info">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow small" style={{ fontWeight: 400 }}>{cutShortNote(pay, visits)}</div>
           </div>
         )}
@@ -566,8 +587,11 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
                 draft={drafts[l.id]}
                 note={lineNote(l, suggestion.data?.lines)}
                 saving={updateLine.isPending && updateLine.variables?.id === l.id}
-                onDraft={(d) => setDrafts((all) => ({ ...all, [l.id]: d }))}
-                onSave={(patch) => updateLine.mutate({ id: l.id, patch })}
+                onDraft={(d) => {
+                  save.edited();
+                  setDrafts((all) => ({ ...all, [l.id]: d }));
+                }}
+                onSave={(patch) => void save.track(updateLine.mutateAsync({ id: l.id, patch }))}
                 onRemove={() => removeLine.mutate(l.id)}
               />
             ))}
@@ -578,7 +602,7 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
             </div>
           </div>
           {who === "sub" && pay.status === "accepted" && (signIns ?? 0) > 0 && pay.lines.length > 0 && (
-            <span className="muted small">Changing these lines here counts as agreed with them, say on the phone. To ask them first, use Change the price.</span>
+            <span className="muted small">Changing these lines here counts as agreed with them, say on the phone. To ask them first, use Change price.</span>
           )}
           <FormError error={updateLine.error ?? addLine.error ?? removeLine.error} />
         </div>
@@ -593,7 +617,21 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
         <FormError error={toggleVisit.error} />
 
         <Field label={who === "sub" ? "Notes for them" : "Notes"} optional hint={who === "sub" ? (waiting ? "They see these with the offer. Withdraw it to change them." : "They see these with the offer and their price.") : undefined}>
-          <textarea className="textarea" rows={2} maxLength={2000} value={notes} disabled={waiting} onChange={(e) => setNotes(e.target.value)} onBlur={() => notes.trim() !== (pay.notes ?? "") && saveNotes.mutate(notes.trim() || null)} />
+          <textarea
+            className="textarea"
+            rows={2}
+            maxLength={2000}
+            value={notes}
+            disabled={waiting}
+            onChange={(e) => {
+              save.edited();
+              setNotes(e.target.value);
+            }}
+            onBlur={() => {
+              if (notes.trim() !== (pay.notes ?? "")) void save.track(saveNotes.mutateAsync(notes.trim() || null));
+              else if (save.status === "edited") save.reset();
+            }}
+          />
         </Field>
 
         {who === "sub" && pay.status === "draft" && signIns === 0 && (
@@ -708,6 +746,7 @@ function DoneDialog({ pay, suggested, onClose, onSaved }: { pay: JobPay; suggest
         <Field label="Work finished on"><input className="input" type="date" value={day} max={today} onChange={(e) => e.target.value && setDay(e.target.value)} required /></Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" icon="check" loading={save.isPending}>Mark work done</Button>
         </div>

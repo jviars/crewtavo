@@ -36,13 +36,13 @@ export function MeasureHelp({ open, onClose, touch }: { open: boolean; onClose: 
         <ol className="measure-help-steps">
           {STEPS.map((s) => (
             <li key={s.title}>
-              <span className="measure-help-icon" aria-hidden="true"><Icon name={s.icon} size={18} /></span>
+              <span className="measure-help-icon" aria-hidden="true"><Icon name={s.icon} size={20} /></span>
               <span className="grow"><strong>{s.title}</strong><span className="muted">{s.body}</span></span>
             </li>
           ))}
         </ol>
         <div className="callout">
-          <Icon name="info" size={18} />
+          <Icon name="info" size={20} />
           <div className="grow stack-sm">
             <span>Tips</span>
             <ul className="measure-help-tips">

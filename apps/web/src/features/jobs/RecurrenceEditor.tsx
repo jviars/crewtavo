@@ -1,6 +1,7 @@
 /**
  * "Every 2 weeks on Tuesday, April to October" without typing an RRULE. Produces the rule string
- * (RFC 5545, no DTSTART) and season months, and previews the next visit dates.
+ * (RFC 5545, no DTSTART) and season months, and previews the next visit dates. The job page says
+ * the rule back in its own words with repeatText (repeatText.ts).
  */
 import { buildSimpleRule, occurrenceDates, parseRule, parseSimpleRule, type SimpleRepeat } from "@crewtavo/core/recurrence";
 import { useMemo } from "react";
@@ -48,7 +49,7 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
   }, [value.rule]);
 
   return (
-    <div className="stack" style={{ padding: 14, borderRadius: 10, background: "var(--fill)", border: "1px solid var(--border)" }}>
+    <div className="stack" style={{ padding: 14, borderRadius: "var(--radius-control)", background: "var(--fill)", border: "1px solid var(--border)" }}>
       <div className="form-grid">
         <label className="field">
           <span>Repeats</span>

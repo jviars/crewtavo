@@ -108,7 +108,7 @@ export function RoofingPage() {
           <ErrorState error={projects.error} onRetry={() => projects.refetch()} />
         ) : !rows.length ? (
           <div className="card">
-            <EmptyState icon="roofing" title="No roof estimates yet" action={canSell && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>Start a roof estimate</Button>}>
+            <EmptyState icon="roofing" title="No roof estimates yet" action={canSell && <Button icon="plus" onClick={() => setParams({ new: "1" })}>Start a roof estimate</Button>}>
               Pick a client, an address and a roof package, then outline the roof on the aerial. The squares, edges and tear-off price themselves from the package.
             </EmptyState>
           </div>
@@ -141,7 +141,7 @@ export function RoofingPage() {
                         ) : q.lines.length ? (
                           formatMoney(q.total)
                         ) : (
-                          <span className="muted">Not priced</span>
+                          <span className="muted" title="Not priced yet">—</span>
                         )}
                       </td>
                       <td><StatusPill label={stage.label} tone={stage.tone} /></td>
@@ -180,15 +180,15 @@ function SetupPackages() {
   return (
     <section className="card card-pad stack-sm" aria-labelledby="roofing-setup" style={{ gap: 10 }}>
       <div className="row" style={{ gap: 10 }}>
-        <Icon name="package" size={18} />
-        <h2 id="roofing-setup" className="section-title grow" style={{ fontSize: 17 }}>Set up your roof packages</h2>
+        <Icon name="package" size={20} />
+        <h2 id="roofing-setup" className="section-title grow" style={{ fontSize: 16 }}>Set up your roof packages</h2>
       </div>
       <span className="muted small">
         A package prices a whole roof in one tap: the shingles or metal by the square, the tear-off, edges and pipe boots, and quick adds for the extras.
         Start with Architectural shingle, Designer shingle and Standing-seam metal, made from your price list. You can change them any time.
       </span>
       <div className="row wrap" style={{ gap: 10 }}>
-        <Button variant="primary" icon="package" loading={setup.isPending} onClick={() => setup.mutate()}>Set up the standard packages</Button>
+        <Button icon="package" loading={setup.isPending} onClick={() => setup.mutate()}>Set up the standard packages</Button>
         <Link to="/roofing/packages" className="link-btn small">See packages</Link>
       </div>
     </section>

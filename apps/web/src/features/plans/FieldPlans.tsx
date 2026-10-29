@@ -31,7 +31,7 @@ export function FieldPlans({ visitId, jobId, propertyId }: { visitId: string; jo
     <section className="card card-pad stack-sm">
       <div className="row-between">
         <strong>Plans</strong>
-        {jobId && hasRole(session, "admin", "office", "estimator", "crew_lead") && <Link className="small strong" to={`/jobs/${jobId}`}>Add or update</Link>}
+        {jobId && hasRole(session, "admin", "office", "estimator", "crew_lead") && <Link className="small strong field-link" to={`/jobs/${jobId}`}>Add or update</Link>}
       </div>
       <div>
         {entries.map((entry) => {

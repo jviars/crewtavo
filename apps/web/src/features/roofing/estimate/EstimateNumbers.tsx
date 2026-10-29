@@ -5,7 +5,7 @@
  * known about the cost.
  */
 import { useId } from "react";
-import { formatMoney } from "@/lib/format";
+import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
 import { useSession } from "@/lib/session";
 import { useSupplier, type Supplier } from "../../materials/data";
 import { estimateFigures, firstName, LOW_MARGIN, whenText, type FiguresQuote } from "./rows";
@@ -48,15 +48,15 @@ export function EstimateNumbers({ quote, clientName, optionId, optionLabel }: {
         {figures.materials !== null && (
           <>
             <dt>ABC materials</dt>
-            <dd>{formatMoney(figures.materials)}{figures.materialsPartial ? "+" : ""}</dd>
+            <dd><AnimatedNumber value={figures.materials} format={MONEY} />{figures.materialsPartial ? "+" : ""}</dd>
           </>
         )}
         <dt>Materials and labor</dt>
-        <dd>{formatMoney(figures.cost)}{figures.costPartial ? "+" : ""}</dd>
+        <dd><AnimatedNumber value={figures.cost} format={MONEY} />{figures.costPartial ? "+" : ""}</dd>
         <dt>Profit</dt>
-        <dd>{formatMoney(figures.profit)}</dd>
+        <dd><AnimatedNumber value={figures.profit} format={MONEY} /></dd>
         <dt className={styles.strong}>Margin</dt>
-        <dd className={styles.strong} data-low={low || undefined}>{figures.margin === null ? "—" : `${figures.margin}%`}</dd>
+        <dd className={styles.strong} data-low={low || undefined}>{figures.margin === null ? "—" : <><AnimatedNumber value={figures.margin} />%</>}</dd>
       </dl>
       {figures.pricedAt && (
         <p className={styles.abc}>

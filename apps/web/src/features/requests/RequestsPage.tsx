@@ -6,19 +6,20 @@ import { Icon } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { EntityStatus } from "@/components/ui/StatusPill";
+import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
 import { can, hasRole, useSession, type Session } from "@/lib/session";
 import { NewRequestDialog } from "./NewRequestDialog";
 
+// A tab for one status says it as the status pill does.
 const FILTERS = [
   { key: "open", label: "Open", statuses: ["new", "assessment_scheduled", "assessment_complete"] },
-  { key: "new", label: "New", statuses: ["new"] },
+  { key: "new", label: statusText("request", "new"), statuses: ["new"] },
   { key: "assessment", label: "Assessments", statuses: ["assessment_scheduled", "assessment_complete"] },
   { key: "done", label: "Quoted or converted", statuses: ["quoted", "converted"] },
-  { key: "archived", label: "Archived", statuses: ["archived"] },
+  { key: "archived", label: statusText("request", "archived"), statuses: ["archived"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
 
@@ -115,7 +116,7 @@ export function RequestsPage() {
               Messages people send with your website's forms show up here as they arrive.
             </EmptyState>
           ) : (
-            <EmptyState icon="requests" title={filter === "open" ? "No open requests" : "Nothing here"} action={canSell && filter === "open" && (<><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>New request</Button><Link className="btn" to="/booking">Set up online booking</Link></>)}>
+            <EmptyState icon="requests" title={filter === "open" ? "No open requests" : "Nothing here"} action={canSell && filter === "open" && (<><Button icon="plus" onClick={() => setCreating(true)}>New request</Button><Link className="btn" to="/booking">Set up online booking</Link></>)}>
               {filter === "open" ? "Requests from your booking and website forms, the Client Hub and referrals land here, along with ones you log by phone." : "No requests have this status."}
             </EmptyState>
           )}
@@ -132,7 +133,7 @@ export function RequestsPage() {
                     <Link className="cell-link" to={`/requests/${r.id}`} onClick={(e) => e.stopPropagation()}>{r.title}</Link>
                     <div className="muted small">{requestSource(r)}{r.property ? ` · ${r.property.line1}` : ""}</div>
                   </td>
-                  <td>{r.client?.display_name}</td>
+                  <td>{r.client?.display_name ?? <span className="muted">—</span>}</td>
                   <td title={formatDate(r.created_at)}>
                     {timeAgo(r.created_at)}
                     {r.status === "new" && Date.now() - Date.parse(r.created_at) > 2 * 86_400_000 && <div className="small text-danger strong">Waiting over 2 days</div>}

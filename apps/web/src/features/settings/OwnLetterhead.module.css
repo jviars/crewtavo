@@ -1,30 +1,30 @@
 /* The business's own letterhead in Settings → Estimate template, and the page its lines are set on. */
 .own { display: grid; gap: 12px; }
-.empty { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--fill); font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.empty { margin: 0; padding: 10px 12px; border-radius: var(--radius-control); background: var(--fill); font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
 
 .pictures { display: grid; gap: 10px; }
 .picture { display: grid; gap: 4px; margin: 0; }
-.picture figcaption { font-size: 12px; color: var(--text-3); }
+.picture figcaption { font-size: var(--fs-12); color: var(--text-3); }
 /* Paper: white in both themes. */
-.paper { display: block; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.paper { display: block; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: #fff; }
 .paper img { display: block; width: 100%; height: auto; }
 
 /* ---- The page and its two lines ---------------------------------------------------------- */
 .split { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 20px; align-items: start; }
-.page { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 4px; background: #fff; touch-action: none; user-select: none; }
+.page { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; touch-action: none; user-select: none; }
 .page img { display: block; width: 100%; height: 100%; pointer-events: none; }
 .header, .footer, .middle { position: absolute; left: 0; right: 0; pointer-events: none; }
 .header { top: 0; box-shadow: inset 0 0 0 2px var(--green); }
 .footer { bottom: 0; box-shadow: inset 0 0 0 2px var(--green); }
 .header > span, .footer > span {
-  position: absolute; left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--green); color: #fff;
-  font-size: 11px; font-weight: 700;
+  position: absolute; left: 6px; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--green); color: #fff;
+  font-size: var(--fs-11); font-weight: 600;
 }
 .header > span { bottom: 6px; }
 .footer > span { top: 6px; }
 /* The middle of the page, where Crewtavo prints the estimate: the letterhead there is left out. */
 .middle { display: grid; place-items: center; background: rgba(242, 241, 237, 0.88); }
-.middle > span { padding: 4px 10px; border-radius: 999px; background: #fff; color: #4e6169; font-size: 12px; font-weight: 600; box-shadow: 0 1px 2px rgba(15, 42, 53, 0.12); }
+.middle > span { padding: 4px 10px; border-radius: var(--radius-pill); background: #fff; color: #4e6169; font-size: var(--fs-12); font-weight: 600; box-shadow: 0 1px 2px rgba(15, 42, 53, 0.12); }
 
 /* Each line is easy to grab: a band 28 px tall with the line through its middle. */
 .line {
@@ -32,14 +32,14 @@
 }
 .line::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: var(--green); }
 .line > span {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); padding: 2px 8px; border-radius: 999px;
-  background: var(--green); color: #fff; font-size: 11px; font-weight: 700; white-space: nowrap;
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--green); color: #fff; font-size: var(--fs-11); font-weight: 600; white-space: nowrap;
 }
 .line:focus-visible > span { box-shadow: var(--ring); }
 
-.about { display: grid; gap: 10px; font-size: 14px; line-height: 1.5; color: var(--text-2); }
+.about { display: grid; gap: 10px; font-size: var(--fs-14); line-height: 1.5; color: var(--text-2); }
 .about p { margin: 0; }
-.sizes { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--fill); }
+.sizes { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; padding: 12px 14px; border-radius: var(--radius-card); background: var(--fill); }
 .sizes dt { font-weight: 600; color: var(--ink); }
 .sizes dd { margin: 0; }
 

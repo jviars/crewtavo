@@ -2,14 +2,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
-import { CardSkeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
+import { fieldError } from "@/lib/errors";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
+import { formatPhoneTyping } from "@/lib/validate";
 
 interface Contact {
   id: string;
@@ -22,59 +24,100 @@ interface Contact {
   notify_sms: boolean;
 }
 
+const contactsKey = (clientId: string) => ["client", clientId, "contacts"];
+/** The order the list loads in: the primary contact first, then by name. */
+const byPrimaryThenName = (a: Contact, b: Contact) => Number(b.is_primary) - Number(a.is_primary) || a.name.localeCompare(b.name);
+
+/** The client's other contacts, for ContactsCard and for the client page to know whether there are any. */
+export function useClientContacts(clientId: string) {
+  return useQuery({
+    queryKey: contactsKey(clientId),
+    queryFn: async () => unwrap(await supabase().from("client_contacts").select("id, name, email, phone, role, is_primary, notify_email, notify_sms").eq("client_id", clientId).order("is_primary", { ascending: false }).order("name")),
+  });
+}
+
+/**
+ * The other contacts, as a section of their own once there's one. With none it isn't shown: the
+ * client's Details card offers "Add another contact" (AddContact) instead.
+ */
 export function ContactsCard({ clientId, canEdit }: { clientId: string; canEdit: boolean }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Contact | "new" | null>(null);
-  const contacts = useQuery({
-    queryKey: ["client", clientId, "contacts"],
-    queryFn: async () => unwrap(await supabase().from("client_contacts").select("id, name, email, phone, role, is_primary, notify_email, notify_sms").eq("client_id", clientId).order("is_primary", { ascending: false }).order("name")),
-  });
+  const contacts = useClientContacts(clientId);
+  const listRef = useListAnimation<HTMLDivElement>();
   const remove = useMutation({
-    meta: { success: "Contact removed" },
+    // Undo's toast says how it went (removeLater below).
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("client_contacts").delete().eq("id", id)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client", clientId, "contacts"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: contactsKey(clientId) }),
   });
 
-  if (contacts.isPending) return <CardSkeleton lines={2} />;
+  /** Takes the contact off the list at once; it's deleted when the Undo toast leaves. */
+  const removeLater = (contact: Contact) => {
+    const key = contactsKey(clientId);
+    undoable({
+      title: "Contact removed",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<Contact[]>(key, (rows) => rows?.filter((r) => r.id !== contact.id));
+      },
+      restore: () => queryClient.setQueryData<Contact[]>(key, (rows) => (rows && !rows.some((r) => r.id === contact.id) ? [...rows, contact].sort(byPrimaryThenName) : rows)),
+      commit: () => remove.mutateAsync(contact.id),
+    });
+  };
+
+  const rows = contacts.data ?? [];
   return (
-    <div className="card">
-      <div className="card-head">
-        <strong>Other contacts</strong>
-        {canEdit && <Button size="sm" variant="ghost" icon="plus" onClick={() => setEditing("new")}>Add</Button>}
-      </div>
-      {!contacts.data?.length && <p className="muted small" style={{ margin: 0, padding: "14px 20px" }}>No other contacts.</p>}
-      {contacts.data?.map((c) => (
-        <div key={c.id} className="card-row" style={{ alignItems: "flex-start" }}>
-          <span className="grow" style={{ display: "grid", gap: 2 }}>
-            <span className="row" style={{ gap: 6 }}>
-              <strong>{c.name}</strong>
-              {c.role && <span className="chip">{c.role}</span>}
-              {c.is_primary && <span className="chip chip-green">Primary</span>}
-            </span>
-            {c.email && <a href={`mailto:${c.email}`} className="small">{c.email}</a>}
-            {c.phone && <a href={`tel:${c.phone}`} className="small">{c.phone}</a>}
-          </span>
-          {canEdit && (
-            <Menu
-              triggerClassName="btn btn-sm btn-ghost btn-icon"
-              label={`Actions for ${c.name}`}
-              items={[
-                { label: "Edit", icon: "edit", onSelect: () => setEditing(c) },
-                {
-                  label: "Remove",
-                  icon: "trash",
-                  danger: true,
-                  onSelect: async () => {
-                    if (await confirm({ title: `Remove ${c.name}?`, body: "They'll no longer be listed on this client.", confirmLabel: "Remove", danger: true })) remove.mutate(c.id);
-                  },
-                },
-              ]}
-            />
-          )}
+    <>
+      {rows.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <strong>Other contacts</strong>
+            {canEdit && <Button size="sm" variant="ghost" icon="plus" onClick={() => setEditing("new")}>Add contact</Button>}
+          </div>
+          <div ref={listRef}>
+            {rows.map((c) => (
+              <div key={c.id} className="card-row" style={{ alignItems: "flex-start" }}>
+                <span className="grow" style={{ display: "grid", gap: 2 }}>
+                  <span className="row" style={{ gap: 6 }}>
+                    <strong>{c.name}</strong>
+                    {c.role && <span className="chip">{c.role}</span>}
+                    {c.is_primary && <span className="chip chip-green">Primary</span>}
+                  </span>
+                  {c.email && <a href={`mailto:${c.email}`} className="small">{c.email}</a>}
+                  {c.phone && <a href={`tel:${c.phone}`} className="small">{c.phone}</a>}
+                </span>
+                {canEdit && (
+                  <Menu
+                    triggerClassName="btn btn-sm btn-ghost btn-icon"
+                    label={`Actions for ${c.name}`}
+                    items={[
+                      { label: "Edit contact", icon: "edit", onSelect: () => setEditing(c) },
+                      { label: "Remove contact", icon: "trash", danger: true, onSelect: () => removeLater(c) },
+                    ]}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      ))}
+      )}
       {editing && <ContactDialog clientId={clientId} contact={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
-    </div>
+    </>
+  );
+}
+
+/** "Add another contact" in the client's Details card, while there are none for ContactsCard to list. */
+export function AddContact({ clientId }: { clientId: string }) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <>
+      <button type="button" className="link-btn text-sm row" style={{ gap: 6, justifySelf: "start" }} onClick={() => setAdding(true)}>
+        <Icon name="plus" size={14} strokeWidth={2} />
+        Add another contact
+      </button>
+      {adding && <ContactDialog clientId={clientId} contact={null} onClose={() => setAdding(false)} />}
+    </>
   );
 }
 
@@ -99,7 +142,7 @@ function ContactDialog({ clientId, contact, onClose }: { clientId: string; conta
       else unwrap(await supabase().from("client_contacts").insert({ company_id: company.id, client_id: clientId, ...row }));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client", clientId, "contacts"] });
+      queryClient.invalidateQueries({ queryKey: contactsKey(clientId) });
       onClose();
     },
   });
@@ -107,18 +150,20 @@ function ContactDialog({ clientId, contact, onClose }: { clientId: string; conta
     <Dialog open onClose={onClose} title={contact ? "Edit contact" : "Add contact"}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
-          <Field label="Name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={120} /></Field>
+          {/* No leading spaces, so a name of only spaces is caught as missing. */}
+          <Field label="Name" requiredMessage="Add a name for this contact."><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value.trimStart() })} required maxLength={120} /></Field>
           <Field label="Role" optional><input className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })} placeholder="Spouse, property manager…" maxLength={60} /></Field>
-          <Field label="Email" optional><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={200} /></Field>
-          <Field label="Phone" optional><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} maxLength={40} /></Field>
+          <Field label="Email" optional error={fieldError(save.error, "email")}><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={200} /></Field>
+          <Field label="Phone" optional error={fieldError(save.error, "phone")}><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={40} /></Field>
         </div>
         <label className="checkbox"><input type="checkbox" checked={f.is_primary} onChange={(e) => setF({ ...f, is_primary: e.target.checked })} /> Primary contact</label>
         <label className="checkbox"><input type="checkbox" checked={f.notify_email} onChange={(e) => setF({ ...f, notify_email: e.target.checked })} /> Gets emailed reminders and receipts</label>
         <label className="checkbox"><input type="checkbox" checked={f.notify_sms} onChange={(e) => setF({ ...f, notify_sms: e.target.checked })} /> Gets text reminders</label>
-        <FormError error={save.error} />
+        <FormError error={save.error} fields={["email", "phone"]} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!f.name.trim()}>{contact ? "Save" : "Add contact"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{contact ? "Save contact" : "Add contact"}</Button>
         </div>
       </form>
     </Dialog>
@@ -128,7 +173,7 @@ function ContactDialog({ clientId, contact, onClose }: { clientId: string; conta
 export function ContactLine({ icon, href, children }: { icon: "mail" | "phone"; href: string; children: React.ReactNode }) {
   return (
     <a href={href} className="row" style={{ gap: 8, color: "var(--ink)" }}>
-      <Icon name={icon} size={15} />
+      <Icon name={icon} size={16} />
       <span className="ellipsis">{children}</span>
     </a>
   );

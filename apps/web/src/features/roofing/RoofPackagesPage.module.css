@@ -27,32 +27,32 @@
 .pkg:hover { border-color: var(--border-strong); }
 .pkg[aria-current="true"] { border-color: var(--green); box-shadow: var(--ring); }
 .pkgText { flex: 1; min-width: 0; display: grid; gap: 3px; }
-.pkgText strong { font-size: 15px; overflow-wrap: anywhere; }
-.pkgText span { font-size: 13px; color: var(--text-2); }
+.pkgText strong { font-size: var(--fs-14); overflow-wrap: anywhere; }
+.pkgText span { font-size: var(--fs-13); color: var(--text-2); }
 /* A package still on the example warranty setup gave it. */
-.pkgText .flag { display: inline-flex; align-items: center; gap: 4px; justify-self: start; font-size: 12.5px; font-weight: 600; color: var(--warning); }
+.pkgText .flag { display: inline-flex; align-items: center; gap: 4px; justify-self: start; font-size: var(--fs-13); font-weight: 600; color: var(--warning); }
 .addPkg {
-  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; padding: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: var(--control-lg); padding: 12px;
   border: 1px dashed var(--border-strong); border-radius: var(--radius-card); background: transparent; color: var(--text-2);
-  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  font: inherit; font-size: var(--fs-14); font-weight: 700; cursor: pointer;
 }
 .addPkg:hover { color: var(--ink); background: var(--fill); }
 
 /* A package's picture in the list (PackagePicture) */
-.tile { width: 56px; border-radius: 7px; }
+.tile { width: 56px; border-radius: 8px; }
 
 /* The cards under the list */
 .sideCard { display: grid; gap: 12px; }
 .sideHead { display: grid; gap: 4px; }
-.sideCard h2 { margin: 0; font-size: 15px; font-weight: 800; }
-.sideHead p, .sideText { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.sideCard h2 { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.sideHead p, .sideText { margin: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
 .rangeFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .rangeFields :global(.field) { min-width: 0; }
 .ink { color: var(--ink); }
 .abc {
   display: inline-block; flex: none; margin-right: 6px; padding: 2px 5px;
-  border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink);
-  font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em; line-height: 1.2;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink);
+  font-size: var(--fs-11); font-weight: 700; letter-spacing: var(--tracking-caps); line-height: 1.2;
 }
 
 /* One package */
@@ -63,20 +63,20 @@
   .part { padding: 16px; }
 }
 .partHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
-.partHead h2 { margin: 0; font-size: 17px; font-weight: 800; }
-.partHead p { margin: 3px 0 0; font-size: 13px; color: var(--text-2); }
-.title { margin: 0; font-size: 20px; font-weight: 800; }
-.note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.partHead h2 { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.partHead p { margin: 3px 0 0; font-size: var(--fs-13); color: var(--text-2); }
+.title { margin: 0; font-size: var(--fs-20); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.note { margin: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
 
 .head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
 .nameField { flex: 1 1 260px; }
-.nameField :global(.input) { height: 42px; font-size: 16px; font-weight: 700; }
+.nameField :global(.input) { height: var(--control); font-size: var(--fs-16); font-weight: 600; }
 .tierField { flex: 0 1 150px; min-width: 120px; }
-.tierField :global(.input) { height: 42px; }
+.tierField :global(.input) { height: var(--control); }
 .headActions { display: flex; flex-wrap: wrap; gap: 4px; }
 
 .pictureRow { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 18px; }
-.editorPicture { width: 168px; border-radius: 10px; border: 1px solid var(--divider); }
+.editorPicture { width: 168px; border-radius: 8px; border: 1px solid var(--divider); }
 .pictureSide { flex: 1 1 240px; min-width: 0; display: grid; gap: 8px; justify-items: start; }
 @media (max-width: 600px) {
   .editorPicture { width: 128px; }
@@ -84,46 +84,46 @@
 
 .styleRow { display: flex; flex-wrap: wrap; gap: 8px; }
 .styleBtn {
-  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 7px;
-  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-2);
-  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; height: var(--control); padding: 0 12px 0 7px;
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: var(--fs-13); font-weight: 700; cursor: pointer;
 }
-.styleBtn svg { border-radius: 6px; }
+.styleBtn svg { border-radius: var(--radius-sm); }
 .styleBtn:hover { color: var(--ink); }
 .styleBtn[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); color: var(--ink); }
 
 /* Price a square */
 .priceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
-.bigMoney :global(.input) { height: 44px; font-size: 18px; font-weight: 800; }
-.bigMoney :global(.addon) { font-size: 16px; }
-.bigPrice { font-size: 20px; font-weight: 800; }
-.costLine { display: grid; gap: 2px; font-size: 13.5px; color: var(--text-2); }
+.bigMoney :global(.input) { height: var(--control); font-size: var(--fs-16); font-weight: 700; }
+.bigMoney :global(.addon) { font-size: var(--fs-16); }
+.bigPrice { font-size: var(--fs-20); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.costLine { display: grid; gap: 2px; font-size: var(--fs-13); color: var(--text-2); }
 .costLine strong { color: var(--ink); }
-.sum { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 14px; }
-.term { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--divider); border-radius: 10px; background: var(--fill); }
-.term > span:first-child { display: flex; align-items: center; font-size: 12px; color: var(--text-3); }
+.sum { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: var(--fs-14); }
+.term { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--divider); border-radius: var(--radius-control); background: var(--fill); }
+.term > span:first-child { display: flex; align-items: center; font-size: var(--fs-12); color: var(--text-3); }
 .term strong { font-variant-numeric: tabular-nums; }
-.op { color: var(--text-4); font-weight: 800; }
+.op { color: var(--text-4); font-weight: 700; }
 .total { border-color: var(--green); background: var(--green-tint); }
-.total > span:first-child { color: var(--green-dark); font-weight: 700; }
-.total strong { font-size: 18px; }
+.total > span:first-child { color: var(--green-dark); font-weight: 600; }
+.total strong { font-size: var(--fs-16); font-weight: 700; }
 
 /* Always on this roof */
 .addSelect { width: auto; max-width: 100%; }
-.rows { container-type: inline-size; border: 1px solid var(--divider); border-radius: 10px; overflow: hidden; }
+.rows { container-type: inline-size; border: 1px solid var(--divider); border-radius: var(--radius-control); overflow: hidden; }
 .rowList { list-style: none; margin: 0; padding: 0; }
 .row {
   display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 100px minmax(0, 1.1fr) 56px 36px;
   grid-template-areas: "name how price cost margin remove";
-  gap: 12px; align-items: center; min-height: 52px; padding: 8px 14px; border-top: 1px solid var(--row-divider); font-size: 14px;
+  gap: 12px; align-items: center; min-height: 52px; padding: 8px 14px; border-top: 1px solid var(--row-divider); font-size: var(--fs-14);
 }
 .rowList > .row:first-child { border-top: 0; }
-.rowHead { min-height: 0; padding: 9px 14px; border-top: 0; border-bottom: 1px solid var(--row-divider); background: var(--fill); font-size: 12px; font-weight: 700; color: var(--text-3); }
+.rowHead { min-height: 0; padding: 9px 14px; border-top: 0; border-bottom: 1px solid var(--row-divider); background: var(--fill); font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
-.sub { display: block; margin-top: 1px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.sub { display: block; margin-top: 1px; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
 .cellName { grid-area: name; min-width: 0; overflow-wrap: anywhere; }
 .cellName strong { font-weight: 600; }
-.cellHow { grid-area: how; min-width: 0; font-size: 13px; color: var(--text-2); }
+.cellHow { grid-area: how; min-width: 0; font-size: var(--fs-13); color: var(--text-2); }
 .cellPrice { grid-area: price; }
 .cellCost { grid-area: cost; min-width: 0; font-variant-numeric: tabular-nums; }
 .cellMargin { grid-area: margin; font-weight: 700; }
@@ -138,26 +138,26 @@
     gap: 4px 12px; padding: 12px 14px;
   }
   .cellPrice, .cellMargin { text-align: left; }
-  .cellPrice::before, .cellCost::before, .cellMargin::before { content: attr(data-label) ": "; font-weight: 500; color: var(--text-3); }
-  .cellCost { font-size: 13px; }
+  .cellPrice::before, .cellCost::before, .cellMargin::before { content: attr(data-label) ": "; font-weight: 400; color: var(--text-3); }
+  .cellCost { font-size: var(--fs-13); }
 }
 
 /* Quick adds */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .quick {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px 0 10px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 12px 0 10px;
   border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text-2);
-  font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer;
   transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
 }
 button.quick:hover { color: var(--ink); border-color: var(--border-strong); }
 .quick :global(svg) { color: var(--text-4); }
-.quick small { font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+.quick small { font-size: var(--fs-13); font-weight: 400; color: var(--text-3); }
 .quick[aria-pressed="true"], .quick[data-on] { border-color: var(--green); background: var(--green-tint); color: var(--ink); }
 .quick[aria-pressed="true"] :global(svg), .quick[data-on] :global(svg) { color: var(--green); }
 span.quick { cursor: default; }
 
 /* What's on its card, for those who only read it, and its contract sections */
-.cardLines { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; }
+.cardLines { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--fs-14); }
 .sections { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .sections :global(.checkbox) { font-weight: 600; }

@@ -205,7 +205,7 @@ function EditCalendarDialog({ source, crews, onClose }: { source: CalendarSource
           </Button>
           <span className="row" style={{ gap: 8 }}>
             <Button onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="primary" loading={save.isPending} disabled={!name.trim()}>Save</Button>
+            <Button type="submit" variant="primary" loading={save.isPending}>Save</Button>
           </span>
         </div>
       </form>
@@ -287,7 +287,7 @@ export function AddCalendarForm({ app, appName, steps, onAdded, addOnPaste }: { 
       </div>
       <CalendarSwitches details={details} setDetails={setDetails} blocks={blocks} setBlocks={setBlocks} />
       <FormError error={add.error} />
-      <div><Button type="submit" variant="primary" icon="plus" loading={add.isPending} disabled={!url.trim()}>{add.isPending ? "Adding…" : "Add calendar"}</Button></div>
+      <div><Button type="submit" icon="plus" loading={add.isPending}>{add.isPending ? "Adding…" : "Add calendar"}</Button></div>
     </form>
   );
 }
@@ -394,7 +394,7 @@ export function LinkCalendarsPanel({ app, appName, steps }: { app: string; appNa
     <>
       {(calendars.isPending || calendars.error || mine.length > 0) && <section className="card" aria-labelledby={`${app}-calendars`}>
         <div className="card-pad stack-sm" style={{ gap: 4 }}>
-          <h2 id={`${app}-calendars`} className="section-title" style={{ fontSize: 17 }}>Calendars on your schedule</h2>
+          <h2 id={`${app}-calendars`} className="section-title" style={{ fontSize: 16 }}>Calendars on your schedule</h2>
           <span className="muted small">Read again every 15 minutes. Changes made here only affect Crewtavo.</span>
         </div>
         {calendars.isPending ? (
@@ -406,7 +406,7 @@ export function LinkCalendarsPanel({ app, appName, steps }: { app: string; appNa
         )}
       </section>}
       <section className="card card-pad stack" aria-labelledby={`${app}-add`}>
-        <h2 id={`${app}-add`} className="section-title" style={{ fontSize: 17 }}>Add {CALENDAR_NOUNS[app] ?? "a calendar"}</h2>
+        <h2 id={`${app}-add`} className="section-title" style={{ fontSize: 16 }}>Add {CALENDAR_NOUNS[app] ?? "a calendar"}</h2>
         <AddCalendarForm app={app} appName={appName} steps={steps} />
       </section>
     </>
@@ -458,7 +458,7 @@ export function GoogleCalendarPanel() {
     <>
       <section className="card" aria-labelledby="google-calendars">
         <div className="card-pad stack-sm" style={{ gap: 4 }}>
-          <h2 id="google-calendars" className="section-title" style={{ fontSize: 17 }}>Calendars on your schedule</h2>
+          <h2 id="google-calendars" className="section-title" style={{ fontSize: 16 }}>Calendars on your schedule</h2>
           <span className="muted small">Pick the calendars in {account} to show next to your visits. Read again every 15 minutes.</span>
         </div>
         {list.isPending ? (
@@ -502,7 +502,7 @@ export function GoogleCalendarPanel() {
       <section className="card card-pad stack-sm" aria-labelledby="google-visits">
         <div className="row" style={{ gap: 12, alignItems: "flex-start" }}>
           <div className="grow stack-sm" style={{ gap: 4 }}>
-            <h2 id="google-visits" className="section-title" style={{ fontSize: 17 }}>Put visits on Google Calendar</h2>
+            <h2 id="google-visits" className="section-title" style={{ fontSize: 16 }}>Put visits on Google Calendar</h2>
             <span className="muted small">
               {google.visits_calendar
                 ? <>Visits go onto <strong>{google.visits_calendar.name}</strong> in {account}. New, moved and finished visits show up there within a few minutes. Share that calendar in Google to let others see the schedule.</>

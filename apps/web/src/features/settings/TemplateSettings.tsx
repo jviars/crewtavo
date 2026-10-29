@@ -23,7 +23,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { LibrarySection } from "@crewtavo/core/contracts";
 import { useEffect, useId, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
@@ -33,6 +33,7 @@ import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
 import { CLASSIC_FONT, DocumentSheet, PrintableDocument, printDocument } from "../documents/EstimateDocument";
 import { documentCompany, letterheadKey, sampleDocument, templatesKey, useLetterhead, useTemplates, websiteLabel, type TemplateRow } from "../documents/data";
 import { CompanyLogo } from "./CompanyLogo";
@@ -95,7 +96,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   );
 
   const save = useMutation({
-    meta: { inline: true, success: "Template saved" },
+    meta: { inline: true },
     mutationFn: async () => {
       const settings = templateSettings(t);
       if (row) {
@@ -148,13 +149,26 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   });
 
   const remove = useMutation({
-    meta: { success: "Template deleted" },
-    mutationFn: async () => unwrap(await supabase().from("document_templates").delete().eq("id", row!.id)),
-    onSuccess: () => {
-      onSelect(null);
-      return reload();
-    },
+    meta: { inline: true },
+    mutationFn: async (id: string) => unwrap(await supabase().from("document_templates").delete().eq("id", id)),
+    onSettled: reload,
   });
+  // Gone at once, with Undo. Quotes that use it print with the default template once it's deleted for real.
+  const deleteTemplate = (doomed: TemplateRow) =>
+    undoable({
+      title: "Template deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: templatesKey(company.id) });
+        queryClient.setQueryData<TemplateRow[]>(templatesKey(company.id), (old) => old?.filter((r) => r.id !== doomed.id));
+        onSelect(null);
+      },
+      restore: () => {
+        queryClient.setQueryData<TemplateRow[]>(templatesKey(company.id), (old) => (old && !old.some((r) => r.id === doomed.id) ? [...old, doomed].sort((a, b) => a.name.localeCompare(b.name)) : old));
+        onSelect(doomed.id);
+      },
+      commit: () => remove.mutateAsync(doomed.id),
+    });
+  const justSaved = useJustDone(save);
 
   /** Leaving a template with changes that aren't saved asks first. */
   const leave = async () => !dirty || confirm({ title: "Discard your changes?", body: "The changes you made to this template aren't saved.", confirmLabel: "Discard changes", danger: true });
@@ -222,16 +236,14 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 icon: "trash",
                 danger: true,
                 hidden: !row || isDefault,
-                onSelect: async () => {
-                  if (await confirm({ title: `Delete “${name}”?`, body: "Quotes that use it print with your default template instead. This can't be undone.", confirmLabel: "Delete template", danger: true })) remove.mutate();
-                },
+                onSelect: () => row && deleteTemplate(row),
               },
             ]}
           />
           <span className={styles.spacer} />
           {dirty && <span className={styles.dirty}>Not saved yet</span>}
           <Button icon="printer" onClick={() => void printDocument()}>Print a sample</Button>
-          <Button variant="primary" icon="check" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate()}>Save template</Button>
+          <Button variant="primary" icon="check" loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved} onClick={() => save.mutate()}>Save template</Button>
         </div>
         <span className={styles.which}>
           {isDefault ? "Used for every estimate and invoice, unless a quote picks another." : "Used on the quotes that pick it. Pick it on a quote, beside its totals."}
@@ -332,11 +344,11 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 <input className="input" value={t.insurer} maxLength={TEMPLATE_LIMITS.insurer} placeholder="Your insurance company" onChange={(e) => set("insurer", e.target.value)} />
               </Field>
             </div>
-            <label className="switch-row" style={{ fontWeight: 500 }}>
+            <label className="switch-row">
               <input type="checkbox" className="switch" checked={t.show_license} onChange={(e) => set("show_license", e.target.checked)} />
               Show the license number
             </label>
-            <label className="switch-row" style={{ fontWeight: 500 }}>
+            <label className="switch-row">
               <input type="checkbox" className="switch" checked={t.show_insurer} onChange={(e) => set("show_insurer", e.target.checked)} />
               Show who insures you
             </label>
@@ -377,20 +389,20 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
 
           <Section id="signatures" icon="signature" title="Signatures" summary={summary.signatures} open={open.signatures} onToggle={toggle}>
             <div className={styles.group}>
-              <label className="switch-row" style={{ fontWeight: 500 }}>
+              <label className="switch-row">
                 <input type="checkbox" className="switch" checked={t.customer_signs} onChange={(e) => set("customer_signs", e.target.checked)} />
                 The customer signs
               </label>
               <input className="input" aria-label="Words under the customer's line" value={t.customer_label} maxLength={TEMPLATE_LIMITS.label} placeholder="Customer" disabled={!t.customer_signs} onChange={(e) => set("customer_label", e.target.value)} />
             </div>
             <div className={styles.group}>
-              <label className="switch-row" style={{ fontWeight: 500 }}>
+              <label className="switch-row">
                 <input type="checkbox" className="switch" checked={t.company_signs} onChange={(e) => set("company_signs", e.target.checked)} />
                 Your company signs too
               </label>
               <input className="input" aria-label="Words under your company's line" value={t.company_label} maxLength={TEMPLATE_LIMITS.label} placeholder={`${doc.name} representative`} disabled={!t.company_signs} onChange={(e) => set("company_label", e.target.value)} />
             </div>
-            <label className="switch-row" style={{ fontWeight: 500 }}>
+            <label className="switch-row">
               <input type="checkbox" className="switch" checked={t.sign_dates} onChange={(e) => set("sign_dates", e.target.checked)} />
               A date beside each signature
             </label>
@@ -407,7 +419,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 <input className="input" value={t.footer} maxLength={TEMPLATE_LIMITS.footer} placeholder="Licensed and insured · Family owned since 1998" onChange={(e) => set("footer", e.target.value)} />
               </Field>
             )}
-            <label className="switch-row" style={{ fontWeight: 500 }}>
+            <label className="switch-row">
               <input type="checkbox" className="switch" checked={t.page_numbers} onChange={(e) => set("page_numbers", e.target.checked)} />
               Page numbers
             </label>

@@ -8,16 +8,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button, Spinner } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { base64Of, packagePicture } from "@/lib/files";
+import { formatMoneyCents } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { undoable } from "@/lib/undo";
 import { ServicePicture } from "../roofing/visit/ServicePicture";
 import { ImportPriceListDialog } from "./ImportPriceList";
 import styles from "./PriceList.module.css";
@@ -41,11 +44,16 @@ export function PriceList() {
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["services", session.company.id] });
   const add = useMutation({
-    meta: { success: "Service added. Name it and set the price." },
     mutationFn: async () => unwrap(await supabase().from("services").insert({ company_id: session.company.id, name: "New service", unit: "ea", unit_price: 0, sort: (services.data?.length ?? 0) + 1 })),
-    onSuccess: refresh,
+    onSuccess: () => {
+      toast.success("Service added", { description: "Name it and set the price." });
+      return refresh();
+    },
   });
+  // Each field saves when it's left, and the toolbar says so.
+  const saving = useSaveStatus();
   const update = useMutation({
+    meta: { inline: true },
     mutationFn: async ({ id, patch }: { id: string; patch: Record<string, unknown> }) => unwrap(await supabase().from("services").update(patch as never).eq("id", id)),
     onMutate: async ({ id, patch }) => {
       await queryClient.cancelQueries({ queryKey: key });
@@ -53,11 +61,25 @@ export function PriceList() {
     },
     onSettled: refresh,
   });
+  const change = (args: { id: string; patch: Record<string, unknown> }) => void saving.track(update.mutateAsync(args));
   const remove = useMutation({
-    meta: { success: "Service deleted" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("services").delete().eq("id", id)),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
+  type Service = NonNullable<typeof services.data>[number];
+  // Gone at once, with Undo. Quotes and invoices keep their lines either way.
+  const deleteService = (service: Service) =>
+    undoable({
+      title: "Service deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<Service[]>(key, (old) => old?.filter((s) => s.id !== service.id));
+      },
+      restore: () =>
+        queryClient.setQueryData<Service[]>(key, (old) => (old && !old.some((s) => s.id === service.id) ? [...old, service].sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name)) : old)),
+      commit: () => remove.mutateAsync(service.id),
+    });
   const checkFormula = async (id: string, formula: string, previous: string | null) => {
     const value = formula.trim();
     if ((value || null) === previous) return;
@@ -69,7 +91,7 @@ export function PriceList() {
         return;
       }
     }
-    update.mutate({ id, patch: { formula: value || null } });
+    change({ id, patch: { formula: value || null } });
   };
 
   const rows = useMemo(
@@ -77,6 +99,7 @@ export function PriceList() {
     [services.data, showInactive, term],
   );
 
+  const body = useListAnimation<HTMLTableSectionElement>();
   if (services.isPending) return <TableSkeleton columns={6} />;
   if (services.error) return <div className="card"><ErrorState error={services.error} onRetry={() => services.refetch()} /></div>;
 
@@ -84,7 +107,8 @@ export function PriceList() {
     <div className="stack">
       <div className="toolbar">
         <div className="input-group"><span className="addon"><Icon name="search" size={16} /></span><input className="input" type="search" placeholder="Search services" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Search services" /></div>
-        <label className="switch-row" style={{ fontWeight: 500 }}><input type="checkbox" className="switch" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Show hidden</label>
+        <label className="switch-row"><input type="checkbox" className="switch" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Show hidden</label>
+        <SaveStatus status={saving.status} />
         <span className="grow" />
         <Button icon="download" onClick={() => downloadCsv(`price-list-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(services.data ?? [], [{ key: "name", label: "Name" }, { key: "category", label: "Category" }, { key: "unit", label: "Unit" }, { key: "unit_price", label: "Price" }, { key: "unit_cost", label: "Cost" }, { key: "taxable", label: "Taxable" }, { key: "formula", label: "Formula" }]))}>Download</Button>
         {canEdit && <Button icon="upload" onClick={() => setImporting(true)}>Import</Button>}
@@ -104,31 +128,31 @@ export function PriceList() {
         </ul>
       </details>
       {!rows.length ? (
-        <div className="card"><EmptyState icon="list" title={term ? "No services match" : "No services yet"} action={canEdit && !term && <Button variant="primary" icon="plus" onClick={() => add.mutate()}>Add your first service</Button>} /></div>
+        <div className="card"><EmptyState inline title={term ? "No services match" : "No services yet"} action={canEdit && !term && <Button onClick={() => add.mutate()}>Add a service</Button>} /></div>
       ) : (
         <div className="card table-scroll">
           <table className="table table-stack">
             <thead><tr><th style={{ width: 96 }}>Picture</th><th style={{ minWidth: 220 }}>Service</th><th style={{ width: 90 }}>Unit</th><th className="num" style={{ width: 130 }}>Price</th><th className="num" style={{ width: 130 }}>Cost</th><th style={{ width: 230 }}>Formula</th><th style={{ width: 120 }} /></tr></thead>
-            <tbody>
+            <tbody ref={body}>
               {rows.map((s) => {
                 const margin = Number(s.unit_price) > 0 && s.unit_cost != null ? Math.round(((Number(s.unit_price) - Number(s.unit_cost)) / Number(s.unit_price)) * 100) : null;
                 return (
                   <tr key={s.id} style={s.active ? undefined : { opacity: 0.55 }}>
                     <td><PictureCell service={s} canEdit={canEdit} /></td>
                     <td>
-                      <input className="input input-sm" defaultValue={s.name} disabled={!canEdit} maxLength={200} onBlur={(e) => { const v = e.target.value.trim(); if (!v) { e.target.value = s.name; toast.error("A service needs a name."); } else if (v !== s.name) update.mutate({ id: s.id, patch: { name: v } }); }} aria-label="Service name" style={{ fontWeight: 700 }} />
-                      <input className="input input-sm" defaultValue={s.category ?? ""} disabled={!canEdit} maxLength={60} placeholder="Category" onBlur={(e) => (e.target.value.trim() || null) !== s.category && update.mutate({ id: s.id, patch: { category: e.target.value.trim() || null } })} aria-label="Category" style={{ marginTop: 4, fontSize: 12 }} />
+                      <input className="input input-sm" defaultValue={s.name} disabled={!canEdit} maxLength={200} onBlur={(e) => { const v = e.target.value.trim(); if (!v) { e.target.value = s.name; toast.error("A service needs a name."); } else if (v !== s.name) change({ id: s.id, patch: { name: v } }); }} aria-label="Service name" style={{ fontWeight: 700 }} />
+                      <input className="input input-sm" defaultValue={s.category ?? ""} disabled={!canEdit} maxLength={60} placeholder="Category" onBlur={(e) => (e.target.value.trim() || null) !== s.category && change({ id: s.id, patch: { category: e.target.value.trim() || null } })} aria-label="Category" style={{ marginTop: 4, fontSize: 12 }} />
                     </td>
-                    <td><input className="input input-sm" defaultValue={s.unit} disabled={!canEdit} maxLength={20} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== s.unit && update.mutate({ id: s.id, patch: { unit: e.target.value.trim() } })} aria-label="Unit" /></td>
-                    <td className="num">{canEdit ? <MoneyInput value={Number(s.unit_price)} width={120} label="Price" onSave={(v) => update.mutate({ id: s.id, patch: { unit_price: v } })} /> : `$${Number(s.unit_price).toFixed(2)}`}</td>
+                    <td><input className="input input-sm" defaultValue={s.unit} disabled={!canEdit} maxLength={20} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== s.unit && change({ id: s.id, patch: { unit: e.target.value.trim() } })} aria-label="Unit" /></td>
+                    <td className="num">{canEdit ? <MoneyInput value={Number(s.unit_price)} width={120} label="Price" onSave={(v) => change({ id: s.id, patch: { unit_price: v } })} /> : formatMoneyCents(Number(s.unit_price))}</td>
                     <td className="num">
-                      {canEdit ? <MoneyInput value={Number(s.unit_cost ?? 0)} width={120} label="Cost" onSave={(v) => update.mutate({ id: s.id, patch: { unit_cost: v || null } })} /> : s.unit_cost ?? "—"}
+                      {canEdit ? <MoneyInput value={Number(s.unit_cost ?? 0)} width={120} label="Cost" onSave={(v) => change({ id: s.id, patch: { unit_cost: v || null } })} /> : s.unit_cost == null ? "—" : formatMoneyCents(Number(s.unit_cost))}
                       {margin !== null && <div className={`small ${margin < 0 ? "text-danger" : "muted"}`} style={{ marginTop: 2 }}>{margin}% margin</div>}
                     </td>
                     <td>
                       <input className="input input-sm" defaultValue={s.formula ?? ""} disabled={!canEdit} placeholder="None" maxLength={300} onBlur={(e) => checkFormula(s.id, e.target.value, s.formula)} aria-label="Formula" style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }} />
                       {s.formula && (
-                        <select className="select input-sm" style={{ marginTop: 4, fontSize: 12 }} value={s.formula_target} disabled={!canEdit} onChange={(e) => update.mutate({ id: s.id, patch: { formula_target: e.target.value } })} aria-label="Formula sets">
+                        <select className="select input-sm" style={{ marginTop: 4, fontSize: 12 }} value={s.formula_target} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { formula_target: e.target.value } })} aria-label="Formula sets">
                           <option value="quantity">Sets the quantity</option>
                           <option value="unit_price">Sets the price</option>
                         </select>
@@ -136,9 +160,9 @@ export function PriceList() {
                     </td>
                     <td>
                       <div className="stack-sm" style={{ justifyItems: "start" }}>
-                        <label className="checkbox small"><input type="checkbox" checked={s.taxable} disabled={!canEdit} onChange={(e) => update.mutate({ id: s.id, patch: { taxable: e.target.checked } })} />Taxable</label>
-                        <label className="checkbox small"><input type="checkbox" checked={s.active} disabled={!canEdit} onChange={(e) => update.mutate({ id: s.id, patch: { active: e.target.checked } })} />Show on quotes</label>
-                        {canEdit && <button type="button" className="link-btn small" style={{ color: "var(--danger)" }} onClick={async () => (await confirm({ title: `Delete “${s.name}”?`, body: "Existing quotes and invoices keep their lines. To keep it but stop offering it, untick “Show on quotes” instead.", confirmLabel: "Delete", danger: true })) && remove.mutate(s.id)}>Delete</button>}
+                        <label className="checkbox small"><input type="checkbox" checked={s.taxable} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { taxable: e.target.checked } })} />Taxable</label>
+                        <label className="checkbox small"><input type="checkbox" checked={s.active} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { active: e.target.checked } })} />Show on quotes</label>
+                        {canEdit && <button type="button" className="link-btn small" style={{ color: "var(--danger)" }} onClick={() => deleteService(s)}>Delete</button>}
                       </div>
                     </td>
                   </tr>
@@ -162,8 +186,8 @@ function PictureCell({ service, canEdit }: { service: { id: string; name: string
   const input = useRef<HTMLInputElement>(null);
   // The price list, the visit's price list and the packages' quick adds all show it.
   const saved = () => Promise.all([queryClient.invalidateQueries({ queryKey: ["services", company.id] }), queryClient.invalidateQueries({ queryKey: ["roof-packages", company.id] })]);
+  // The thumbnail changing in place says it worked.
   const set = useMutation({
-    meta: { success: "Picture saved" },
     mutationFn: async (file: File) => {
       const jpeg = await packagePicture(file);
       if (!jpeg) throw new Error("Crewtavo can't open that picture here. Try a JPEG or PNG.");
@@ -172,7 +196,6 @@ function PictureCell({ service, canEdit }: { service: { id: string; name: string
     onSuccess: saved,
   });
   const remove = useMutation({
-    meta: { success: "Picture removed" },
     mutationFn: () => api.delete<{ ok: true }>(`/services/${service.id}/picture`),
     onSuccess: saved,
   });

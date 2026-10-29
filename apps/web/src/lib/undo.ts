@@ -11,6 +11,7 @@
  *   });
  */
 import { errorMessage } from "./errors";
+import { queryClient } from "./queryClient";
 import { toast, type ToastTone } from "./toast";
 
 export interface UndoableOptions {
@@ -31,6 +32,22 @@ const waiting = new Map<number, () => Promise<void>>();
 
 export function undoable({ title, description, tone, hide, restore, commit }: UndoableOptions): void {
   hide();
+  // Fresh data arriving before the change is saved (a refetch on window focus, another change on the
+  // page) would bring the row back: take it off again each time, until it's saved or undone.
+  let watching = true;
+  let hiding = false;
+  const unwatch = queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "updated" || event.action.type !== "success" || event.action.manual || hiding) return;
+    hiding = true;
+    queueMicrotask(() => {
+      hiding = false;
+      if (watching) hide();
+    });
+  });
+  const stopWatching = () => {
+    watching = false;
+    unwatch();
+  };
   let settled = false;
   let id = -1;
   const save = async () => {
@@ -39,7 +56,9 @@ export function undoable({ title, description, tone, hide, restore, commit }: Un
     waiting.delete(id);
     try {
       await commit();
+      stopWatching();
     } catch (error) {
+      stopWatching();
       restore();
       toast.error(errorMessage(error));
     }
@@ -55,6 +74,7 @@ export function undoable({ title, description, tone, hide, restore, commit }: Un
         if (settled) return;
         settled = true;
         waiting.delete(id);
+        stopWatching();
         restore();
       },
     },

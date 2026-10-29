@@ -12,7 +12,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
@@ -43,6 +43,8 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
   const [title, setTitle] = useState("");
   const [packageIds, setPackageIds] = useState<string[] | null>(null);
   const [addingAddress, setAddingAddress] = useState(false);
+  // Tried to start without saying who it's for: the picker says so until someone's picked.
+  const [noClient, setNoClient] = useState(false);
   // The quote made by a try that then couldn't offer the options: trying again offers them on it.
   const made = useRef<string | null>(null);
   const kindId = useId();
@@ -52,6 +54,7 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
       setPropertyId(null);
       setTitle("");
       setPackageIds(null);
+      setNoClient(false);
       made.current = null;
     }
   }, [open]);
@@ -137,8 +140,17 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
     <>
       {/* Adding an address opens over this one: closing a native dialog would close the takeoff too. */}
       <Dialog open={open} onClose={close} title={words.title} description={words.description} size={roofing ? "lg" : "md"}>
-        <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client) create.mutate(); }}>
-          <Field label={roofing ? "Who's it for?" : "Client"}><ClientPicker value={client} onChange={setClient} /></Field>
+        <form
+          onSubmit={(e: FormEvent<HTMLFormElement>) => {
+            e.preventDefault();
+            if (client) return create.mutate();
+            setNoClient(true);
+            e.currentTarget.querySelector<HTMLInputElement>('[aria-label="Search clients"]')?.focus();
+          }}
+        >
+          <Field label={roofing ? "Who's it for?" : "Client"} error={noClient && !client ? "Pick who it's for, or type a name to add them." : null}>
+            <ClientPicker value={client} onChange={setClient} />
+          </Field>
           {client && (
             <Field label="Property">
               <div className="stack-sm">
@@ -168,10 +180,10 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
                 </div>
               ) : canSetUpRoofing(session) ? (
                 <div className="callout callout-info" style={{ fontWeight: 400 }}>
-                  <Icon name="package" size={18} />
+                  <Icon name="package" size={20} />
                   <span className="grow stack-sm" style={{ gap: 8 }}>
                     <span>Packages price a roof in one tap: Architectural shingle, Designer shingle and Standing-seam metal, from your price list.</span>
-                    <Button size="sm" variant="primary" icon="package" style={{ justifySelf: "start" }} loading={setup.isPending} onClick={() => setup.mutate()}>Set up the standard packages</Button>
+                    <Button size="sm" icon="package" style={{ justifySelf: "start" }} loading={setup.isPending} onClick={() => setup.mutate()}>Set up the standard packages</Button>
                   </span>
                 </div>
               ) : (
@@ -179,11 +191,12 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
               )}
             </div>
           )}
-          <Field label="Project name" hint={`Optional. For example: ${words.name}.`}>
+          <Field label="Project name" optional hint={`For example: ${words.name}.`}>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder={words.name} />
           </Field>
           <FormError error={create.error} />
           <div className="form-actions">
+            <FormChecks />
             {roofing && (
               <>
                 <span className="muted small row hide-mobile" style={{ gap: 6 }}>
@@ -193,7 +206,7 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
               </>
             )}
             <Button onClick={close}>Cancel</Button>
-            <Button type="submit" variant="primary" icon="area" loading={create.isPending} disabled={!client || (roofing && setup.isPending)}>{words.start}</Button>
+            <Button type="submit" variant="primary" icon="area" loading={create.isPending} disabled={roofing && setup.isPending}>{words.start}</Button>
           </div>
         </form>
       </Dialog>

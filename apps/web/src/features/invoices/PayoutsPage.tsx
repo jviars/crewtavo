@@ -101,7 +101,7 @@ function PayoutsScreen() {
         <div className="card"><ErrorState error={data.error} onRetry={() => data.refetch()} /></div>
       ) : !d?.payouts.length ? (
         <div className="card">
-          <EmptyState icon="dollar" title="No deposits yet" action={<Link className="btn" to="/apps">Stripe settings</Link>}>
+          <EmptyState icon="dollar" title="No deposits yet" action={<Link className="btn" to="/apps">Open Apps</Link>}>
             When Stripe sends money to your bank, it shows up here. To bring in deposits you already have, import your Stripe history from Apps.
           </EmptyState>
         </div>

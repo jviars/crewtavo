@@ -3,9 +3,8 @@ import { formSlug as slugify, normalizeIntakeForm } from "@crewtavo/core/forms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
@@ -14,7 +13,9 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
 import { EmbedDialog } from "./EmbedDialog";
 
 const KIND: Record<string, string> = { request: "Request form", assessment: "Book an estimate", booking: "Book a service" };
@@ -50,20 +51,34 @@ export function BookingAdminPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["intake-forms", company.id] }),
   });
   const remove = useMutation({
-    meta: { success: "Form deleted" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("intake_forms").delete().eq("id", id)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["intake-forms", company.id] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["intake-forms", company.id] }),
   });
+  // Gone at once, with Undo; its link keeps working until it's deleted for real. Requests it brought in are kept.
+  const deleteForm = (form: FormRow) => {
+    const key = ["intake-forms", company.id];
+    undoable({
+      title: "Form deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key, exact: true });
+        queryClient.setQueryData<FormRow[]>(key, (old) => old?.filter((f) => f.id !== form.id));
+      },
+      restore: () => queryClient.setQueryData<FormRow[]>(key, (old) => (old && !old.some((f) => f.id === form.id) ? [...old, form].sort((a, b) => a.name.localeCompare(b.name)) : old)),
+      commit: () => remove.mutateAsync(form.id),
+    });
+  };
   const link = (slug: string) => `${window.location.origin}/book/${company.slug}/${slug}`;
+  const cards = useListAnimation<HTMLDivElement>();
 
   return (
     <>
       <BackLink to="/settings">Settings</BackLink>
       <PageHeader title="Online booking" actions={canEdit && <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>New form</Button>} />
       {forms.isPending ? <Loading><div className="grid-cards">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={3} />)}</div></Loading> : forms.error ? <div className="card"><ErrorState error={forms.error} onRetry={() => forms.refetch()} /></div> : !forms.data?.length ? (
-        <div className="card"><EmptyState icon="globe" title="No booking forms yet" action={canEdit && <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Create a form</Button>} /></div>
+        <div className="card"><EmptyState icon="globe" title="No booking forms yet" action={canEdit && <Button icon="plus" onClick={() => setEditing("new")}>Create a form</Button>} /></div>
       ) : (
-        <div className="grid-cards">
+        <div className="grid-cards" ref={cards}>
           {forms.data.map((f) => (
             <div key={f.id} className="card card-pad stack-sm" style={{ alignContent: "start" }}>
               <div className="row">
@@ -76,7 +91,7 @@ export function BookingAdminPage() {
                       { label: "Edit form", icon: "edit", onSelect: () => setEditing(f) },
                       { label: f.active ? "Turn off" : "Turn on", icon: f.active ? "pause" : "play", onSelect: () => toggle.mutate({ id: f.id, active: !f.active }) },
                       { separator: true },
-                      { label: "Delete form", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: `Delete “${f.name}”?`, body: "The link stops working. Requests it already brought in are kept.", confirmLabel: "Delete", danger: true })) && remove.mutate(f.id) },
+                      { label: "Delete form", icon: "trash", danger: true, onSelect: () => deleteForm(f) },
                     ]}
                   />
                 )}
@@ -85,7 +100,7 @@ export function BookingAdminPage() {
                 {KIND[f.kind] ?? f.kind} · {f.questions.filter((q) => q.type !== "address").length} questions{f.service_area_zips.length ? ` · ${f.service_area_zips.length} ZIP codes` : " · any area"}
               </span>
               <span className="small"><strong>{counts.data?.[f.id] ?? 0}</strong> <span className="muted">requests in the last 30 days</span></span>
-              <code style={{ padding: 8, background: "var(--fill)", borderRadius: 8, fontSize: 12, overflowWrap: "anywhere" }}>{link(f.slug)}</code>
+              <code style={{ padding: 8, background: "var(--fill)", borderRadius: "var(--radius-control)", fontSize: 12, overflowWrap: "anywhere" }}>{link(f.slug)}</code>
               <div className="row wrap">
                 <Button size="sm" icon="copy" onClick={() => copyText(link(f.slug), "Link copied")}>Copy link</Button>
                 <a className="btn btn-sm" href={link(f.slug)} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Open</a>
@@ -172,6 +187,7 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
         </div>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending} disabled={clash || badZips.length > 0}>{form ? "Save form" : "Create form"}</Button>
         </div>

@@ -10,6 +10,7 @@ import { STARTER_NOTE } from "@crewtavo/core/contracts";
 import { formulaVariables } from "@crewtavo/core/formulas";
 import { isExampleWarranty, PACKAGE_LIMITS } from "@crewtavo/core/presets";
 import { ROOFING_VARIABLE_NAMES, isRoofDrawing } from "@crewtavo/core/roofing";
+import { statusText } from "@/components/ui/StatusPill";
 import { invoicesSettled, sectionsOf, type FlowStep, type TakeoffRow } from "../paving/data";
 
 /** A roofing project's steps: measure, price, send the range, check and sign on site, then the job. */
@@ -132,8 +133,8 @@ export type StageTone = "muted" | "info" | "warning" | "good" | "danger";
  * office instead), signed, then the job.
  */
 export function roofStage(q: RoofStageQuote, hasTakeoff: boolean): { label: string; tone: StageTone } {
-  if (q.status === "lost") return { label: "Lost", tone: "danger" };
-  if (q.status === "archived") return { label: "Archived", tone: "muted" };
+  if (q.status === "lost") return { label: statusText("quote", q.status), tone: "danger" };
+  if (q.status === "archived") return { label: statusText("quote", q.status), tone: "muted" };
   if (q.status === "converted") {
     const job = q.jobs?.[0];
     if (job?.status === "completed" || job?.status === "archived") return { label: "Done", tone: "good" };
@@ -143,7 +144,7 @@ export function roofStage(q: RoofStageQuote, hasTakeoff: boolean): { label: stri
   if (q.status === "approved") return { label: "Signed", tone: "good" };
   if (!hasTakeoff) return { label: "Measuring", tone: "muted" };
   if (!q.lines?.length) return { label: "Pricing", tone: "muted" };
-  if (q.status === "changes_requested") return { label: "Changes requested", tone: "warning" };
+  if (q.status === "changes_requested") return { label: statusText("quote", q.status), tone: "warning" };
   const ranged = q.range_low !== null && q.range_low !== undefined;
   if (ranged && !q.priced_on_site_at && !q.exact_sent_at && q.range_accepted_at) return { label: "Wants a visit", tone: "warning" };
   if (q.priced_on_site_at) return { label: "Priced on site", tone: "info" };

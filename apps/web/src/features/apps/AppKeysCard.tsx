@@ -60,7 +60,7 @@ export function AppKeysCard({ app, onChanged, onConnect, connecting }: { app: Ap
     const end = keys.client_id.slice(-4);
     return (
       <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="app-keys-title" style={{ gap: 8 }}>
-        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 17 }}>Your {provider} app</h2>
+        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 16 }}>Your {provider} app</h2>
         <span className="muted small">
           Client ID ending in <strong>{end}</strong>
           {qbo ? (keys.sandbox ? " · Development keys, for a sandbox company" : " · Production keys") : ` · ${regionOf(keys.accounts_server).label}`}
@@ -86,7 +86,7 @@ export function AppKeysCard({ app, onChanged, onConnect, connecting }: { app: Ap
   return (
     <section id="app-setup" className="card card-pad stack" aria-labelledby="app-keys-title">
       <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 17 }}>{keys ? `Change your ${provider} app keys` : `Set up ${app.name}`}</h2>
+        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 16 }}>{keys ? `Change your ${provider} app keys` : `Set up ${app.name}`}</h2>
         <span className="muted small">
           {qbo
             ? "QuickBooks connects through an app you make at Intuit, for your business only. It's free, and these steps give you everything Intuit asks for."

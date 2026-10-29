@@ -53,7 +53,7 @@ export function SpareKeysSheet({ keys, email, doneLabel, onDone, busy = false }:
           <ol
             aria-label="Spare keys"
             // Each key on one line (a key split across lines is easy to copy wrong); two columns when they fit.
-            style={{ margin: 0, padding: "12px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", columnGap: 16, listStylePosition: "inside", whiteSpace: "nowrap", borderRadius: 12, background: "var(--fill)", font: "600 15px/2 ui-monospace, Menlo, Consolas, monospace", letterSpacing: "0.02em" }}
+            style={{ margin: 0, padding: "12px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", columnGap: 16, listStylePosition: "inside", whiteSpace: "nowrap", borderRadius: "var(--radius-card)", background: "var(--fill)", font: "600 16px/2 ui-monospace, Menlo, Consolas, monospace" }}
           >
             {keys.map((key) => <li key={key}>{key}</li>)}
           </ol>

@@ -12,6 +12,7 @@ import { api, ApiError, supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { undoable } from "@/lib/undo";
 import { TAKEOFF_FIELDS, type TakeoffRow } from "../../paving/data";
 import { sortOptions } from "../../quotes/options";
 import { layersFormula, layersName, layersOf } from "../data";
@@ -576,7 +577,15 @@ export function useQuoteNotes(quoteId: string | null | undefined) {
   });
 }
 
-/** Adding and removing a quote's notes and photos. Photos upload one at a time; `uploading` counts what's left. */
+/** The notes with one changed, and the thread built again from them. */
+const withNotes = (data: QuoteNotes, notes: QuoteNote[], photos: QuotePhoto[] = data.photos): QuoteNotes => ({ ...data, notes, photos, thread: threadItems(notes, photos) });
+const byCreated = (a: { created_at: string }, b: { created_at: string }) => Date.parse(a.created_at) - Date.parse(b.created_at);
+
+/**
+ * Adding and removing a quote's notes and photos. Photos upload one at a time; `uploading` counts
+ * what's left. A note or photo deleted goes at once with Undo on its toast (deleteNote, deletePhoto),
+ * and is only deleted for real once the toast leaves.
+ */
 export function useNoteActions(quoteId: string) {
   const { company } = useSession();
   const queryClient = useQueryClient();
@@ -584,8 +593,8 @@ export function useNoteActions(quoteId: string) {
   const refresh = () => queryClient.invalidateQueries({ queryKey: notesKey(quoteId) });
   const clientId = () => queryClient.getQueryData<QuoteNotes>(notesKey(quoteId))?.clientId ?? null;
 
+  // The note shows in the thread, and its button says Added.
   const addNote = useMutation({
-    meta: { success: "Note added" },
     mutationFn: async (body: string) =>
       unwrap(
         await supabase()
@@ -624,18 +633,44 @@ export function useNoteActions(quoteId: string) {
     },
     onSuccess: (saved) => saved && toast.success(saved === 1 ? "Photo added" : `${saved} photos added`),
   });
+  // undoable says when these fail, and puts the note or photo back.
   const removeNote = useMutation({
-    meta: { success: "Note deleted" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("messages").delete().eq("id", id)),
     onSettled: refresh,
   });
   const removePhoto = useMutation({
-    meta: { success: "Photo removed" },
+    meta: { inline: true },
     mutationFn: async (photo: Pick<QuotePhoto, "id" | "path">) => {
       unwrap(await supabase().from("attachments").delete().eq("id", photo.id));
       await supabase().storage.from("files").remove([photo.path]);
     },
     onSettled: refresh,
   });
-  return { addNote, addPhotos, removeNote, removePhoto, uploading };
+  const key = notesKey(quoteId);
+  // Put back into the thread as it is now, so a note added meanwhile stays.
+  const change = (fn: (data: QuoteNotes) => QuoteNotes) => queryClient.setQueryData<QuoteNotes>(key, (data) => (data ? fn(data) : data));
+  const deleteNote = (note: QuoteNote) =>
+    undoable({
+      title: "Note deleted",
+      tone: "quote",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        change((d) => withNotes(d, d.notes.filter((n) => n.id !== note.id)));
+      },
+      restore: () => change((d) => (d.notes.some((n) => n.id === note.id) ? d : withNotes(d, [...d.notes, note].sort(byCreated)))),
+      commit: () => removeNote.mutateAsync(note.id),
+    });
+  const deletePhoto = (photo: QuotePhoto) =>
+    undoable({
+      title: "Photo removed",
+      tone: "quote",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        change((d) => withNotes(d, d.notes, d.photos.filter((p) => p.id !== photo.id)));
+      },
+      restore: () => change((d) => (d.photos.some((p) => p.id === photo.id) ? d : withNotes(d, d.notes, [...d.photos, photo].sort(byCreated)))),
+      commit: () => removePhoto.mutateAsync(photo),
+    });
+  return { addNote, addPhotos, deleteNote, deletePhoto, uploading };
 }

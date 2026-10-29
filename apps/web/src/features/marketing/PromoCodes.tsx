@@ -3,9 +3,8 @@ import type { Tables } from "@crewtavo/core/database";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Menu } from "@/components/ui/Menu";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -13,7 +12,9 @@ import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
 
 type Promo = Tables<"promo_codes">;
 
@@ -53,10 +54,25 @@ export function PromoCodes() {
     onSuccess: refresh,
   });
   const remove = useMutation({
-    meta: { success: "Code deleted" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("promo_codes").delete().eq("id", id)),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
+  type Codes = NonNullable<typeof codes.data>;
+  const key = ["promo-codes", session.company.id];
+  // Gone at once, with Undo. Quotes and invoices that used it keep their discount either way.
+  const deleteCode = (promo: Promo) =>
+    undoable({
+      title: "Promo code deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<Codes>(key, (old) => old && { ...old, rows: old.rows.filter((r) => r.id !== promo.id) });
+      },
+      restore: () =>
+        queryClient.setQueryData<Codes>(key, (old) => (old && !old.rows.some((r) => r.id === promo.id) ? { ...old, rows: [...old.rows, promo].sort((a, b) => b.created_at.localeCompare(a.created_at)) } : old)),
+      commit: () => remove.mutateAsync(promo.id),
+    });
+  const list = useListAnimation<HTMLDivElement>();
 
   const form = codes.data?.form;
   const bookingLink = (code: string) => (form ? `${window.location.origin}/book/${session.company.slug}/${form.slug}?promo=${encodeURIComponent(code)}` : null);
@@ -71,12 +87,12 @@ export function PromoCodes() {
         <div className="card"><ErrorState error={codes.error} onRetry={() => codes.refetch()} /></div>
       ) : !codes.data.rows.length ? (
         <div className="card">
-          <EmptyState icon="tag" title="No promo codes yet" action={<Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Create a promo code</Button>}>
+          <EmptyState inline title="No promo codes yet" action={<Button onClick={() => setEditing("new")}>Create a promo code</Button>}>
             Offer a percent or dollar amount off, like SPRING10 for 10% off spring cleanups.
           </EmptyState>
         </div>
       ) : (
-        <div className="card">
+        <div className="card" ref={list}>
           {codes.data.rows.map((p) => {
             const usage = codes.data.used.get(p.id);
             const uses = usage?.uses ?? 0;
@@ -112,10 +128,7 @@ export function PromoCodes() {
                       label: "Delete",
                       icon: "trash",
                       danger: true,
-                      onSelect: async () => {
-                        const body = uses ? "Quotes and invoices that used it keep their discount. To stop new uses but keep the history, pause it instead." : undefined;
-                        if (await confirm({ title: `Delete ${p.code}?`, body, confirmLabel: "Delete", danger: true })) remove.mutate(p.id);
-                      },
+                      onSelect: () => deleteCode(p),
                     },
                   ]}
                 />
@@ -145,8 +158,8 @@ function PromoDialog({ promo, onClose, onSaved }: { promo: Promo | null; onClose
   });
   const value = Number(f.value);
   const codeOk = /^[A-Z0-9-]{3,24}$/.test(f.code);
-  const valueError = f.value && (!(value > 0) || (f.kind === "percent" && value > 100)) ? (f.kind === "percent" ? "Between 1 and 100" : "More than $0") : null;
-  const datesError = f.starts_on && f.ends_on && f.ends_on < f.starts_on ? "Ends before it starts" : null;
+  const valueError = f.value && (!(value > 0) || (f.kind === "percent" && value > 100)) ? (f.kind === "percent" ? "Enter a percent between 1 and 100." : "Enter an amount more than $0.") : null;
+  const datesError = f.starts_on && f.ends_on && f.ends_on < f.starts_on ? "The end date is before the start date." : null;
   const save = useMutation({
     meta: { inline: true, success: promo ? "Promo code saved" : "Promo code created" },
     mutationFn: async () => {
@@ -179,7 +192,7 @@ function PromoDialog({ promo, onClose, onSaved }: { promo: Promo | null; onClose
   return (
     <Dialog open onClose={onClose} title={promo ? `Edit ${promo.code}` : "New promo code"}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <Field label="Code" hint="What clients type in. Letters, numbers and dashes." error={f.code && !codeOk ? "3 to 24 letters, numbers or dashes" : null}>
+        <Field label="Code" hint="What clients type in. Letters, numbers and dashes." error={f.code && !codeOk ? "Use 3 to 24 letters, numbers or dashes." : null}>
           <input className="input mono" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "") })} maxLength={24} placeholder="SPRING10" required autoFocus />
         </Field>
         <div className="form-grid">
@@ -211,19 +224,20 @@ function PromoDialog({ promo, onClose, onSaved }: { promo: Promo | null; onClose
           </Field>
         </div>
         <div className="stack-sm">
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row">
             <input type="checkbox" className="switch" checked={f.once_per_client || f.new_clients_only} disabled={f.new_clients_only} onChange={(e) => setF({ ...f, once_per_client: e.target.checked })} />
             Each client can use it once
           </label>
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row">
             <input type="checkbox" className="switch" checked={f.new_clients_only} onChange={(e) => setF({ ...f, new_clients_only: e.target.checked })} />
             New customers only
           </label>
         </div>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!codeOk || !(value > 0) || Boolean(valueError) || Boolean(datesError)}>{promo ? "Save" : "Create code"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{promo ? "Save" : "Create code"}</Button>
         </div>
       </form>
     </Dialog>

@@ -79,7 +79,7 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
   const test = useMutation({
     meta: { inline: true },
     mutationFn: () => api.post("/push/test", {}),
-    onSuccess: () => toast.success("Test sent. It should pop up in a few seconds."),
+    onSuccess: () => toast.success("Test sent", { description: "It should pop up in a few seconds." }),
   });
 
   const toggle = (channel: NotificationChannel, topic: NotificationTopic, on: boolean) => {
@@ -211,7 +211,7 @@ function PushRow({ state, sub, busy, testing, onToggle, onTest }: {
           <Button size="sm" variant="ghost" loading={busy} onClick={() => onToggle(false)}>Turn off</Button>
         </>
       ) : (
-        <Button variant="primary" icon="bell" loading={busy} onClick={() => onToggle(true)}>Turn on notifications for this phone</Button>
+        <Button icon="bell" loading={busy} onClick={() => onToggle(true)}>Turn on notifications</Button>
       )}
     </div>
   );

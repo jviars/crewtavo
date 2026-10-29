@@ -23,6 +23,7 @@ export function DiscountRows({
   canChangePromo,
   suggestedCode,
   onSaveDiscount,
+  onEditDiscount,
   onChanged,
 }: {
   kind: "quote" | "invoice";
@@ -37,13 +38,15 @@ export function DiscountRows({
   /** A code the client typed on the booking form, not applied yet. */
   suggestedCode?: string | null;
   onSaveDiscount: (amount: number) => void;
+  /** Each keystroke in the discount, for the page's save status. */
+  onEditDiscount?: () => void;
   onChanged: () => void;
 }) {
   const [entering, setEntering] = useState(false);
   const [code, setCode] = useState("");
   const path = `/${kind === "quote" ? "quotes" : "invoices"}/${id}/promo`;
   const apply = useMutation({
-    meta: { inline: true, success: (r: { code: string }) => `${r.code} applied` },
+    meta: { inline: true, success: (r: { code: string }) => `${r.code} applied`, tone: kind },
     mutationFn: (value: string) => api.post<{ code: string; discount_amount: number }>(path, { code: value }),
     onSuccess: () => {
       setEntering(false);
@@ -52,7 +55,7 @@ export function DiscountRows({
     },
   });
   const remove = useMutation({
-    meta: { success: "Promo code removed" },
+    meta: { success: "Promo code removed", tone: kind },
     mutationFn: () => api.delete(path),
     onSuccess: onChanged,
   });
@@ -76,7 +79,7 @@ export function DiscountRows({
       {(canEditDiscount || discount > 0) && (
         <div className="line">
           <span>Discount</span>
-          {canEditDiscount ? <MoneyInput label="Discount" value={discount} max={Math.max(subtotal, 0)} onSave={onSaveDiscount} /> : <span>−{formatMoneyCents(shown)}</span>}
+          {canEditDiscount ? <MoneyInput label="Discount" value={discount} max={Math.max(subtotal, 0)} onSave={onSaveDiscount} onEdit={onEditDiscount} /> : <span>−{formatMoneyCents(shown)}</span>}
         </div>
       )}
       {canChangePromo && suggestedCode && !entering && (
@@ -89,7 +92,8 @@ export function DiscountRows({
         entering ? (
           <form className="promo-entry" onSubmit={(e: FormEvent) => { e.preventDefault(); if (code.trim()) apply.mutate(code.trim()); }}>
             <input className="input input-sm mono grow" aria-label="Promo code" placeholder="Promo code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={24} autoFocus />
-            <Button size="sm" type="submit" variant="primary" loading={apply.isPending} disabled={!code.trim()}>Apply</Button>
+            {/* Outlined: inside the totals, the page's next step keeps the only solid button. */}
+            <Button size="sm" type="submit" loading={apply.isPending} disabled={!code.trim()}>Apply</Button>
             <Button size="sm" variant="ghost" onClick={() => { setEntering(false); apply.reset(); }}>Cancel</Button>
           </form>
         ) : (

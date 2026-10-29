@@ -12,6 +12,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { initials } from "@/components/ui/Avatar";
 import { ApiError, api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
@@ -65,10 +66,12 @@ export function MessagesPage() {
     return [...seen.values()].filter((c) => !term || c.client!.display_name.toLowerCase().includes(term.toLowerCase()) || c.body.toLowerCase().includes(term.toLowerCase()));
   }, [messages.data, term]);
   const open = (clientId: string | null) => setParams(clientId ? { client: clientId } : {}, { replace: true });
+  // Conversations move to the top as messages come in.
+  const list = useListAnimation<HTMLDivElement>();
 
   return (
     <div className="messages-page stack" data-open={selected ? "" : undefined} style={{ gap: "inherit" }}>
-      <PageHeader title="Messages" actions={hasRole(session, "admin", "office", "estimator") && <Button variant="primary" icon="plus" onClick={() => setComposing(true)}>New message</Button>} />
+      <PageHeader title="Messages" actions={hasRole(session, "admin", "office", "estimator") && <Button icon="plus" onClick={() => setComposing(true)}>New message</Button>} />
       {!session.config.features.email && !session.config.features.sms && (
         <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">Email and texting aren't turned on yet. You can still add notes.<ConnectEmailHint /></div></div>
       )}
@@ -78,7 +81,7 @@ export function MessagesPage() {
           <div className="tabs" role="group" aria-label="Filter messages">
             {FILTERS.map((x) => <button key={x.key} type="button" className="tab" aria-pressed={filter === x.key} onClick={() => setFilter(x.key)}>{x.label}</button>)}
           </div>
-          <div className={`card${messages.isPlaceholderData ? " is-stale" : ""}`}>
+          <div className={`card${messages.isPlaceholderData ? " is-stale" : ""}`} ref={list}>
             {messages.isPending && <Loading label="Loading conversations">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="card-row"><Skeleton width={36} height={36} circle /><span className="grow stack-sm"><Skeleton width="50%" /><Skeleton width="85%" height={10} /></span></div>)}</Loading>}
             {messages.error && <ErrorState compact error={messages.error} onRetry={() => messages.refetch()} />}
             {messages.data && conversations.length === 0 && <EmptyState compact icon="messages" title={term ? "No conversations match" : "No messages yet"} />}
@@ -137,7 +140,7 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
   useEffect(() => {
     // Keep the newest message in view (scroll the thread, never the page).
     const el = body.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: count ? "smooth" : "auto" });
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: count && !matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto" });
   }, [count]);
   if (thread.isPending)
     return (
@@ -194,7 +197,8 @@ function Composer({ client, onSent }: { client: { id: string; display_name: stri
   const [subject, setSubject] = useState(`A note from ${session.company.name}`);
   const [body, setBody] = useState("");
   const send = useMutation({
-    meta: { inline: true, success: () => (channel === "note" ? "Note added" : channel === "email" ? "Email sent" : "Text sent") },
+    // A note shows up in the thread right away; a sent email or text goes out to the client, so it's said.
+    meta: { inline: true, success: () => (channel === "note" ? null : channel === "email" ? "Email sent" : "Text sent") },
     mutationFn: async () => {
       if (channel === "note") return unwrap(await supabase().from("messages").insert({ company_id: session.company.id, client_id: client.id, channel: "note", direction: "internal", body: body.trim() }));
       return api.post("/messages/send", { client_id: client.id, channel, subject: channel === "email" ? subject.trim() : undefined, body: body.trim() });

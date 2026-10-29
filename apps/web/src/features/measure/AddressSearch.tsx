@@ -156,7 +156,7 @@ export function AddressSearch({
                     onMouseMove={() => i !== index && setIndex(i)}
                     onClick={item.pick}
                   >
-                    <span className="p-icon"><Icon name={item.icon} size={15} /></span>
+                    <span className="p-icon"><Icon name={item.icon} size={14} /></span>
                     <span style={{ minWidth: 0, flex: 1 }}>
                       <span className="p-title ellipsis" style={{ display: "block" }}>{item.title}</span>
                       {item.sub && <span className="p-sub ellipsis" style={{ display: "block" }}>{item.sub}</span>}

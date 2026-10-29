@@ -3,10 +3,11 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
+import { formatPhoneTyping } from "@/lib/validate";
 
 interface ReferralView {
   company: { name: string; phone: string | null; website: string | null; logo?: string | null };
@@ -35,11 +36,13 @@ export function ReferralPage() {
     if (view.data) document.title = `${view.data.referrer} recommends ${view.data.company.name}`;
   }, [view.data]);
   const missingContact = !f.email.trim() && !f.phone.trim();
+  // The button stays on; trying it without a way to reach them says so on the email field.
+  const [tried, setTried] = useState(false);
 
   return (
     <div className="public-page">
       <div className="public-wrap" style={{ maxWidth: 620 }}>
-        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="60%" height={26} /><Skeleton width="80%" /><Skeleton height={220} radius={10} /></div>}
+        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="60%" height={26} /><Skeleton width="80%" /><Skeleton height={220} radius={8} /></div>}
         {view.error && (
           <div className="card"><div className="empty-state error-state"><span className="empty-icon"><Icon name="link" size={24} /></span><h3>This link isn't working</h3><p>{(view.error as Error).message}</p></div></div>
         )}
@@ -52,31 +55,32 @@ export function ReferralPage() {
             {submit.isSuccess ? (
               <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 32 }}>
                 <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
-                <h1 style={{ fontSize: 22 }}>Thanks, we'll be in touch</h1>
+                <h1 style={{ fontSize: 24, letterSpacing: "var(--tracking-display)" }}>Thanks, we'll be in touch</h1>
                 <p className="muted" style={{ margin: 0 }}>{view.data.company.name} will contact you soon about your request (reference #{submit.data.reference}).</p>
               </div>
             ) : (
-              <form className="card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); if (!missingContact) submit.mutate(); }}>
+              <form className="card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); setTried(true); if (!missingContact) submit.mutate(); }}>
                 <div className="stack-sm">
                   <span className="chip chip-green" style={{ justifySelf: "start" }}><Icon name="gift" size={12} />Referred by {view.data.referrer}</span>
-                  <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>{view.data.referrer} thinks you'll like working with {view.data.company.name}</h1>
-                  {view.data.offer && <p style={{ margin: 0, fontWeight: 700, color: "var(--green-dark)" }}>{view.data.offer}</p>}
+                  <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{view.data.referrer} thinks you'll like working with {view.data.company.name}</h1>
+                  {view.data.offer && <p style={{ margin: 0, fontWeight: 600, color: "var(--green-dark)" }}>{view.data.offer}</p>}
                 </div>
                 <div className="form-grid">
-                  <Field label="Your name"><input className="input" value={f.name} onChange={set("name")} required minLength={2} maxLength={120} autoComplete="name" /></Field>
-                  <Field label="Email"><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={200} autoComplete="email" /></Field>
-                  <Field label="Phone"><input className="input" type="tel" value={f.phone} onChange={set("phone")} maxLength={30} autoComplete="tel" /></Field>
+                  <Field label="Your name" requiredMessage="Enter your name, so we know who to reply to."><input className="input" value={f.name} onChange={set("name")} required minLength={2} maxLength={120} autoComplete="name" /></Field>
+                  <Field label="Email" error={tried && missingContact ? "Add an email or a phone number, so we can reach you." : null}><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={200} autoComplete="email" /></Field>
+                  <Field label="Phone"><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="tel" /></Field>
                 </div>
-                <Field label="Address where you need the work"><input className="input" value={f.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="address-line1" /></Field>
+                <Field label="Address where you need the work" requiredMessage="Enter the address where the work is."><input className="input" value={f.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="address-line1" /></Field>
                 <div className="form-grid">
                   <Field label="City"><input className="input" value={f.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
                   <Field label="ZIP"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} inputMode="numeric" autoComplete="postal-code" /></Field>
                 </div>
                 <Field label="What do you need?" optional><textarea className="textarea" value={f.details} onChange={set("details")} maxLength={4000} /></Field>
-                {missingContact && (f.name || f.line1) && <p className="muted small" style={{ margin: 0 }}>Add an email or phone number so we can reach you.</p>}
+                {missingContact && !tried && (f.name || f.line1) && <p className="muted small" style={{ margin: 0 }}>Add an email or phone number so we can reach you.</p>}
                 <div ref={turnstile.ref} />
                 <FormError error={submit.error} />
-                <Button type="submit" variant="primary" size="lg" icon="send" loading={submit.isPending} disabled={missingContact || (turnstile.required && !turnstile.token)}>Request a quote</Button>
+                <FormChecks />
+                <Button type="submit" variant="primary" size="lg" icon="send" loading={submit.isPending} disabled={turnstile.required && !turnstile.token}>Request a quote</Button>
               </form>
             )}
           </>

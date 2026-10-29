@@ -8,8 +8,9 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
 import { NoAccess } from "@/components/ui/States";
+import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { supabase } from "@/lib/api";
-import { formatDate, formatMoney, formatMoneyCompact, formatNumber, todayIn } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { CATEGORY_LABELS } from "../field/fieldData";
 import { leadSource } from "../marketing/website";
@@ -103,17 +104,17 @@ function Sales({ range }: { range: Range }) {
             <KpiStrip label="Sales this period">
               <Kpi label="Quotes sent" value={formatNumber(d.quotes.length)} hint={formatMoney(sum(d.quotes, (q) => Number(q.total)))} />
               <Kpi label="Won" value={formatNumber(won.length)} hint={formatMoney(sum(won, (q) => Number(q.total)))} />
-              <Kpi label="Conversion" value={pct(won.length, d.quotes.length)} hint={`${lost.length} lost · ${open.length} awaiting`} />
+              <Kpi label="Conversion" value={pct(won.length, d.quotes.length)} hint={`${lost.length} ${statusText("quote", "lost").toLowerCase()} · ${open.length} ${statusText("quote", "sent").toLowerCase()}`} />
               <Kpi label="Average quote" value={d.quotes.length ? formatMoney(sum(d.quotes, (q) => Number(q.total)) / d.quotes.length) : "—"} />
               <Kpi label="Days to approval" value={avgDays === null ? "—" : formatNumber(avgDays, 1)} />
-              <Kpi label="Still awaiting" value={formatMoney(sum(open, (q) => Number(q.total)))} hint={<Link to="/pipeline">Open pipeline</Link>} />
+              <Kpi label={statusText("quote", "sent")} value={formatMoney(sum(open, (q) => Number(q.total)))} hint={<Link to="/pipeline">Open pipeline</Link>} />
             </KpiStrip>
             <div className="report-grid">
               <ReportCard title="Quoted value" value={formatMoney(sum(d.quotes, (q) => Number(q.total)))} footer={plural(d.quotes.length, "quote") + " sent"}>
-                <TrendChart buckets={buckets} values={bucketize(d.quotes, buckets, (q) => q.sent_at, (q) => Number(q.total), company.timezone)} format={formatMoneyCompact} label="Quote value sent over time" color="var(--quote)" height={200} />
+                <TrendChart buckets={buckets} values={bucketize(d.quotes, buckets, (q) => q.sent_at, (q) => Number(q.total), company.timezone)} format={formatMoney} label="Quote value sent over time" color="var(--quote)" height={200} />
               </ReportCard>
               <ReportCard title="Why quotes were lost" subtitle={plural(lost.length, "lost quote")}>
-                <HBars rows={[...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ key: label, label, value, color: "var(--danger)" }))} format={(n) => formatNumber(n)} empty="No lost quotes in this period." />
+                <HBars rows={[...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ key: label, label, value, color: "var(--danger)" }))} format={(n) => formatNumber(n)} empty="No lost quotes in this period" />
               </ReportCard>
             </div>
             <ReportCard title="By salesperson">
@@ -122,7 +123,7 @@ function Sales({ range }: { range: Range }) {
                 rowKey={(r) => r.id}
                 filename={`sales-by-person-${range.from}-to-${range.to}`}
                 initialSort={{ key: "value", desc: true }}
-                empty="No quotes were sent in this period."
+                empty="No quotes sent in this period"
                 columns={[
                   { key: "name", label: "Salesperson", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
                   { key: "sent", label: "Sent", num: true, value: (r) => r.sent },
@@ -138,7 +139,7 @@ function Sales({ range }: { range: Range }) {
                 rowKey={(r) => r.source}
                 filename={`lead-sources-${range.from}-to-${range.to}`}
                 initialSort={{ key: "value", desc: true }}
-                empty="No new clients or quotes in this period."
+                empty="No new clients or quotes in this period"
                 columns={[
                   { key: "source", label: "Source", value: (r) => r.source, render: (r) => <strong>{r.source}</strong> },
                   { key: "clients", label: "New clients", num: true, value: (r) => r.clients },
@@ -260,7 +261,7 @@ function Team({ range }: { range: Range }) {
                 <TrendChart buckets={buckets} values={bucketize(entries, buckets, (e) => e.started_at, (e) => e.paid, company.timezone)} format={(n) => hrs(n)} label="Hours worked over time" color="var(--ink)" height={200} />
               </ReportCard>
               <ReportCard title="Where the time went">
-                <HBars rows={[...categories].sort((a, b) => b[1] - a[1]).map(([c, value]) => ({ key: c, label: CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c, value }))} format={hrs} empty="No time tracked in this period." />
+                <HBars rows={[...categories].sort((a, b) => b[1] - a[1]).map(([c, value]) => ({ key: c, label: CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c, value }))} format={hrs} empty="No time tracked in this period" />
               </ReportCard>
             </div>
             <ReportCard title="By team member">
@@ -269,9 +270,9 @@ function Team({ range }: { range: Range }) {
                 rowKey={(r) => r.id}
                 filename={`hours-by-person-${range.from}-to-${range.to}`}
                 initialSort={{ key: "total", desc: true }}
-                empty="No time tracked in this period."
+                empty="No time tracked in this period"
                 columns={[
-                  { key: "name", label: "Name", value: (r) => r.name, render: (r) => <span className="row" style={{ gap: 6 }}><strong>{r.name}</strong>{r.running && <span className="pill" data-tone="success">Clocked in</span>}</span> },
+                  { key: "name", label: "Name", value: (r) => r.name, render: (r) => <span className="row" style={{ gap: 6 }}><strong>{r.name}</strong>{r.running && <StatusPill label="Clocked in" tone="good" />}</span> },
                   { key: "total", label: "Total", num: true, value: (r) => Math.round(r.total * 100) / 100, render: (r) => hrs(r.total) },
                   { key: "visit", label: "On visits", num: true, value: (r) => Math.round(r.visit * 100) / 100, render: (r) => hrs(r.visit) },
                   { key: "drive", label: "Driving", num: true, value: (r) => Math.round(r.drive * 100) / 100, render: (r) => hrs(r.drive) },
@@ -338,7 +339,7 @@ function Clients({ range }: { range: Range }) {
                 <TrendChart buckets={buckets} values={bucketize(d.created, buckets, (c) => c.created_at, () => 1, company.timezone)} format={(n) => formatNumber(n)} label="New clients over time" color="var(--req)" height={200} />
               </ReportCard>
               <ReportCard title="How they found you">
-                <HBars rows={[...sources].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ key: label, label, value }))} format={(n) => formatNumber(n)} empty="No new clients in this period." />
+                <HBars rows={[...sources].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ key: label, label, value }))} format={(n) => formatNumber(n)} empty="No new clients in this period" />
               </ReportCard>
             </div>
             <ReportCard
@@ -350,10 +351,10 @@ function Clients({ range }: { range: Range }) {
                 rowKey={(r) => r.id}
                 filename={`win-back-${todayIn(company.timezone)}`}
                 initialSort={{ key: "last", desc: true }}
-                empty="None"
+                empty="No clients to win back"
                 columns={[
                   { key: "name", label: "Client", value: (r) => r.name, render: (r) => <Link className="cell-link" to={`/clients/${r.id}`}>{r.name}</Link> },
-                  { key: "email", label: "Email", value: (r) => r.email ?? "", render: (r) => r.email ? <span className="row" style={{ gap: 6 }}>{r.email}{r.optOut && <span className="pill">Unsubscribed</span>}</span> : <span className="muted">—</span> },
+                  { key: "email", label: "Email", value: (r) => r.email ?? "", render: (r) => r.email ? <span className="row" style={{ gap: 6 }}>{r.email}{r.optOut && <StatusPill label="Unsubscribed" />}</span> : <span className="muted">—</span> },
                   { key: "last", label: "Last activity", value: (r) => r.last.slice(0, 10), render: (r) => formatDate(r.last) },
                 ]}
               />

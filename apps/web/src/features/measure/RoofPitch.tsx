@@ -149,7 +149,7 @@ export function MeasurePitch({
         ) : (
           <Dialog open onClose={() => setOpen(null)} title="Roof pitch from lidar" size="sm">
             <div className="dialog-body stack">
-              <div className="callout"><Icon name="info" size={18} /><span className="grow">Draw the roof with Area first (or choose Outline the building in the middle), then try again. Lidar reads the pitch inside what you draw.</span></div>
+              <div className="callout"><Icon name="info" size={20} /><span className="grow">Draw the roof with Area first (or choose Outline the building in the middle), then try again. Lidar reads the pitch inside what you draw.</span></div>
               <div className="form-actions"><Button variant="primary" onClick={() => setOpen(null)}>OK</Button></div>
             </div>
           </Dialog>
@@ -262,7 +262,7 @@ function PhoneGauge({ onUse, onClose }: { onUse: (pitch: string) => void; onClos
 function Unavailable({ children, onClose }: { children: string; onClose: () => void }) {
   return (
     <>
-      <div className="callout"><Icon name="info" size={18} /><span className="grow">{children}</span></div>
+      <div className="callout"><Icon name="info" size={20} /><span className="grow">{children}</span></div>
       <div className="form-actions"><Button variant="primary" onClick={onClose}>OK</Button></div>
     </>
   );
@@ -400,7 +400,7 @@ function GoogleRoof({ at, onUse, onClose }: { at: { lat: number; lng: number }; 
         {insights.isPending ? (
           <span className="muted">Asking Google…</span>
         ) : insights.error ? (
-          <div className="callout"><Icon name="info" size={18} /><span className="grow">{(insights.error as Error).message}</span></div>
+          <div className="callout"><Icon name="info" size={20} /><span className="grow">{(insights.error as Error).message}</span></div>
         ) : !pitches.length ? (
           <span className="muted">Google found the building but no sloped roof on it.</span>
         ) : (

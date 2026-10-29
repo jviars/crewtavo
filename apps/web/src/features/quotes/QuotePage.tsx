@@ -19,6 +19,7 @@ import { isPackagePicturePath } from "@crewtavo/core/presets";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -27,6 +28,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
@@ -76,9 +78,9 @@ import { QuotePrint, useQuotePrint } from "../roofing/flow/QuotePrint";
 import { SendEstimateDialog } from "../roofing/flow/SendEstimateDialog";
 import { PackagePicture } from "../roofing/PackageCards";
 import { lineSums, LineItems, visibleLines } from "./LineItems";
-import { ALREADY_ANSWERED, duplicateQuote, optionTabs, quoteOptionsKey, showOption, sortOptions, useQuoteOptions, viewedOption, type OptionsQuote, type QuoteOptionRow } from "./options";
+import { ALREADY_ANSWERED, duplicateQuote, optionsOpen, optionTabs, quoteOptionsKey, showOption, sortOptions, useQuoteOptions, viewedOption, type OptionsQuote, type QuoteOptionRow } from "./options";
 import styles from "./QuotePage.module.css";
-import { QuoteOptions } from "./QuoteOptions";
+import { AddOptionsDialog, QuoteOptions } from "./QuoteOptions";
 import { QuoteSections } from "./QuoteSections";
 import { DiscountRows } from "./PromoRow";
 import { SendDialog } from "./SendDialog";
@@ -89,6 +91,7 @@ const EDITABLE = ["draft", "sent", "changes_requested"];
 /** Before the quote has loaded: the business's default template. */
 const NO_QUOTE = { template_id: null, approval: null };
 const LOST_REASONS = ["Price was too high", "Went with another company", "Timing didn't work", "No response", "Scope changed", "Other"];
+/** The totals card's figures, to the cent as the quote prints them, rolling to their new values. */
 
 /** The quote, with every line (every option's) and what its paper and contract are filled in from. Its options are useQuoteOptions. */
 async function loadQuote(id: string) {
@@ -341,7 +344,11 @@ export function QuotePage() {
   // The option being looked at (local: the customer sees nothing change), and how: as lines or as paper.
   const [viewing, setViewing] = useState<string | null>(null);
   const [view, setView] = useState<"lines" | "paper">("lines");
+  // "Offer options" from the lines' add row: packages to offer side by side.
+  const [offering, setOffering] = useState(false);
   const panelId = useId();
+  // Every field here saves as it loses focus; the header says when it's saving and saved.
+  const save = useSaveStatus();
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
 
   const quote = useQuery({ queryKey: ["quote", id], queryFn: () => loadQuote(id) });
@@ -374,10 +381,23 @@ export function QuotePage() {
     queryClient.invalidateQueries({ queryKey: ["quotes", session.company.id] });
   };
   const update = useMutation({
-    meta: { success: (_: unknown, patch: TablesUpdate<"quotes">) => (patch.status === "approved" ? "Marked approved" : patch.status === "lost" ? "Marked lost" : patch.status === "archived" ? "Quote archived" : patch.status === "draft" ? "Moved back to draft" : null) },
+    meta: {
+      success: (_: unknown, patch: TablesUpdate<"quotes">) => (patch.status === "approved" ? "Marked approved" : patch.status === "lost" ? "Marked lost" : patch.status === "archived" ? "Quote archived" : patch.status === "draft" ? "Moved back to draft" : null),
+      tone: "quote",
+    },
     mutationFn: async (patch: TablesUpdate<"quotes">) => unwrap(await supabase().from("quotes").update(patch).eq("id", id)),
     onSuccess: refresh,
   });
+  // A field saved in place (title, message, discount, tax, deposit, end date, template): the
+  // header's save status says how it went, so it has no toast of its own.
+  const edit = useMutation({
+    meta: { inline: true },
+    mutationFn: async (patch: TablesUpdate<"quotes">) => unwrap(await supabase().from("quotes").update(patch).eq("id", id)),
+    onSuccess: refresh,
+  });
+  const saveField = (patch: TablesUpdate<"quotes">) => save.track(edit.mutateAsync(patch));
+  // A field left without a change takes back its "Edited".
+  const unchanged = () => save.status === "edited" && save.reset();
   // Marked approved by the office: like a signed estimate, it keeps the template it was approved on,
   // the option they chose and its contract as they read now. With `convert`, it becomes a job after.
   // `approvedOnly`: it was approved, and only making the job went wrong.
@@ -385,7 +405,8 @@ export function QuotePage() {
   const approve = useMutation({
     meta: {
       inline: choosing !== null,
-      success: (_: unknown, v: { convert: boolean }) => (!v.convert ? "Marked approved" : quote.data?.change_order_for ? "Added to the job" : "Converted to a job. Schedule the work next."),
+      success: (_: unknown, v: { convert: boolean }) => (!v.convert ? "Marked approved" : quote.data?.change_order_for ? "Added to the job" : "Converted to a job"),
+      tone: choosing === "convert" ? "job" : "quote",
     },
     mutationFn: async ({ optionId, convert }: { optionId: string | null; convert: boolean }) => {
       approvedOnly.current = false;
@@ -417,13 +438,13 @@ export function QuotePage() {
     onError: (error) => {
       if (!approvedOnly.current) return;
       setChoosing(null);
-      toast.error("Marked approved, but making the job didn't work.", { description: errorMessage(error), action: { label: "Try again", onClick: () => convert.mutate() } });
+      toast.error("Marked approved, but the job wasn't made", { description: errorMessage(error), action: { label: "Try again", onClick: () => convert.mutate() } });
     },
     // Even when it didn't go through, the option they chose may have been saved.
     onSettled: refresh,
   });
   const convert = useMutation({
-    meta: { success: () => (quote.data?.change_order_for ? "Added to the job" : "Converted to a job. Schedule the work next.") },
+    meta: { success: () => (quote.data?.change_order_for ? "Added to the job" : "Converted to a job"), tone: "job" },
     mutationFn: () => api.post<{ job_id: string }>(`/quotes/${id}/convert`),
     onSuccess: (res) => {
       refresh();
@@ -431,7 +452,7 @@ export function QuotePage() {
     },
   });
   const copy = useMutation({
-    meta: { success: "Quote copied as a new draft" },
+    meta: { success: "Quote copied as a new draft", tone: "quote" },
     mutationFn: () => duplicateQuote(id),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["quotes", session.company.id] });
@@ -439,7 +460,7 @@ export function QuotePage() {
     },
   });
   const remove = useMutation({
-    meta: { success: "Quote deleted" },
+    meta: { success: "Quote deleted", tone: "quote" },
     mutationFn: async () => unwrap(await supabase().from("quotes").delete().eq("id", id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["quotes", session.company.id] });
@@ -503,14 +524,15 @@ export function QuotePage() {
     <>
       <BackLink to="/quotes">Quotes</BackLink>
       <div className="page-header">
-        <h1 className="page-title">{editable ? <TitleInput value={q.title} onSave={(title) => update.mutate({ title })} /> : q.title}</h1>
+        <h1 className="page-title">{editable ? <TitleInput value={q.title} onEdit={save.edited} onUnchanged={unchanged} onSave={(title) => saveField({ title })} /> : q.title}</h1>
         {canSell && (
           <div className="page-actions">
+            {/* One solid green button: the next step. Sending while it's a draft (or again once they asked for changes), making the job once it's approved. */}
             {EDITABLE.includes(q.status) &&
               (rangeAccepted ? (
                 <Button icon="send" variant="secondary" onClick={() => setDialog("exact")} disabled={!q.lines.length}>Send the exact price</Button>
               ) : (
-                <Button icon="send" variant={q.status === "draft" ? "primary" : "secondary"} onClick={() => setDialog("send")} disabled={!q.lines.length} title={!q.lines.length ? "Add a line item first" : undefined}>{q.status === "draft" ? "Send quote" : "Resend"}</Button>
+                <Button icon="send" variant={q.status === "draft" || q.status === "changes_requested" ? "primary" : "secondary"} onClick={() => setDialog("send")} disabled={!q.lines.length} title={!q.lines.length ? "Add a line item first" : undefined}>{q.status === "draft" ? "Send quote" : "Resend"}</Button>
               ))}
             {q.status !== "draft" && ["approved", "sent", "changes_requested"].includes(q.status) && (
               <Button variant={q.status === "approved" ? "primary" : "secondary"} icon="job" loading={converting} disabled={!q.lines.length || settling} onClick={startConvert}>{convertLabel}</Button>
@@ -543,6 +565,7 @@ export function QuotePage() {
       <div className="page-meta">
         <span className="muted">Quote #{q.number}</span>
         <EntityStatus kind="quote" status={q.status} />
+        <SaveStatus status={save.status} />
         {q.client && <Link to={`/clients/${q.client.id}`} className="strong">{q.client.display_name}</Link>}
         {q.property && <span className="muted">{addressLine(q.property)}</span>}
       </div>
@@ -558,7 +581,8 @@ export function QuotePage() {
             </div>
             {signatures}
           </div>
-          {canSell && <Button size="sm" variant="primary" loading={convert.isPending} onClick={() => convert.mutate()}>{convertLabel}</Button>}
+          {/* The header's button is the solid one. */}
+          {canSell && <Button size="sm" loading={convert.isPending} onClick={() => convert.mutate()}>{convertLabel}</Button>}
         </div>
       )}
       {changeJob && (
@@ -606,7 +630,8 @@ export function QuotePage() {
 
       <div className="two-col">
         <div className="wide stack-lg">
-          <QuoteOptions quote={q} options={options} lines={q.lines} viewing={viewing} onView={setViewing} mode="office" onChanged={refresh} panelId={panelId} />
+          {/* Without options there's no bar: they're offered from the lines' add row instead. */}
+          <QuoteOptions quote={q} options={options} lines={q.lines} viewing={viewing} onView={setViewing} mode="office" onChanged={refresh} panelId={panelId} invite={false} />
           <div className="stack-sm">
             <div className="segmented" role="group" aria-label="Show the estimate as" style={{ justifySelf: "start" }}>
               <button type="button" aria-pressed={view === "lines"} aria-controls={panelId} onClick={() => setView("lines")}>Lines</button>
@@ -614,18 +639,32 @@ export function QuotePage() {
             </div>
             <div id={panelId} role={offers ? "tabpanel" : undefined} aria-label={viewedRow ? viewedRow.name : undefined}>
               {view === "lines" && (
-                <LineItems table="quote_line_items" parent="quote_id" parentId={q.id} lines={q.lines} editable={editable} onChanged={refresh} withOptions optionId={viewed} shownOptionId={q.option_id} options={options} />
+                <LineItems
+                  table="quote_line_items"
+                  parent="quote_id"
+                  parentId={q.id}
+                  lines={q.lines}
+                  editable={editable}
+                  onChanged={refresh}
+                  withOptions
+                  optionId={viewed}
+                  shownOptionId={q.option_id}
+                  options={options}
+                  saveStatus={save}
+                  onOfferOptions={!offers && optionsOpen(q.status) ? () => setOffering(true) : undefined}
+                />
               )}
               {(view === "paper" || printer.request > 0) && <QuotePaper quote={q} options={options} viewed={viewed} sheet={view === "paper"} print={printer.request} />}
             </div>
           </div>
-          <MessageCard value={q.message} editable={editable} onSave={(message) => update.mutate({ message })} />
+          <MessageCard value={q.message} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(message) => saveField({ message })} />
           {canSell && <PlansCard scope={{ kind: "quote", id: q.id, propertyId: q.property?.id ?? null }} />}
         </div>
         <aside className="narrow stack">
           <div className="card card-pad totals">
             {viewedRow && <p className={styles.totalsFor}>{totalsCaption(viewedRow.name, { shown: viewed === q.option_id, signed })}</p>}
-            <div className="line"><span>Subtotal</span><span>{formatMoneyCents(tab.subtotal)}</span></div>
+            {/* The figures roll to their new values as lines change, rather than snapping. */}
+            <div className="line"><span>Subtotal</span><AnimatedNumber value={tab.subtotal} format={MONEY_CENTS} /></div>
             <DiscountRows
               kind="quote"
               id={q.id}
@@ -635,7 +674,8 @@ export function QuotePage() {
               canEditDiscount={editable}
               canChangePromo={editable && !sitePriced}
               suggestedCode={sitePriced ? null : q.request?.promo_code}
-              onSaveDiscount={(v) => update.mutate({ discount_amount: v })}
+              onSaveDiscount={(v) => saveField({ discount_amount: v })}
+              onEditDiscount={save.edited}
               onChanged={refresh}
             />
             {offers && (editable || Number(q.discount_amount) > 0) && (
@@ -643,24 +683,20 @@ export function QuotePage() {
             )}
             <div className="line">
               <span>Tax {editable ? "" : `(${formatTaxRate(q.tax_rate)})`}</span>
-              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => update.mutate({ tax_rate: taxRateFromPercent(v) })} /> : <span>{formatMoneyCents(tab.tax)}</span>}
+              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} /> : <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />}
             </div>
-            {editable && <div className="line"><span>Tax amount</span><span>{formatMoneyCents(tab.tax)}</span></div>}
-            <div className="line grand"><span>Total</span><span>{formatMoneyCents(tab.total)}</span></div>
+            {editable && <div className="line"><span>Tax amount</span><AnimatedNumber value={tab.tax} format={MONEY_CENTS} /></div>}
+            <div className="line grand"><span>Total</span><AnimatedNumber value={tab.total} format={MONEY_CENTS} /></div>
             <div className="line">
               <span>Deposit required</span>
-              {editable ? <MoneyInput label="Deposit" value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => update.mutate({ deposit_amount: v })} /> : <span>{formatMoneyCents(q.deposit_amount)}</span>}
+              {editable ? <MoneyInput label="Deposit" value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => saveField({ deposit_amount: v })} onEdit={save.edited} /> : <span>{formatMoneyCents(q.deposit_amount)}</span>}
             </div>
             {cap.name && editable && Number(q.deposit_amount) > cap.amount && (
               <p className={styles.warn}>That's more than {cap.name} comes to ({formatMoneyCents(cap.amount)}). Lower it so it fits whichever option they choose.</p>
             )}
             <div className="line">
               <span>Valid until</span>
-              {editable ? (
-                <input className="input input-sm" type="date" style={{ width: 150 }} value={q.valid_until ?? ""} onChange={(e) => update.mutate({ valid_until: e.target.value || null })} aria-label="Valid until" />
-              ) : (
-                <span>{formatDate(q.valid_until)}</span>
-              )}
+              <ValidUntil value={q.valid_until} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(validUntil) => saveField({ valid_until: validUntil })} />
             </div>
           </div>
           {canSell && templateRows.length > 1 && (
@@ -670,11 +706,11 @@ export function QuotePage() {
                 id="quote-template"
                 className="select"
                 value={templateId}
-                disabled={!editable || update.isPending}
+                disabled={!editable}
                 onChange={(e) => {
                   const chosen = templateRows.find((t) => t.id === e.target.value);
                   // The default one isn't pinned: the quote follows whichever template is the default.
-                  if (chosen) update.mutate({ template_id: chosen.is_default ? null : chosen.id });
+                  if (chosen) void saveField({ template_id: chosen.is_default ? null : chosen.id });
                 }}
               >
                 {templateRows.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_default ? " (default)" : ""}</option>)}
@@ -687,9 +723,14 @@ export function QuotePage() {
             <div className="card card-pad stack-sm">
               <strong>Profit estimate</strong>
               <div className="totals">
-                <div className="line"><span>Price before tax</span><span>{formatMoneyCents(priceForMargin)}</span></div>
-                <div className="line"><span>Estimated cost</span><span>{formatMoneyCents(cost)}</span></div>
-                <div className="line grand" style={{ fontSize: 15 }}><span>Profit</span><span style={{ color: priceForMargin - cost < 0 ? "var(--danger)" : "var(--green-dark)" }}>{formatMoneyCents(priceForMargin - cost)} {priceForMargin > 0 && `(${Math.round(((priceForMargin - cost) / priceForMargin) * 100)}%)`}</span></div>
+                <div className="line"><span>Price before tax</span><AnimatedNumber value={priceForMargin} format={MONEY_CENTS} /></div>
+                <div className="line"><span>Estimated cost</span><AnimatedNumber value={cost} format={MONEY_CENTS} /></div>
+                <div className="line grand" style={{ fontSize: 16 }}>
+                  <span>Profit</span>
+                  <span style={{ color: priceForMargin - cost < 0 ? "var(--danger)" : "var(--green-dark)" }}>
+                    <AnimatedNumber value={priceForMargin - cost} format={MONEY_CENTS} /> {priceForMargin > 0 && `(${Math.round(((priceForMargin - cost) / priceForMargin) * 100)}%)`}
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -724,6 +765,21 @@ export function QuotePage() {
       {/* They said yes to the range: the exact price goes out instead, the way the roofing project offers it. */}
       {dialog === "exact" && <SendEstimateDialog quote={quoteToSend(q, options)} mode="exact" onClose={() => setDialog(null)} onSent={refresh} />}
       {dialog === "lost" && <LostDialog onClose={() => setDialog(null)} onSave={(reason) => update.mutateAsync({ status: "lost", lost_reason: reason }).then(() => setDialog(null))} />}
+      {offering && (
+        <AddOptionsDialog
+          quote={q}
+          options={options}
+          lines={q.lines}
+          startOver={false}
+          mode="office"
+          onClose={() => setOffering(false)}
+          onDone={() => {
+            setOffering(false);
+            setViewing(null);
+            refresh();
+          }}
+        />
+      )}
       {choosing && (
         <ChooseOptionDialog
           choices={choices}
@@ -809,7 +865,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
     if (printable && print > printing) setPrinting(print);
   }, [printable, print, printing]);
   useEffect(() => {
-    if (print > printing && terms.error) toast.error("The contract didn't load, so it can't print yet.", { action: { label: "Try again", onClick: terms.refetch } });
+    if (print > printing && terms.error) toast.error("The contract didn't load, so it can't print yet", { action: { label: "Try again", onClick: terms.refetch } });
     // Once for each print asked for while it can't load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [print, Boolean(terms.error)]);
@@ -925,7 +981,7 @@ function ApprovalSignatures({ quoteId, approval, approvedAt, companySigns, canSi
   const needsCompany = companySigns && canSign && !approval?.company;
   const mine = useMySignature({ enabled: needsCompany });
   const countersign = useMutation({
-    meta: { inline: drawing, success: `Signed for ${company.name}` },
+    meta: { inline: drawing, success: `Signed for ${company.name}`, tone: "quote" },
     mutationFn: (body: { signature?: string; save_signature?: boolean }) => api.post<{ ok: true }>(`/quotes/${quoteId}/countersign`, body),
     onSuccess: (_, body) => {
       if (body.save_signature && body.signature) queryClient.setQueryData(mySignatureKey(company.id, userId), body.signature);
@@ -961,7 +1017,7 @@ function SignatureTile({ image, name, caption }: { image: string; name: string; 
   return (
     <div className="stack-sm" style={{ gap: 2 }}>
       <img src={image} alt={`Signature of ${name}`} style={{ height: 56, width: 180, objectFit: "contain", background: "#fff", borderRadius: 8, padding: 4, border: "1px solid var(--border)" }} />
-      <span className="small" style={{ fontWeight: 700 }}>{name}</span>
+      <span className="small" style={{ fontWeight: 600 }}>{name}</span>
       <span className="small" style={{ fontWeight: 400 }}>{caption}</span>
     </div>
   );
@@ -1022,7 +1078,8 @@ function LostDialog({ onClose, onSave }: { onClose: () => void; onSave: (reason:
   );
 }
 
-function TitleInput({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+/** The quote's title, typed over in the header; saved as it loses focus, and a blank one goes back. */
+function TitleInput({ value, onEdit, onUnchanged, onSave }: { value: string; onEdit: () => void; onUnchanged: () => void; onSave: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   return (
@@ -1031,23 +1088,115 @@ function TitleInput({ value, onSave }: { value: string; onSave: (v: string) => v
       aria-label="Quote title"
       value={draft}
       maxLength={200}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => (draft.trim() ? draft.trim() !== value && onSave(draft.trim()) : setDraft(value))}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onEdit();
+      }}
+      onBlur={() => {
+        const title = draft.trim();
+        if (title && title !== value) return onSave(title);
+        if (!title) setDraft(value);
+        onUnchanged();
+      }}
       onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
     />
   );
 }
 
-function MessageCard({ value, editable, onSave }: { value: string | null; editable: boolean; onSave: (v: string) => void }) {
+/**
+ * "Valid until" in the totals: the day the quote is good until, or "No end date". The date field
+ * shows only while a date is being picked (it opens on the picker), so an empty one never reads as
+ * the browser's "mm/dd/yyyy". Saved as it loses focus; Escape puts it back.
+ */
+function ValidUntil({ value, editable, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
+  const [picking, setPicking] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const input = useRef<HTMLInputElement>(null);
+  const shown = useRef<HTMLSpanElement>(null);
+  const cancelled = useRef(false);
+  // Done from the keyboard (Enter, Escape), the focus goes back to the date rather than the page.
+  const refocus = useRef(false);
+  useEffect(() => setDraft(value ?? ""), [value]);
+  useEffect(() => {
+    if (!picking && refocus.current) {
+      refocus.current = false;
+      shown.current?.querySelector("button")?.focus();
+    }
+    if (!picking || !input.current) return;
+    cancelled.current = false;
+    input.current.focus();
+    try {
+      input.current.showPicker();
+    } catch {
+      // Some browsers open it only on a click in the field itself; it has focus either way.
+    }
+  }, [picking]);
+
+  if (!editable) return value ? <span>{formatDate(value)}</span> : <span className="muted">No end date</span>;
+  if (picking) {
+    return (
+      <input
+        ref={input}
+        className="input input-sm"
+        style={{ width: 150 }}
+        type="date"
+        aria-label="Valid until"
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onEdit();
+        }}
+        onBlur={(e) => {
+          setPicking(false);
+          // A date typed only partway reads as empty: it goes back rather than clearing the date.
+          if (cancelled.current || e.currentTarget.validity.badInput) setDraft(value ?? "");
+          else if ((draft || null) !== value) return onSave(draft || null);
+          onUnchanged();
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== "Escape") return;
+          e.preventDefault();
+          refocus.current = true;
+          if (e.key === "Escape") cancelled.current = true;
+          e.currentTarget.blur();
+        }}
+      />
+    );
+  }
+  // The date as picked, while it saves.
+  return draft ? (
+    <span ref={shown} className={styles.validUntil}>
+      <Button size="sm" variant="ghost" className={styles.validUntilDate} aria-label={`Valid until ${formatDate(draft)}. Change the date`} onClick={() => setPicking(true)}>{formatDate(draft)}</Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        icon="x"
+        aria-label="Remove the end date"
+        title="No end date"
+        onClick={() => {
+          setDraft("");
+          onSave(null);
+        }}
+      />
+    </span>
+  ) : (
+    <span ref={shown} className={styles.validUntil}>
+      <span className="muted">No end date</span>
+      <Button size="sm" variant="ghost" icon="calendar" onClick={() => setPicking(true)}>Set date</Button>
+    </span>
+  );
+}
+
+function MessageCard({ value, editable, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string) => void }) {
   const { config } = useSession();
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
   const polish = useMutation({
-    meta: { success: "Polished. Review it before sending." },
     mutationFn: () => api.post<{ text: string }>("/ai/rewrite", { text: draft }),
     onSuccess: (res) => {
       setDraft(res.text);
       onSave(res.text);
+      toast.success("Message polished", { description: "Review it before sending." });
     },
   });
   if (!editable) {
@@ -1056,7 +1205,18 @@ function MessageCard({ value, editable, onSave }: { value: string | null; editab
   return (
     <div className="card card-pad stack-sm">
       <label htmlFor="quote-message"><strong>Message to client</strong> <span className="muted small">(shown above the line items)</span></label>
-      <textarea id="quote-message" className="textarea" value={draft} maxLength={4000} onChange={(e) => setDraft(e.target.value)} onBlur={() => draft !== (value ?? "") && onSave(draft)} placeholder="Thanks for having us out. Here's what we recommend…" />
+      <textarea
+        id="quote-message"
+        className="textarea"
+        value={draft}
+        maxLength={4000}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onEdit();
+        }}
+        onBlur={() => (draft !== (value ?? "") ? onSave(draft) : onUnchanged())}
+        placeholder="Thanks for having us out. Here's what we recommend…"
+      />
       {config.features.ai && (
         <div className="row">
           <Button size="sm" icon="sparkle" loading={polish.isPending} disabled={draft.trim().length < 3} onClick={() => polish.mutate()}>Polish with AI</Button>
@@ -1069,7 +1229,7 @@ function MessageCard({ value, editable, onSave }: { value: string | null; editab
 function MeasurementsCard({ quoteId, propertyId, lat, lng, editable, onApplied }: { quoteId: string; propertyId: string | null; lat: number | null; lng: number | null; editable: boolean; onApplied: () => void }) {
   const [depth, setDepth] = useState("");
   const apply = useMutation({
-    meta: { success: (r: { lines: unknown[] }) => (r.lines.length ? "Quantities filled from the measurement" : null) },
+    meta: { success: (r: { lines: unknown[] }) => (r.lines.length ? "Quantities filled from the drawing" : null), tone: "quote" },
     mutationFn: (measurementId: string) =>
       api.post<{ lines: Array<{ name: string; field?: string; value?: number; error?: string }> }>(`/quotes/${quoteId}/apply-measurement`, {
         measurement_id: measurementId,
@@ -1087,7 +1247,7 @@ function MeasurementsCard({ quoteId, propertyId, lat, lng, editable, onApplied }
       editable
       rowExtra={(m) =>
         editable && (
-          <Button size="sm" style={{ justifySelf: "start" }} loading={apply.isPending && apply.variables === m.id} onClick={() => apply.mutate(m.id)}>Fill quantities from this</Button>
+          <Button size="sm" style={{ justifySelf: "start" }} loading={apply.isPending && apply.variables === m.id} onClick={() => apply.mutate(m.id)}>Fill quantities</Button>
         )
       }
     >

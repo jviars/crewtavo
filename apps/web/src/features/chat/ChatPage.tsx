@@ -294,7 +294,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
     onJumpTo: (id) => {
       if (all.some((m) => m.id === id)) {
         setFlash(id);
-        document.getElementById(`message-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+        document.getElementById(`message-${id}`)?.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       } else navigate(`/chat/${channel.id}?message=${id}`);
     },
   };

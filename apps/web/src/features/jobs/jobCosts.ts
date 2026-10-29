@@ -9,6 +9,8 @@
 import { lineCosts, type CostedLine } from "@crewtavo/core/reports";
 import { formatMoneyCents } from "@/lib/format";
 
+/** Dollars and cents for an AnimatedNumber, the way formatMoneyCents writes them: "$1,250.00". */
+
 export interface JobCostInput {
   contract: number;
   lines: readonly CostedLine[];

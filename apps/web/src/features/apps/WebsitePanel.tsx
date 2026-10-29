@@ -30,7 +30,7 @@ export function WebsitePanel({ app, onSaved }: { app: AppRow; onSaved: () => voi
   if (!site) return <AddressCard onSaved={onSaved} />;
   return (
     <section className="card card-pad stack-sm" aria-labelledby="website-title" style={{ gap: 12 }}>
-      <h2 id="website-title" className="section-title" style={{ fontSize: 17 }}>{siteName(site)}</h2>
+      <h2 id="website-title" className="section-title" style={{ fontSize: 16 }}>{siteName(site)}</h2>
       <span className="muted">
         <strong>Website</strong> is in the menu for owners, admins and anyone whose role has Marketing. It opens {site.cms ? CMS_NAMES[site.cms] : "your editor"} right there, and
         everyone signs in to it the way they do on your site.
@@ -87,7 +87,7 @@ function CheckAgain({ site, onSaved }: { site: WebsiteSite; onSaved: () => void 
 function AddressCard({ onSaved }: { onSaved: () => void }) {
   return (
     <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="website-setup" style={{ gap: 10 }}>
-      <h2 id="website-setup" className="section-title" style={{ fontSize: 17 }}>Your website's address</h2>
+      <h2 id="website-setup" className="section-title" style={{ fontSize: 16 }}>Your website's address</h2>
       <span className="muted small">
         Where you sign in to Sveltia: usually your website with <strong>/admin</strong> at the end. Crewtavo checks the editor is there, then puts <strong>Website</strong> in the menu.
       </span>
@@ -128,7 +128,7 @@ function AddressForm({ initial = "", onSaved, onCancel }: { initial?: string; on
             save.reset();
           }}
         />
-        <Button type="submit" variant="primary" loading={save.isPending && !save.variables} disabled={address.trim().length < 3}>{initial ? "Save" : "Add"}</Button>
+        <Button type="submit" variant={initial ? undefined : "primary"} loading={save.isPending && !save.variables} disabled={address.trim().length < 3}>{initial ? "Save" : "Add"}</Button>
         {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
       </form>
       {save.error && (

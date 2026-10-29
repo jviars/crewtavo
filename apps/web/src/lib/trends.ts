@@ -1,4 +1,4 @@
-/** Series for the small trend sparklines on Home and Invoices. Pure functions, so they're unit tested. */
+/** Figures for the trends on Home (this month against last) and Invoices (now against 30 days ago). Pure functions, so they're unit tested. */
 import { addDays, localDate } from "@crewtavo/core/time";
 
 export interface TrendPayment {

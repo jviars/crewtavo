@@ -5,11 +5,12 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { useCompanyRoles, type CompanyRole } from "./roles";
 
@@ -32,6 +33,7 @@ export function RolesSettings() {
     },
   });
   const count = (id: string) => team.data?.filter((m) => m.active && m.role_id === id).length ?? 0;
+  const cards = useListAnimation<HTMLDivElement>();
 
   return (
     <div className="stack">
@@ -44,9 +46,9 @@ export function RolesSettings() {
       ) : roles.isPending ? (
         <Loading label="Loading roles"><div className="grid-cards">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={3} />)}</div></Loading>
       ) : roles.data.length === 0 ? (
-        <div className="card"><EmptyState icon="lock" title="No custom roles yet" action={<Button variant="primary" icon="plus" onClick={() => setEditing("new")}>New role</Button>} /></div>
+        <div className="card"><EmptyState inline title="No custom roles yet" action={<Button onClick={() => setEditing("new")}>Add a role</Button>} /></div>
       ) : (
-        <div className="grid-cards">
+        <div className="grid-cards" ref={cards}>
           {roles.data.map((r) => (
             <div key={r.id} className="card card-pad stack-sm role-card">
               <div className="row-between" style={{ alignItems: "flex-start" }}>
@@ -124,7 +126,7 @@ function RoleDialog({ role, existing, onClose }: { role: CompanyRole | null; exi
   return (
     <Dialog open onClose={onClose} title={role ? `Edit ${role.name}` : "New role"}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <Field label="Name"><input className="input" value={name} onChange={(e) => { setName(e.target.value); save.reset(); }} maxLength={60} placeholder="e.g. Foreman" autoFocus /></Field>
+        <Field label="Name" requiredMessage="Give the role a name."><input className="input" value={name} onChange={(e) => { setName(e.target.value); save.reset(); }} maxLength={60} placeholder="e.g. Foreman" required autoFocus /></Field>
         <Field label="Access level" hint={LEVEL_SUMMARY[level]}>
           <select className="select" value={level} onChange={(e) => changeLevel(e.target.value as Role)}>
             {LEVELS.map((l) => <option key={l} value={l}>{ROLE_LABELS[l]}</option>)}
@@ -135,7 +137,7 @@ function RoleDialog({ role, existing, onClose }: { role: CompanyRole | null; exi
             <legend style={{ marginBottom: 8 }}>Can use</legend>
             <div className="perm-list">
               {PERMISSIONS.filter((p) => allowed.includes(p.key)).map((p) => (
-                <label key={p.key} className="switch-row" style={{ fontWeight: 500 }}>
+                <label key={p.key} className="switch-row">
                   <input type="checkbox" className="switch" checked={perms.includes(p.key)} onChange={(e) => setPerms(e.target.checked ? [...perms, p.key] : perms.filter((x) => x !== p.key))} />
                   {p.label}
                 </label>
@@ -147,6 +149,7 @@ function RoleDialog({ role, existing, onClose }: { role: CompanyRole | null; exi
         )}
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending}>{role ? "Save role" : "Create role"}</Button>
         </div>

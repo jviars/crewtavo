@@ -16,13 +16,13 @@ import { lineChanges } from "@crewtavo/core/estimates";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Button, Spinner } from "@/components/ui/Button";
+import { Button, Spinner, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
+import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -162,11 +162,12 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
     // fill.mutate is stable; the key says when to try.
   }, [autoKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The lines change in place, and the button says Updated.
   const remeasure = useMutation({
-    meta: { success: "The measured lines follow the roof now" },
     mutationFn: () => api.post(`/quotes/${quote.id}/apply-measurement`, { measurement_id: takeoff!.id }),
     onSuccess: refresh,
   });
+  const remeasured = useJustDone(remeasure);
 
   const choose = async (ids: string[]) => {
     const startOver = quote.lines.length > 0 || options.length > 0;
@@ -260,7 +261,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
         {emptyNote && (
           <div className={styles.emptyOptions}>
             <span className={styles.note}>{emptyNote.text}</span>
-            {emptyNote.action && !takeoff && <Link className="btn btn-sm" to={measureLinkFor({ id: "roofing" }, quote, null)}><Icon name="ruler" size={15} />{emptyNote.action}</Link>}
+            {emptyNote.action && !takeoff && <Link className="btn btn-sm" to={measureLinkFor({ id: "roofing" }, quote, null)}><Icon name="ruler" size={14} />{emptyNote.action}</Link>}
             {emptyNote.action && takeoff && (
               <Button size="sm" icon="package" loading={filling} disabled={editor.busy || add.isPending} onClick={() => fill.mutate()}>{emptyNote.action}</Button>
             )}
@@ -289,7 +290,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
         </div>
         {editable && measured && takeoff && (
           <div className={styles.tools}>
-            <Button size="sm" variant="ghost" icon="refresh" loading={remeasure.isPending} disabled={editor.busy} onClick={() => remeasure.mutate()}>
+            <Button size="sm" variant="ghost" icon="refresh" loading={remeasure.isPending} done={remeasured} doneLabel="Updated" disabled={editor.busy} onClick={() => remeasure.mutate()}>
               Update from the roof
             </Button>
             <span className={styles.note}>Measured the roof again? This works the measured lines out from it{options.length ? ", on every option" : ""}.</span>
@@ -299,7 +300,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
           // Folded away until it's wanted; it still prices the materials again as the lines change.
           <details className={styles.materials}>
             <summary>
-              <Icon name="truck" size={17} />
+              <Icon name="truck" size={16} />
               Materials for this roof{view ? `, ${view.label}` : ""}
               <small>ABC Supply</small>
               <Icon name="chevronDown" size={16} />
@@ -413,7 +414,7 @@ function PickPackage({ quote, packages, error, pending, onPrice, byHand }: {
       <div className={styles.pick}>
         {canSetUpRoofing(session) ? (
           <div className="callout callout-info">
-            <Icon name="package" size={18} />
+            <Icon name="package" size={20} />
             <span className="grow stack-sm" style={{ gap: 8, fontWeight: 400 }}>
               <span>Packages price a roof in one tap: Architectural shingle, Designer shingle and Standing-seam metal, from your price list.</span>
               <Button size="sm" variant="primary" icon="package" style={{ justifySelf: "start" }} loading={setup.isPending} onClick={() => setup.mutate()}>
@@ -431,7 +432,7 @@ function PickPackage({ quote, packages, error, pending, onPrice, byHand }: {
   return (
     <div className={styles.pick}>
       <div>
-        <h3 style={{ margin: 0, fontSize: 17 }}>What kind of roof?</h3>
+        <h3 style={{ margin: 0, fontSize: 16 }}>What kind of roof?</h3>
         <p className={styles.lead}>Pick one, or offer two or three side by side. Their lines go on from the measurements, and you can change any of them after.</p>
       </div>
       <PackagePicker packages={list} value={chosen.map((p) => p.id)} onChange={setPicked} flagExamples />
@@ -443,7 +444,7 @@ function PickPackage({ quote, packages, error, pending, onPrice, byHand }: {
         <Link to="/roofing/packages" className="small strong">Edit packages</Link>
         {!manual && (
           <button type="button" className={styles.linkBtn} onClick={() => setManual(true)}>
-            Or add lines by hand
+            Add lines by hand
           </button>
         )}
       </div>
@@ -475,7 +476,7 @@ function ChangePackage({ packages, current, hasLines, pending, error, onClose, o
         ) : list.length ? (
           <PackagePicker packages={list} value={chosen.map((p) => p.id)} onChange={setPicked} flagExamples />
         ) : (
-          <p className="muted" style={{ margin: 0 }}>No roof packages yet. Set them up in <Link to="/roofing/packages">Roofing → Packages</Link>.</p>
+          <EmptyState inline title="No roof packages yet">Set them up in <Link to="/roofing/packages">Roofing → Packages</Link>.</EmptyState>
         )}
         {hasLines && <p className={styles.note}>The lines on the estimate now are replaced. Notes and photos stay.</p>}
         <FormError error={error} />

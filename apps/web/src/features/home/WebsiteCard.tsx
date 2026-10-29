@@ -5,6 +5,7 @@ import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { LazySparkline } from "@/components/ui/LazySparkline";
 import { formatNumber, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { Change } from "../finance/change";
 import { shortDate } from "../finance/range";
 import { periodTotals, useWebStats } from "../marketing/website";
 
@@ -22,20 +23,15 @@ export function WebsiteCard() {
     const day = addDays(week.from, i);
     return { label: shortDate(day), now: byDay.get(day) ?? 0, before: byDay.get(addDays(day, -7)) ?? 0 };
   });
-  const change = before.visitors ? Math.round(((now.visitors - before.visitors) / before.visitors) * 100) : null;
   return (
     <div className="card card-pad stack-sm">
       <div className="row-between">
         <span className="muted small strong">Website visitors this week</span>
         <Link to="/marketing?tab=website" className="small strong">Marketing</Link>
       </div>
-      <div className="row" style={{ alignItems: "baseline", gap: 10 }}>
+      <div className="row" style={{ alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
         <AnimatedNumber value={now.visitors} className="hero-number" />
-        {change !== null && (
-          <span className={`chip ${change >= 0 ? "chip-green" : "chip-red"}`} title="Compared with the 7 days before">
-            {change >= 0 ? "▲" : "▼"} {Math.abs(change)}% vs last week
-          </span>
-        )}
+        <Change now={now.visitors} before={before.visitors} compared="the 7 days before" same="Same as last week" />
       </div>
       <div className="stack-sm" style={{ gap: 4, margin: "2px 0 6px" }}>
         <LazySparkline

@@ -97,12 +97,12 @@ export function KnowledgeBasePage() {
 
       <form onSubmit={onSearch} className="kb-search" role="search">
         <div className="input-group grow">
-          <span className="addon"><Icon name="search" size={17} /></span>
+          <span className="addon"><Icon name="search" size={16} /></span>
           <input className="input input-lg" type="search" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={aiEnabled ? "Search or ask a question" : "Search"} aria-label="Search guides" maxLength={200} />
         </div>
         <Button type="submit" size="lg">Search</Button>
         {aiEnabled && (
-          <Button type="button" size="lg" variant="primary" icon="sparkle" loading={ask.isPending} disabled={draft.trim().length < 4} onClick={() => ask.mutate(draft.trim())}>Ask</Button>
+          <Button type="button" size="lg" icon="sparkle" loading={ask.isPending} disabled={draft.trim().length < 4} onClick={() => ask.mutate(draft.trim())}>Ask</Button>
         )}
       </form>
 
@@ -143,7 +143,7 @@ export function KnowledgeBasePage() {
           <div className="card" aria-busy={fullTextPending}>
             {hits.length === 0 && (index.isPending || fullTextPending) && <PageRowsSkeleton />}
             {results.error && <ErrorState compact error={results.error} onRetry={() => results.refetch()} />}
-            {hits.length === 0 && !index.isPending && !fullTextPending && !results.error && <EmptyState compact icon="search" title="No matches" />}
+            {hits.length === 0 && !index.isPending && !fullTextPending && !results.error && <EmptyState inline title="No matches" />}
             {hits.map((hit) => (
               <Link key={hit.id} to={`/kb/${hit.id}`} className="card-row" style={{ alignItems: "flex-start" }}>
                 {hit.cover ? <GuideCover path={hit.cover} className="guide-thumb" /> : <span className="kb-doc"><Icon name="file" size={16} /></span>}
@@ -159,7 +159,7 @@ export function KnowledgeBasePage() {
         <section className="stack-sm" aria-labelledby="kb-category">
           <button type="button" className="back-link" style={{ border: 0, background: "none", padding: 0, marginBottom: 0 }} onClick={() => set({ category: null })}><Icon name="arrowLeft" size={14} />All categories</button>
           <h2 id="kb-category" className="section-title">{category.name}</h2>
-          <GuideCards pages={pages.filter((p) => p.category_id === (category.id === "none" ? null : category.id))} loading={index.isPending} error={index.error} retry={() => index.refetch()} isRead={index.data?.isRead} empty={editor ? <Link className="btn btn-primary" to={`/kb/new${category.id !== "none" ? `?category=${category.id}` : ""}`}><Icon name="plus" size={16} />Write the first guide</Link> : undefined} />
+          <GuideCards pages={pages.filter((p) => p.category_id === (category.id === "none" ? null : category.id))} loading={index.isPending} error={index.error} retry={() => index.refetch()} isRead={index.data?.isRead} empty={editor ? <Link className="btn" to={`/kb/new${category.id !== "none" ? `?category=${category.id}` : ""}`}><Icon name="plus" size={16} />Write a guide</Link> : undefined} />
         </section>
       ) : (
         <>
@@ -170,7 +170,7 @@ export function KnowledgeBasePage() {
             ) : categories.isPending ? (
               <Loading label="Loading categories"><div className="grid-cards">{[0, 1, 2, 3].map((i) => <CardSkeleton key={i} lines={1} />)}</div></Loading>
             ) : categories.data.length === 0 && uncategorized === 0 ? (
-              <div className="card"><EmptyState icon="book" title="Your knowledge base is empty" action={editor && <Link className="btn btn-primary" to="/kb/new"><Icon name="plus" size={16} />Write your first guide</Link>} /></div>
+              <div className="card"><EmptyState icon="book" title="Your knowledge base is empty" action={editor && <Link className="btn" to="/kb/new"><Icon name="plus" size={16} />Write a guide</Link>} /></div>
             ) : (
               <div className="grid-cards">
                 {categories.data.map((c) => (
@@ -217,7 +217,7 @@ function GuideCards({ pages, loading, error, retry, isRead, empty, showCategory 
       </Loading>
     );
   }
-  if (!pages.length) return <div className="card"><EmptyState compact icon="file" title="No guides here yet" action={empty} /></div>;
+  if (!pages.length) return <div className="card"><EmptyState inline title="No guides here yet" action={empty} /></div>;
   return (
     <div className="guide-cards">
       {pages.map((p) => {

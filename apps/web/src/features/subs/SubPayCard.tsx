@@ -1,11 +1,13 @@
 /** A sub's pay on every job: what's owed, what was paid this year (and toward their 1099), and the history. */
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { formatMoneyCents, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { MarkPaidDialog, type ToPay } from "./MarkPaidDialog";
 import { offerChip, offerLine } from "./offers";
@@ -24,6 +26,7 @@ export function SubPayCard({ subId, name }: { subId: string; name: string }) {
   const owed = rows.filter((p) => p.status === "done");
   const toPay = (p: (typeof rows)[number]): ToPay => ({ id: p.id, total: p.total, label: `${name}, job #${p.job?.number ?? ""}` });
   const shown = all ? rows : rows.slice(0, 8);
+  const listRef = useListAnimation<HTMLDivElement>();
 
   return (
     <section className="stack">
@@ -31,26 +34,26 @@ export function SubPayCard({ subId, name }: { subId: string; name: string }) {
         <h2 className="section-title">Pay</h2>
         {rows.length > 0 && <Link className="small" to={`/subs/1099?year=${year}`}>Year-end totals</Link>}
       </div>
-      <div className="card">
+      <div className="card" ref={listRef}>
         {pays.isPending ? (
           <div className="card-row"><Skeleton width="50%" /></div>
         ) : pays.error ? (
           <div className="card-row"><ErrorState compact error={pays.error} onRetry={() => pays.refetch()} /></div>
         ) : rows.length === 0 ? (
-          <EmptyState compact icon="dollar" title="No pay yet">Add their pay from a job's page, under Sub and crew pay.</EmptyState>
+          <EmptyState inline title="No pay yet">Add their pay from a job's page, under Sub and crew pay.</EmptyState>
         ) : (
           <>
             <div className="card-row" style={{ flexWrap: "wrap", gap: 16 }}>
               <span className="grow stack-sm" style={{ gap: 2, minWidth: 140 }}>
                 <span className="muted small">Paid in {year}</span>
-                <strong className="tabular" style={{ fontSize: 18 }}>{formatMoneyCents(totals.paid)}</strong>
+                <strong className="tabular" style={{ fontSize: 16 }}><AnimatedNumber value={totals.paid} format={MONEY_CENTS} /></strong>
                 {totals.for1099 !== totals.paid && <span className="muted small">{formatMoneyCents(totals.for1099)} counts toward their 1099: card and payment-app payments are left out.</span>}
               </span>
               <span className="grow stack-sm" style={{ gap: 2, minWidth: 140 }}>
                 <span className="muted small">Owed now</span>
-                <strong className="tabular" style={{ fontSize: 18 }}>{formatMoneyCents(totals.owed)}</strong>
+                <strong className="tabular" style={{ fontSize: 16 }}><AnimatedNumber value={totals.owed} format={MONEY_CENTS} /></strong>
               </span>
-              {owed.length > 1 && <Button size="sm" variant="primary" icon="check" onClick={() => setPaying(owed.map(toPay))}>Mark all {owed.length} paid</Button>}
+              {owed.length > 1 && <Button size="sm" icon="check" onClick={() => setPaying(owed.map(toPay))}>Mark all {owed.length} paid</Button>}
             </div>
             {shown.map((p) => (
               <div key={p.id} className="card-row" style={{ flexWrap: "wrap" }}>

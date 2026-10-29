@@ -8,10 +8,12 @@
  */
 import { rangeSettings } from "@crewtavo/core/estimates";
 import { useId, useState, type FormEvent } from "react";
+import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { useSession } from "@/lib/session";
 import { firstName, money, type EstimateQuote } from "../estimate";
@@ -125,7 +127,7 @@ function SaidYesDialog({ quote, unsent, onClose }: { quote: EstimateQuote; unsen
         <FormError error={mark.error} />
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="check" loading={mark.isPending}>Yes, they agreed</Button>
+          <Button type="submit" variant="primary" icon="check" loading={mark.isPending}>Mark as agreed</Button>
         </div>
       </form>
     </Dialog>
@@ -138,11 +140,15 @@ export function SalespersonSelect({ quoteId, value, disabled, label = "Site visi
   const id = useId();
   const team = useTeam();
   const set = useSetSalesperson(quoteId);
+  const save = useSaveStatus();
   const people = salesPeople(team.data ?? [], value);
   return (
     <div className={styles.fieldLabel}>
-      <label htmlFor={id}>{label}</label>
-      <select id={id} className={`select ${styles.select}`} value={value ?? ""} disabled={disabled || set.isPending || team.isPending} onChange={(e) => set.mutate(e.target.value || null)}>
+      <span className="row" style={{ gap: 8, justifyContent: "space-between" }}>
+        <label htmlFor={id}>{label}</label>
+        <SaveStatus status={save.status} />
+      </span>
+      <select id={id} className={`select ${styles.select}`} value={value ?? ""} disabled={disabled || set.isPending || team.isPending} onChange={(e) => void save.track(set.mutateAsync(e.target.value || null))}>
         <option value="">{team.isPending ? "Loading your team…" : "Pick who goes out"}</option>
         {people.map((p) => (
           <option key={p.id} value={p.id}>
@@ -191,7 +197,7 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
   );
   const sitePrice = (
     <div className="callout callout-info">
-      <Icon name="info" size={18} />
+      <Icon name="info" size={20} />
       <span className="grow" style={{ fontWeight: 400 }}>{rep ? `${rep} sets` : "Whoever goes out sets"} the exact price on site, after checking this list on the roof.</span>
     </div>
   );
@@ -292,7 +298,8 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
       <div>
         <p className={styles.eyebrow} id={titleId}>The range {who} will see</p>
         {priced ? (
-          <p className={styles.rangeBig}>{money(now.low)} <span className={styles.rangeTo}>to</span> {money(now.high)}</p>
+          // Rolls to the new range as the estimate changes beside it.
+          <p className={styles.rangeBig}><AnimatedNumber value={now.low} format={MONEY} /> <span className={styles.rangeTo}>to</span> <AnimatedNumber value={now.high} format={MONEY} /></p>
         ) : (
           <p className={styles.when}>Put the roof on the estimate to see its range.</p>
         )}

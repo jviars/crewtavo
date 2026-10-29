@@ -1,7 +1,8 @@
 /**
  * Line items, shared by quotes, jobs and invoices. They read like a simple table; clicking a row opens
- * it for editing (one at a time). Each field saves when it loses focus (or on Enter); totals are
- * recalculated by Postgres triggers, so the parent just refetches. Removing a line can be undone.
+ * it for editing (one at a time). Each field saves when it loses focus (or on Enter), and says so in
+ * the page header's save status when the page passes one; totals are recalculated by Postgres
+ * triggers, so the parent just refetches. Removing a line can be undone.
  *
  * On a quote that offers options (quote_options), `lines` is every line on the quote and the list
  * shows the ones on every option with the option being looked at (`optionId`). New lines go on that
@@ -14,12 +15,13 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
+import type { SaveStatusHandle } from "@/components/ui/SaveStatus";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { formatMoneyCents, formatNumber } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
-import { toast } from "@/lib/toast";
+import { toast, type ToastTone } from "@/lib/toast";
 import styles from "./LineItems.module.css";
 
 type Table = "quote_line_items" | "job_line_items" | "invoice_line_items";
@@ -46,6 +48,8 @@ export interface Line {
 }
 
 const COPY_FIELDS = ["name", "description", "quantity", "unit", "unit_price", "taxable", "service_id"] as const;
+/** The workflow color of the record the lines are on, for their toasts. */
+const TONES: Record<Table, ToastTone> = { quote_line_items: "quote", job_line_items: "job", invoice_line_items: "invoice" };
 
 /** The lines a list shows: on a quote with options, the ones on every option and the option looked at's. */
 export function visibleLines<T extends { option_id?: string | null }>(lines: readonly T[], optionId: string | null | undefined): T[] {
@@ -105,6 +109,8 @@ export function LineItems({
   optionId = null,
   shownOptionId = null,
   options = [],
+  saveStatus,
+  onOfferOptions,
 }: {
   table: Table;
   parent: Parent;
@@ -119,9 +125,14 @@ export function LineItems({
   shownOptionId?: string | null;
   /** The quote's options, for where each line is ("On every option", "Only on Better"). */
   options?: ReadonlyArray<{ id: string; name: string }>;
+  /** The page header's save status (useSaveStatus): each field's save shows there, and its failure too, in place of a toast. */
+  saveStatus?: SaveStatusHandle;
+  /** On a quote that offers no options yet: "Offer options" in the add row, beside "Custom item". */
+  onOfferOptions?: () => void;
 }) {
   const session = useSession();
   const { company } = session;
+  const tone = TONES[table];
   const listRef = useListAnimation<HTMLDivElement>();
   const showCosts = hasRole(session, "admin", "office", "estimator") && can(session, "job_costs") && table !== "invoice_line_items";
   // Only a quote's lines are ever on an option.
@@ -173,7 +184,7 @@ export function LineItems({
   });
 
   const duplicate = useMutation({
-    meta: { success: "Line duplicated" },
+    meta: { success: "Line duplicated", tone },
     mutationFn: async (line: Line) => {
       const row: Record<string, unknown> = Object.fromEntries(COPY_FIELDS.map((k) => [k, line[k] ?? null]));
       if (table !== "invoice_line_items") row.unit_cost = line.unit_cost ?? null;
@@ -190,9 +201,13 @@ export function LineItems({
       unwrap(await supabase().from(table).delete().eq("id", line.id));
       return line;
     },
+    // Gone at once (the totals follow), and put back from the toast: a new row with the same fields.
     onSuccess: (line) => {
       onChanged();
-      toast.success(`Removed “${line.name}”`, {
+      toast.success("Line removed", {
+        description: line.name,
+        tone,
+        countdown: true,
         action: {
           label: "Undo",
           onClick: async () => {
@@ -208,7 +223,7 @@ export function LineItems({
             if (table === "invoice_line_items") delete row.unit_cost;
             // Back on the option it was on (that option may have gone since: then it can't come back).
             const { error } = await supabase().from(table).insert(row as never);
-            if (error) toast.error("Couldn't restore that line.");
+            if (error) toast.error("Couldn't put the line back");
             onChanged();
           },
         },
@@ -234,7 +249,6 @@ export function LineItems({
             <span role="columnheader" className="num">Total</span>
             <span role="columnheader"><span className="sr-only">Actions</span></span>
           </div>
-          {shown.length === 0 && <EmptyState compact icon="list" title={offers ? `Nothing on ${viewingName} yet` : "No line items yet"} />}
           {shown.map((line, i) => {
             const actions = (
               <Menu
@@ -251,14 +265,14 @@ export function LineItems({
               />
             );
             return openId === line.id ? (
-              <LineRow key={line.id} table={table} line={line} editable withOptions={withOptions} showCosts={showCosts} place={place} viewing={viewing} addOn={chipOf(line)} onChanged={onChanged} onDone={() => setOpenId(null)} actions={actions} />
+              <LineRow key={line.id} table={table} line={line} editable withOptions={withOptions} showCosts={showCosts} place={place} viewing={viewing} addOn={chipOf(line)} saveStatus={saveStatus} onChanged={onChanged} onDone={() => setOpenId(null)} actions={actions} />
             ) : (
               <LineSummary key={line.id} line={line} withOptions={withOptions} shared={offers && line.option_id == null} addOn={chipOf(line)} onOpen={() => setOpenId(line.id)} actions={actions} />
             );
           })}
         </div>
       ) : (
-        <table className="table table-stack">
+        <table className="table table-stack" aria-label="Line items">
           <thead>
             <tr>
               <th>Item</th>
@@ -269,17 +283,21 @@ export function LineItems({
             </tr>
           </thead>
           <tbody>
-            {shown.length === 0 && <tr><td colSpan={5} className="muted">No items.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={5} className="muted">No line items</td></tr>}
             {shown.map((line) => (
               <LineRow key={line.id} table={table} line={line} editable={false} withOptions={withOptions} showCosts={false} place={place} viewing={viewing} addOn={chipOf(line)} onChanged={onChanged} />
             ))}
           </tbody>
         </table>
       )}
+      {/* One quiet line, right above the ways to add one. */}
+      {editable && shown.length === 0 && <EmptyState inline title={offers ? `Nothing on ${viewingName} yet` : "No line items yet"} />}
       {editable && (
         <div className="card-pad row wrap" style={{ borderTop: "1px solid var(--divider)", paddingTop: 14, paddingBottom: 14 }}>
           <ServicePicker services={services.data ?? []} loading={services.isPending || add.isPending} onPick={(id) => add.mutate(id)} />
           <Button icon="plus" onClick={() => add.mutate(null)} disabled={add.isPending}>Custom item</Button>
+          {/* What the options bar offered before there were any: one package to price it from, or two or three side by side. */}
+          {onOfferOptions && <Button icon="package" onClick={onOfferOptions}>{lines.length ? "Offer options" : "Pick packages"}</Button>}
           {offers && (
             <div className={`segmented ${styles.addTo}`} role="group" aria-label="New lines go">
               <button type="button" aria-pressed={!addToEvery} onClick={() => setAddToEvery(false)}><span>Only on {viewingName}</span></button>
@@ -338,17 +356,18 @@ function ServicePicker({ services, loading, onPick }: { services: Array<{ id: st
 
   return (
     <>
-      <button ref={button} type="button" className="btn btn-primary" popovertarget={id} disabled={loading && !services.length}>
+      {/* Outlined like the other ways to add: the page's next step is its only solid button. */}
+      <button ref={button} type="button" className="btn" popovertarget={id} disabled={loading && !services.length}>
         {loading ? <span className="spinner" style={{ width: 16, height: 16 }} /> : <Icon name="list" size={16} />}
         Add from price list
       </button>
       <div ref={panel} id={id} popover="auto" className="menu" style={{ width: 360, maxWidth: "calc(100vw - 16px)", padding: 0 }}>
         <div className="input-group" style={{ padding: 8, borderBottom: "1px solid var(--divider)" }}>
-          <span className="addon" style={{ left: 18 }}><Icon name="search" size={15} /></span>
+          <span className="addon" style={{ left: 18 }}><Icon name="search" size={14} /></span>
           <input ref={input} className="input input-sm" value={term} onChange={(e) => { setTerm(e.target.value); setIndex(0); }} onKeyDown={onKeyDown} placeholder="Search your services" aria-label="Search services" />
         </div>
         <div style={{ maxHeight: 280, overflowY: "auto", padding: 4 }} role="listbox">
-          {matches.length === 0 && <div className="empty" style={{ padding: 16 }}>{services.length ? "No services match." : "Your price list is empty. Add services in Settings."}</div>}
+          {matches.length === 0 && <div className="empty" style={{ padding: 16 }}>{services.length ? "No services match" : "Your price list is empty. Add services in Settings."}</div>}
           {matches.map((s, i) => (
             <button key={s.id} type="button" role="option" aria-selected={i === index} className="menu-item" style={{ height: "auto", padding: "8px 10px", background: i === index ? "var(--fill-2)" : undefined }} onMouseMove={() => setIndex(i)} onClick={() => pick(s.id)}>
               <span className="grow" style={{ minWidth: 0 }}>
@@ -364,18 +383,20 @@ function ServicePicker({ services, loading, onPick }: { services: Array<{ id: st
   );
 }
 
-function NumberField({ value, onCommit, label, step = "any", align = "right", prefix }: { value: number; onCommit: (v: number) => void; label: string; step?: string; align?: "right" | "left"; prefix?: string }) {
+function NumberField({ value, onCommit, onEdit, onUnchanged, label, step = "any", align = "right", prefix }: { value: number; onCommit: (v: number) => void; onEdit?: () => void; onUnchanged?: () => void; label: string; step?: string; align?: "right" | "left"; prefix?: string }) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => setDraft(String(value)), [value]);
   const commit = () => {
     const n = Number(draft);
     if (draft.trim() === "" || !Number.isFinite(n) || n < 0) {
       setDraft(String(value));
-      if (draft.trim() !== "") toast.error(`${label} must be zero or more.`);
+      onUnchanged?.();
+      if (draft.trim() !== "") toast.error(`${label} must be zero or more`);
       return;
     }
     const rounded = step === "0.01" ? Math.round(n * 100) / 100 : Math.round(n * 1000) / 1000;
     if (rounded !== Number(value)) onCommit(rounded);
+    else onUnchanged?.();
     setDraft(String(rounded));
   };
   return (
@@ -386,7 +407,10 @@ function NumberField({ value, onCommit, label, step = "any", align = "right", pr
         aria-label={label}
         inputMode="decimal"
         value={draft}
-        onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+        onChange={(e) => {
+          setDraft(e.target.value.replace(/[^0-9.]/g, ""));
+          onEdit?.();
+        }}
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         onFocus={(e) => e.target.select()}
@@ -436,9 +460,9 @@ function LineSummary({ line, withOptions, shared, addOn, onOpen, actions }: { li
 /**
  * A line as a row: its fields to edit, or (not `editable`) as it reads. `place`: the quote's options,
  * when it offers them, for where the line is; `viewing` is the option looked at. `addOn`: its add-on
- * chip (addOnLabel).
+ * chip (addOnLabel). `saveStatus`: the page header's, which each save reports to.
  */
-function LineRow({ table, line, editable, withOptions, showCosts, place, viewing, addOn, onChanged, onDone, actions }: {
+function LineRow({ table, line, editable, withOptions, showCosts, place, viewing, addOn, saveStatus, onChanged, onDone, actions }: {
   table: Table;
   line: Line;
   editable: boolean;
@@ -447,6 +471,7 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
   place: ReadonlyArray<{ id: string; name: string }> | null;
   viewing: string | null;
   addOn: string | null;
+  saveStatus?: SaveStatusHandle;
   onChanged: () => void;
   onDone?: () => void;
   actions?: React.ReactNode;
@@ -454,30 +479,41 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
   const [draft, setDraft] = useState(line);
   useEffect(() => setDraft(line), [line]);
   const save = useMutation({
+    // With a save status in the header, a failure says so there instead of in a toast.
+    meta: { inline: Boolean(saveStatus) },
     mutationFn: async (patch: Partial<Line>) => unwrap(await supabase().from(table).update(patch as never).eq("id", line.id)),
     onSuccess: onChanged,
     onError: () => setDraft(line),
   });
   // Moved onto another option, the line leaves this list: the toast says where it went.
   const moveTo = useMutation({
-    meta: { success: (_: unknown, optionId: string | null) => (optionId && optionId !== viewing ? `Moved to ${place?.find((o) => o.id === optionId)?.name ?? "the other option"}` : null) },
+    meta: { success: (_: unknown, optionId: string | null) => (optionId && optionId !== viewing ? `Moved to ${place?.find((o) => o.id === optionId)?.name ?? "the other option"}` : null), tone: TONES[table] },
     mutationFn: async (optionId: string | null) => unwrap(await supabase().from(table).update({ option_id: optionId } as never).eq("id", line.id)),
     onSuccess: onChanged,
     onError: () => setDraft(line),
   });
+  const persist = (patch: Partial<Line>) => (saveStatus ? void saveStatus.track(save.mutateAsync(patch)) : save.mutate(patch));
+  const edited = () => saveStatus?.edited();
+  // A field left as it was takes back its "Edited".
+  const unchanged = () => saveStatus?.status === "edited" && saveStatus.reset();
   const set = (patch: Partial<Line>) => {
     setDraft({ ...draft, ...patch });
-    save.mutate(patch);
+    persist(patch);
   };
   const commitText = (key: "name" | "unit" | "description") => () => {
     const value = (draft[key] ?? "").toString().trim();
     if (key === "name" && !value) {
       setDraft({ ...draft, name: line.name });
-      toast.error("A line item needs a name.");
+      unchanged();
+      toast.error("A line item needs a name");
       return;
     }
-    if (key === "unit" && !value) return setDraft({ ...draft, unit: line.unit });
-    if (value !== (line[key] ?? "")) save.mutate({ [key]: key === "description" ? value || null : value } as Partial<Line>);
+    if (key === "unit" && !value) {
+      unchanged();
+      return setDraft({ ...draft, unit: line.unit });
+    }
+    if (value !== (line[key] ?? "")) persist({ [key]: key === "description" ? value || null : value } as Partial<Line>);
+    else unchanged();
   };
   const blurOnEnter = (e: KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
   const excluded = withOptions && line.optional && !line.selected;
@@ -503,16 +539,16 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
   return (
     <div className="line-edit" role="row" data-excluded={excluded || undefined} data-saving={save.isPending || undefined}>
       <div className="name-cell" role="cell">
-        <input className="input" aria-label="Item name" value={draft.name} maxLength={200} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onBlur={commitText("name")} onKeyDown={blurOnEnter} style={{ fontWeight: 700 }} autoFocus={Boolean(onDone)} onFocus={(e) => line.name === "New item" && e.target.select()} />
+        <input className="input" aria-label="Item name" value={draft.name} maxLength={200} onChange={(e) => { setDraft({ ...draft, name: e.target.value }); edited(); }} onBlur={commitText("name")} onKeyDown={blurOnEnter} style={{ fontWeight: 700 }} autoFocus={Boolean(onDone)} onFocus={(e) => line.name === "New item" && e.target.select()} />
       </div>
       <div className="num" role="cell"><span className="cell-label" aria-hidden="true">Qty</span>
-        <NumberField label="Quantity" value={Number(draft.quantity)} onCommit={(v) => set({ quantity: v })} />
+        <NumberField label="Quantity" value={Number(draft.quantity)} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ quantity: v })} />
       </div>
       <div role="cell"><span className="cell-label" aria-hidden="true">Unit</span>
-        <input className="input" aria-label="Unit" value={draft.unit} maxLength={20} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} onBlur={commitText("unit")} onKeyDown={blurOnEnter} />
+        <input className="input" aria-label="Unit" value={draft.unit} maxLength={20} onChange={(e) => { setDraft({ ...draft, unit: e.target.value }); edited(); }} onBlur={commitText("unit")} onKeyDown={blurOnEnter} />
       </div>
       <div className="num" role="cell"><span className="cell-label" aria-hidden="true">Price</span>
-        <NumberField label="Unit price" step="0.01" prefix="$" value={Number(draft.unit_price)} onCommit={(v) => set({ unit_price: v })} />
+        <NumberField label="Unit price" step="0.01" prefix="$" value={Number(draft.unit_price)} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ unit_price: v })} />
       </div>
       <div className="total" role="cell"><span className="cell-label">Total</span>{excluded ? <span className="muted">Not included</span> : formatMoneyCents(amount)}</div>
       <div role="cell" style={{ paddingTop: 3 }}>{actions}</div>
@@ -523,7 +559,10 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
           placeholder="Description the client will see (optional)"
           value={draft.description ?? ""}
           maxLength={4000}
-          onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+          onChange={(e) => {
+            setDraft({ ...draft, description: e.target.value });
+            edited();
+          }}
           onBlur={commitText("description")}
           style={{ minHeight: 38, fontSize: 13 }}
           rows={1}
@@ -559,11 +598,11 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
           {showCosts && (
             <label style={{ gap: 6 }}>
               Unit cost
-              <span style={{ width: 96 }}><NumberField label="Unit cost" step="0.01" prefix="$" value={Number(draft.unit_cost ?? 0)} onCommit={(v) => set({ unit_cost: v })} /></span>
+              <span style={{ width: 96 }}><NumberField label="Unit cost" step="0.01" prefix="$" value={Number(draft.unit_cost ?? 0)} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ unit_cost: v })} /></span>
             </label>
           )}
           {draft.formula && <span className="muted" title="Fills from a measurement">Formula: {draft.formula}</span>}
-          {onDone && <Button size="sm" variant="primary" style={{ marginLeft: "auto" }} onClick={onDone}>Done</Button>}
+          {onDone && <Button size="sm" style={{ marginLeft: "auto" }} onClick={onDone}>Done</Button>}
         </div>
       </div>
     </div>

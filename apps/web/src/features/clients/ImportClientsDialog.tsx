@@ -80,13 +80,13 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
               onDragLeave={() => setOver(false)}
               onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) load(f); }}
             >
-              <Icon name="upload" size={28} />
+              <Icon name="upload" size={24} />
               <strong>Drop your spreadsheet here, or click to choose</strong>
               <span className="small">A .csv file with column names in the first row.</span>
               <input ref={fileInput} type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) load(f); }} />
             </label>
             <div className="callout">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow small" style={{ fontWeight: 400 }}>
                 <div style={{ fontWeight: 700 }}>Coming from Jobber?</div>
                 In Jobber, open Clients, choose Export and download the CSV; import it here. Then export Properties the same way and import that file too: each property is added to its client. Clients already here aren't duplicated.
@@ -118,9 +118,9 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
                   {clients.slice(0, 5).map((c) => (
                     <tr key={c.key}>
                       <td>{c.display_name}</td>
-                      <td>{c.email}</td>
-                      <td>{c.phone}</td>
-                      <td>{c.properties.map((p) => [p.line1, p.city].filter(Boolean).join(", ")).join("; ") || <span className="muted">none</span>}</td>
+                      <td>{c.email || <span className="muted">—</span>}</td>
+                      <td>{c.phone || <span className="muted">—</span>}</td>
+                      <td>{c.properties.map((p) => [p.line1, p.city].filter(Boolean).join(", ")).join("; ") || <span className="muted">—</span>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -144,7 +144,7 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
           ) : (
             <Button onClick={onClose}>Cancel</Button>
           )}
-          <Button variant="primary" icon="upload" loading={run.isPending} disabled={!clients.length} onClick={() => run.mutate()}>
+          <Button variant="primary" icon="upload" loading={run.isPending} slowHint={false} disabled={!clients.length} onClick={() => run.mutate()}>
             Import {clients.length || ""} {clients.length === 1 ? "client" : "clients"}
           </Button>
         </div>

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -30,14 +30,9 @@ export function NewJobDialog({ open, onClose, onCreated }: { open: boolean; onCl
   const [kind, setKind] = useState<"one_off" | "recurring">("one_off");
   const [recurrence, setRecurrence] = useState<Recurrence>({ rule: "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO", months: null, starts_on: today, ends_on: null });
   const [crewId, setCrewId] = useState("");
+  // Pressed Create job without a client: the client picker says so (it isn't a field the browser checks).
+  const [tried, setTried] = useState(false);
   const crews = useCrews();
-  useEffect(() => {
-    if (open) {
-      setClient(null);
-      setTitle("");
-      setKind("one_off");
-    }
-  }, [open]);
   useEffect(() => setPropertyId(null), [client?.id]);
 
   const create = useMutation({
@@ -71,10 +66,21 @@ export function NewJobDialog({ open, onClose, onCreated }: { open: boolean; onCl
     },
   });
 
+  // A fresh form next time, once this one has animated away.
+  const reset = () => {
+    setClient(null);
+    setTitle("");
+    setKind("one_off");
+    setRecurrence({ rule: "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO", months: null, starts_on: todayIn(session.company.timezone), ends_on: null });
+    setCrewId("");
+    setTried(false);
+    create.reset();
+  };
+
   return (
-    <Dialog open={open} onClose={onClose} title="New job" size="lg">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client) create.mutate(); }}>
-        <Field label="Client"><ClientPicker value={client} onChange={setClient} /></Field>
+    <Dialog open={open} onClose={onClose} onExited={reset} title="New job" size="lg">
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (client) create.mutate(); else setTried(true); }} onInvalidCapture={() => setTried(true)}>
+        <Field label="Client" error={tried && !client ? "Choose who the job is for." : null}><ClientPicker value={client} onChange={setClient} /></Field>
         {client && <Field label="Property"><PropertySelect clientId={client.id} value={propertyId} onChange={setPropertyId} /></Field>}
         <div className="form-grid">
           <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} placeholder="Weekly mowing, driveway repair…" /></Field>
@@ -92,8 +98,9 @@ export function NewJobDialog({ open, onClose, onCreated }: { open: boolean; onCl
         {kind === "recurring" && <RecurrenceEditor value={recurrence} onChange={setRecurrence} />}
         <FormError error={create.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={create.isPending} disabled={!client || !title.trim()}>Create job</Button>
+          <Button type="submit" variant="primary" loading={create.isPending}>Create job</Button>
         </div>
       </form>
     </Dialog>
@@ -201,7 +208,7 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
               <Field label="Minutes per visit"><input className="input" type="number" inputMode="numeric" min={1} max={1440} step={1} value={f.visit_duration_min} onChange={set("visit_duration_min")} /></Field>
             </div>
             {f.visit_start_time && (
-              <label className="switch-row" style={{ fontWeight: 500 }}>
+              <label className="switch-row" style={{ fontWeight: 400 }}>
                 <input type="checkbox" className="switch" checked={f.visit_time_fixed === "1"} onChange={(e) => setF({ ...f, visit_time_fixed: e.target.checked ? "1" : "" })} />
                 Keep this time when routes are organized
               </label>
@@ -230,14 +237,15 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
           <div className="form-grid">
             <Field label="PO number" optional><input className="input" value={f.po_number} onChange={set("po_number")} maxLength={60} /></Field>
             <Field label="Permit number" optional><input className="input" value={f.permit_number} onChange={set("permit_number")} maxLength={60} /></Field>
-            <Field label="Retainage %" hint="Held back from each invoice until the work is accepted." error={retainage >= 0 && retainage <= 100 ? null : "0 to 100"}><input className="input" inputMode="decimal" value={f.retainage_pct} onChange={(e) => setF({ ...f, retainage_pct: e.target.value.replace(/[^0-9.]/g, "") })} /></Field>
+            <Field label="Retainage %" hint="Held back from each invoice until the work is accepted." error={retainage >= 0 && retainage <= 100 ? null : "Enter 0 to 100."}><input className="input" inputMode="decimal" value={f.retainage_pct} onChange={(e) => setF({ ...f, retainage_pct: e.target.value.replace(/[^0-9.]/g, "") })} /></Field>
             <Field label="Warranty until" optional><input className="input" type="date" value={f.warranty_until} onChange={set("warranty_until")} /></Field>
           </div>
         </details>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!f.title.trim()}>Save</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>Save</Button>
         </div>
       </form>
     </Dialog>
@@ -263,10 +271,18 @@ export function InvoiceJobDialog({
   const amount = kind === "progress" && mode === "percent" ? (Number(value) / 100) * Number(job.contract_total) : Number(value);
   const needsAmount = kind === "deposit" || kind === "progress";
   const overLimit = needsAmount && job.kind !== "recurring" && amount > leftToBill + 0.005;
-  const invalid = (needsAmount && !(amount > 0)) || overLimit || (kind === "standard" && job.finalInvoice !== null);
+  // Create invoice stays pressable; what stops it is said under the form (an amount over the limit, under its field).
+  const blocked =
+    kind === "standard" && job.finalInvoice !== null ? `Invoice #${job.finalInvoice} already bills the job. Void it to bill the job again.`
+      : kind === "visits" && !job.uninvoicedVisits ? "No completed visits are waiting to be invoiced."
+        : needsAmount && !(amount > 0) ? "Enter an amount above zero."
+          : null;
   const create = useMutation({
-    meta: { inline: true, success: "Invoice created as a draft" },
-    mutationFn: () => api.post<{ invoice_id: string }>(`/jobs/${job.id}/invoice`, { kind, amount: needsAmount ? Math.round(amount * 100) / 100 : undefined }),
+    meta: { inline: true, success: "Invoice created as a draft", tone: "invoice" },
+    mutationFn: () => {
+      if (blocked) throw new Error(blocked);
+      return api.post<{ invoice_id: string }>(`/jobs/${job.id}/invoice`, { kind, amount: needsAmount ? Math.round(amount * 100) / 100 : undefined });
+    },
     onSuccess: (r) => onCreated(r.invoice_id),
   });
   const options: Array<{ kind: InvoiceKind; title: string; body: string; hidden?: boolean }> = [
@@ -278,7 +294,7 @@ export function InvoiceJobDialog({
   ];
   return (
     <Dialog open onClose={onClose} title="Create invoice">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (!invalid) create.mutate(); }}>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (!overLimit) create.mutate(); }}>
         <div className="stack-sm" role="radiogroup" aria-label="Invoice type">
           {options.filter((o) => !o.hidden).map((o) => (
             <label key={o.kind} className="card card-pad" style={{ display: "flex", gap: 10, cursor: "pointer", padding: 14, borderColor: kind === o.kind ? "var(--green)" : undefined, boxShadow: kind === o.kind ? "var(--ring)" : undefined }}>
@@ -299,7 +315,7 @@ export function InvoiceJobDialog({
         {needsAmount && (
           <Field
             label={kind === "progress" && mode === "percent" ? "Percent of contract" : "Amount"}
-            error={overLimit ? `That's more than the ${formatMoneyCents(leftToBill)} left to bill` : null}
+            error={overLimit ? `That's more than the ${formatMoneyCents(leftToBill)} left to bill.` : null}
             hint={kind === "progress" && mode === "percent" && amount > 0 ? `${formatMoneyCents(amount)}` : undefined}
           >
             <input className="input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ""))} placeholder={kind === "progress" && mode === "percent" ? "25" : "500.00"} required autoFocus />
@@ -307,8 +323,9 @@ export function InvoiceJobDialog({
         )}
         <FormError error={create.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="invoice" loading={create.isPending} disabled={invalid || (kind === "visits" && !job.uninvoicedVisits)}>Create invoice</Button>
+          <Button type="submit" variant="primary" icon="invoice" loading={create.isPending}>Create invoice</Button>
         </div>
       </form>
     </Dialog>

@@ -56,24 +56,25 @@ function MyJobs({ sub }: { sub: SubLogin }) {
     : null;
 
   // A text or notification opens the offer: scroll to it once it's in (after the new screen has
-  // started at the top).
+  // started at the top), at once with Reduce Motion.
   useEffect(() => {
     if (!payId || !linked) return;
-    const t = setTimeout(() => document.getElementById(`job-${payId}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 50);
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    const t = setTimeout(() => document.getElementById(`job-${payId}`)?.scrollIntoView({ block: "start", behavior }), 50);
     return () => clearTimeout(t);
   }, [payId, Boolean(linked)]);
 
   return (
-    <>
+    <div className="field-app">
       <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-2)" }}>{sub.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-2)" }}>{sub.name}</div>
         <h1 className="page-title" style={{ marginTop: 4 }}>My jobs</h1>
       </div>
       {!online && (
         <div className="callout callout-info" role="status">
-          <Icon name="wifiOff" size={18} />
+          <Icon name="wifiOff" size={20} />
           <div className="grow small" style={{ fontWeight: 400 }}>
-            <div style={{ fontWeight: 700 }}>No signal</div>
+            <div>No signal</div>
             This is what you had when you last had signal. Accepting or declining a job needs signal, so it reaches the office right away.
           </div>
         </div>
@@ -83,9 +84,9 @@ function MyJobs({ sub }: { sub: SubLogin }) {
       {jobs.error && !jobs.data && <div className="card"><ErrorState error={jobs.error} onRetry={() => jobs.refetch()} /></div>}
       {missing && (
         <div className="callout callout-info" role="status">
-          <Icon name="info" size={18} />
+          <Icon name="info" size={20} />
           <div className="grow" style={{ fontWeight: 400 }}>{missing.text}</div>
-          {missing.switchTo && <Button size="sm" onClick={() => session.switchCompany(missing.switchTo!)}>Switch to it</Button>}
+          {missing.switchTo && <Button onClick={() => session.switchCompany(missing.switchTo!)}>Switch to it</Button>}
         </div>
       )}
 
@@ -188,7 +189,7 @@ function MyJobs({ sub }: { sub: SubLogin }) {
           </div>
         </section>
       )}
-    </>
+    </div>
   );
 }
 
@@ -228,7 +229,7 @@ function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean })
         <StatusPill label={o.is_change ? "New price" : "New job offer"} tone="info" />
         <span className="chip">{o.respond_by ? `Answer by ${formatDateTime(o.respond_by, tz)}` : "No deadline"}</span>
       </div>
-      <strong id={`job-${o.id}-title`} style={{ fontSize: 17 }}>{offerCardLine(o)}</strong>
+      <strong id={`job-${o.id}-title`} style={{ fontSize: 16 }}>{offerCardLine(o)}</strong>
       {o.is_change && o.agreed_total != null && (
         <span className="small">The office changed the price: {moneyShort(o.total)}, was {moneyShort(o.agreed_total)}. If you decline it, you keep the job at {moneyShort(o.agreed_total)}.</span>
       )}
@@ -275,16 +276,16 @@ function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean })
 
       {o.insurance_warning.length > 0 && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow small" style={{ fontWeight: 400 }}>
             {o.insurance_warning.join(" ")} <Link to="/field/paperwork">My paperwork</Link>
           </div>
         </div>
       )}
 
-      {state.note && <span className="small" style={{ color: "var(--warning)", fontWeight: 700 }}><Icon name={online ? "clock" : "wifiOff"} size={14} /> {state.note}</span>}
+      {state.note && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}><Icon name={online ? "clock" : "wifiOff"} size={14} /> {state.note}</span>}
       {!declining && <FormError error={send.error} />}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+      <div className="field-card-more">
         <Button className="big-action" icon="x" aria-label={`Decline ${o.job_title}`} disabled={state.disabled || send.isPending} onClick={() => { send.reset(); setDeclining(true); }}>Decline</Button>
         <Button className="big-action" variant="primary" icon="check" aria-label={`Accept ${o.job_title}`} disabled={state.disabled} loading={send.isPending && send.variables?.accept === true} onClick={() => send.mutate({ accept: true })}>
           Accept
@@ -347,7 +348,7 @@ function DeclineDialog({ offer: o, disabled, note, sending, error, onClose, onDe
         <Field label="Why" optional hint="The office sees this.">
           <textarea className="textarea" rows={2} maxLength={500} value={reason} placeholder="Booked that week" onChange={(e) => setReason(e.target.value)} />
         </Field>
-        {note && <span className="small" role="status" style={{ color: "var(--warning)", fontWeight: 700 }}>{note}</span>}
+        {note && <span className="small" role="status" style={{ color: "var(--warning)", fontWeight: 600 }}>{note}</span>}
         <FormError error={error} />
         <div className="form-actions">
           <Button onClick={onClose} disabled={sending}>Keep it</Button>

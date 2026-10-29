@@ -17,6 +17,7 @@ import { formatDate, formatMoneyCents } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
 import { EquipmentDialog, LogDialog, PlanDialog, type LogKind } from "./EquipmentDialogs";
 import {
   EQUIPMENT_FIELDS,
@@ -32,6 +33,8 @@ import {
 } from "./equipmentData";
 
 const LOG_ICON: Record<EquipmentLog["kind"], IconName> = { service: "check", repair: "wrench", reading: "gauge", note: "note" };
+/** A history entry with who logged it. */
+type Logged = EquipmentLog & { by: string | null };
 
 export function EquipmentDetailPage() {
   const { id = "" } = useParams();
@@ -59,8 +62,9 @@ export function EquipmentDetailPage() {
     queryKey: ["equipment", session.company.id, "plans", id],
     queryFn: async () => unwrap(await supabase().from("equipment_plans").select("id, name, every_count, every_unit, every_meter, last_done_on, last_done_meter, baseline_on, notes, active").eq("equipment_id", id).order("name")),
   });
+  const logsKey = ["equipment", session.company.id, "logs", id];
   const logs = useQuery({
-    queryKey: ["equipment", session.company.id, "logs", id],
+    queryKey: logsKey,
     queryFn: async () => {
       const rows = unwrap(
         await supabase()
@@ -117,10 +121,26 @@ export function EquipmentDetailPage() {
     onSuccess: () => refreshEquipment(queryClient),
   });
   const removeLog = useMutation({
-    meta: { success: "Entry deleted" },
+    meta: { inline: true },
     mutationFn: async (logId: string) => unwrap(await supabase().from("equipment_logs").delete().eq("id", logId)),
     onSuccess: () => refreshEquipment(queryClient),
   });
+  // Gone from the history at once with Undo on the toast; deleted for real (and the schedule it
+  // counted for moved back) once the toast leaves.
+  const removeLater = (l: Logged) =>
+    undoable({
+      title: "Entry deleted",
+      description: l.kind === "service" && l.plan_id ? "Its schedule goes back to when it was done before." : undefined,
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: logsKey });
+        queryClient.setQueryData<Logged[]>(logsKey, (rows) => rows?.filter((r) => r.id !== l.id));
+      },
+      restore: () =>
+        queryClient.setQueryData<Logged[]>(logsKey, (rows) =>
+          rows && !rows.some((r) => r.id === l.id) ? [...rows, l].sort((a, b) => b.done_on.localeCompare(a.done_on) || b.created_at.localeCompare(a.created_at)) : rows,
+        ),
+      commit: () => removeLog.mutateAsync(l.id),
+    });
 
   if (item.isPending) return <DetailSkeleton />;
   if (item.error || !e) return <PageError error={item.error} onRetry={() => item.refetch()} back={<BackLink to="/equipment">Equipment</BackLink>} />;
@@ -183,16 +203,16 @@ export function EquipmentDetailPage() {
         <StatusPill label={STATUS_LABELS[e.status]} tone={STATUS_TONES[e.status]} />
         <span className="muted">{kindLabel(e.kind)}</span>
         {e.meter !== "none" && (
-          <span className="strong tabular">
+          <span className="muted tabular">
             {e.meter_reading != null ? formatMeter(e.meter_reading, e.meter) : e.meter === "miles" ? "No miles logged" : "No hours logged"}
-            {e.meter_read_on && <span className="muted" style={{ fontWeight: 400 }}> · read {formatDate(e.meter_read_on)}</span>}
+            {e.meter_read_on && ` · read ${formatDate(e.meter_read_on)}`}
           </span>
         )}
       </div>
 
       {e.status === "in_shop" && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow">In the shop. Crews know not to count on it.</div>
           {canManage && <Button size="sm" onClick={() => update.mutate({ status: "active" })}>Back in service</Button>}
         </div>
@@ -207,9 +227,10 @@ export function EquipmentDetailPage() {
             </div>
             <div className="card" ref={plansRef}>
               {plans.isPending && [0, 1].map((i) => <div key={i} className="card-row"><span className="grow stack-sm"><Skeleton width="40%" /><Skeleton width="30%" height={10} /></span><Skeleton width={80} height={24} radius={12} /></div>)}
+              {/* Add schedule is in the heading, so the empty line doesn't repeat it. */}
               {plans.data && due.length === 0 && (
-                <EmptyState compact icon="calendarCheck" title={retired ? "Retired equipment has no maintenance due" : "No maintenance schedules yet"} action={canManage && !retired && <Button size="sm" icon="plus" onClick={() => setDialog({ plan: null })}>Add schedule</Button>}>
-                  {!retired && "Oil changes, blade sharpening, inspections: anything that comes due by date, hours or miles."}
+                <EmptyState inline title={retired ? "Retired equipment has no maintenance due" : paused.length ? "No schedules running" : "No maintenance schedules yet"}>
+                  {!retired && !paused.length ? "Oil changes, blade sharpening, inspections: anything that comes due by date, hours or miles." : null}
                 </EmptyState>
               )}
               {due.map((p) => (
@@ -229,7 +250,7 @@ export function EquipmentDetailPage() {
                       {[p.next_due_on ? formatDate(p.next_due_on) : null, p.next_due_meter != null ? formatMeter(p.next_due_meter, e.meter) : null].filter(Boolean).join(" or ")}
                     </span>
                   </span>
-                  <Button size="sm" icon="check" onClick={() => setDialog({ log: "service", planId: p.plan_id })}>Done</Button>
+                  <Button size="sm" icon="check" onClick={() => setDialog({ log: "service", planId: p.plan_id })}>Mark done</Button>
                   {canManage && (
                     <Menu
                       triggerClassName="btn btn-sm btn-ghost btn-icon"
@@ -258,14 +279,14 @@ export function EquipmentDetailPage() {
               {history.length > 0 && <span className="muted small">{history.length} {history.length === 1 ? "entry" : "entries"}</span>}
             </div>
             <div className="card" ref={historyRef}>
-              {logs.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton width={32} height={32} radius={9} /><span className="grow stack-sm"><Skeleton width="45%" /><Skeleton width="30%" height={10} /></span></div>)}
-              {logs.data && history.length === 0 && <EmptyState compact icon="history" title="Nothing logged yet">Maintenance, repairs and readings show up here.</EmptyState>}
+              {logs.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton width={32} height={32} radius={8} /><span className="grow stack-sm"><Skeleton width="45%" /><Skeleton width="30%" height={10} /></span></div>)}
+              {logs.data && history.length === 0 && <EmptyState inline title="Nothing logged yet" />}
               {shown.map((l) => {
                 const mine = l.user_id === session.userId;
                 return (
                   <div key={l.id} className="card-row" style={{ alignItems: "flex-start" }}>
-                    <span className="n-icon" style={{ width: 32, height: 32, borderRadius: 9, display: "grid", placeItems: "center", flex: "none", background: l.kind === "service" ? "var(--green-tint)" : l.kind === "repair" ? "var(--warning-tint)" : "var(--fill-2)", color: l.kind === "service" ? "var(--green-dark)" : l.kind === "repair" ? "var(--warning)" : "var(--text-2)" }}>
-                      <Icon name={LOG_ICON[l.kind]} size={15} />
+                    <span className="n-icon" style={{ width: 32, height: 32, borderRadius: "var(--radius-control)", display: "grid", placeItems: "center", flex: "none", background: l.kind === "service" ? "var(--green-tint)" : l.kind === "repair" ? "var(--warning-tint)" : "var(--fill-2)", color: l.kind === "service" ? "var(--green-dark)" : l.kind === "repair" ? "var(--warning)" : "var(--text-2)" }}>
+                      <Icon name={LOG_ICON[l.kind]} size={16} />
                     </span>
                     <span className="grow" style={{ minWidth: 0 }}>
                       <strong>{l.kind === "reading" ? `${e.meter === "miles" ? "Odometer" : "Hour meter"}: ${formatMeter(l.meter_reading, e.meter)}` : l.title || (l.kind === "note" ? "Note" : l.kind === "repair" ? "Repair" : "Maintenance")}</strong>
@@ -279,7 +300,7 @@ export function EquipmentDetailPage() {
                       <Menu
                         triggerClassName="btn btn-sm btn-ghost btn-icon"
                         label="Entry actions"
-                        items={[{ label: "Delete entry", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Delete this entry?", body: l.kind === "service" ? "The schedule goes back to the time before it was last done." : undefined, confirmLabel: "Delete", danger: true })) && removeLog.mutate(l.id) }]}
+                        items={[{ label: "Delete entry", icon: "trash", danger: true, onSelect: () => removeLater(l) }]}
                       />
                     )}
                   </div>
@@ -309,7 +330,7 @@ export function EquipmentDetailPage() {
             <dl className="kv">
               {details.filter(([, v]) => v).map(([k, v]) => <div key={k} style={{ display: "contents" }}><dt>{k}</dt><dd>{v}</dd></div>)}
             </dl>
-            {e.notes && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: 8, border: "1px solid var(--note-border)" }}>{e.notes}</p>}
+            {e.notes && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: "var(--radius-control)", border: "1px solid var(--note-border)" }}>{e.notes}</p>}
           </div>
           {showCosts && (
             <div className="card card-pad stack-sm">
@@ -318,7 +339,7 @@ export function EquipmentDetailPage() {
                 <div className="totals">
                   <div className="line"><span>Bought for</span><span>{costs.data?.price ? formatMoneyCents(costs.data.price) : "—"}</span></div>
                   <div className="line"><span>Upkeep logged</span><span>{formatMoneyCents(costs.data?.upkeep ?? 0)}</span></div>
-                  <div className="line grand" style={{ fontSize: 15 }}><span>Total</span><span>{formatMoneyCents((costs.data?.price ?? 0) + (costs.data?.upkeep ?? 0))}</span></div>
+                  <div className="line grand" style={{ fontSize: 16, fontWeight: 700 }}><span>Total</span><span>{formatMoneyCents((costs.data?.price ?? 0) + (costs.data?.upkeep ?? 0))}</span></div>
                 </div>
               )}
             </div>

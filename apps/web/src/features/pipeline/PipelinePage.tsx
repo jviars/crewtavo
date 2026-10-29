@@ -15,10 +15,11 @@ import { Icon } from "@/components/ui/Icon";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
+import { statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { formatMoney, formatMoneyCompact } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { toast } from "@/lib/toast";
+import { toast, type ToastTone } from "@/lib/toast";
 import { ALREADY_ANSWERED, listPrice, withOptionLines } from "../quotes/options";
 import { optionsNote } from "../quotes/QuotesPage";
 import { SendDialog } from "../quotes/SendDialog";
@@ -103,15 +104,15 @@ export function PipelinePage() {
     queryClient.invalidateQueries({ queryKey: ["requests", company.id] });
   };
   const move = useMutation({
-    mutationFn: async ({ card, to }: { card: Card; to: ColumnKey | "lost" }) => {
+    mutationFn: async ({ card, to }: { card: Card; to: ColumnKey | "lost" }): Promise<{ message: string; open?: string; refused?: boolean; tone?: ToastTone }> => {
       if (to === "lost") {
         if (card.kind === "quote") unwrap(await supabase().from("quotes").update({ status: "lost", lost_reason: "Marked lost from the pipeline" }).eq("id", card.id));
         else unwrap(await supabase().from("requests").update({ status: "archived" }).eq("id", card.id));
-        return { message: card.kind === "quote" ? `Quote #${card.number} marked lost` : "Request archived" };
+        return { message: card.kind === "quote" ? `Quote #${card.number} marked lost` : "Request archived", tone: card.kind };
       }
       if (card.kind === "request" && to === "draft") {
         const quote = await api.post<{ id: string }>(`/requests/${card.id}/quote`);
-        return { message: "Quote started", open: `/quotes/${quote.id}` };
+        return { message: "Quote started", open: `/quotes/${quote.id}`, tone: "quote" };
       }
       if (card.kind === "quote" && to === "won") {
         // The quote page's own approval, loaded only once a quote is dropped here.
@@ -123,14 +124,14 @@ export function PipelinePage() {
           await supabase().from("quotes").update({ status: "approved", approved_at: new Date().toISOString(), approval: approval as unknown as Json }).eq("id", card.id).in("status", ["sent", "changes_requested"]).select("id"),
         );
         if (!saved.length) return { message: ALREADY_ANSWERED, refused: true, open: `/quotes/${card.id}` };
-        return { message: `Quote #${card.number} marked approved` };
+        return { message: `Quote #${card.number} marked approved`, tone: "quote" };
       }
       throw new Error("That move isn't possible.");
     },
-    onSuccess: (r: { message: string; open?: string; refused?: boolean }) => {
+    onSuccess: (r) => {
       const action = r.open ? { action: { label: "Open", onClick: () => navigate(r.open!) } } : undefined;
       if (r.refused) toast.error(r.message, action);
-      else toast.success(r.message, action);
+      else toast.success(r.message, { ...action, tone: r.tone });
       refresh();
     },
   });
@@ -185,7 +186,7 @@ export function PipelinePage() {
       )}
       {data.error && <div className="card"><ErrorState error={data.error} onRetry={() => data.refetch()} /></div>}
       {data.isPending ? (
-        <Loading><div className="board">{COLUMNS.map((c) => <div key={c.key} className="board-col"><Skeleton width="60%" height={14} />{[0, 1].map((i) => <Skeleton key={i} height={70} radius={10} />)}</div>)}</div></Loading>
+        <Loading><div className="board">{COLUMNS.map((c) => <div key={c.key} className="board-col"><Skeleton width="60%" height={14} />{[0, 1].map((i) => <Skeleton key={i} height={70} radius={8} />)}</div>)}</div></Loading>
       ) : (
         <div className="board">
           {COLUMNS.map((col) => {
@@ -196,7 +197,7 @@ export function PipelinePage() {
                 <div className="board-col-head">
                   <strong>{col.label}</strong>
                   <span className="badge">{items.length}</span>
-                  {total > 0 && <span className="muted">{formatMoneyCompact(total)}</span>}
+                  {total > 0 && <span className="muted">{formatMoney(total)}</span>}
                 </div>
                 {items.map((c) => {
                   const age = daysOld(c.updated);
@@ -221,8 +222,8 @@ export function PipelinePage() {
                       <span className="d-title">{c.title}</span>
                       <span className="muted small ellipsis">{c.client}</span>
                       <span className="d-meta">
-                        <span>{c.status === "changes_requested" ? <span className="text-danger strong">Changes requested</span> : `#${c.number}`}</span>
-                        <span style={age >= 14 ? { color: "var(--danger)", fontWeight: 700 } : age >= 7 ? { color: "var(--warning)", fontWeight: 700 } : undefined}>{age === 0 ? "today" : `${age}d`}</span>
+                        <span>{c.status === "changes_requested" ? <span className="text-danger strong">{statusText("quote", c.status)}</span> : `#${c.number}`}</span>
+                        <span style={age >= 14 ? { color: "var(--danger)", fontWeight: 600 } : age >= 7 ? { color: "var(--warning)", fontWeight: 600 } : undefined}>{age === 0 ? "Today" : `${age} ${age === 1 ? "day" : "days"}`}</span>
                       </span>
                       {c.value != null && (
                         <span className="d-value">
@@ -240,7 +241,7 @@ export function PipelinePage() {
         </div>
       )}
       {dragging && (
-        <div className="card row" style={{ justifyContent: "center", padding: 16, borderStyle: "dashed", borderColor: over === "lost" ? "var(--danger)" : undefined, background: over === "lost" ? "var(--danger-tint)" : undefined, color: "var(--danger)", fontWeight: 700, position: "sticky", bottom: 16, transition: "background 150ms" }} {...zone("lost")}>
+        <div className="card row" style={{ justifyContent: "center", padding: 16, borderStyle: "dashed", borderColor: over === "lost" ? "var(--danger)" : undefined, background: over === "lost" ? "var(--danger-tint)" : undefined, color: "var(--danger)", fontWeight: 600, position: "sticky", bottom: 16, transition: "background 150ms" }} {...zone("lost")}>
           <Icon name="x" size={16} />Drop here to mark {dragging.kind === "quote" ? "lost" : "archived"}
         </div>
       )}

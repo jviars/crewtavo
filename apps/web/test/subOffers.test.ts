@@ -66,9 +66,9 @@ describe("the office's buttons for a sub's pay", () => {
     expect(offerActions(pay({ status: "accepted" }), 1, NOW)).toEqual(["done", "change", "cancel"]);
     const change = pay({ status: "offered", total: 2210, accepted_snapshot: { total: 2040 } });
     expect(offerActions(change, 1, NOW)).toEqual(["accept", "withdraw", "cancel"]);
-    expect(offerActionLabel("withdraw", change)).toBe("Withdraw the new price");
-    expect(offerActionLabel("withdraw", pay({ status: "offered" }))).toBe("Withdraw the offer");
-    expect(offerActionLabel("change", pay({ status: "accepted" }))).toBe("Change the price");
+    expect(offerActionLabel("withdraw", change)).toBe("Withdraw new price");
+    expect(offerActionLabel("withdraw", pay({ status: "offered" }))).toBe("Withdraw offer");
+    expect(offerActionLabel("change", pay({ status: "accepted" }))).toBe("Change price");
   });
 
   it("offer the job to someone else after a decline or no answer in time", () => {
@@ -76,7 +76,7 @@ describe("the office's buttons for a sub's pay", () => {
     expect(offerActions(pay({ status: "expired" }), 1, NOW)).toEqual(["other", "delete"]);
     // Past its time and not marked yet by the hourly upkeep: it can't be answered any more.
     expect(offerActions(pay({ status: "offered", respond_by: "2026-11-02T20:00:00Z" }), 1, NOW)).toEqual(["other"]);
-    expect(offerActionLabel("other", pay({ status: "declined" }))).toBe("Offer to someone else");
+    expect(offerActionLabel("other", pay({ status: "declined" }))).toBe("Offer someone else");
     expect(offerActions(pay({ status: "withdrawn" }), 1, NOW)).toEqual(["delete"]);
   });
 
@@ -96,11 +96,11 @@ describe("the office's buttons for a sub's pay", () => {
 
   it("agreeing a new price for them says so first, with both prices", () => {
     const change = pay({ status: "offered", total: 1800, accepted_snapshot: { total: 2040 } });
-    expect(AGREE_CHANGE_LABEL).toBe("They agreed the new price");
+    expect(AGREE_CHANGE_LABEL).toBe("Agree new price");
     expect(agreeChangeConfirm(change, "Apex Roofing")).toEqual({
       title: "Agree the new price for them?",
       body: "This sets Apex Roofing's price to $1,800 (was $2,040) without waiting for their answer. They're told.",
-      confirmLabel: "Agree the new price",
+      confirmLabel: "Agree new price",
       cancelLabel: "Wait for them",
     });
   });
@@ -442,9 +442,9 @@ describe("answering an offer", () => {
   });
 
   it("says what happens next", () => {
-    expect(answeredToast(true, offer())).toBe("It's yours. Smith roof is on My day for the days it's on.");
-    expect(answeredToast(false, offer())).toBe("Declined. We've told the office.");
-    expect(answeredToast(false, offer({ is_change: true, agreed_total: 2040 }))).toBe("Declined. Smith roof stays at $2,040.");
-    expect(answeredToast(true, offer({ is_change: true, agreed_total: 2040 }))).toBe("New price accepted for Smith roof.");
+    expect(answeredToast(true, offer())).toBe("Smith roof accepted, it's on My day");
+    expect(answeredToast(false, offer())).toBe("Job declined, the office knows");
+    expect(answeredToast(false, offer({ is_change: true, agreed_total: 2040 }))).toBe("New price declined, Smith roof stays at $2,040");
+    expect(answeredToast(true, offer({ is_change: true, agreed_total: 2040 }))).toBe("New price accepted for Smith roof");
   });
 });

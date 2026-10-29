@@ -5,8 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
@@ -17,8 +16,10 @@ import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { formatDate, formatDateTime, formatMoney, timeAgo } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { undoable } from "@/lib/undo";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { PromoCodes } from "./PromoCodes";
 import { analyticsOn } from "./website";
@@ -96,10 +97,24 @@ function Campaigns() {
     },
   });
   const remove = useMutation({
-    meta: { success: "Campaign deleted" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("campaigns").delete().eq("id", id)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["campaigns", session.company.id] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["campaigns", session.company.id] }),
   });
+  type Campaign = NonNullable<typeof campaigns.data>[number];
+  const key = ["campaigns", session.company.id];
+  // Gone at once, with Undo; deleted for real once the toast leaves.
+  const deleteCampaign = (campaign: Campaign) =>
+    undoable({
+      title: "Campaign deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<Campaign[]>(key, (old) => old?.filter((c) => c.id !== campaign.id));
+      },
+      restore: () => queryClient.setQueryData<Campaign[]>(key, (old) => (old && !old.some((c) => c.id === campaign.id) ? [...old, campaign].sort((a, b) => b.created_at.localeCompare(a.created_at)) : old)),
+      commit: () => remove.mutateAsync(campaign.id),
+    });
+  const list = useListAnimation<HTMLDivElement>();
 
   return (
     <div className="stack">
@@ -114,10 +129,10 @@ function Campaigns() {
         <div className="card"><ErrorState error={campaigns.error} onRetry={() => campaigns.refetch()} /></div>
       ) : !campaigns.data?.length ? (
         <div className="card">
-          <EmptyState icon="mail" title="No campaigns yet" action={<Button variant="primary" icon="plus" onClick={() => create.mutate()}>Write your first campaign</Button>} />
+          <EmptyState icon="mail" title="No campaigns yet" action={<Button icon="plus" onClick={() => create.mutate()}>Write a campaign</Button>} />
         </div>
       ) : (
-        <div className="card">
+        <div className="card" ref={list}>
           {campaigns.data.map((c) => (
             <div key={c.id} className="card-row">
               <Link to={`/marketing/campaigns/${c.id}`} className="grow" style={{ color: "inherit", minWidth: 0 }}>
@@ -133,7 +148,7 @@ function Campaigns() {
                 triggerClassName="btn btn-sm btn-ghost btn-icon"
                 items={[
                   { label: c.status === "draft" ? "Edit" : "View", icon: c.status === "draft" ? "edit" : "eye", onSelect: () => navigate(`/marketing/campaigns/${c.id}`) },
-                  { label: "Delete", icon: "trash", danger: true, hidden: c.status === "sending", onSelect: async () => (await confirm({ title: `Delete “${c.name}”?`, confirmLabel: "Delete", danger: true })) && remove.mutate(c.id) },
+                  { label: "Delete", icon: "trash", danger: true, hidden: c.status === "sending", onSelect: () => deleteCampaign(c) },
                 ]}
               />
             </div>
@@ -144,11 +159,11 @@ function Campaigns() {
   );
 }
 
-/** Company settings for marketing: merged into companies.settings (owners and admins only). */
+/** Company settings for marketing: merged into companies.settings (owners and admins only). Its Save button says when it's saved. */
 function useSettingsSaver() {
   const session = useSession();
   return useMutation({
-    meta: { success: "Settings saved" },
+    meta: { inline: true },
     mutationFn: async (patch: Record<string, unknown>) => {
       const current = unwrap(await supabase().from("companies").select("settings").eq("id", session.company.id).single());
       unwrap(await supabase().from("companies").update({ settings: { ...(current.settings as Record<string, unknown>), ...patch } as never }).eq("id", session.company.id));
@@ -157,6 +172,7 @@ function useSettingsSaver() {
   });
 }
 
+/** The API's default (services/reviews.ts) word for word: it's what clients get until it's changed here. */
 const DEFAULT_REVIEW_MESSAGE =
   "Hi {{client.first_name}}, thank you for choosing {{company.name}}! If you have a minute, would you leave us a quick review? It really helps a small business like ours.\n\n{{link}}";
 
@@ -169,6 +185,7 @@ function Reviews() {
   const [client, setClient] = useState<PickedClient>(null);
   const [channel, setChannel] = useState<"email" | "sms" | "link">("email");
   const save = useSettingsSaver();
+  const saved = useJustDone(save);
   const queryClient = useQueryClient();
   const validUrl = /^https:\/\/\S+\.\S+/.test(url.trim());
 
@@ -205,14 +222,14 @@ function Reviews() {
           {!message.includes("{{link}}") && <p className="error-text">Include {"{{link}}"} so clients can click through.</p>}
           <FormError error={save.error} />
           <div className="form-actions" style={{ justifyContent: "flex-start" }}>
-            {canSave ? <Button type="submit" variant="primary" loading={save.isPending} disabled={!validUrl || !message.includes("{{link}}")}>Save</Button> : <span className="muted small">Only owners and admins can change these.</span>}
+            {canSave ? <Button type="submit" loading={save.isPending} done={saved} disabled={!validUrl || !message.includes("{{link}}")}>Save</Button> : <span className="muted small">Only owners and admins can change these.</span>}
           </div>
         </form>
 
         <div className="card">
           <div className="card-head"><strong>Recent requests</strong></div>
           {requests.isPending && <div className="card-pad"><CardSkeleton lines={2} title={false} /></div>}
-          {requests.data?.length === 0 && <EmptyState compact icon="star" title="No review requests yet" />}
+          {requests.data?.length === 0 && <EmptyState inline title="No review requests yet" />}
           {requests.data?.map((r) => (
             <div key={r.id} className="card-row">
               <Icon name={r.channel === "sms" ? "messages" : r.channel === "email" ? "mail" : "link"} size={16} />
@@ -263,6 +280,7 @@ function Referrals() {
   const [client, setClient] = useState<PickedClient>(null);
   useEffect(() => setAmount(String(settings.referral_reward?.amount ?? "")), [settings.referral_reward?.amount]);
   const save = useSettingsSaver();
+  const saved = useJustDone(save);
   const referrals = useQuery({
     queryKey: ["referrals", session.company.id],
     queryFn: async () =>
@@ -296,7 +314,7 @@ function Referrals() {
           <div className="card-head"><strong>Referrals</strong></div>
           {referrals.isPending && <div className="card-pad"><CardSkeleton lines={2} title={false} /></div>}
           {referrals.error && <ErrorState compact error={referrals.error} onRetry={() => referrals.refetch()} />}
-          {referrals.data?.length === 0 && <EmptyState compact icon="gift" title="No referrals yet" />}
+          {referrals.data?.length === 0 && <EmptyState inline title="No referrals yet" />}
           {referrals.data?.map((r) => {
             const referrer = r.referrer as unknown as { id: string; display_name: string } | null;
             const referred = r.referred as unknown as { id: string; display_name: string } | null;
@@ -328,7 +346,7 @@ function Referrals() {
             <input className="input" value={offer} maxLength={200} onChange={(e) => setOffer(e.target.value)} disabled={!canSave} placeholder="10% off your first service" />
           </Field>
           <FormError error={save.error} />
-          {canSave ? <Button type="submit" loading={save.isPending} style={{ justifySelf: "start" }}>Save</Button> : <span className="muted small">Only owners and admins can change these.</span>}
+          {canSave ? <Button type="submit" loading={save.isPending} done={saved} style={{ justifySelf: "start" }}>Save</Button> : <span className="muted small">Only owners and admins can change these.</span>}
         </form>
       </aside>
     </div>

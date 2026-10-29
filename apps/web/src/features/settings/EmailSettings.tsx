@@ -16,7 +16,7 @@ import yahooLogo from "@/assets/apps/yahoo.svg";
 import zohoLogo from "@/assets/apps/zoho.svg";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -58,7 +58,7 @@ const WIDE = new Set<MailPreset["id"]>(["zoho"]);
 /** The provider's logo, or the mail icon for any other server. Decorative: its name is right beside it. */
 export function ProviderMark({ preset }: { preset: MailPreset["id"] }) {
   const logo = LOGOS[preset];
-  if (!logo) return <span className={styles.mark} aria-hidden="true"><Icon name="mail" size={15} /></span>;
+  if (!logo) return <span className={styles.mark} aria-hidden="true"><Icon name="mail" size={16} /></span>;
   return (
     <span className={`${styles.mark} ${styles.logo}`} data-wide={WIDE.has(preset) || undefined} aria-hidden="true">
       <img src={logo} alt="" />
@@ -91,7 +91,7 @@ export function EmailSettings() {
   });
 
   if (state.error) return <div className="card"><ErrorState error={state.error} onRetry={() => state.refetch()} /></div>;
-  if (state.isPending) return <div className="card card-pad stack"><Skeleton width="40%" /><Skeleton height={120} radius={10} /></div>;
+  if (state.isPending) return <div className="card card-pad stack"><Skeleton width="40%" /><Skeleton height={120} radius={8} /></div>;
   const { mailbox, fallback, on_railway: onRailway = false } = state.data;
   const preset = mailPreset(mailbox?.preset);
 
@@ -324,6 +324,7 @@ function ConnectForm({ existing, onRailway, onSaved, onCancel }: { existing: Mai
 
           <FormError error={save.error} />
           <div className="form-actions">
+            <FormChecks />
             {onCancel && <Button onClick={onCancel}>Cancel</Button>}
             <Button type="submit" variant="primary" icon="check" loading={save.isPending}>{save.isPending ? "Connecting and sending a test…" : "Connect"}</Button>
           </div>

@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-import { AnimatedNumber, moneyCompact } from "@/components/ui/AnimatedNumber";
+import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { formatMoneyCompact } from "@/lib/format";
+import { statusText } from "@/components/ui/StatusPill";
+import { formatMoney } from "@/lib/format";
 import type { Dashboard } from "./types";
 import styles from "./WorkflowStrip.module.css";
 
@@ -18,36 +19,38 @@ interface Column {
   rows: Array<{ label: string; value: string; danger?: boolean }>;
 }
 
+/** Money in full ("$54,058"), as Invoices writes it; each column's figures wrap under its count when they need to. */
 export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Dashboard["workflow"]; showInvoices?: boolean }) {
   const { requests, quotes, jobs, invoices } = workflow;
   const columns: Column[] = [
     {
       key: "requests", label: "Requests", icon: "requests", to: "/requests", color: "var(--req)", textColor: "var(--req-text)",
-      count: requests.new, caption: "New",
+      count: requests.new, caption: statusText("request", "new"),
       rows: [
-        { label: "Assessment done", value: String(requests.assessment_complete) },
+        { label: statusText("request", "assessment_complete"), value: String(requests.assessment_complete) },
+        // Late work, not late money: a new request nobody has answered in two days.
         { label: "Overdue", value: String(requests.overdue) },
       ],
     },
     {
       key: "quotes", label: "Quotes", icon: "quote", to: "/quotes", color: "var(--quote)", textColor: "var(--quote-text)",
-      count: quotes.awaiting, value: quotes.awaiting_value, caption: "Awaiting response",
+      count: quotes.awaiting, value: quotes.awaiting_value, caption: statusText("quote", "sent"),
       rows: [
-        { label: `Approved (${quotes.approved ?? 0})`, value: formatMoneyCompact(quotes.approved_value ?? 0) },
-        { label: `Draft (${quotes.draft})`, value: formatMoneyCompact(quotes.draft_value) },
+        { label: `${statusText("quote", "approved")} (${quotes.approved ?? 0})`, value: formatMoney(quotes.approved_value ?? 0) },
+        { label: `${statusText("quote", "draft")} (${quotes.draft})`, value: formatMoney(quotes.draft_value) },
       ],
     },
     {
       key: "jobs", label: "Jobs", icon: "job", to: "/jobs", color: "var(--job)", textColor: "var(--job-text)",
-      count: jobs.to_invoice, value: jobs.to_invoice_value, caption: "Require invoicing",
-      rows: [{ label: "Active", value: String(jobs.active) }],
+      count: jobs.to_invoice, value: jobs.to_invoice_value, caption: statusText("job", "requires_invoicing"),
+      rows: [{ label: statusText("job", "active"), value: String(jobs.active) }],
     },
     {
       key: "invoices", label: "Invoices", icon: "invoice", to: "/invoices", color: "var(--invoice)", textColor: "var(--invoice-text)",
-      count: invoices.awaiting, value: invoices.awaiting_value, caption: "Awaiting payment",
+      count: invoices.awaiting, value: invoices.awaiting_value, caption: statusText("invoice", "sent"),
       rows: [
-        { label: `Draft (${invoices.draft})`, value: "" },
-        { label: `Past due (${invoices.past_due})`, value: formatMoneyCompact(invoices.past_due_value), danger: invoices.past_due > 0 },
+        { label: `${statusText("invoice", "draft")} (${invoices.draft})`, value: "" },
+        { label: `${statusText("invoice", "overdue")} (${invoices.past_due})`, value: formatMoney(invoices.past_due_value), danger: invoices.past_due > 0 },
       ],
     },
   ];
@@ -57,7 +60,7 @@ export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Das
       <h2 id="workflow-title" className="section-title">Workflow</h2>
       <div className={styles.strip} style={{ ["--cols" as string]: showInvoices ? 4 : 3 }}>
         {columns.filter((col) => showInvoices || col.key !== "invoices").map((col, i) => (
-          <Link key={col.key} to={col.to} className={styles.column} style={{ borderTopColor: col.color }}>
+          <Link key={col.key} to={col.to} className={styles.column} style={{ borderTopColor: col.color }} data-rise>
             {i > 0 && <span className={styles.chevron} aria-hidden="true"><Icon name="chevronRight" size={12} /></span>}
             <span className={styles.label} style={{ color: col.textColor }}>
               <span style={{ color: col.color }}><Icon name={col.icon} /></span>
@@ -66,7 +69,7 @@ export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Das
             <span>
               <span className={styles.countRow}>
                 <AnimatedNumber className={styles.count} value={col.count} />
-                {col.value !== undefined && <AnimatedNumber className="muted" value={col.value} format={moneyCompact(col.value)} />}
+                {col.value !== undefined && <AnimatedNumber className={styles.value} value={col.value} format={MONEY} />}
               </span>
               <span className={styles.caption}>{col.caption}</span>
             </span>

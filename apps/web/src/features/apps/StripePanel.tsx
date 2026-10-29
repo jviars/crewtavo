@@ -47,7 +47,7 @@ export function StripePanel({ app, onChanged }: { app: AppRow; onChanged: () => 
       </section>
 
       <section className="card card-pad stack-sm" aria-labelledby="stripe-history" style={{ gap: 8 }}>
-        <h2 id="stripe-history" className="section-title" style={{ fontSize: 17 }}>Bring in your Stripe history</h2>
+        <h2 id="stripe-history" className="section-title" style={{ fontSize: 16 }}>Bring in your Stripe history</h2>
         <span className="muted small">Invoices you made in Stripe, with their clients and payments, and your bank deposits. Nobody is emailed or texted, and running it again only updates what's already here.</span>
         {running ? (
           <span className="small" role="status"><Icon name="refresh" size={13} /> Importing… {counts ? plural(counts.invoices, "invoice") : ""} so far</span>

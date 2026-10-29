@@ -39,7 +39,7 @@ export function useTeamChatSwitch() {
 export function TeamChatPanel() {
   return (
     <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="team-chat-setup" style={{ gap: 12 }}>
-      <h2 id="team-chat-setup" className="section-title" style={{ fontSize: 17 }}>Team chat is on</h2>
+      <h2 id="team-chat-setup" className="section-title" style={{ fontSize: 16 }}>Team chat is on</h2>
       <span className="muted">
         Everyone on your team has <strong>Team chat</strong> in the menu. Crewtavo started you with <strong>Announcements</strong>, <strong>#general</strong>, a channel for each
         crew and one for the office. Set up channels and who sees each one in Chat settings: field crew start with only their own crew's.

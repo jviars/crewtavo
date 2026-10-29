@@ -8,7 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { readAmount } from "@/components/ui/MoneyInput";
 import { formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -48,7 +48,7 @@ export function MarkPaidDialog({ pays, onClose, onPaid }: { pays: readonly ToPay
         <div className="form-grid">
           <Field label="Paid on"><input className="input" type="date" value={paidOn} max={today} onChange={(e) => e.target.value && setPaidOn(e.target.value)} required /></Field>
           {one ? (
-            <Field label="Amount" hint={Number(amount) !== total ? `Their pay comes to ${formatMoneyCents(total)}.` : undefined}>
+            <Field label="Amount" requiredMessage="Enter the amount you paid." hint={Number(amount) !== total ? `Their pay comes to ${formatMoneyCents(total)}.` : undefined}>
               <span className="input-group">
                 <span className="addon">$</span>
                 <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} style={{ paddingLeft: 24, textAlign: "right" }} required />
@@ -75,6 +75,7 @@ export function MarkPaidDialog({ pays, onClose, onPaid }: { pays: readonly ToPay
         <Field label="Reference" optional hint="A check number or the transfer's confirmation."><input className="input" value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} /></Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" icon="check" loading={save.isPending}>Mark paid</Button>
         </div>

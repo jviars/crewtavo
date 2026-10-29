@@ -2,8 +2,7 @@
 import { checklistItemKey as slug, MAX_CHECKLIST_ITEMS, normalizeChecklist } from "@crewtavo/core/forms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
@@ -11,6 +10,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
 
 interface Item {
   key: string;
@@ -50,6 +50,26 @@ export function ChecklistSettings() {
       setSelected(row.id);
     },
   });
+  const remove = useMutation({
+    meta: { inline: true },
+    mutationFn: async (id: string) => unwrap(await supabase().from("checklist_templates").delete().eq("id", id)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
+  });
+  // Gone at once, with Undo; deleted for real once the toast leaves. Checklists filled in on visits are kept either way.
+  const deleteTemplate = (template: Template) =>
+    undoable({
+      title: "Checklist deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<Template[]>(key, (rows) => rows?.filter((r) => r.id !== template.id));
+        setSelected(null);
+      },
+      restore: () => {
+        queryClient.setQueryData<Template[]>(key, (rows) => (rows && !rows.some((r) => r.id === template.id) ? [...rows, template].sort((a, b) => a.name.localeCompare(b.name)) : rows));
+        setSelected(template.id);
+      },
+      commit: () => remove.mutateAsync(template.id),
+    });
 
   if (templates.isPending) return <Loading><div className="two-col"><div className="narrow"><CardSkeleton lines={4} /></div><div className="wide"><CardSkeleton lines={6} /></div></div></Loading>;
   if (templates.error) return <div className="card"><ErrorState error={templates.error} onRetry={() => templates.refetch()} /></div>;
@@ -65,23 +85,23 @@ export function ChecklistSettings() {
               <span className="grow"><strong>{t.name}</strong><span className="muted small" style={{ display: "block" }}>{t.items.length} items{t.active ? "" : " · hidden"}</span></span>
             </button>
           ))}
-          {!templates.data?.length && <EmptyState compact icon="clipboard" title="No checklists yet" />}
+          {!templates.data?.length && <EmptyState inline title="No checklists yet" />}
         </div>
         <Button icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New checklist</Button>
       </aside>
-      <div className="wide">{current ? <TemplateEditor key={current.id} template={current} onDeleted={() => setSelected(null)} /> : null}</div>
+      <div className="wide">{current ? <TemplateEditor key={current.id} template={current} onDelete={() => deleteTemplate(current)} /> : null}</div>
     </div>
   );
 }
 
-function TemplateEditor({ template, onDeleted }: { template: Template; onDeleted: () => void }) {
+function TemplateEditor({ template, onDelete }: { template: Template; onDelete: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const [t, setT] = useState(template);
   const itemsRef = useListAnimation<HTMLDivElement>();
   const dirty = JSON.stringify(t) !== JSON.stringify(template);
   const save = useMutation({
-    meta: { inline: true, success: "Checklist saved" },
+    meta: { inline: true },
     mutationFn: async () => {
       // Checked and tidied the way an AI assistant's are too (packages/core/src/forms.ts).
       const clean = normalizeChecklist(t);
@@ -89,14 +109,7 @@ function TemplateEditor({ template, onDeleted }: { template: Template; onDeleted
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklist-templates", session.company.id] }),
   });
-  const remove = useMutation({
-    meta: { success: "Checklist deleted" },
-    mutationFn: async () => unwrap(await supabase().from("checklist_templates").delete().eq("id", t.id)),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["checklist-templates", session.company.id] });
-      onDeleted();
-    },
-  });
+  const saved = useJustDone(save);
   const setItem = (i: number, patch: Partial<Item>) => setT({ ...t, items: t.items.map((item, j) => (j === i ? { ...item, ...patch } : item)) });
   const move = (i: number, dir: -1 | 1) => {
     const items = [...t.items];
@@ -110,7 +123,7 @@ function TemplateEditor({ template, onDeleted }: { template: Template; onDeleted
         <Field label="Checklist name"><input className="input" value={t.name} maxLength={120} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
         <Field label="Job type" optional><input className="input" value={t.job_type ?? ""} maxLength={60} onChange={(e) => setT({ ...t, job_type: e.target.value })} /></Field>
       </div>
-      <label className="switch-row" style={{ fontWeight: 500 }}><input type="checkbox" className="switch" checked={t.active} onChange={(e) => setT({ ...t, active: e.target.checked })} />Crews can use this checklist</label>
+      <label className="switch-row"><input type="checkbox" className="switch" checked={t.active} onChange={(e) => setT({ ...t, active: e.target.checked })} />Crews can use this checklist</label>
       <div className="stack-sm" ref={itemsRef}>
         {t.items.map((item, i) => (
           <div key={item.key} className="card" style={{ padding: 12, boxShadow: "none", background: "var(--fill)", display: "grid", gap: 8 }}>
@@ -135,10 +148,10 @@ function TemplateEditor({ template, onDeleted }: { template: Template; onDeleted
       </div>
       <FormError error={save.error} />
       <div className="form-actions">
-        <Button variant="danger" icon="trash" onClick={async () => (await confirm({ title: `Delete “${t.name}”?`, body: "Checklists already filled in on visits are kept.", confirmLabel: "Delete", danger: true })) && remove.mutate()}>Delete</Button>
+        <Button variant="danger" icon="trash" onClick={onDelete}>Delete</Button>
         <span className="spacer" />
         {dirty && <Button onClick={() => setT(template)}>Discard changes</Button>}
-        <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate()}>Save checklist</Button>
+        <Button variant="primary" loading={save.isPending} done={saved} disabled={!dirty && !saved} onClick={() => save.mutate()}>Save checklist</Button>
       </div>
     </div>
   );

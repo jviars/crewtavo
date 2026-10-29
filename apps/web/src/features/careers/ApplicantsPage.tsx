@@ -9,7 +9,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { featureOn } from "@/components/shell/nav";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
@@ -18,7 +18,9 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { useStatusCounts } from "@/lib/listing";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
+import { formatPhoneTyping } from "@/lib/validate";
 import { APPLICANT_TONES, filesJson, isWaiting, refreshApplicants, seesApplicants, uploadApplicantFile, WAITING_DAYS, type Applicant } from "./applicants";
 
 const FILTERS = [
@@ -86,6 +88,7 @@ function ApplicantList() {
     },
   });
 
+  const body = useListAnimation<HTMLTableSectionElement>();
   if (applicants.isPending) return <ListPageSkeleton columns={5} tabs={6} />;
   const rows = applicants.data ?? [];
 
@@ -127,7 +130,7 @@ function ApplicantList() {
           {term || position ? (
             <EmptyState icon="search" title="No applicants match" action={<Button onClick={() => { setSearch(""); setPosition(""); }}>Clear search</Button>} />
           ) : !installed && counts.data?.all === 0 ? (
-            <EmptyState icon="user" title="Take applications from your website" action={setsUpApps && <Link to="/apps/careers" className="btn btn-primary">Set up Careers</Link>}>
+            <EmptyState icon="user" title="Take applications from your website" action={setsUpApps && <Link to="/apps/careers" className="btn">Set up Careers</Link>}>
               {setsUpApps
                 ? "Install Careers in Apps and point the Apply form on your website at it. Each application lands here, résumé and all."
                 : "An admin can install Careers in Apps so applications from your website land here, résumé and all."}
@@ -142,7 +145,7 @@ function ApplicantList() {
         <div className={`card${applicants.isPlaceholderData ? " is-stale" : ""}`}>
           <table className="table table-stack">
             <thead><tr><th>Applicant</th><th>Position</th><th>Applied</th><th>Résumé</th><th>Status</th></tr></thead>
-            <tbody>
+            <tbody ref={body}>
               {rows.map((a) => (
                 <tr key={a.id} className="row-link" onClick={() => navigate(`/applicants/${a.id}`)}>
                   <td>
@@ -159,9 +162,9 @@ function ApplicantList() {
                   </td>
                   <td>
                     {a.files.length ? (
-                      <span className="row" style={{ gap: 6 }}><Icon name="file" size={15} />{a.files.length === 1 ? "Attached" : `${a.files.length} files`}</span>
+                      <span className="row" style={{ gap: 6 }}><Icon name="file" size={16} />{a.files.length === 1 ? "Attached" : `${a.files.length} files`}</span>
                     ) : (
-                      <span className="muted">None</span>
+                      <span className="muted">—</span>
                     )}
                   </td>
                   <td>
@@ -221,7 +224,7 @@ function AddApplicantDialog({ onClose, onAdded }: { onClose: () => void; onAdded
         <Field label="Name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} autoFocus /></Field>
         <div className="form-grid">
           <Field label="Email" optional><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} /></Field>
-          <Field label="Phone" optional><input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} /></Field>
+          <Field label="Phone" optional><input className="input" type="tel" value={phone} onChange={(e) => setPhone(formatPhoneTyping(e.target.value))} maxLength={30} /></Field>
         </div>
         <div className="form-grid">
           <Field label="Position" optional><input className="input" value={position} onChange={(e) => setPosition(e.target.value)} maxLength={200} placeholder="Crew member" /></Field>
@@ -233,8 +236,9 @@ function AddApplicantDialog({ onClose, onAdded }: { onClose: () => void; onAdded
         <Field label="Notes" optional><textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={10000} rows={3} /></Field>
         <FormError error={add.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={add.isPending} disabled={!name.trim()}>Add applicant</Button>
+          <Button type="submit" variant="primary" loading={add.isPending} slowHint={false}>Add applicant</Button>
         </div>
       </form>
     </Dialog>

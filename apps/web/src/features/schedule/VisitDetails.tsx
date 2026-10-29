@@ -11,7 +11,7 @@ import { Icon } from "@/components/ui/Icon";
 import { MapsLink } from "@/components/ui/MapsLink";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
+import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatTime } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
@@ -67,7 +67,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
         {v && (
           <>
             <div className="row wrap" style={{ gap: 6 }}>
-              <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
+              <EntityStatus kind="visit" status={v.status} />
               {v.kind !== "job" && <span className="chip">{statusLabel(v.kind)}</span>}
               {v.route_order && v.status === "scheduled" && <span className="chip"><Icon name="navigation" size={12} />Stop {v.route_order}</span>}
               {v.time_fixed && v.starts_at && <span className="chip chip-blue"><Icon name="lock" size={12} />Fixed time</span>}
@@ -89,8 +89,8 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
                     <MapsLink className="address-link" place={v.property}>{addressLine(v.property)}</MapsLink>
                     {(codes?.gate_code || codes?.lockbox_code) && (
                       <span className="row wrap small" style={{ gap: 12, marginTop: 4 }}>
-                        {codes.gate_code && <span><Icon name="lock" size={13} /> Gate <strong>{codes.gate_code}</strong></span>}
-                        {codes.lockbox_code && <span><Icon name="lock" size={13} /> Lockbox <strong>{codes.lockbox_code}</strong></span>}
+                        {codes.gate_code && <span><Icon name="lock" size={12} /> Gate <strong>{codes.gate_code}</strong></span>}
+                        {codes.lockbox_code && <span><Icon name="lock" size={12} /> Lockbox <strong>{codes.lockbox_code}</strong></span>}
                       </span>
                     )}
                     {codes?.instructions && <span className="muted small pre-wrap" style={{ display: "block", marginTop: 4 }}>{codes.instructions}</span>}
@@ -114,7 +114,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
                 <>
                   <Icon name="users" size={16} />
                   <div>
-                    {v.crew && <span className="row" style={{ gap: 6, display: "inline-flex" }}><i style={{ width: 10, height: 10, borderRadius: 3, background: v.crew.color ?? "var(--text-4)" }} />{v.crew.name}</span>}
+                    {v.crew && <span className="row" style={{ gap: 6, display: "inline-flex" }}><i style={{ width: 8, height: 8, borderRadius: "50%", background: v.crew.color ?? "var(--text-4)" }} />{v.crew.name}</span>}
                     {names.length > 0 && <span className="muted" style={{ display: "block" }}>{names.join(", ")}</span>}
                   </div>
                 </>
@@ -130,7 +130,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
               {v.hold_reason && (
                 <>
                   <Icon name="cloud" size={16} />
-                  <div style={{ color: "var(--warning)", fontWeight: 700 }}>Weather: {v.hold_reason}</div>
+                  <div style={{ color: "var(--warning)", fontWeight: 600 }}>Weather: {v.hold_reason}</div>
                 </>
               )}
 

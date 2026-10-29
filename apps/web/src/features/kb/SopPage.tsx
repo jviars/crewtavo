@@ -49,7 +49,7 @@ export function SopPage() {
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["kb", company.id] });
   const acknowledge = useMutation({
-    meta: { success: "Thanks! Marked as read" },
+    meta: { success: "Marked as read" },
     mutationFn: async () => unwrap(await supabase().from("sop_acknowledgements").insert({ company_id: company.id, page_id: pageId, revision: page.data!.revision })),
     onSettled: refresh,
   });
@@ -108,7 +108,7 @@ export function SopPage() {
         actions={
           <>
             {sop.required && sop.status === "published" && (acknowledged ? (
-              <span className="pill" data-tone="success" style={{ height: 36, padding: "0 14px" }}><Icon name="check" size={14} strokeWidth={2} />You've read this</span>
+              <span className="pill" data-tone="success" style={{ height: "var(--control)", padding: "0 14px" }}><Icon name="check" size={14} strokeWidth={2} />You've read this</span>
             ) : (
               <Button variant="primary" icon="check" loading={acknowledge.isPending} disabled={reads.isPending} onClick={() => acknowledge.mutate()}>I've read this</Button>
             ))}
@@ -159,7 +159,7 @@ export function SopPage() {
                     <div className="stack-sm" style={{ gap: 8 }}>
                       {readers.map((r) => (
                         <div key={r.user_id} className="row" style={{ gap: 8 }}>
-                          <span className="avatar" style={{ width: 26, height: 26, fontSize: 10 }}><Face name={name(r.user_id)} photo={team.data?.find((m) => m.user_id === r.user_id)?.profile?.avatar_url} /></span>
+                          <span className="avatar" style={{ width: 26, height: 26, fontSize: 11 }}><Face name={name(r.user_id)} photo={team.data?.find((m) => m.user_id === r.user_id)?.profile?.avatar_url} /></span>
                           <span className="grow small strong">{name(r.user_id)}</span>
                           <span className="muted small" title={formatDateTime(r.acknowledged_at)}>{formatDate(r.acknowledged_at)}</span>
                         </div>

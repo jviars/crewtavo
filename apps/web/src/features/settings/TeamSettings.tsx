@@ -5,9 +5,10 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -15,6 +16,7 @@ import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, useSession } from "@/lib/session";
 import { RatesCard } from "../subs/RatesCard";
 import { handlesTeamPay, useTeamRateCounts } from "../subs/payData";
@@ -52,7 +54,8 @@ export function TeamSettings() {
   const pending = new Map((invites.data ?? []).map((i) => [i.user_id, i.sent_at]));
   const roles = useCompanyRoles();
   const update = useMutation({
-    meta: { success: (_: unknown, v: { patch: { role?: Role; role_id?: string | null; active?: boolean; labor_rate?: number | null } }) => (v.patch.active === false ? "Access removed" : v.patch.active ? "Access restored" : "role_id" in v.patch ? "Role changed" : "Saved") },
+    // Access and roles change things elsewhere, so they're announced.
+    meta: { success: (_: unknown, v: { patch: { role?: Role; role_id?: string | null; active?: boolean; labor_rate?: number | null } }) => (v.patch.active === false ? "Access removed" : v.patch.active ? "Access restored" : "role_id" in v.patch ? "Role changed" : null) },
     mutationFn: async ({ userId, patch }: { userId: string; patch: { role?: Role; role_id?: string | null; labor_rate?: number | null; active?: boolean } }) =>
       unwrap(await supabase().from("memberships").update(patch).eq("company_id", session.company.id).eq("user_id", userId)),
     onSettled: () => {
@@ -61,11 +64,20 @@ export function TeamSettings() {
       queryClient.invalidateQueries({ queryKey: ["dispatch-options", session.company.id] });
     },
   });
+  // A labor cost saves when its field loses focus, and says so beside the head count.
+  const saving = useSaveStatus();
+  const rate = useMutation({
+    meta: { inline: true },
+    mutationFn: async ({ userId, labor_rate }: { userId: string; labor_rate: number | null }) =>
+      unwrap(await supabase().from("memberships").update({ labor_rate }).eq("company_id", session.company.id).eq("user_id", userId)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["team", session.company.id] }),
+  });
   const isOwner = session.role === "owner";
   const members = [...(team.data ?? [])].sort((a, b) => Number(b.active) - Number(a.active) || (a.profile?.full_name ?? "").localeCompare(b.profile?.full_name ?? ""));
   // Your own photo, and for those who manage the team, anyone's (an owner's only by an owner).
   const canSetPhoto = (m: Member) => m.user_id === session.userId || (ADMINS.includes(session.role) && can(session, "team") && (isOwner || m.role !== "owner"));
   const photoMember = members.find((m) => m.user_id === photoFor);
+  const rows = useListAnimation<HTMLTableSectionElement>();
 
   return (
     <div className="stack">
@@ -73,13 +85,15 @@ export function TeamSettings() {
         <span className="muted">
           {members.filter((m) => m.active).length} people with access{pending.size ? ` · ${pending.size} ${pending.size === 1 ? "hasn't" : "haven't"} joined yet` : ""}
         </span>
+        <SaveStatus status={saving.status} />
+        <span className="grow" />
         <Button variant="primary" icon="plus" onClick={() => setInviting(true)}>Invite someone</Button>
       </div>
       {team.isPending ? <TableSkeleton columns={4} rows={4} /> : team.error ? <div className="card"><ErrorState error={team.error} onRetry={() => team.refetch()} /></div> : (
         <div className="card">
           <table className="table table-stack">
             <thead><tr><th>Person</th><th>Role</th><th className="num">Labor cost / hr</th><th>Access</th></tr></thead>
-            <tbody>
+            <tbody ref={rows}>
               {members.map((m) => {
                 const me = m.user_id === session.userId;
                 const locked = me || (m.role === "owner" && !isOwner);
@@ -119,7 +133,7 @@ export function TeamSettings() {
                       )}
                     </td>
                     <td className="num">
-                      <MoneyInput value={Number(m.labor_rate ?? 0)} max={1000} width={110} label={`Labor cost for ${name}`} onSave={(v) => update.mutate({ userId: m.user_id, patch: { labor_rate: v || null } })} />
+                      <MoneyInput value={Number(m.labor_rate ?? 0)} max={1000} width={110} label={`Labor cost for ${name}`} onSave={(v) => void saving.track(rate.mutateAsync({ userId: m.user_id, labor_rate: v || null }))} />
                       {pieceRates && (
                         <div>
                           <button type="button" className="link-btn small" onClick={() => setRatesFor(m)}>
@@ -175,7 +189,7 @@ function PhotoDialog({ member, onClose }: { member: Member; onClose: () => void 
     <Dialog open onClose={onClose} title={me ? "Your photo" : `${first}'s photo`} size="sm">
       <div className="dialog-body">
         <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center" }}>
-          <span className="avatar" style={{ width: 96, height: 96, fontSize: 34, background: member.profile?.color || "var(--text-3)" }}><Face name={name} photo={member.profile?.avatar_url} /></span>
+          <span className="avatar" style={{ width: 96, height: 96, fontSize: 32, background: member.profile?.color || "var(--text-3)" }}><Face name={name} photo={member.profile?.avatar_url} /></span>
           <PhotoButtons userId={member.user_id} photo={member.profile?.avatar_url} />
           <p className="muted small" style={{ margin: 0 }}>
             {me
@@ -282,6 +296,7 @@ function InviteDialog({ onClose, prefill }: { onClose: () => void; prefill?: { n
           </Field>
           <FormError error={invite.error} />
           <div className="form-actions">
+            <FormChecks />
             <Button onClick={onClose}>Cancel</Button>
             <Button type="submit" variant="primary" icon="send" loading={invite.isPending}>Send invite</Button>
           </div>

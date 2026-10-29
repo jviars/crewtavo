@@ -74,7 +74,7 @@ export function SignaturePad({ value, onChange, label = "Sign here", disabled = 
   if (value && !redo) {
     return (
       <div className="stack-sm">
-        <img src={value} alt="Signature" style={{ width: "100%", maxWidth, height, objectFit: "contain", background: "#fff", border: "1px solid var(--border)", borderRadius: 10 }} />
+        <img src={value} alt="Signature" style={{ width: "100%", maxWidth, height, objectFit: "contain", background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-control)" }} />
         {!disabled && <Button size="sm" variant="ghost" icon="undo" style={{ justifySelf: "start" }} onClick={clear}>Sign again</Button>}
       </div>
     );
@@ -90,8 +90,9 @@ export function SignaturePad({ value, onChange, label = "Sign here", disabled = 
           onPointerMove={move}
           onPointerUp={up}
           onPointerCancel={up}
-          style={{ display: "block", width: "100%", height, background: "#fff", border: "1px solid var(--border)", borderRadius: 10, touchAction: "none", cursor: disabled ? "not-allowed" : "crosshair" }}
+          style={{ display: "block", width: "100%", height, background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", touchAction: "none", cursor: disabled ? "not-allowed" : "crosshair" }}
         />
+        {/* Paper white in both themes, so its ink is fixed too: #6b6963 on white is 5.5:1. */}
         {empty && <span aria-hidden="true" style={{ position: "absolute", left: 14, bottom: 12, right: 14, borderTop: "1px solid #c9c7c0", paddingTop: 4, color: "#6b6963", fontSize: 12, pointerEvents: "none" }}>{label}</span>}
       </div>
       {!empty && <Button size="sm" variant="ghost" icon="x" style={{ justifySelf: "start" }} onClick={clear}>Clear</Button>}

@@ -221,7 +221,7 @@ export function AnalyticsPanel() {
     <>
       <section className="card card-pad stack-sm" aria-labelledby="analytics-status" style={{ gap: 10 }}>
         <div className="row-between wrap" style={{ gap: 8 }}>
-          <h2 id="analytics-status" className="section-title" style={{ fontSize: 17 }}>{working ? "Counting your website's visits" : "Waiting for your website"}</h2>
+          <h2 id="analytics-status" className="section-title" style={{ fontSize: 16 }}>{working ? "Counting your website's visits" : "Waiting for your website"}</h2>
           <StatusPill label={working ? "Installed" : "Not on your website yet"} tone={working ? "good" : "muted"} />
         </div>
         <span className="muted" role="status">
@@ -238,7 +238,7 @@ export function AnalyticsPanel() {
 
       <section id="app-setup" className="card card-pad stack" aria-labelledby="analytics-line" style={{ gap: 14 }}>
         <div className="stack-sm" style={{ gap: 4 }}>
-          <h2 id="analytics-line" className="section-title" style={{ fontSize: 17 }}>Put this line on your website</h2>
+          <h2 id="analytics-line" className="section-title" style={{ fontSize: 16 }}>Put this line on your website</h2>
           <span className="muted small">It goes on every page, in the part of the page called the head. It loads from your own Crewtavo, uses no cookies and keeps nothing that tells who a visitor is.</span>
         </div>
         <div className="row wrap" style={{ gap: 8 }}>
@@ -259,7 +259,7 @@ export function AnalyticsPanel() {
       </section>
 
       <section className="card card-pad stack-sm" aria-labelledby="analytics-check" style={{ gap: 10 }}>
-        <h2 id="analytics-check" className="section-title" style={{ fontSize: 17 }}>Check your website</h2>
+        <h2 id="analytics-check" className="section-title" style={{ fontSize: 16 }}>Check your website</h2>
         <span className="muted small">After you publish, Crewtavo opens your home page and looks for the line. Once it finds it, only that website's pages count, so a copy of your site somewhere else doesn't add to your numbers.</span>
         <form className="row wrap" style={{ gap: 8 }} onSubmit={submit}>
           <input className="input grow" style={{ minWidth: 0, flexBasis: 220 }} type="text" inputMode="url" autoComplete="url" spellCheck={false} placeholder="greenlawn.com" aria-label="Your website's address" value={site} onChange={(e) => { setSite(e.target.value); check.reset(); }} />

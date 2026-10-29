@@ -24,13 +24,12 @@ export function CalendarFeedCard({ title = "Your schedule in your phone's calend
   const key = ["calendar-feed", session.company.id];
   const feed = useQuery({ queryKey: key, queryFn: () => api.get<{ feed: Feed | null; can_see_all: boolean }>("/calendar-feed") });
   const [scope, setScope] = useState<"mine" | "all">("mine");
+  // The card changes in place, which says it worked.
   const create = useMutation({
-    meta: { success: "Calendar link ready" },
     mutationFn: (s: "mine" | "all") => api.post<{ feed: Feed }>("/calendar-feed", { scope: s }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
   });
   const remove = useMutation({
-    meta: { success: "Calendar link turned off" },
     mutationFn: () => api.delete("/calendar-feed"),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
   });
@@ -49,7 +48,7 @@ export function CalendarFeedCard({ title = "Your schedule in your phone's calend
       ) : f ? (
         <>
           <div className="row wrap" style={{ gap: 8 }}>
-            <a className="btn btn-primary" href={`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal!)}`} target="_blank" rel="noreferrer"><Icon name="calendar" size={16} />Add to Google Calendar</a>
+            <a className="btn" href={`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal!)}`} target="_blank" rel="noreferrer"><Icon name="calendar" size={16} />Add to Google Calendar</a>
             <a className="btn" href={webcal}><Icon name="calendar" size={16} />Apple or Outlook</a>
             <Button icon="copy" onClick={() => copyText(f.url, "Calendar link copied")}>Copy link</Button>
           </div>
@@ -74,7 +73,7 @@ export function CalendarFeedCard({ title = "Your schedule in your phone's calend
               <button type="button" aria-pressed={scope === "all"} onClick={() => setScope("all")}>Whole schedule</button>
             </div>
           )}
-          <Button variant="primary" icon="calendar" loading={create.isPending} onClick={() => create.mutate(scope)}>Get my calendar link</Button>
+          <Button icon="calendar" loading={create.isPending} onClick={() => create.mutate(scope)}>Get my calendar link</Button>
         </div>
       )}
       <FormError error={create.error ?? remove.error} />

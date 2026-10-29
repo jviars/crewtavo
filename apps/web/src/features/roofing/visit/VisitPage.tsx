@@ -6,8 +6,9 @@
  * homeowner). On the right, the estimate as it prints and as they'll sign it: the business's own
  * template, letterhead and contract (the same paper as the sign page), redrawn as each change lands,
  * with the line that changed lit up. A line tapped on the paper opens to change. Landscape has the
- * two side by side, with the price and "Review and sign" along the top of the paper; portrait and
- * phones show the paper, with the left side as a sheet over it and the price along the bottom.
+ * two side by side, with the price and "Review and sign" along the bottom of the paper, in thumb
+ * reach; portrait and phones show the paper, with the left side as a sheet over it and the price
+ * along the bottom.
  *
  * An estimate that offers options shows them as cards on "Line items" (quotes/QuoteOptions.tsx): the
  * lists and the paper show the one being looked at, and "They chose this one" marks the homeowner's
@@ -365,9 +366,9 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
   const priceFigure = <AnimatedNumber className={styles.priceFigure} value={shownPrice} format={toCents(shownPrice) % 100 ? MONEY_CENTS : MONEY} />;
   const reviewButton = (
     <button type="button" className={`btn btn-primary ${styles.bigButton}`} disabled={!ready} aria-busy={sitePrice.isPending || undefined} onClick={review}>
-      {sitePrice.isPending && <Spinner size={18} />}
+      {sitePrice.isPending && <Spinner size={20} />}
       {editor.busy ? "Saving your changes…" : (blocker ?? (invalid ? "Fix the price to go on" : "Review and sign"))}
-      {!sitePrice.isPending && !editor.busy && !invalid && !blocker && <Icon name="arrowRight" size={19} strokeWidth={2} />}
+      {!sitePrice.isPending && !editor.busy && !invalid && !blocker && <Icon name="arrowRight" size={20} strokeWidth={2} />}
     </button>
   );
   const changeCount = changes?.length ?? 0;
@@ -412,7 +413,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
             <span>{takeoff ? "The roof's lines are worked out from the measurements." : "The roof hasn't been measured yet."}</span>
           </span>
           <Link className={`btn ${styles.touch}`} to={measureLink}>
-            <Icon name="ruler" size={18} />
+            <Icon name="ruler" size={20} />
             {takeoff ? "Fix measurements" : "Measure the roof"}
           </Link>
         </div>
@@ -453,7 +454,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
         <>
           <RangeBar low={range.low} high={range.high} value={shownTotals.total} />
           <p className={styles.rangeNote} data-where={position.where}>
-            <Icon name={position.where === "above" ? "alert" : "check"} size={18} />
+            <Icon name={position.where === "above" ? "alert" : "check"} size={20} />
             {note.text}
           </p>
         </>
@@ -546,7 +547,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
           </div>
         ) : (
           <button type="button" className={styles.marginShow} aria-expanded="false" onClick={() => setShowMargin(true)}>
-            <Icon name="eye" size={18} />
+            <Icon name="eye" size={20} />
             <span>
               <strong>Show margin</strong>
               <span>{first || "The homeowner"} can see this screen, so it starts hidden.</span>
@@ -578,7 +579,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
       <div className={styles.visit}>
         <section className={styles.panel} data-open={sheet || undefined} aria-label="Change the estimate">
           <div className={styles.grab} aria-hidden="true" />
-          <div className={styles.panelTabs} role="tablist" aria-label="What to change">
+          <div className={`segmented ${styles.panelTabs}`} role="tablist" aria-label="What to change">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -640,7 +641,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
           </div>
           {looking && view && (
             <p className={`callout ${styles.paperNote}`}>
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <span>
                 This is {view.label}. {first || "They"} chose {chosenTab ? labelOf(chosenTab) : "another option"}, so it isn't the one they'd sign yet.
               </span>
@@ -670,7 +671,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
         <FormError error={sitePrice.error} />
         <div className={styles.bottomRow}>
           <button type="button" className={`btn ${styles.changeButton}`} onClick={() => setSheet(true)}>
-            <Icon name="edit" size={18} />
+            <Icon name="edit" size={20} />
             Make changes
           </button>
           <div className={styles.bottomPrice}>

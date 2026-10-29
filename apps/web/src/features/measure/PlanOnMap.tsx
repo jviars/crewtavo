@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { forgetPlanPdf, releasePlanImage, renderPlan, type PlanImage } from "../plans/planImage";
@@ -326,7 +327,7 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
               </select>
             </label>
           )}
-          {plans.data && !list.length && hasPlace && <span className="muted small">No plans for this property or quote yet.</span>}
+          {plans.data && !list.length && hasPlace && <EmptyState inline title="No plans for this property or quote yet" />}
         </>
       )}
       {sending && (
@@ -336,7 +337,7 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
         </div>
       )}
       {!shown && canAdd && hasPlace && !sending && (
-        <Button size="sm" icon="upload" style={{ justifySelf: "start" }} disabled={Boolean(plan.loading)} onClick={() => input.current?.click()}>Add a plan (PDF or picture)</Button>
+        <Button size="sm" icon="upload" style={{ justifySelf: "start" }} disabled={Boolean(plan.loading)} title="A PDF or a picture of the plan" onClick={() => input.current?.click()}>Add a plan</Button>
       )}
       {plan.loading && shown && <span className="muted small"><span className="spinner" style={{ width: 12, height: 12 }} /> Opening the page…</span>}
       {shown && (
@@ -354,22 +355,22 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
             </label>
           )}
           {!plan.step && (
-            <Button size="sm" variant={shown.linedUp ? "secondary" : "primary"} icon="pin" style={{ justifySelf: "start" }} onClick={plan.startLineUp}>
+            <Button size="sm" icon="pin" style={{ justifySelf: "start" }} onClick={plan.startLineUp}>
               {shown.linedUp ? "Line it up again" : "Line it up with the aerial"}
             </Button>
           )}
           {!shown.linedUp && !plan.step && <span className="small" style={{ color: "var(--warning)" }}>Not lined up yet, so sizes drawn on it won't be right.</span>}
-          {scale && <span className="small"><Icon name="check" size={13} /> Lined up at <strong>{scale}</strong>. The scale printed on the plan should say the same; if it's off, line it up again with spots farther apart.</span>}
+          {scale && <span className="small"><Icon name="check" size={14} /> Lined up at <strong>{scale}</strong>. The scale printed on the plan should say the same; if it's off, line it up again with spots farther apart.</span>}
           <label className="field">
             <span>See-through</span>
             <input type="range" min={10} max={100} step={5} value={Math.round(shown.opacity * 100)} disabled={shown.hidden} onChange={(e) => plan.patch({ opacity: Number(e.target.value) / 100 })} aria-label="How solid the plan is" />
           </label>
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row" style={{ fontWeight: 400 }}>
             <input type="checkbox" className="switch" checked={shown.paper} onChange={(e) => plan.patch({ paper: e.target.checked })} />
             Show the white paper
           </label>
           <span className="muted small" style={{ marginTop: -4 }}>Off shows just the plan's lines on the aerial.</span>
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row" style={{ fontWeight: 400 }}>
             <input type="checkbox" className="switch" checked={!shown.hidden} onChange={(e) => plan.patch({ hidden: !e.target.checked })} />
             Show the plan
           </label>

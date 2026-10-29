@@ -13,11 +13,13 @@ import { countsOn, lineTotal, optionLabels, toCents } from "@crewtavo/core/money
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { FormError } from "@/components/ui/Field";
+import { FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { api } from "@/lib/api";
 import { formatMoney, formatMoneyCents, formatNumber, timeAgo } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -50,8 +52,10 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
     mutationFn: (link: ServiceMaterial) => api.delete(`/services/${link.service_id}/materials/${link.id}`),
     onSettled: refreshMaterials,
   });
+  // Labor saves as it's left, and says so beside the field.
+  const laborSave = useSaveStatus();
   const labor = useMutation({
-    meta: { success: "Labor updated" },
+    meta: { inline: true },
     mutationFn: ({ serviceId, value }: { serviceId: string; value: number }) => api.put(`/services/${serviceId}/labor`, { labor_cost: value }),
     onSettled: refreshMaterials,
   });
@@ -64,7 +68,7 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
   if (!supplier.data && !anyPriced) {
     return (
       <div className="callout" role="note">
-        <Icon name="truck" size={18} />
+        <Icon name="truck" size={20} />
         <span className="grow stack-sm" style={{ gap: 6 }}>
           <span>See exactly what this roof's materials cost. Connect your ABC Supply account and every bundle, roll and piece is priced at your branch, at your prices.</span>
           {canSetUp ? <Link className="btn btn-sm" style={{ justifySelf: "start" }} to="/apps/abc_supply">Set up ABC Supply</Link> : <span className="muted small" style={{ fontWeight: 400 }}>An owner or admin can install ABC Supply in Apps.</span>}
@@ -119,7 +123,7 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
             {editable && connected && anyLinks && !price.isPending && <> · <button type="button" className="link-btn small" onClick={() => price.mutate()}>Update prices</button></>}
           </span>
         </span>
-        <strong className="num material-total">{formatMoney(total)}{unpriced ? "+" : ""}</strong>
+        <strong className="num material-total"><AnimatedNumber value={total} format={MONEY} />{unpriced ? "+" : ""}</strong>
       </div>
       {supplier.data?.status === "error" && (
         <span className="field-error" role="alert">
@@ -158,8 +162,8 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
                       <strong className="num">{row.total === null ? <span className="muted">—</span> : formatMoney(row.total)}</strong>
                       {canEdit && row.link && (
                         <span className="material-actions">
-                          <button type="button" className="icon-btn" aria-label={`Change how many ${row.name} per ${unit}`} onClick={() => setEditing({ link: row.link!, unit })}><Icon name="edit" size={15} /></button>
-                          <button type="button" className="icon-btn" aria-label={`Take ${row.name} out of ${line.name}`} disabled={remove.isPending} onClick={() => remove.mutate(row.link!)}><Icon name="x" size={15} /></button>
+                          <button type="button" className="icon-btn" aria-label={`Change how many ${row.name} per ${unit}`} onClick={() => setEditing({ link: row.link!, unit })}><Icon name="edit" size={14} /></button>
+                          <button type="button" className="icon-btn" aria-label={`Take ${row.name} out of ${line.name}`} disabled={remove.isPending} onClick={() => remove.mutate(row.link!)}><Icon name="x" size={14} /></button>
                         </span>
                       )}
                     </li>
@@ -172,8 +176,9 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
                   {own.length > 0 && (
                     <span className="row small" style={{ gap: 8 }}>
                       <span className="muted">Labor and the rest</span>
-                      <MoneyInput value={Number(service.labor_cost ?? 0)} width={110} label={`Labor and the rest per ${unit} for ${line.name}`} onSave={(value) => labor.mutate({ serviceId: service.id, value })} />
+                      <MoneyInput value={Number(service.labor_cost ?? 0)} width={110} label={`Labor and the rest per ${unit} for ${line.name}`} onSave={(value) => void laborSave.track(labor.mutateAsync({ serviceId: service.id, value }))} />
                       <span className="muted">per {unit}</span>
+                      <SaveStatus status={laborSave.status} />
                     </span>
                   )}
                 </div>
@@ -214,8 +219,9 @@ function PerUnitDialog({ link, unit, onClose, onSaved }: { link: ServiceMaterial
         <HowMany perUnit={perUnit} onChange={setPerUnit} uom={{ code: link.uom, name: link.uom_name ?? link.uom }} serviceUnit={unit} />
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!(perUnit > 0)}>Save</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>Save</Button>
         </div>
       </form>
     </Dialog>

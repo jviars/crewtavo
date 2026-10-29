@@ -9,7 +9,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -59,7 +59,7 @@ export function AddMaterial({ service, item, lineQuantity, onBack, onAdded }: { 
   const order = lineQuantity !== null ? orderQuantity(lineQuantity, perUnit) : null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (perUnit > 0) add.mutate();
+    if (perUnit > 0 && !(item.dimensional && !chosenLength)) add.mutate();
   };
   return (
     <form onSubmit={submit}>
@@ -77,7 +77,7 @@ export function AddMaterial({ service, item, lineQuantity, onBack, onAdded }: { 
         )}
         {item.dimensional && (
           <Field label="Length">
-            <select className="select" value={chosenLength ?? ""} onChange={(e) => setLength(Number(e.target.value) || null)} disabled={!lengths.length}>
+            <select className="select" required value={chosenLength ?? ""} onChange={(e) => setLength(Number(e.target.value) || null)} disabled={!lengths.length}>
               {!lengths.length && <option value="">{detail.isPending ? "Loading lengths…" : "No lengths listed"}</option>}
               {lengths.map((l) => <option key={l} value={l}>{formatNumber(l, 2)} ft</option>)}
             </select>
@@ -96,12 +96,16 @@ export function AddMaterial({ service, item, lineQuantity, onBack, onAdded }: { 
       )}
       <FormError error={add.error} />
       <div className="form-actions">
+        <FormChecks />
         <Button onClick={onBack}>Back</Button>
-        <Button type="submit" variant="primary" icon="plus" loading={add.isPending} disabled={!(perUnit > 0) || (item.dimensional && !chosenLength)}>Add to {service.name}</Button>
+        <Button type="submit" variant="primary" icon="plus" loading={add.isPending}>Add to {service.name}</Button>
       </div>
     </form>
   );
 }
+
+/** A number above 0, as typed: "3", "0.5", ".25". The field says so under it when it isn't. */
+const ABOVE_ZERO = String.raw`0*[1-9]\d*(\.\d*)?|0*\.\d*[1-9]\d*`;
 
 /**
  * How many of an item go into one unit of a service: "3 bundles per square", or for something that
@@ -122,7 +126,7 @@ export function HowMany({ perUnit, onChange, uom, serviceUnit }: { perUnit: numb
     if (n > 0) set(String(round(1 / n)), next);
   };
   return (
-    <Field label="How many?" hint={perUnit > 0 ? `Kept as ${describePerUnit(perUnit, uom.name, serviceUnit)}.` : "Type how many."}>
+    <Field label="How many?" requiredMessage="Type how many." hint={perUnit > 0 ? `Kept as ${describePerUnit(perUnit, uom.name, serviceUnit)}.` : "Type how many."}>
       <div className="row wrap" style={{ gap: 8 }}>
         <div className="segmented" role="group" aria-label="How to say it">
           <button type="button" aria-pressed={!covers} onClick={() => switchMode(false)}>Per {serviceUnit}</button>
@@ -131,12 +135,12 @@ export function HowMany({ perUnit, onChange, uom, serviceUnit }: { perUnit: numb
         {covers ? (
           <span className="row" style={{ gap: 8 }}>
             One {name} covers
-            <input className="input" style={{ width: 90 }} inputMode="decimal" value={draft} onChange={(e) => set(e.target.value.replace(/[^0-9.]/g, ""))} aria-label={`How many ${serviceUnit} one ${name} covers`} />
+            <input className="input" style={{ width: 90 }} inputMode="decimal" required pattern={ABOVE_ZERO} title="Enter a number above 0." value={draft} onChange={(e) => set(e.target.value.replace(/[^0-9.]/g, ""))} aria-label={`How many ${serviceUnit} one ${name} covers`} />
             {serviceUnit}
           </span>
         ) : (
           <span className="row" style={{ gap: 8 }}>
-            <input className="input" style={{ width: 90 }} inputMode="decimal" value={draft} onChange={(e) => set(e.target.value.replace(/[^0-9.]/g, ""))} aria-label={`How many ${name}s per ${serviceUnit}`} />
+            <input className="input" style={{ width: 90 }} inputMode="decimal" required pattern={ABOVE_ZERO} title="Enter a number above 0." value={draft} onChange={(e) => set(e.target.value.replace(/[^0-9.]/g, ""))} aria-label={`How many ${name}s per ${serviceUnit}`} />
             {name}s per {serviceUnit}
           </span>
         )}

@@ -247,7 +247,7 @@ export function Composer({
                 onClick={() => choose(o)}
               >
                 {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={28} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={18} />}
-                <span style={{ fontWeight: 700, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? "@everyone" : o.label}</span>
+                <span style={{ fontWeight: 600, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? "@everyone" : o.label}</span>
                 {o.hint && <small>{o.hint}</small>}
               </button>
             ))}
@@ -369,7 +369,7 @@ function JobPicker({ open, onClose, onPick }: { open: boolean; onClose: () => vo
         {jobs.data?.length === 0 && <span className="muted small">No jobs match.</span>}
         <div className="stack-sm" style={{ gap: 4 }}>
           {jobs.data?.map((j) => (
-            <button key={j.id} type="button" className="card-row" style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", textAlign: "left", cursor: "pointer" }} onClick={() => onPick(j)}>
+            <button key={j.id} type="button" className="card-row" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--surface)", textAlign: "left", cursor: "pointer" }} onClick={() => onPick(j)}>
               <span className={s.jobIcon}><Icon name="job" size={16} /></span>
               <span className="grow">
                 <strong style={{ display: "block" }}>{j.number ? `#${j.number} · ` : ""}{j.title}</strong>

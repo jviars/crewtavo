@@ -16,11 +16,12 @@ import { ACROSS_OPTIONS, capital, dayText, hasRange, homeownerName, rangeAcrossO
 import { SaidYesButton, type SendChannel, type SendMode } from "./RangeCard";
 import styles from "./flow.module.css";
 
-/** Takes the person to the range card beside the estimate, and onto its send button. */
+/** Takes the person to the range card beside the estimate, and onto its send button (a jump, with less motion). */
 function goToRangeCard() {
   const card = document.getElementById("range-card");
   if (!card) return;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  card.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
   card.querySelector<HTMLButtonElement>("button.btn-primary:not(:disabled)")?.focus({ preventScroll: true });
 }
 
@@ -60,7 +61,8 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
         <p className={styles.stepLead}>Send {who} a price range before anyone goes out, so nobody drives out to a roof that's out of their budget. When they say yes, you book the visit.</p>
         {canSell && (
           <div className={styles.actions}>
-            <Button variant="primary" icon="send" onClick={goToRangeCard}>Send the range</Button>
+            {/* The green Send is on the range card itself; this takes them there. */}
+            <Button icon="send" onClick={goToRangeCard}>Send the range</Button>
             <SaidYesButton quote={quote} />
           </div>
         )}
@@ -84,7 +86,7 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
         )}
         {canSell && (
           <div className={styles.actions}>
-            <Button icon="send" variant={outdated ? "primary" : undefined} onClick={() => onSend("range")}>{outdated ? "Send the new range" : "Resend"}</Button>
+            <Button icon="send" onClick={() => onSend("range")}>{outdated ? "Send the new range" : "Resend"}</Button>
             {/* A new link would carry the new range: that goes through the dialog, where it's shown. */}
             <Button icon="copy" loading={copyLink.isPending} onClick={() => (outdated ? onSend("range", "link") : copyLink.mutate())}>Copy link</Button>
             <SaidYesButton quote={quote} />
@@ -99,7 +101,7 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
     return (
       <div className={styles.stepBody}>
         <div className={styles.yes} role="status">
-          <span className={styles.yesIcon} aria-hidden="true"><Icon name="check" size={17} strokeWidth={2.25} /></span>
+          <span className={styles.yesIcon} aria-hidden="true"><Icon name="check" size={16} strokeWidth={2} /></span>
           <p>
             <strong>{Who} said yes{quote.range_accepted_at ? ` on ${dayText(quote.range_accepted_at, tz)}` : ""}.</strong> Book {rep ? `${rep}'s` : "the site"} visit.
           </p>

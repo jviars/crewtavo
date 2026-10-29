@@ -86,12 +86,12 @@ export function useTeam() {
   return useQuery({ queryKey: ["team", company.id], staleTime: 5 * 60_000, queryFn: () => api.get<TeamMember[]>("/team") });
 }
 
-/** Who goes out on the site visit (quotes.salesperson_id). The pick shows at once. */
+/** Who goes out on the site visit (quotes.salesperson_id). The pick shows at once, and its save beside it (inline). */
 export function useSetSalesperson(quoteId: string) {
   const queryClient = useQueryClient();
   const refresh = useRefreshProject(quoteId);
   return useMutation({
-    meta: { success: (_: unknown, userId: string | null) => (userId ? "Site visit assigned" : "Nobody's assigned now") },
+    meta: { inline: true },
     onMutate: (userId: string | null) => {
       queryClient.setQueryData<EstimateData>(estimateKey(quoteId), (old) => (old ? { ...old, quote: { ...old.quote, salesperson_id: userId } } : old));
     },
@@ -170,7 +170,7 @@ export function useSendSignedCopy(quoteId: string) {
   return useMutation({
     mutationFn: (channel: "email" | "sms") => api.post<{ sent: boolean; reason?: string; link: string }>(`/quotes/${quoteId}/send-copy`, { channel }),
     onSuccess: (r, channel) => {
-      if (r.sent) toast.success(channel === "email" ? "Copy emailed" : "Link texted");
+      if (r.sent) toast.success(channel === "email" ? "Copy emailed" : "Link texted", { tone: "quote" });
       else toast.error(r.reason ?? "It didn't send. Try again in a minute.");
       void queryClient.invalidateQueries({ queryKey: [...projectKey(quoteId), "copies"] });
     },

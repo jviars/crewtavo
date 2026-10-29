@@ -5,12 +5,12 @@
  * comes first and everything is sized for a finger; in the office the thread comes first.
  */
 import { useId, useState, type ChangeEvent, type FormEvent } from "react";
-import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { Face } from "@/components/ui/Avatar";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
+import { EmptyState, ErrorState } from "@/components/ui/States";
+import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { useNoteActions, useQuoteNotes, type NoteAuthor, type QuotePhoto } from "./data";
 import { whenText } from "./rows";
@@ -50,7 +50,9 @@ export function NotesThread({ quoteId, composer, title = "Notes", hint = "Only y
   const id = useId();
   const notes = useQuoteNotes(quoteId);
   const data = notes.data;
-  const { addNote, addPhotos, removeNote, removePhoto, uploading } = useNoteActions(quoteId);
+  const { addNote, addPhotos, deleteNote, deletePhoto, uploading } = useNoteActions(quoteId);
+  const added = useJustDone(addNote);
+  const threadRef = useListAnimation<HTMLUListElement>();
   const [text, setText] = useState(() => readDraft(quoteId));
   const site = composer === "site";
   const isOffice = hasRole(session, "admin", "office");
@@ -88,11 +90,11 @@ export function NotesThread({ quoteId, composer, title = "Notes", hint = "Only y
       />
       <div className={styles.composerActions}>
         <label className="btn" aria-busy={uploading > 0 || undefined}>
-          {uploading > 0 ? <span className="spinner" style={{ width: 16, height: 16 }} aria-hidden="true" /> : <Icon name="camera" size={site ? 19 : 16} />}
+          {uploading > 0 ? <span className="spinner" style={{ width: 16, height: 16 }} aria-hidden="true" /> : <Icon name="camera" size={site ? 20 : 16} />}
           {uploading > 0 ? "Uploading…" : site ? "Take a photo" : "Add photos"}
           <input type="file" className="sr-only" accept="image/*" capture={site ? "environment" : undefined} multiple onChange={onPhotos} />
         </label>
-        <Button type="submit" variant="primary" loading={addNote.isPending} disabled={!text.trim()}>Add note</Button>
+        <Button type="submit" loading={addNote.isPending} done={added} doneLabel="Added" disabled={!text.trim()}>Add note</Button>
       </div>
     </form>
   );
@@ -110,9 +112,9 @@ export function NotesThread({ quoteId, composer, title = "Notes", hint = "Only y
         </ul>
       )}
       {notes.error && <ErrorState compact error={notes.error} onRetry={() => notes.refetch()} />}
-      {data && !data.thread.length && !uploading && <p className={styles.emptyNotes}>No notes yet.</p>}
+      {data && !data.thread.length && !uploading && <EmptyState inline title="No notes yet" />}
       {data && (data.thread.length > 0 || uploading > 0) && (
-        <ul className={styles.thread} aria-label={title}>
+        <ul ref={threadRef} className={styles.thread} aria-label={title}>
           {uploading > 0 && (
             <li className={styles.item}>
               <span className={`avatar ${styles.face}`} style={{ background: session.profile.color || "var(--text-3)" }}><Face name={session.profile.full_name || session.profile.email} photo={session.profile.avatar_url} /></span>
@@ -136,12 +138,9 @@ export function NotesThread({ quoteId, composer, title = "Notes", hint = "Only y
                         type="button"
                         className={styles.itemDelete}
                         aria-label="Delete this note"
-                        disabled={removeNote.isPending}
-                        onClick={async () => {
-                          if (await confirm({ title: "Delete this note?", confirmLabel: "Delete", danger: true })) removeNote.mutate(item.note!.id);
-                        }}
+                        onClick={() => deleteNote(item.note!)}
                       >
-                        <Icon name="trash" size={site ? 17 : 14} />
+                        <Icon name="trash" size={site ? 16 : 14} />
                       </button>
                     )}
                   </span>
@@ -149,7 +148,7 @@ export function NotesThread({ quoteId, composer, title = "Notes", hint = "Only y
                   {item.photos.length > 0 && (
                     <span className={styles.photos}>
                       {item.photos.map((p, i) => (
-                        <Photo key={p.id} photo={p} n={i + 1} canDelete={canDelete(p.author_id)} onDelete={() => removePhoto.mutate(p)} />
+                        <Photo key={p.id} photo={p} n={i + 1} canDelete={canDelete(p.author_id)} onDelete={() => deletePhoto(p)} />
                       ))}
                     </span>
                   )}
@@ -192,16 +191,14 @@ function Photo({ photo, n, canDelete, onDelete }: { photo: QuotePhoto; n: number
           <img src={photo.url} alt={label} loading="lazy" />
         </a>
       ) : (
-        <span className={styles.photoMissing} title="This photo couldn't be loaded"><Icon name="image" size={18} label="Photo unavailable" /></span>
+        <span className={styles.photoMissing} title="This photo couldn't be loaded"><Icon name="image" size={20} label="Photo unavailable" /></span>
       )}
       {canDelete && (
         <button
           type="button"
           className={styles.photoX}
           aria-label={`Remove ${label}`}
-          onClick={async () => {
-            if (await confirm({ title: "Remove this photo?", confirmLabel: "Remove", danger: true })) onDelete();
-          }}
+          onClick={onDelete}
         >
           <Icon name="x" size={12} strokeWidth={2} />
         </button>

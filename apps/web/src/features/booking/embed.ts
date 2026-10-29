@@ -14,7 +14,8 @@ export const EMBED_HEIGHT = 900;
 /**
  * Runs on the business's website. It only touches the frame a message came from, so it works with
  * several forms on one page, and still after Settings → Web address moves the form to a new address.
- * A sent form is scrolled to 100px below the top of the window, clear of a site's sticky header.
+ * A sent form is scrolled to 100px below the top of the window, clear of a site's sticky header:
+ * smoothly, unless the visitor asked their device for less motion.
  */
 export const EMBED_SCRIPT = `addEventListener("message", function (e) {
   document.querySelectorAll("iframe[data-crewtavo-form]").forEach(function (f) {
@@ -22,7 +23,7 @@ export const EMBED_SCRIPT = `addEventListener("message", function (e) {
     if (e.data.crewtavo === "height" && e.data.height > 0) f.style.height = Math.ceil(e.data.height) + "px";
     if (e.data.crewtavo === "top") {
       var top = f.getBoundingClientRect().top - 100;
-      if (top < 0) scrollBy({ top: top, behavior: "smooth" });
+      if (top < 0) scrollBy({ top: top, behavior: typeof matchMedia == "function" && matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     }
   });
 });`;

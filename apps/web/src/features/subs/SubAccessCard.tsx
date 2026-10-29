@@ -117,7 +117,7 @@ export function SubAccessCard({ sub }: { sub: Sub }) {
         a && (
           <div className="row wrap" style={{ gap: 8 }}>
             {!a.shared && (
-              <Button size="sm" variant={has ? "secondary" : "primary"} icon="messages" loading={sending("text")} disabled={!sub.phone || sendLink.isPending} title={sub.phone ? undefined : "Add their phone number first"} onClick={() => sendLink.mutate("text")}>
+              <Button size="sm" icon="messages" loading={sending("text")} disabled={!sub.phone || sendLink.isPending} title={sub.phone ? undefined : "Add their phone number first"} onClick={() => sendLink.mutate("text")}>
                 Text sign-in link
               </Button>
             )}
@@ -147,12 +147,12 @@ export function SubAccessCard({ sub }: { sub: Sub }) {
       <FormError error={sendLink.error ?? removeAccess.error} />
 
       <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 10, marginTop: 4 }}>
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row">
           <input type="checkbox" className="switch" checked={sub.can_contact_clients} disabled={setOption.isPending} onChange={(e) => setOption.mutate({ can_contact_clients: e.target.checked })} />
           Can contact clients
         </label>
         <span className="muted small">{sub.can_contact_clients ? "They see the client's phone and email on their visits, to call or text them." : "They see the client's name but not their phone or email."}</span>
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row">
           <input type="checkbox" className="switch" checked={sub.uses_clock} disabled={setOption.isPending} onChange={(e) => setOption.mutate({ uses_clock: e.target.checked })} />
           Uses the clock
         </label>
@@ -201,7 +201,7 @@ function SignInLinkDialog({ result, who, phone, email, onClose }: { result: Sign
         {message && <p style={{ margin: 0 }}>{message}</p>}
         {result.reason && (
           <div className="callout callout-info">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow small">{result.reason}</div>
           </div>
         )}

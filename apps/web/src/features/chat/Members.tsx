@@ -1,5 +1,5 @@
 /**
- * Who's in a channel: roles that show separately get their own group ("Crew lead — 2"), everyone
+ * Who's in a channel: roles that show separately get their own group ("Crew lead · 2"), everyone
  * else online is under Online, and the rest under Offline. Opening someone shows their role, crews
  * and phone, with a button to @mention them.
  */
@@ -45,7 +45,7 @@ export function MembersPanel({ members, onPerson, onClose }: { members: ChatMemb
       {members &&
         groupMembers(members, live.online).map((g) => (
           <div key={g.title}>
-            <h2 className={s.groupTitle}>{g.title} — {g.people.length}</h2>
+            <h2 className={s.groupTitle}>{g.title} · {g.people.length}</h2>
             {g.people.map((m) => {
               const on = m.online || live.online.has(m.id);
               return (
@@ -103,7 +103,7 @@ export function PersonDialog({ person, onClose, onMention }: { person: ChatMembe
           </div>
           {details.data && details.data.crews.length > 0 && (
             <div className="stack-sm" style={{ gap: 4 }}>
-              <strong className="small" style={{ textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-3)" }}>Crews</strong>
+              <strong className="small" style={{ textTransform: "uppercase", letterSpacing: "var(--tracking-caps)", color: "var(--text-3)" }}>Crews</strong>
               <span>{details.data.crews.join(", ")}</span>
             </div>
           )}

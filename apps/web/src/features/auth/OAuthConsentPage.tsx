@@ -94,7 +94,7 @@ export function OAuthConsentPage() {
         <span className={styles.appTile} style={{ background: "var(--solid)", color: "var(--on-solid)" }}><Icon name="layers" size={24} /></span>
       </div>
       <div className="stack-sm" style={{ gap: 6, textAlign: "center" }}>
-        <h1 className={styles.title} style={{ fontSize: 22 }}>Connect {client.name}?</h1>
+        <h1 className={styles.title}>Connect {client.name}?</h1>
         <p className="muted" style={{ margin: 0 }}>Signed in as <strong style={{ color: "var(--ink)" }}>{user.email}</strong></p>
       </div>
       <span className="muted small strong" style={{ marginBottom: -10 }}>Can look at</span>

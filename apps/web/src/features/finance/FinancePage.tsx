@@ -8,14 +8,14 @@ import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { CardSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
-import { StatusPill } from "@/components/ui/StatusPill";
+import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { formatDate, formatMoney, formatMoneyCents, formatMoneyCompact, formatNumber, todayIn } from "@/lib/format";
+import { formatDate, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { localDate } from "@crewtavo/core/time";
 import { Breakdown, Change, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Part } from "./Charts";
@@ -51,7 +51,7 @@ export function FinancePage() {
   const tab = (TABS.find((t) => t.key === asked)?.key ?? "overview") as TabKey;
   const openTab: OpenTab = (t) => {
     update({ tab: t === "overview" ? null : t });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   };
   return (
     <>
@@ -113,7 +113,7 @@ function PaymentsTable({ rows }: { rows: Payment[] }) {
             <tr key={p.id} className={p.invoice ? "row-link" : undefined} onClick={() => p.invoice && navigate(`/invoices/${p.invoice.id}`)}>
               <td className="num tabular"><strong>{formatMoneyCents(p.amount)}</strong>{Number(p.tip_amount) > 0 && <div className="muted small">+{formatMoneyCents(p.tip_amount)} tip</div>}</td>
               <td><StatusPill label={refund ? "Refunded" : "Paid"} tone={refund ? "muted" : "good"} /></td>
-              <td><span className="pay-method"><Icon name={method.icon} size={15} />{method.label}</span></td>
+              <td><span className="pay-method"><Icon name={method.icon} size={14} />{method.label}</span></td>
               <td>
                 {p.invoice ? (
                   <Link className="cell-link" to={`/invoices/${p.invoice.id}`} onClick={(e) => e.stopPropagation()}>{what} for invoice #{p.invoice.number}</Link>
@@ -123,7 +123,7 @@ function PaymentsTable({ rows }: { rows: Payment[] }) {
               </td>
               <td>
                 {p.client ? (
-                  <Link className="cell-link" to={`/clients/${p.client.id}`} onClick={(e) => e.stopPropagation()} style={{ fontWeight: 500 }}>{p.client.display_name}</Link>
+                  <Link className="cell-link" to={`/clients/${p.client.id}`} onClick={(e) => e.stopPropagation()} style={{ fontWeight: 400 }}>{p.client.display_name}</Link>
                 ) : <span className="muted">—</span>}
               </td>
               <td className="muted tabular" style={{ whiteSpace: "nowrap" }}>{paidAt(p.received_at, company.timezone)}</td>
@@ -264,10 +264,10 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
                     <div className="fin-hero-hint">{shortDate(prev.from)} – {shortDate(prev.to)}</div>
                   </div>
                 </div>
-                <TrendChart key={figure} buckets={buckets} values={running(series[figure].now)} previous={running(series[figure].before)} format={formatMoneyCompact} label={FIGURES[figure].chart} color={figure === "invoiced" ? "var(--invoice)" : "var(--green)"} height={240} />
+                <TrendChart key={figure} buckets={buckets} values={running(series[figure].now)} previous={running(series[figure].before)} format={formatMoney} label={FIGURES[figure].chart} color={figure === "invoiced" ? "var(--invoice)" : "var(--green)"} height={240} />
                 <div className="fin-balances">
                   <Balance label="Owed to you" value={formatMoney(owed)} hint={`${plural(d.open.length, "open invoice")}`} to="/invoices" />
-                  <Balance label="Past due" value={formatMoney(sum(late, (i) => Number(i.balance_due)))} hint={late.length ? plural(late.length, "invoice") : "Nothing late"} to="/invoices?status=overdue" tone={late.length ? "bad" : undefined} />
+                  <Balance label={statusText("invoice", "overdue")} value={formatMoney(sum(late, (i) => Number(i.balance_due)))} hint={late.length ? plural(late.length, "invoice") : "Nothing late"} to="/invoices?status=overdue" tone={late.length ? "bad" : undefined} />
                   {coming.length > 0 ? (
                     <Balance label="On the way to your bank" value={formatMoneyCents(sum(coming, (p) => Number(p.amount)))} hint={`Arrives ${formatDate(coming.map((p) => p.arrival_on).sort()[0])}`} to="/payouts" />
                   ) : deposited ? (
@@ -282,21 +282,21 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
               <SectionHead title="Performance" id="fin-performance"><span className="muted small">{range.label}</span></SectionHead>
               <div className="fin-grid">
                 <ReportCard as="h3" title="Payments" info="Money received, by how it was paid. Refunds are listed on their own." footer={plural(pay.filter((p) => Number(p.amount) > 0).length, "payment")} more={{ label: "View all", onClick: () => openTab("payments") }}>
-                  <Breakdown parts={methodParts(pay)} format={formatMoney} label="Payments by method" empty="No payments in this period." />
+                  <Breakdown parts={methodParts(pay)} format={formatMoney} label="Payments by method" empty="No payments in this period" />
                 </ReportCard>
                 <ReportCard as="h3" title="Collected" info="Payments received, less refunds. Tips aren't included." value={<>{formatMoney(totals.collected.now)}<Change now={totals.collected.now} before={totals.collected.before} /></>} more={{ label: "More details", onClick: () => openTab("payments") }}>
-                  <TrendChart buckets={buckets} values={series.collected.now} format={formatMoneyCompact} label="Collected over time" />
+                  <TrendChart buckets={buckets} values={series.collected.now} format={formatMoney} label="Collected over time" />
                 </ReportCard>
                 <ReportCard as="h3" title="Net volume" info="Collected, less card and bank processing fees: roughly what reaches your bank." value={<>{formatMoney(totals.net.now)}<Change now={totals.net.now} before={totals.net.before} /></>} footer={fees ? `${formatMoneyCents(fees)} in fees` : "No fees"} more={d.payouts.length ? { label: "Deposits", to: "/payouts" } : undefined}>
-                  <TrendChart buckets={buckets} values={series.net.now} format={formatMoneyCompact} label="Net volume over time" />
+                  <TrendChart buckets={buckets} values={series.net.now} format={formatMoney} label="Net volume over time" />
                 </ReportCard>
                 <ReportCard as="h3" title="Unpaid invoices" info="What clients owe today, by how late it is." value={formatMoney(owed)} more={{ label: "View all", to: "/invoices" }}>
-                  <Breakdown parts={aging} format={formatMoney} label="Unpaid invoices by age" empty="Nothing owed." />
+                  <Breakdown parts={aging} format={formatMoney} label="Unpaid invoices by age" empty="Nothing owed" />
                 </ReportCard>
                 <ReportCard as="h3" title="Invoiced" info="Invoices issued, not counting drafts or voided invoices." value={<>{formatMoney(totals.invoiced.now)}<Change now={totals.invoiced.now} before={totals.invoiced.before} /></>} footer={plural(invoicedNow.length, "invoice")} more={{ label: "Invoices", to: "/invoices" }}>
-                  <TrendChart buckets={buckets} values={series.invoiced.now} format={formatMoneyCompact} label="Invoiced over time" color="var(--invoice)" />
+                  <TrendChart buckets={buckets} values={series.invoiced.now} format={formatMoney} label="Invoiced over time" color="var(--invoice)" />
                 </ReportCard>
-                <ReportCard as="h3" title="Past due" info="Invoices past their due date that still have a balance, oldest first." footer={late.length ? plural(late.length, "invoice") : undefined} more={late.length ? { label: "View all", to: "/invoices?status=overdue" } : undefined}>
+                <ReportCard as="h3" title={statusText("invoice", "overdue")} info="Invoices past their due date that still have a balance, oldest first." footer={late.length ? plural(late.length, "invoice") : undefined} more={late.length ? { label: "View all", to: "/invoices?status=overdue" } : undefined}>
                   {late.length ? (
                     <ul className="fin-list">
                       {late.slice(0, 4).map((i) => (
@@ -327,14 +327,14 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
                       ))}
                     </ul>
                   ) : (
-                    <p className="muted small" style={{ margin: 0 }}>No payments in this period.</p>
+                    <EmptyState inline title="No payments in this period" />
                   )}
                 </ReportCard>
                 <ReportCard as="h3" title="Time to get paid" info="Days from an invoice being issued to its payment, for payments received in this period." value={avgWait === null ? "—" : `${formatNumber(avgWait, avgWait < 10 ? 1 : 0)} days`} footer={waits.length ? `Average of ${plural(waits.length, "invoice payment")}` : undefined}>
-                  <Breakdown parts={speed} format={formatMoney} label="Payments by how long they took" empty="No invoice payments in this period." />
+                  <Breakdown parts={speed} format={formatMoney} label="Payments by how long they took" empty="No invoice payments in this period" />
                 </ReportCard>
                 <ReportCard as="h3" title="Quotes won" info="The value of quotes sent in this period that were approved." value={<>{formatMoney(sum(quotesNow.filter(won), (q) => Number(q.total)))}<Change now={sum(quotesNow.filter(won), (q) => Number(q.total))} before={sum(quotesBefore.filter(won), (q) => Number(q.total))} /></>} footer={`${quotesNow.filter(won).length} of ${quotesNow.length} won · ${pct(quotesNow.filter(won).length, quotesNow.length)}`} more={{ label: "Sales metrics", to: `/metrics?tab=sales&${rangeQuery(range)}` }}>
-                  <TrendChart buckets={buckets} values={bucketize(quotesNow.filter(won), buckets, (q) => q.sent_at, (q) => Number(q.total), tz)} format={formatMoneyCompact} label="Quotes won over time" color="var(--quote)" />
+                  <TrendChart buckets={buckets} values={bucketize(quotesNow.filter(won), buckets, (q) => q.sent_at, (q) => Number(q.total), tz)} format={formatMoney} label="Quotes won over time" color="var(--quote)" />
                 </ReportCard>
               </div>
             </section>
@@ -344,7 +344,7 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
               {pay.length ? (
                 <div className="card"><PaymentsTable rows={pay.slice(0, 6)} /></div>
               ) : (
-                <div className="card"><EmptyState compact icon="dollar" title="No payments in this period">Payments you record or receive online show up here.</EmptyState></div>
+                <div className="card"><EmptyState inline title="No payments in this period" /></div>
               )}
             </section>
           </>
@@ -413,11 +413,11 @@ function RevenueGoal() {
   const progress = goal > 0 ? ytd / goal : 0;
   const projected = ytd / pace;
   return (
-    <ReportCard title={`${year} revenue goal`} info="Collected since January 1, against the yearly goal an admin sets." action={isAdmin && <Button size="sm" variant="ghost" icon="edit" onClick={() => setEditing(true)}>{goal ? "Edit" : "Set goal"}</Button>}>
+    <ReportCard title={`${year} revenue goal`} info="Collected since January 1, against the yearly goal an admin sets." action={isAdmin && goal > 0 && <Button size="sm" variant="ghost" icon="edit" onClick={() => setEditing(true)}>Edit goal</Button>}>
       {goal > 0 ? (
         <div className="stack" style={{ gap: 14 }}>
           <div className="row" style={{ alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-            <span className="report-card-value" style={{ fontSize: 30 }}>{formatMoney(ytd)}</span>
+            <span className="report-card-value" style={{ fontSize: 32 }}>{formatMoney(ytd)}</span>
             <span className="muted">of {formatMoney(goal)}</span>
           </div>
           <div className="goal-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Progress to revenue goal">
@@ -430,11 +430,11 @@ function RevenueGoal() {
             <span className="muted">On track for</span><strong className="tabular" style={{ color: projected >= goal ? "var(--green-dark)" : "var(--warning)" }}>{formatMoney(projected)}</strong>
           </div>
           <span className="small" style={{ color: progress >= pace ? "var(--green-dark)" : "var(--warning)", fontWeight: 700 }}>
-            {progress >= 1 ? "Goal reached. Nice work!" : progress >= pace ? `Ahead of pace by ${formatMoney(ytd - goal * pace)}` : `Behind pace by ${formatMoney(goal * pace - ytd)}`}
+            {progress >= 1 ? "Goal reached" : progress >= pace ? `Ahead of pace by ${formatMoney(ytd - goal * pace)}` : `Behind pace by ${formatMoney(goal * pace - ytd)}`}
           </span>
         </div>
       ) : (
-        <EmptyState compact icon="finance" title="No goal set" action={isAdmin ? <Button size="sm" variant="primary" onClick={() => setEditing(true)}>Set a revenue goal</Button> : undefined}>
+        <EmptyState inline title="No goal set" action={isAdmin ? <Button onClick={() => setEditing(true)}>Set a revenue goal</Button> : undefined}>
           {formatMoney(ytd)} collected so far this year.
         </EmptyState>
       )}
@@ -474,7 +474,7 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
           <div className="input-group"><input className="input" inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="30" style={{ paddingLeft: 12, paddingRight: 32 }} /><span className="addon addon-right">%</span></div>
         </Field>
         <FormError error={save.error} />
-        <div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" loading={save.isPending}>Save goals</Button></div>
+        <div className="form-actions"><FormChecks /><Button onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" loading={save.isPending}>Save goals</Button></div>
       </form>
     </Dialog>
   );
@@ -582,7 +582,7 @@ function Payments({ range }: { range: Range }) {
                   </div>
                 </div>
               ) : (
-                <div className="card"><EmptyState compact icon="dollar" title="No payments in this period">Payments you record or receive online show up here.</EmptyState></div>
+                <div className="card"><EmptyState inline title="No payments in this period" /></div>
               )}
             </section>
 
@@ -673,7 +673,7 @@ function Profit({ range }: { range: Range }) {
                   rowKey={(r) => r.id}
                   filename={`job-profitability-${range.from}-to-${range.to}`}
                   initialSort={{ key: "margin", desc: false }}
-                  empty="No jobs were completed in this period."
+                  empty="No jobs completed in this period"
                   columns={[
                     { key: "number", label: "Job", value: (r) => r.number, render: (r) => <Link className="cell-link" to={`/jobs/${r.id}`}>#{r.number} {r.title}</Link> },
                     { key: "client", label: "Client", value: (r) => r.client },
@@ -682,7 +682,7 @@ function Profit({ range }: { range: Range }) {
                     { key: "profit", label: "Profit", num: true, value: (r) => Math.round(r.profit * 100) / 100, render: (r) => <span style={{ color: r.profit < 0 ? "var(--danger)" : undefined }}>{formatMoney(r.profit)}</span> },
                     {
                       key: "margin", label: "Margin", num: true, value: (r) => (r.margin === null ? null : Math.round(r.margin)),
-                      render: (r) => r.margin === null ? "—" : <span className="pill" data-tone={d.target && r.margin < d.target ? "danger" : r.margin < 0 ? "danger" : "success"}>{Math.round(r.margin)}%</span>,
+                      render: (r) => r.margin === null ? "—" : <span className={`chip tabular ${(d.target && r.margin < d.target) || r.margin < 0 ? "chip-red" : "chip-green"}`}>{Math.round(r.margin)}%</span>,
                     },
                   ]}
                 />
@@ -694,7 +694,7 @@ function Profit({ range }: { range: Range }) {
                 rowKey={(r) => r.name}
                 filename={`services-sold-${range.from}-to-${range.to}`}
                 initialSort={{ key: "revenue", desc: true }}
-                empty="No invoices were issued in this period."
+                empty="No invoices issued in this period"
                 columns={[
                   { key: "name", label: "Item", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
                   { key: "qty", label: "Quantity", num: true, value: (r) => Math.round(r.qty * 100) / 100, render: (r) => formatNumber(r.qty, r.qty % 1 ? 2 : 0) },

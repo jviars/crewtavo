@@ -10,6 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
+import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
 import { formatDate, formatNumber } from "@/lib/format";
@@ -32,11 +33,15 @@ export interface DrawingRow {
 export const DRAWING_FIELDS = "id, title, quote_id, invoice_id, property_id, show_on_quote, show_on_invoice, snapshot_path, total_area_sqft, total_length_ft, roofing_squares, created_at";
 type Patch = Partial<Pick<DrawingRow, "quote_id" | "invoice_id" | "show_on_quote" | "show_on_invoice">>;
 const shownOn = (patch: Patch) => patch.show_on_quote ?? patch.show_on_invoice;
+/** What the client will see changed somewhere else (the Client Hub, the PDF), so it gets a toast in the record's color. */
 function toastFor(patch: Patch) {
   const shown = shownOn(patch);
   const where = patch.show_on_quote !== undefined ? "quote" : "invoice";
-  if (shown !== undefined) toast.success(shown ? `The client will see this drawing on the ${where}` : `Hidden from the client on the ${where}`);
-  else if (patch.quote_id || patch.invoice_id) toast.success(`Added to the ${patch.quote_id ? "quote" : "invoice"}. Turn on "Client sees it" to show it there.`);
+  if (shown !== undefined) toast.success(shown ? `Drawing shown on the ${where}` : `Drawing hidden from the client`, { tone: where });
+  else if (patch.quote_id || patch.invoice_id) {
+    const on = patch.quote_id ? "quote" : "invoice";
+    toast.success(`Drawing added to the ${on}`, { description: `Turn on "Client sees it" to show it there.`, tone: on });
+  }
 }
 
 /** Short-lived links to the saved pictures, for thumbnails. */
@@ -110,7 +115,7 @@ export function ShareDrawing({
       queryClient.invalidateQueries({ queryKey: ["measurements"] });
       toastFor(patch);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't change that. Try again."),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't change that"),
   });
   const attached = Boolean(drawing.quote_id || drawing.invoice_id);
   const name = (row: { client: unknown }) => (row.client as { display_name: string } | null)?.display_name;
@@ -160,7 +165,7 @@ export function ShareDrawing({
 
 function ClientSees({ checked, disabled, where, onChange }: { checked: boolean; disabled: boolean; where: "quote" | "invoice"; onChange: (on: boolean) => void }) {
   return (
-    <label className="switch-row" style={{ fontWeight: 500, marginTop: -4 }}>
+    <label className="switch-row" style={{ fontWeight: 400, marginTop: -4 }}>
       <input type="checkbox" className="switch" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       Client sees it on this {where}
     </label>
@@ -201,7 +206,7 @@ export function DrawingsCard({
       queryClient.invalidateQueries({ queryKey: ["measurements"] });
       toastFor(patch);
     },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't change that. Try again."),
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't change that"),
   });
   const rows = drawings.data ?? [];
   const on = rows.filter((m) => m[column] === parentId);
@@ -217,7 +222,7 @@ export function DrawingsCard({
           <Link to={open} className="strong text-sm drawing-row-title">{m.title}</Link>
           <span className="muted small">{sizes(m)} · {formatDate(m.created_at)}</span>
           {attached && editable && (
-            <label className="switch-row small" style={{ fontWeight: 500 }}>
+            <label className="switch-row small" style={{ fontWeight: 400 }}>
               <input type="checkbox" className="switch" checked={m[shownKey]} disabled={update.isPending} onChange={(e) => update.mutate({ id: m.id, patch: { [shownKey]: e.target.checked } })} />
               Client sees it
             </label>
@@ -236,7 +241,7 @@ export function DrawingsCard({
             ]}
           />
         ) : (
-          <Button size="sm" onClick={() => update.mutate({ id: m.id, patch: { [column]: parentId } })} loading={update.isPending && update.variables?.id === m.id}>Add</Button>
+          <Button size="sm" onClick={() => update.mutate({ id: m.id, patch: { [column]: parentId } })} loading={update.isPending && update.variables?.id === m.id}>Add to {noun}</Button>
         ))}
       </div>
     );
@@ -250,7 +255,8 @@ export function DrawingsCard({
       </div>
       {drawings.isPending && <span className="muted small">Loading…</span>}
       {drawings.error && <span className="field-error">Couldn't load drawings. <button type="button" className="link-btn" onClick={() => drawings.refetch()}>Try again</button></span>}
-      {drawings.data && !rows.length && <span className="muted small">Measure the property on the map, then the drawing can go on this {noun} for the client to see.</span>}
+      {/* One quiet line: "Measure" above is the way to make one. */}
+      {drawings.data && !rows.length && <EmptyState inline title="No drawings yet" />}
       {on.map((m) => row(m, true))}
       {editable && others.length > 0 && (
         <>
@@ -258,7 +264,8 @@ export function DrawingsCard({
           {others.map((m) => row(m, false))}
         </>
       )}
-      {children}
+      {/* What works with a drawing (the quote's depth for its formulas) waits until there is one. */}
+      {rows.length > 0 && children}
     </div>
   );
 }

@@ -75,7 +75,7 @@ export function VisitPicks({ quote, editor, quickAdds, services, takeoff, view, 
   return (
     <div className={styles.picks}>
       <div className={styles.search}>
-        <span className={styles.searchIcon} aria-hidden="true"><Icon name="search" size={17} /></span>
+        <span className={styles.searchIcon} aria-hidden="true"><Icon name="search" size={16} /></span>
         <input
           className={`input ${styles.searchInput}`}
           type="search"
@@ -88,7 +88,7 @@ export function VisitPicks({ quote, editor, quickAdds, services, takeoff, view, 
         />
       </div>
       {groups.length > 1 && (
-        <div className={styles.groups} role="group" aria-label="Kinds of work">
+        <div className={`tabs ${styles.groups}`} role="group" aria-label="Kinds of work">
           {groups.map((g) => {
             const on = g.items.filter((s) => rows.has(s.id)).length;
             return (
@@ -115,7 +115,7 @@ export function VisitPicks({ quote, editor, quickAdds, services, takeoff, view, 
 
       {!services && !quickAdds.length ? (
         <div className={styles.grid} aria-hidden="true">
-          {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={230} radius={14} />)}
+          {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} height={230} radius={12} />)}
         </div>
       ) : (
         <div className={styles.grid}>
@@ -147,7 +147,7 @@ function Tile({ service, row, start, price, editor, onAdd, onShow }: { service: 
     <article className={styles.tile} data-on={line ? "" : undefined}>
       <button type="button" className={styles.pic} aria-label={tapLabel} disabled={adding} onClick={tap}>
         <ServicePicture name={service.name} picture={service.picture} />
-        {line && <span className={styles.badge}>{howMany ?? <Icon name="check" size={16} strokeWidth={2.25} />}</span>}
+        {line && <span className={styles.badge}>{howMany ?? <Icon name="check" size={16} strokeWidth={2} />}</span>}
       </button>
       <div className={styles.body}>
         <span className={styles.text}>
@@ -162,22 +162,22 @@ function Tile({ service, row, start, price, editor, onAdd, onShow }: { service: 
         ) : stepper ? (
           <div className={styles.stepper}>
             <button type="button" className={styles.step} aria-label={row!.lessLabel} disabled={saving} onClick={() => editor.dec(line)}>
-              <Icon name="minus" size={18} strokeWidth={2} />
+              <Icon name="minus" size={20} strokeWidth={2} />
             </button>
             <span className={styles.count} aria-live="polite" aria-label={row!.quantity ?? undefined}>{howMany}</span>
             <button type="button" className={styles.step} aria-label={row!.moreLabel} disabled={saving || !row!.more} onClick={() => editor.inc(line)}>
-              <Icon name="plus" size={18} strokeWidth={2} />
+              <Icon name="plus" size={20} strokeWidth={2} />
             </button>
           </div>
         ) : (
           <div className={styles.onIt}>
             <span className={styles.onText}>
-              <Icon name="check" size={16} strokeWidth={2.25} />
+              <Icon name="check" size={16} strokeWidth={2} />
               {money(row!.amount)}
             </span>
             {row!.less && (
               <button type="button" className={styles.step} aria-label={row!.lessLabel} disabled={saving} onClick={() => editor.dec(line)}>
-                <Icon name="minus" size={18} strokeWidth={2} />
+                <Icon name="minus" size={20} strokeWidth={2} />
               </button>
             )}
           </div>

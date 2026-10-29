@@ -29,8 +29,8 @@ export function AssistantAccess() {
   const settings = (company.settings ?? {}) as { assistants?: { enabled?: boolean; read_only?: boolean } };
   const enabled = settings.assistants?.enabled !== false;
   const readOnly = settings.assistants?.read_only === true;
+  // The switches change in place, which says it worked.
   const save = useMutation({
-    meta: { success: "Saved" },
     mutationFn: async (patch: { enabled?: boolean; read_only?: boolean }) => {
       const current = unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single());
       const s = (current.settings ?? {}) as Record<string, unknown>;
@@ -51,11 +51,11 @@ export function AssistantAccess() {
 
   return (
     <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
-      <label className="switch-row" style={{ fontWeight: 500 }}>
+      <label className="switch-row">
         <input type="checkbox" className="switch" checked={enabled} disabled={save.isPending} onChange={(e) => save.mutate({ enabled: e.target.checked })} />
         Let my team use AI assistants with Crewtavo
       </label>
-      <label className="switch-row" style={{ fontWeight: 500, opacity: enabled ? 1 : 0.5 }}>
+      <label className="switch-row" style={{ opacity: enabled ? 1 : 0.5 }}>
         <input type="checkbox" className="switch" checked={readOnly} disabled={!enabled || save.isPending} onChange={(e) => save.mutate({ read_only: e.target.checked })} />
         Look things up only, whatever each person allows
       </label>
@@ -214,7 +214,7 @@ function AccessDialog({ connection, onClose }: { connection: AssistantConnection
         <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="sr-only">Access</legend>
           {LEVELS.map((l) => (
-            <label key={l.level} className="card-row" style={{ border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", borderColor: level === l.level ? "var(--green)" : undefined }}>
+            <label key={l.level} className="card-row" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", cursor: "pointer", borderColor: level === l.level ? "var(--green)" : undefined }}>
               <input type="radio" name="access" checked={level === l.level} onChange={() => setLevel(l.level)} />
               <span className="grow">
                 <strong style={{ display: "block" }}>{l.label}</strong>

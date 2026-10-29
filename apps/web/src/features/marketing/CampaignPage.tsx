@@ -9,6 +9,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
@@ -84,7 +85,8 @@ function CampaignPageScreen() {
     queryFn: async () => unwrap(await supabase().from("campaign_recipients").select("id, email, name, status, error, sent_at").eq("campaign_id", id).order("id").limit(500)),
   });
 
-  // Autosave drafts a moment after typing stops.
+  // Autosave drafts a moment after typing stops, and say so beside the status.
+  const saving = useSaveStatus();
   const save = useMutation({
     meta: { inline: true },
     mutationFn: async (d: Draft) => unwrap(await supabase().from("campaigns").update({ name: d.name.trim() || "Untitled campaign", subject: d.subject, body: d.body, audience: d.audience as never }).eq("id", id)),
@@ -99,16 +101,17 @@ function CampaignPageScreen() {
       return;
     }
     if (json === savedRef.current) return;
+    saving.edited();
     const t = setTimeout(() => {
       savedRef.current = json;
-      save.mutate(draft);
+      void saving.track(save.mutateAsync(draft));
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, editable]);
 
   const cancel = useMutation({
-    meta: { success: (r: { status: string }) => (r.status === "draft" ? "Unscheduled. It's a draft again." : "Sending stopped") },
+    meta: { success: (r: { status: string }) => (r.status === "draft" ? "Campaign unscheduled" : "Sending stopped") },
     mutationFn: () => api.post<{ status: string }>(`/campaigns/${id}/cancel`),
     onSuccess: () => {
       setDraft(null);
@@ -167,9 +170,8 @@ function CampaignPageScreen() {
         documentTitle={c.name}
         actions={
           <>
-            {editable && <span className="muted small">{save.isPending ? "Saving…" : save.isError ? "Couldn't save" : "Saved"}</span>}
             {editable && <Button icon="mail" onClick={() => setDialog("test")} disabled={!session.config.features.email || problems.slice(0, 2).length > 0}>Send test</Button>}
-            {editable && <Button variant="primary" icon="send" onClick={() => setDialog("send")} disabled={problems.length > 0 || !session.config.features.email}>Send…</Button>}
+            {editable && <Button variant="primary" icon="send" onClick={() => setDialog("send")} disabled={problems.length > 0 || !session.config.features.email}>Send</Button>}
             {(c.status === "scheduled" || c.status === "sending") && <Button variant="danger" icon="x" loading={cancel.isPending} onClick={async () => (await confirm({ title: c.status === "scheduled" ? "Unschedule this campaign?" : "Stop sending?", body: c.status === "sending" ? "Emails already sent can't be recalled." : "It goes back to being a draft.", confirmLabel: c.status === "scheduled" ? "Unschedule" : "Stop", danger: c.status === "sending" })) && cancel.mutate()}>{c.status === "scheduled" ? "Unschedule" : "Stop sending"}</Button>}
             <Menu
               items={[
@@ -182,6 +184,7 @@ function CampaignPageScreen() {
       />
       <div className="page-meta">
         <StatusPill label={CAMPAIGN_LABELS[c.status] ?? c.status} tone={CAMPAIGN_TONES[c.status] ?? "muted"} />
+        {editable && <SaveStatus status={saving.status} />}
         {c.status === "scheduled" && c.scheduled_at && <span className="muted">Sends {formatDateTime(c.scheduled_at)}</span>}
         {c.status !== "draft" && <span className="muted">{c.sent_count} of {c.recipients_count} sent{c.failed_count ? ` · ${c.failed_count} failed` : ""}</span>}
       </div>
@@ -212,7 +215,7 @@ function CampaignPageScreen() {
             <div className="card">
               <div className="card-head"><strong>Recipients</strong><span className="muted small">{c.recipients_count}</span></div>
               {delivered.isPending && <div className="card-pad"><Skeleton height={60} /></div>}
-              {delivered.data?.length === 0 && <EmptyState compact icon="users" title="No recipients" />}
+              {delivered.data?.length === 0 && <EmptyState inline title="No recipients" />}
               <div style={{ maxHeight: 420, overflowY: "auto" }}>
                 {delivered.data?.map((r) => (
                   <div key={r.id} className="card-row" style={{ padding: "10px 20px" }}>
@@ -229,7 +232,7 @@ function CampaignPageScreen() {
             <div className="email-preview">
               <div className="sheet-inner">
                 <div className="muted small" style={{ marginBottom: 6 }}>Subject: <strong style={{ color: "var(--ink)" }}>{render(draft.subject, vars) || "No subject"}</strong></div>
-                <div style={{ fontWeight: 800, marginBottom: 12 }}>{session.company.name}</div>
+                <div style={{ fontWeight: 700, marginBottom: 12 }}>{session.company.name}</div>
                 {render(draft.body, vars) || <span className="muted">Your message appears here.</span>}
               </div>
               <div className="email-foot">{session.company.name} · Unsubscribe</div>
@@ -347,9 +350,12 @@ function AiDialog({ onClose, onDraft }: { onClose: () => void; onDraft: (d: { su
   const [goal, setGoal] = useState("");
   const [tone, setTone] = useState<"friendly" | "professional" | "urgent">("friendly");
   const draft = useMutation({
-    meta: { inline: true, success: "Draft ready. Read it over before sending." },
+    meta: { inline: true },
     mutationFn: () => api.post<{ subject: string; body: string }>("/campaigns/draft", { goal: goal.trim(), tone }),
-    onSuccess: onDraft,
+    onSuccess: (d) => {
+      toast.success("Draft ready", { description: "Read it over before sending." });
+      onDraft(d);
+    },
   });
   return (
     <Dialog open onClose={onClose} title="Write with AI">
@@ -361,7 +367,7 @@ function AiDialog({ onClose, onDraft }: { onClose: () => void; onDraft: (d: { su
         <FormError error={draft.error} />
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="sparkle" loading={draft.isPending} disabled={goal.trim().length < 5}>Write draft</Button>
+          <Button type="submit" variant="primary" icon="sparkle" loading={draft.isPending}>Write draft</Button>
         </div>
       </form>
     </Dialog>

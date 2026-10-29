@@ -4,11 +4,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { useSession } from "@/lib/session";
+import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize } from "../plans/plans";
 import { asksForEndDate, documentTitle, isInsurance, needsEndDate, type PaperworkRow } from "./paperwork";
 import { SUB_PHONE_HINT, signInPhoneNote } from "./signInCountries";
@@ -38,7 +39,6 @@ export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose:
     active: sub?.active ?? true,
   });
   const set = (key: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [key]: e.target.value });
-  const emailOk = !f.email.trim() || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim());
   // How the number reads for sign-in codes by text, once it's typed: where codes go, or why none can.
   const phoneNote = signInPhoneNote(f.phone, subSettings(session.company.settings).sign_in_countries, session.config.features.sms);
 
@@ -75,13 +75,13 @@ export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose:
 
   return (
     <Dialog open onClose={onClose} title={sub ? "Edit sub" : "Add a sub"} description={sub ? undefined : "A business you hire for jobs. You can send them a link to upload their W-9 and insurance next."} size="lg">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (emailOk) save.mutate(); }}>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
-          <Field label="Business name" hint="As it's written on their W-9."><input className="input" value={f.name} onChange={set("name")} required maxLength={120} placeholder="Apex Roofing LLC" autoFocus /></Field>
+          <Field label="Business name" hint="As it's written on their W-9." requiredMessage="Enter the business's name."><input className="input" value={f.name} onChange={set("name")} required maxLength={120} placeholder="Apex Roofing LLC" autoFocus /></Field>
           <Field label="Trade" optional><input className="input" value={f.trade} onChange={set("trade")} maxLength={80} placeholder="Roofing, gutters, concrete" /></Field>
           <Field label="Contact name" optional><input className="input" value={f.contact_name} onChange={set("contact_name")} maxLength={120} autoComplete="off" /></Field>
-          <Field label="Mobile phone" optional hint={phoneNote?.text ?? SUB_PHONE_HINT}><input className="input" type="tel" value={f.phone} onChange={set("phone")} maxLength={30} autoComplete="off" /></Field>
-          <Field label="Email" optional error={emailOk ? null : "Enter an email like name@example.com"}><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={254} autoComplete="off" /></Field>
+          <Field label="Mobile phone" optional hint={phoneNote?.text ?? SUB_PHONE_HINT}><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="off" /></Field>
+          <Field label="Email" optional><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={254} autoComplete="off" /></Field>
           <Field label="Tax classification" optional hint="Box 3 on their W-9.">
             <select className="select" value={f.tax_classification} onChange={set("tax_classification")}>
               <option value="">Not set</option>
@@ -101,13 +101,14 @@ export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose:
           <Field label="Notes" optional hint="Only the office sees these."><textarea className="textarea" value={f.notes} onChange={set("notes")} maxLength={4000} rows={3} /></Field>
         </details>
         {sub && (
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row" style={{ fontWeight: 400 }}>
             <input type="checkbox" className="switch" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} />
             Active. Turned off, they leave the list and stop getting reminders. Their paperwork stays.
           </label>
         )}
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending}>{sub ? "Save" : "Add sub"}</Button>
         </div>
@@ -226,7 +227,7 @@ export function DocumentDialog({
         <div className="form-grid">
           {f.kind !== "w9" && <Field label="Starts" optional><input className="input" type="date" value={f.starts_on} onChange={set("starts_on")} /></Field>}
           {endDate && (
-            <Field label="Ends" optional={!needsEndDate(f.kind)} hint={needsEndDate(f.kind) ? "The policy's expiration date. We remind you 30 and 7 days before." : undefined} error={datesOk ? null : "This has to be after it starts"}>
+            <Field label="Ends" optional={!needsEndDate(f.kind)} hint={needsEndDate(f.kind) ? "The policy's expiration date. We remind you 30 and 7 days before." : undefined} error={datesOk ? null : "Pick an end date after it starts."}>
               <input className="input" type="date" value={f.expires_on} onChange={set("expires_on")} required={needsEndDate(f.kind)} min={f.starts_on || undefined} />
             </Field>
           )}
@@ -234,8 +235,10 @@ export function DocumentDialog({
         </div>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon={doc ? undefined : "upload"} loading={save.isPending} disabled={!doc && !file}>{doc ? "Save" : replacing ? "Replace" : "Add"}</Button>
+          {/* Pressed with no file chosen, it says so under the form. A file uploads, which is slow anyway. */}
+          <Button type="submit" variant="primary" icon={doc ? undefined : "upload"} loading={save.isPending} slowHint={doc ? undefined : false}>{doc ? "Save" : replacing ? "Replace" : "Add"}</Button>
         </div>
       </form>
     </Dialog>
@@ -263,6 +266,8 @@ export function SendLinkDialog({ sub, paperwork, onClose }: { sub: Sub; paperwor
   const [channels, setChannels] = useState({ sms: canText, email: canEmail });
   const [message, setMessage] = useState(intro);
   const chosen = (["sms", "email"] as const).filter((c) => channels[c]);
+  // Send stays pressable: pressed with neither way ticked, it says what to do instead.
+  const [tried, setTried] = useState(false);
 
   const send = useMutation({
     meta: { inline: true },
@@ -295,7 +300,7 @@ export function SendLinkDialog({ sub, paperwork, onClose }: { sub: Sub; paperwor
             </div>
           )}
           {outcomes.filter((o) => !o.label && o.reason).map((o) => (
-            <div key={o.reason} className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow" style={{ fontWeight: 400 }}>{o.reason}</div></div>
+            <div key={o.reason} className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow" style={{ fontWeight: 400 }}>{o.reason}</div></div>
           ))}
           <div className="field">
             <span>Their link</span>
@@ -322,7 +327,7 @@ export function SendLinkDialog({ sub, paperwork, onClose }: { sub: Sub; paperwor
   ].filter((p): p is { key: string; label: string; body: string } => Boolean(p));
   return (
     <Dialog open onClose={onClose} title="Send upload link" description={`${sub.name} opens it on their phone or computer and sends in their paperwork. No account needed.`}>
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (chosen.length) send.mutate(); }}>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (chosen.length) send.mutate(); else setTried(true); }}>
         <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="strong small" style={{ marginBottom: 6 }}>Send it by</legend>
           <label className="checkbox">
@@ -343,17 +348,18 @@ export function SendLinkDialog({ sub, paperwork, onClose }: { sub: Sub; paperwor
             {previews.map((p) => (
               <div key={p.key} className="stack-sm" style={{ gap: 4 }}>
                 <span className="muted small">{p.label}</span>
-                <div className="small pre-wrap" style={{ padding: 12, borderRadius: 8, background: "var(--fill)", border: "1px solid var(--border)", overflowWrap: "anywhere" }}>{p.body}</div>
+                <div className="small pre-wrap" style={{ padding: 12, borderRadius: "var(--radius-control)", background: "var(--fill)", border: "1px solid var(--border)", overflowWrap: "anywhere" }}>{p.body}</div>
               </div>
             ))}
           </div>
         )}
+        {tried && !chosen.length && <div className="form-error" role="alert">{canText || canEmail ? "Tick text or email to send it, or copy the link." : "Copy the link and send it to them yourself."}</div>}
         <FormError error={send.error ?? copy.error} />
         <div className="form-actions">
           <Button icon="copy" loading={copy.isPending} onClick={() => copy.mutate()}>Copy link</Button>
           <span className="spacer" />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="send" loading={send.isPending} disabled={!chosen.length}>{chosen.length === 2 ? "Send text and email" : chosen[0] === "email" ? "Send email" : chosen[0] === "sms" ? "Send text" : "Send"}</Button>
+          <Button type="submit" variant="primary" icon="send" loading={send.isPending}>{chosen.length === 2 ? "Send text and email" : chosen[0] === "email" ? "Send email" : chosen[0] === "sms" ? "Send text" : "Send"}</Button>
         </div>
       </form>
     </Dialog>

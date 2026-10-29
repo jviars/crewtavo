@@ -110,7 +110,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
     onSuccess: (res) => replaceMessage(queryClient, company, res.message),
   });
   const pin = useMutation({
-    meta: { success: message.pinned_at ? "Unpinned" : "Pinned to the channel" },
+    meta: { success: message.pinned_at ? "Message unpinned" : "Message pinned" },
     mutationFn: () => api.post<{ message: ChatMessage }>(`/chat/messages/${message.id}/pin`, { pinned: !message.pinned_at }),
     onSuccess: (res) => replaceMessage(queryClient, company, res.message),
   });

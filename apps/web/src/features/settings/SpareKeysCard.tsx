@@ -62,7 +62,7 @@ function MakeSpareKeys({ onClose }: { onClose: () => void }) {
             <FormError error={make.error} />
             <div className="form-actions">
               <Button onClick={onClose}>Cancel</Button>
-              <Button type="submit" variant="primary" icon="lock" loading={make.isPending} disabled={!password}>Get new key file</Button>
+              <Button type="submit" variant="primary" icon="lock" loading={make.isPending}>Get new key file</Button>
             </div>
           </form>
         )}

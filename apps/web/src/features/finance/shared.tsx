@@ -70,7 +70,7 @@ export function RangePicker({ state }: { state: RangeParams }) {
   return (
     <div className="row wrap" style={{ gap: 8 }}>
       <label className="select-pill range-pill">
-        <Icon name="calendar" size={15} />
+        <Icon name="calendar" size={14} />
         <span className="range-pill-label">Date range</span>
         <select value={presetKey} onChange={(e) => update(e.target.value === "custom" ? { range: "custom", from: range.from, to: range.to } : { range: e.target.value, from: null, to: null })}>
           {PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}

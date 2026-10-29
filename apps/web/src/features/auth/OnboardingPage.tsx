@@ -58,7 +58,7 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
         <h1 className={styles.title}>Set up your business</h1>
 
         <div className="form-grid">
-          <Field label="Business name" error={touched && name.trim().length < 2 ? "Enter your business name" : null}>
+          <Field label="Business name" requiredMessage="Enter your business name. It goes on your quotes and invoices." error={touched && name.trim().length < 2 ? "Enter your business name. It goes on your quotes and invoices." : null}>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Roofing" required maxLength={200} autoFocus autoComplete="organization" />
           </Field>
           <Field label="Time zone">

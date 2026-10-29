@@ -143,7 +143,7 @@ export function actionLabel(action: PayAction, payee: Payee, signIns?: number | 
     case "unpaid":
       return "Take back paid";
     case "cancel":
-      return "Cancel this pay";
+      return "Cancel pay";
     case "delete":
       return "Delete";
   }

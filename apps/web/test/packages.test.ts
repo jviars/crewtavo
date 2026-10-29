@@ -162,9 +162,9 @@ describe("what's on a package's card", () => {
 
   it("says setup's packages come with example warranties, only when it made packages", () => {
     expect(setupMessage({ packages_created: 3, services_added: ["Ridge vent", "Drip edge"] })).toBe(
-      "Added 3 packages and 2 services. Their warranties are example wording — have your attorney review them.",
+      "Added 3 packages and 2 services. Their warranties are example wording, so have your attorney review them.",
     );
-    expect(setupMessage({ packages_created: 1, services_added: [] })).toBe("Added 1 package. Its warranty is example wording — have your attorney review it.");
+    expect(setupMessage({ packages_created: 1, services_added: [] })).toBe("Added 1 package. Its warranty is example wording, so have your attorney review it.");
     // Only services added (the price list was missing some): nothing about warranties.
     expect(setupMessage({ packages_created: 0, services_added: ["Ridge vent"] })).toBe("Added 1 service");
     expect(setupMessage({ packages_created: 0, services_added: [] })).toBe("You already have them");

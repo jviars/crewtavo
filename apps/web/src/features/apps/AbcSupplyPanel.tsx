@@ -30,8 +30,8 @@ export function AbcSupplyPanel({ app, onChanged }: { app: AppRow; onChanged: () 
         <AccountCard app={app} supplier={supplier} onChanged={onChanged} onChangeKeys={() => setChanging(true)} />
         <section className="card card-pad stack-sm" aria-labelledby="abc-catalog" style={{ gap: 10 }}>
           <div className="row wrap" style={{ gap: 10 }}>
-            <h2 id="abc-catalog" className="section-title grow" style={{ fontSize: 17 }}>Your catalog</h2>
-            <Link className="btn btn-sm btn-primary" to={CATALOG}>Open the Catalog</Link>
+            <h2 id="abc-catalog" className="section-title grow" style={{ fontSize: 16 }}>Your catalog</h2>
+            <Link className="btn btn-sm" to={CATALOG}>Open the Catalog</Link>
           </div>
           <span className="muted small">
             Roofing now has a Catalog: ABC's items at {supplier.branch_name} with your price on each, what your account buys most, every color and size, and your materials checked with ABC in one tap.
@@ -45,7 +45,7 @@ export function AbcSupplyPanel({ app, onChanged }: { app: AppRow; onChanged: () 
   return (
     <section id="app-setup" className="card card-pad stack" aria-labelledby="abc-setup-title">
       <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="abc-setup-title" className="section-title" style={{ fontSize: 17 }}>{changing ? "Change your ABC Supply app" : "Connect your ABC Supply account"}</h2>
+        <h2 id="abc-setup-title" className="section-title" style={{ fontSize: 16 }}>{changing ? "Change your ABC Supply app" : "Connect your ABC Supply account"}</h2>
         <span className="muted small">
           ABC Supply gives your prices to an app you make in its developer portal, for your company only. It's free and takes about ten minutes, plus a business day or two for ABC to switch on your real prices.
           Once it's connected, Roofing gets a Catalog: ABC's items at your branch with your prices, what you buy most up front, and your materials kept current.
@@ -154,7 +154,7 @@ function AccountCard({ app, supplier, onChanged, onChangeKeys }: { app: AppRow; 
   const changed = shipTo !== supplier.ship_to || branchNow !== supplier.branch;
   return (
     <section className="card card-pad stack-sm" aria-labelledby="abc-account" style={{ gap: 12 }}>
-      <h2 id="abc-account" className="section-title" style={{ fontSize: 17 }}>Where prices come from</h2>
+      <h2 id="abc-account" className="section-title" style={{ fontSize: 16 }}>Where prices come from</h2>
       {supplier.environment === "sandbox" && (
         <div className="callout callout-warning" role="status">
           <Icon name="info" size={18} />

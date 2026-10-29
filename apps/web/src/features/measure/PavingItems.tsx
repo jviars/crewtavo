@@ -7,6 +7,7 @@
 import type { Section } from "@crewtavo/core/geo";
 import { itemTotal, PAVING_GROUPS, PAVING_ITEMS, pavingItem, type PavingItem } from "@crewtavo/core/paving";
 import { useState } from "react";
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { formatNumber } from "@/lib/format";
@@ -19,6 +20,19 @@ export function formatItemTotal(sections: readonly Section[], item: PavingItem, 
   if (item.geometry === "area") return unit === "sqyd" ? `${formatNumber(value / 9, 1)} sq yd` : `${formatNumber(value)} sq ft`;
   if (item.geometry === "line" && item.id !== "stall_row") return `${formatNumber(value)} ft`;
   return item.id === "stall_row" ? `${formatNumber(value)} stalls` : formatNumber(value);
+}
+
+/** formatItemTotal's figure as the panel shows it, rolling to each new total while the item is drawn. */
+function ItemTotal({ sections, item, unit }: { sections: readonly Section[]; item: PavingItem; unit: AreaUnit }) {
+  const { value } = itemTotal(sections, item.id);
+  const yards = item.geometry === "area" && unit === "sqyd";
+  const suffix = item.geometry === "area" ? (yards ? " sq yd" : " sq ft") : item.id === "stall_row" ? " stalls" : item.geometry === "line" ? " ft" : "";
+  return (
+    <>
+      <AnimatedNumber value={yards ? value / 9 : value} format={yards ? { minimumFractionDigits: 1, maximumFractionDigits: 1 } : { maximumFractionDigits: 0 }} />
+      {suffix}
+    </>
+  );
 }
 
 export function PavingItemsCard({
@@ -80,7 +94,7 @@ export function PavingItemsCard({
                   <ItemSwatch item={item} />
                   <span className="grow">{item.name}</span>
                   <span className="paving-item-kind muted small">{item.geometry === "area" ? "Area" : item.geometry === "line" ? "Line" : "Count"}</span>
-                  <strong className="num" data-zero={total ? undefined : true}>{total ? formatItemTotal(sections, item, unit) : "—"}</strong>
+                  <strong className="num" data-zero={total ? undefined : true}>{total ? <ItemTotal sections={sections} item={item} unit={unit} /> : "—"}</strong>
                 </button>
               );
             })}
@@ -120,10 +134,13 @@ export function ItemSelect({ kind, value, label, onChange }: { kind: Section["ki
   );
 }
 
-/** Find paving (fal.ai): a button that says what it needs when it can't run yet. */
-export function FindPavingButton({ ready, busy, onClick }: { ready: boolean; busy: boolean; onClick: () => void }) {
+/**
+ * Find paving (fal.ai): a button that says what it needs when it can't run yet. An outline button
+ * either way (`ready` is kept for its callers); the page's one green button is its save.
+ */
+export function FindPavingButton({ busy, onClick }: { ready: boolean; busy: boolean; onClick: () => void }) {
   return (
-    <Button size="sm" variant={ready ? "primary" : undefined} icon="sparkle" loading={busy} onClick={onClick} style={{ justifySelf: "start" }}>
+    <Button size="sm" icon="sparkle" loading={busy} onClick={onClick} style={{ justifySelf: "start" }}>
       Find paving
     </Button>
   );

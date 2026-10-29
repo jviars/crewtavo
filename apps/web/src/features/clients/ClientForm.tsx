@@ -3,13 +3,16 @@ import { useDeferredValue, useEffect, useState, type FormEvent, type KeyboardEve
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { statusText } from "@/components/ui/StatusPill";
 import { TagInput } from "@/components/ui/TagInput";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { fieldError } from "@/lib/errors";
 import { addressLine } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { formatPhoneTyping } from "@/lib/validate";
 
 export interface ClientFields {
   display_name: string;
@@ -66,32 +69,33 @@ function useDuplicateEmail(email: string, exceptId?: string) {
   });
 }
 
-function ClientFieldset({ value, onChange, clientId }: { value: ClientFields; onChange: (v: ClientFields) => void; clientId?: string }) {
+/** The fields both client dialogs share. `error` is the save's, so a clash on email or phone shows under that field. */
+function ClientFieldset({ value, onChange, clientId, error }: { value: ClientFields; onChange: (v: ClientFields) => void; clientId?: string; error?: unknown }) {
   const set = (key: keyof ClientFields) => (e: { target: { value: string } }) => onChange({ ...value, [key]: e.target.value });
   const tags = useClientTags();
   const duplicate = useDuplicateEmail(value.email, clientId);
   return (
     <>
       <div className="form-grid">
-        <Field label="Name"><input className="input" value={value.display_name} onChange={set("display_name")} required maxLength={200} autoComplete="off" placeholder="Jordan Rivera" /></Field>
+        {/* No leading spaces, so a name of only spaces is caught as missing. */}
+        <Field label="Name" requiredMessage="Add a name so you can find this client later."><input className="input" value={value.display_name} onChange={(e) => onChange({ ...value, display_name: e.target.value.trimStart() })} required maxLength={200} autoComplete="off" placeholder="Jordan Rivera" /></Field>
         <Field label="Company" optional><input className="input" value={value.company_name} onChange={set("company_name")} maxLength={200} autoComplete="off" /></Field>
         <Field
           label="Email"
           optional
+          error={fieldError(error, "email")}
           hint={duplicate.data ? <span style={{ color: "var(--warning)", fontWeight: 600 }}>Already used by <Link to={`/clients/${duplicate.data.id}`} target="_blank">{duplicate.data.display_name}</Link></span> : undefined}
         >
           <input className="input" type="email" value={value.email} onChange={set("email")} maxLength={200} autoComplete="off" />
         </Field>
-        <Field label="Phone" optional><input className="input" type="tel" value={value.phone} onChange={set("phone")} maxLength={40} autoComplete="off" /></Field>
+        <Field label="Phone" optional error={fieldError(error, "phone")}><input className="input" type="tel" value={value.phone} onChange={(e) => onChange({ ...value, phone: formatPhoneTyping(e.target.value) })} maxLength={40} autoComplete="off" /></Field>
         <Field label="Lead source" optional>
           <input className="input" value={value.lead_source} onChange={set("lead_source")} list="lead-sources" maxLength={120} placeholder="Referral, Google, yard sign…" />
           <datalist id="lead-sources">{LEAD_SOURCES.map((s) => <option key={s} value={s} />)}</datalist>
         </Field>
         <Field label="Status">
           <select className="select" value={value.status} onChange={set("status")}>
-            <option value="lead">Lead</option>
-            <option value="active">Active client</option>
-            <option value="archived">Archived</option>
+            {(["lead", "active", "archived"] as const).map((s) => <option key={s} value={s}>{statusText("client", s)}</option>)}
           </select>
         </Field>
       </div>
@@ -124,12 +128,13 @@ export function NewClientDialog({ open, onClose, onCreated, initialName = "" }: 
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<ClientFields>({ ...blank, display_name: initialName });
   const [address, setAddress] = useState(blankAddress);
-  useEffect(() => {
-    if (open) {
-      setFields({ ...blank, display_name: initialName });
-      setAddress(blankAddress);
-    }
-  }, [open, initialName]);
+  // Opened while searching, the name starts as what was searched for. Set in the render that
+  // opens it, so it never shows the old value first.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setFields({ ...blank, display_name: initialName });
+  }
   const create = useMutation({
     meta: { inline: true, success: "Client created" },
     mutationFn: async () => {
@@ -147,17 +152,29 @@ export function NewClientDialog({ open, onClose, onCreated, initialName = "" }: 
   });
 
   return (
-    <Dialog open={open} onClose={onClose} title="New client" size="lg">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      // Cleared once it has animated out, so it closes on what was typed and opens empty next time.
+      onExited={() => {
+        setFields(blank);
+        setAddress(blankAddress);
+        create.reset();
+      }}
+      title="New client"
+      size="lg"
+    >
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); create.mutate(); }}>
-        <ClientFieldset value={fields} onChange={setFields} />
+        <ClientFieldset value={fields} onChange={setFields} error={create.error} />
         <div className="form-section">
           <h3>Service address</h3>
           <AddressFields value={address} onChange={setAddress} />
         </div>
-        <FormError error={create.error} />
+        <FormError error={create.error} fields={["email", "phone"]} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={create.isPending} disabled={!fields.display_name.trim()}>Create client</Button>
+          <Button type="submit" variant="primary" loading={create.isPending}>Create client</Button>
         </div>
       </form>
     </Dialog>
@@ -193,7 +210,7 @@ export function EditClientDialog({ open, onClose, client }: { open: boolean; onC
   return (
     <Dialog open={open} onClose={onClose} title="Edit client" size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <ClientFieldset value={fields} onChange={setFields} clientId={client.id} />
+        <ClientFieldset value={fields} onChange={setFields} clientId={client.id} error={save.error} />
         <Field label="Internal notes" optional>
           <textarea className="textarea" value={fields.notes} onChange={(e) => setFields({ ...fields, notes: e.target.value })} maxLength={4000} />
         </Field>
@@ -202,10 +219,11 @@ export function EditClientDialog({ open, onClose, client }: { open: boolean; onC
           <p className="muted small" style={{ margin: "-8px 0 0" }}>Leave empty if it's the same as the service address.</p>
           <AddressFields value={address} onChange={setAddress} />
         </div>
-        <FormError error={save.error} />
+        <FormError error={save.error} fields={["email", "phone"]} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!fields.display_name.trim()}>Save changes</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>Save changes</Button>
         </div>
       </form>
     </Dialog>
@@ -287,12 +305,12 @@ export function ClientPicker({ value, onChange, allowCreate = true }: { value: P
           </button>
         ))}
         {canCreate && (
-          <button type="button" role="option" aria-selected={index === rows.length} className="card-row" onMouseMove={() => setIndex(rows.length)} onClick={() => choose(rows.length)} disabled={create.isPending} style={{ padding: "10px 12px", background: index === rows.length ? "var(--fill-2)" : "var(--surface)", color: "var(--green-dark)", fontWeight: 700 }}>
+          <button type="button" role="option" aria-selected={index === rows.length} className="card-row" onMouseMove={() => setIndex(rows.length)} onClick={() => choose(rows.length)} disabled={create.isPending} style={{ padding: "10px 12px", background: index === rows.length ? "var(--fill-2)" : "var(--surface)", color: "var(--green-dark)", fontWeight: 600 }}>
             <Icon name="plus" size={16} />
             {create.isPending ? "Creating…" : `Create “${term.trim()}” as a new client`}
           </button>
         )}
-        {!results.isPending && total === 0 && <div className="empty" style={{ padding: 16 }}>{term ? "No matching clients." : "No clients yet. Type a name to add one."}</div>}
+        {!results.isPending && total === 0 && <div className="empty" style={{ padding: 16 }}>{term ? "No matching clients" : "No clients yet. Type a name to add one."}</div>}
       </div>
     </div>
   );

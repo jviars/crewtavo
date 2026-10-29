@@ -1,12 +1,11 @@
 /** Time for the week: the running clock, hours per person per day, edits, and approval for payroll. */
 import { breakPay, isUnpaidBreak, SHORT_BREAK_MINUTES } from "@crewtavo/core/breaks";
-import { isIsoDate, localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
+import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -17,7 +16,9 @@ import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
 import { ClockCard } from "../field/ClockCard";
 import { CATEGORY_LABELS, type TimerCategory } from "../field/fieldData";
 import { useMyCrews } from "../schedule/myCrews";
@@ -45,6 +46,8 @@ interface Entry {
   job: { title: string } | null;
 }
 interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null; sub?: { id: string; name: string } }
+/** A week of time as the page loads it. */
+interface WeekData { rows: Entry[]; team: TeamMember[]; places: Record<string, EntryPlaces | undefined> }
 
 export function TimesheetsPage() {
   const session = useSession();
@@ -67,9 +70,10 @@ export function TimesheetsPage() {
   const [editing, setEditing] = useState<Entry | "new" | null>(null);
   const days = Array.from({ length: 7 }, (_, i) => addDaysIso(week, i));
 
+  const weekKey = ["time", session.company.id, week];
   const data = useQuery({
-    queryKey: ["time", session.company.id, week],
-    queryFn: async () => {
+    queryKey: weekKey,
+    queryFn: async (): Promise<WeekData> => {
       const [rows, team] = await Promise.all([
         supabase()
           .from("time_entries")
@@ -114,10 +118,21 @@ export function TimesheetsPage() {
     onSuccess: refresh,
   });
   const remove = useMutation({
-    meta: { success: "Time entry deleted" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("time_entries").delete().eq("id", id)),
     onSuccess: refresh,
   });
+  // Gone from the week at once with Undo on the toast; deleted for real once the toast leaves.
+  const removeLater = (entry: Entry) =>
+    undoable({
+      title: "Time entry deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: weekKey });
+        queryClient.setQueryData<WeekData>(weekKey, (d) => d && { ...d, rows: d.rows.filter((r) => r.id !== entry.id) });
+      },
+      restore: () => queryClient.setQueryData<WeekData>(weekKey, (d) => (d && !d.rows.some((r) => r.id === entry.id) ? { ...d, rows: [...d.rows, entry].sort((a, b) => a.started_at.localeCompare(b.started_at)) } : d)),
+      commit: () => remove.mutateAsync(entry.id),
+    });
 
   const name = (id: string) => memberName(data.data?.team.find((m) => m.user_id === id), "Team member");
   const color = (id: string) => data.data?.team.find((m) => m.user_id === id)?.profile?.color ?? "var(--text-3)";
@@ -221,34 +236,36 @@ export function TimesheetsPage() {
                 );
               })}
             </div>
-            {mine.map((r) => {
-              const canEdit = isOffice || (!r.approved_at && (r.user_id === session.userId || isLead));
-              return (
-                <div key={r.id} className="card-row">
-                  <span className="small strong" style={{ width: 92 }}>{dayLabel(dayOf(r.started_at))}</span>
-                  <span className="grow">
-                    <span className="tabular">{fmtTime(r.started_at)} – {r.ended_at ? fmtTime(r.ended_at) : "now"}</span>
-                    <span className="muted small" style={{ display: "block" }}>{r.visit?.title ?? r.job?.title ?? CATEGORY_LABELS[r.category]}{r.notes ? ` · ${r.notes}` : ""}</span>
-                    {placeOf(r.id) && <ClockPlaces places={placeOf(r.id)!} userId={r.user_id} name={name} />}
-                  </span>
-                  {isUnpaidBreak(r, pay)
-                    ? <span className="tabular muted" title={pay === "unpaid" ? "Breaks aren't paid time" : `Breaks over ${SHORT_BREAK_MINUTES} minutes aren't paid time`}>{hours(r.started_at, r.ended_at).toFixed(2)} h unpaid</span>
-                    : <span className="tabular strong">{hours(r.started_at, r.ended_at).toFixed(2)} h</span>}
-                  {r.auto_stopped_at && !r.approved_at && <span title="The clock was left running, so Crewtavo stopped it. Check the end time."><StatusPill label="Check end time" tone="danger" /></span>}
-                  {r.approved_at ? <StatusPill label="Approved" tone="good" /> : r.ended_at ? <StatusPill label="Pending" tone="warning" /> : <StatusPill label="Running" tone="info" />}
-                  {canEdit && (
-                    <Menu
-                      triggerClassName="btn btn-sm btn-ghost btn-icon"
-                      items={[
-                        { label: "Edit", icon: "edit", hidden: !r.ended_at, onSelect: () => setEditing(r) },
-                        { label: "Remove approval", icon: "undo", hidden: !approvable(r.user_id) || !r.approved_at, onSelect: () => unapprove.mutate(r.id) },
-                        { label: "Delete", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Delete this time entry?", confirmLabel: "Delete", danger: true })) && remove.mutate(r.id) },
-                      ]}
-                    />
-                  )}
-                </div>
-              );
-            })}
+            <EntryRows>
+              {mine.map((r) => {
+                const canEdit = isOffice || (!r.approved_at && (r.user_id === session.userId || isLead));
+                return (
+                  <div key={r.id} className="card-row">
+                    <span className="small strong" style={{ width: 92 }}>{dayLabel(dayOf(r.started_at))}</span>
+                    <span className="grow">
+                      <span className="tabular">{fmtTime(r.started_at)} – {r.ended_at ? fmtTime(r.ended_at) : "now"}</span>
+                      <span className="muted small" style={{ display: "block" }}>{r.visit?.title ?? r.job?.title ?? CATEGORY_LABELS[r.category]}{r.notes ? ` · ${r.notes}` : ""}</span>
+                      {placeOf(r.id) && <ClockPlaces places={placeOf(r.id)!} userId={r.user_id} name={name} />}
+                    </span>
+                    {isUnpaidBreak(r, pay)
+                      ? <span className="tabular muted" title={pay === "unpaid" ? "Breaks aren't paid time" : `Breaks over ${SHORT_BREAK_MINUTES} minutes aren't paid time`}>{hours(r.started_at, r.ended_at).toFixed(2)} h unpaid</span>
+                      : <span className="tabular strong">{hours(r.started_at, r.ended_at).toFixed(2)} h</span>}
+                    {r.auto_stopped_at && !r.approved_at && <span title="The clock was left running, so Crewtavo stopped it. Check the end time."><StatusPill label="Check end time" tone="danger" /></span>}
+                    {r.approved_at ? <StatusPill label="Approved" tone="good" /> : r.ended_at ? <StatusPill label="Pending" tone="warning" /> : <StatusPill label="Running" tone="info" />}
+                    {canEdit && (
+                      <Menu
+                        triggerClassName="btn btn-sm btn-ghost btn-icon"
+                        items={[
+                          { label: "Edit", icon: "edit", hidden: !r.ended_at, onSelect: () => setEditing(r) },
+                          { label: "Remove approval", icon: "undo", hidden: !approvable(r.user_id) || !r.approved_at, onSelect: () => unapprove.mutate(r.id) },
+                          { label: "Delete", icon: "trash", danger: true, onSelect: () => removeLater(r) },
+                        ]}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </EntryRows>
           </section>
         );
       })}
@@ -256,6 +273,12 @@ export function TimesheetsPage() {
       {editing && <TimeEntryDialog entry={editing === "new" ? null : editing} team={data.data?.team ?? []} defaultDate={isThisWeek ? todayIn(tz) : week} onClose={() => setEditing(null)} onSaved={refresh} />}
     </>
   );
+}
+
+/** A person's entries for the week, sliding into place as they're added, deleted or put back. */
+function EntryRows({ children }: { children: ReactNode }) {
+  const ref = useListAnimation<HTMLDivElement>();
+  return <div ref={ref}>{children}</div>;
 }
 
 /** Where the clock started and stopped, for the office and crew leads. Each place opens on a map. */
@@ -324,8 +347,8 @@ function TimeEntryDialog({ entry, team, defaultDate, onClose, onSaved }: { entry
           </Field>
         )}
         <div className="form-grid">
-          <Field label="Date" error={isIsoDate(date) ? null : "Pick a date"}><input className="input" type="date" value={date} max={todayIn(tz)} onChange={(e) => setDate(e.target.value)} required /></Field>
-          <Field label="Start"><input className="input" type="time" value={start} onChange={(e) => setStart(e.target.value)} required /></Field>
+          <Field label="Date"><input className="input" type="date" value={date} max={todayIn(tz)} onChange={(e) => setDate(e.target.value)} required /></Field>
+          <Field label="Start" error={future ? "Pick a start time that has passed." : null}><input className="input" type="time" value={start} onChange={(e) => setStart(e.target.value)} required /></Field>
           <Field label="End" hint={length > 0 ? `${length.toFixed(2)} hours${end <= start ? " (ends the next day)" : ""}` : undefined}><input className="input" type="time" value={end} onChange={(e) => setEnd(e.target.value)} required /></Field>
         </div>
         <Field label="Type">
@@ -337,8 +360,9 @@ function TimeEntryDialog({ entry, team, defaultDate, onClose, onSaved }: { entry
         {length > 12 && <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">That's a {length.toFixed(1)}-hour entry. Double-check the times.</div></div>}
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={future || !span}>{entry ? "Save" : "Add time"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{entry ? "Save" : "Add time"}</Button>
         </div>
       </form>
     </Dialog>

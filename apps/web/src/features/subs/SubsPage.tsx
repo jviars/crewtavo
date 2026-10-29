@@ -111,7 +111,8 @@ function SubsList() {
         <div className="card"><ErrorState error={list.error} onRetry={() => list.refetch()} /></div>
       ) : all.length === 0 ? (
         <div className="card">
-          <EmptyState icon="users" title="Keep your subs' paperwork in one place" action={addButton}>
+          {/* Add a sub is the page header's green button, so it isn't repeated here. */}
+          <EmptyState icon="users" title="Keep your subs' paperwork in one place">
             Add the crews you hire for jobs and keep their W-9 and insurance certificates current. Up-to-date certificates can save you real money at your workers' comp audit.
           </EmptyState>
         </div>
@@ -202,7 +203,7 @@ function Reminders() {
   return (
     <>
       <strong>Reminders</strong>
-      <label className="switch-row" style={{ fontWeight: 500 }}>
+      <label className="switch-row" style={{ fontWeight: 400 }}>
         <input type="checkbox" className="switch" checked={checked} disabled={save.isPending} onChange={(e) => save.mutate(e.target.checked)} />
         Remind subs when their insurance is about to expire
       </label>
@@ -251,7 +252,7 @@ function SignInCountries() {
         {countries.map((code) => (
           <span key={code} className="chip">
             {countryLabel(code)}
-            <button type="button" aria-label={`Stop texting codes to ${countryLabel(code)}`} disabled={save.isPending} onClick={() => save.mutate(countries.filter((c) => c !== code))}><Icon name="x" size={10} strokeWidth={2} /></button>
+            <button type="button" aria-label={`Stop texting codes to ${countryLabel(code)}`} disabled={save.isPending} onClick={() => save.mutate(countries.filter((c) => c !== code))}><Icon name="x" size={12} strokeWidth={2} /></button>
           </span>
         ))}
       </div>

@@ -31,7 +31,7 @@ export function MaterialSearch({ initial = "", onPick, autoFocus }: { initial?: 
   return (
     <div className="stack-sm" style={{ gap: 10 }}>
       <div className="input-group">
-        <span className="addon"><Icon name="search" size={15} /></span>
+        <span className="addon"><Icon name="search" size={14} /></span>
         <input
           className="input"
           type="search"
@@ -50,7 +50,7 @@ export function MaterialSearch({ initial = "", onPick, autoFocus }: { initial?: 
       ) : results.error ? (
         <span className="field-error" role="alert">{(results.error as Error).message}</span>
       ) : !items.length ? (
-        <span className="muted small" role="status">Nothing at {results.data?.branch_name ?? "your branch"} matches "{query}". Try fewer words, or the brand's name.</span>
+        <span className="muted small" role="status">Nothing at {results.data?.branch_name ?? "your branch"} matches “{query}”. Try fewer words, or the brand's name.</span>
       ) : (
         <div className="material-results" role="list" aria-label={`Items at ${results.data?.branch_name}`}>
           {items.map((item) => {
