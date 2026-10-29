@@ -14,9 +14,10 @@ export function readAmount(draft: string, { percent, max }: { percent?: boolean;
 
 /**
  * Dollar or percent field that saves on blur or Enter and rejects bad values. `onEdit` hears each
- * keystroke, for a page's "Edited" save status (components/ui/SaveStatus).
+ * keystroke, for a page's "Edited" save status (components/ui/SaveStatus), and
+ * `onUnchanged` hears a blur that saves nothing (the same value, or one it turned down).
  */
-export function MoneyInput({ value, onSave, onEdit, percent, max, width = 120, label }: { value: number; onSave: (v: number) => void; onEdit?: () => void; percent?: boolean; max?: number; width?: number; label?: string }) {
+export function MoneyInput({ value, onSave, onEdit, onUnchanged, percent, max, width = 120, label }: { value: number; onSave: (v: number) => void; onEdit?: () => void; onUnchanged?: () => void; percent?: boolean; max?: number; width?: number; label?: string }) {
   const [draft, setDraft] = useState(String(value));
   const [error, setError] = useState(false);
   useEffect(() => setDraft(String(value)), [value]);
@@ -26,9 +27,11 @@ export function MoneyInput({ value, onSave, onEdit, percent, max, width = 120, l
       setError(true);
       setDraft(String(value));
       setTimeout(() => setError(false), 1500);
+      onUnchanged?.();
       return;
     }
     if (rounded !== value) onSave(rounded);
+    else onUnchanged?.();
   };
   return (
     <span className="input-group" style={{ width }}>

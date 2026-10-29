@@ -243,7 +243,7 @@ function EditRequestDialog({ request, onClose, onSaved }: { request: { id: strin
   return (
     <Dialog open onClose={onClose} title="Edit request">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (title.trim()) save.mutate(); }}>
-        <Field label="Title" requiredMessage="Say what they need, like a driveway estimate."><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} /></Field>
+        <Field label="Title" requiredMessage="Say what they need, like a driveway estimate."><input className="input" value={title} onChange={(e) => setTitle(e.target.value.trimStart())} required maxLength={200} /></Field>
         {request.client_id && <Field label="Property"><PropertySelect clientId={request.client_id} value={propertyId} onChange={setPropertyId} /></Field>}
         <Field label="Details" optional><textarea className="textarea" value={details} onChange={(e) => setDetails(e.target.value)} maxLength={4000} /></Field>
         <FormError error={save.error} />

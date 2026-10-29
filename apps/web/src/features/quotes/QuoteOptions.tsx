@@ -399,7 +399,7 @@ function EditOptionDialog({ option, onClose, onSaved }: { option: QuoteOptionRow
       >
         <div className={styles.nameRow}>
           <Field label="Name" className={styles.nameField}>
-            <input className="input" required value={name} maxLength={PACKAGE_LIMITS.name} onChange={(e) => setName(e.target.value)} />
+            <input className="input" required value={name} maxLength={PACKAGE_LIMITS.name} onChange={(e) => setName(e.target.value.trimStart())} />
           </Field>
           <Field label="Tier" optional className={styles.tierField}>
             <input className="input" list={tiersId} value={tier} maxLength={PACKAGE_LIMITS.tier} placeholder="Good, Better…" onChange={(e) => setTier(e.target.value)} />

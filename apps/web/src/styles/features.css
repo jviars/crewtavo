@@ -55,6 +55,11 @@
   --tint-bg: color-mix(in srgb, var(--tint) 18%, var(--surface));
   --tint-text: color-mix(in srgb, var(--tint) 40%, var(--ink));
 }
+/* A visit that's done: a paler tint and edge rather than see-through, so its words keep their 4.5:1. */
+:is(.tg-event, .month-chip)[data-status="completed"], :root.dark :is(.tg-event, .month-chip)[data-status="completed"] {
+  --tint-bg: color-mix(in srgb, var(--tint) 8%, var(--surface));
+  border-left-color: color-mix(in srgb, var(--tint) 50%, var(--surface));
+}
 
 .month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--border); gap: 1px; }
 .month-head { padding: 8px; font-size: var(--fs-11); font-weight: 600; color: var(--text-3); background: var(--fill); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
@@ -69,9 +74,8 @@
 .month-chip { display: block; width: 100%; padding: 2px 6px; border: 0; border-left: 3px solid var(--tint); border-radius: var(--radius-sm); background: var(--tint-bg); font-size: var(--fs-11); font-weight: 600; text-align: left; color: var(--tint-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background var(--dur-fast); }
 .month-chip:hover { background: color-mix(in srgb, var(--tint) 7%, var(--tint-bg)); }
 .month-chip[data-selected] { background: color-mix(in srgb, var(--tint) 12%, var(--tint-bg)); }
-.month-chip[data-status="completed"] { opacity: 0.55; }
 .month-more { font-size: var(--fs-11); font-weight: 600; color: var(--text-3); border: 0; background: none; text-align: left; padding: 0 4px; }
-@media (max-width: 700px) { .month-cell { min-height: 64px; } .month-chip, .month-chip:hover, .month-chip[data-selected] { font-size: 0; height: 6px; padding: 0; border-left-width: 0; background: var(--tint); } }
+@media (max-width: 700px) { .month-cell { min-height: 64px; } .month-chip, .month-chip:hover, .month-chip[data-selected] { font-size: 0; height: 6px; padding: 0; border-left-width: 0; background: var(--tint); } .month-chip[data-status="completed"] { opacity: 0.55; } }
 
 /* Which color is which crew, for the week and month views (the day view names a crew over each lane). */
 .crew-legend { display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: var(--fs-12); color: var(--text-3); }
@@ -175,10 +179,21 @@ a.field-card:active { transform: scale(0.99); }
 /*
  * A visit's buttons (FieldVisitPage): its next step beside Call, Text and Directions. On a phone the
  * next step moves to a bar above the tab bar, in thumb reach while the crew scrolls the checklist. It
- * fades in once the screen has slid into place: during the slide a fixed bar would ride along.
+ * fades in once the screen has slid into place: during the slide a fixed bar would ride along. Until
+ * it shows, it takes no taps.
  */
 .field-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
 .field-commit { display: contents; }
+/*
+ * Wider than a phone, a next step on its own (Start visit, or Complete visit and what's left) has a
+ * row of its own, with Call, Text and Directions sharing the row under it: in a cell beside them,
+ * Complete visit and what's left doesn't fit. On my way and Start visit stay in the grid.
+ */
+@media (min-width: 901px) {
+  .field-actions:has(> .field-commit > .btn:only-child) { display: flex; flex-wrap: wrap; }
+  .field-actions:has(> .field-commit > .btn:only-child) > * { flex: 1 1 140px; }
+  .field-commit > .btn:only-child { flex: 1 1 100%; }
+}
 .field-commit-left { font-weight: 600; color: var(--text-2); }
 .field-commit-room { display: none; }
 /* How much of the checklist's required part is in, on Complete visit. */
@@ -191,15 +206,19 @@ a.field-card:active { transform: scale(0.99); }
     position: fixed; z-index: 19; inset: auto 0 calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)) 0;
     display: flex; gap: 8px; padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
     border-top: 1px solid var(--border); background: color-mix(in srgb, var(--page) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    animation: fade-in var(--dur) var(--ease-out) var(--dur-slow) both;
+    animation: commit-in var(--dur) var(--ease-out) var(--dur-slow) both;
   }
   .field-commit > .btn { flex: 1 1 0; min-width: 0; }
+  /* Still working: above the button, clear of the tab bar, on the page's color over what scrolls under. */
+  .field-commit .btn-slow { top: auto; bottom: calc(100% + 3px); padding: 2px 6px; border-radius: var(--radius-sm); background: var(--page); }
   .field-commit-room { display: block; height: 40px; }
   /* Out of the way while the keyboard is up, as the tab bar is. */
   body:has(.mobile-nav[data-typing]) .field-commit { display: none; }
   /* Toasts and the task island come up above it. */
   body:has(.field-commit) :is(.toaster, .task-island) { margin-bottom: calc(var(--control-lg) + 17px); }
 }
+/* Hidden from taps as well as from sight until it fades in, each time it comes back too (the keyboard closing). */
+@keyframes commit-in { from { opacity: 0; visibility: hidden; } }
 @media (prefers-reduced-transparency: reduce) { .field-commit { background: var(--page); backdrop-filter: none; -webkit-backdrop-filter: none; } }
 
 /* A visit's checklist: a box's whole row is its label, so a tap anywhere on it ticks it. */
@@ -995,7 +1014,6 @@ button.material-result:focus-visible { outline: none; box-shadow: var(--ring); }
 .tg-event[data-selected] { background: color-mix(in srgb, var(--tint) 12%, var(--tint-bg)); z-index: 2; }
 .tg-event > span:not(.tg-resize) { flex-shrink: 0; }
 .tg-event:focus-visible { box-shadow: var(--ring); z-index: 2; }
-.tg-event[data-status="completed"] { opacity: 0.6; }
 .tg-event[data-status="in_progress"], .tg-event[data-status="en_route"] { box-shadow: 0 0 0 2px var(--info-tint); }
 .tg-event[data-kind="task"], .tg-event[data-kind="event"] { border-left-style: dashed; }
 .tg-event[data-conflict] { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }

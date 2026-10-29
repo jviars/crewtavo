@@ -18,6 +18,7 @@ import { Menu } from "@/components/ui/Menu";
 import type { SaveStatusHandle } from "@/components/ui/SaveStatus";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
+import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
 import { formatMoneyCents, formatNumber } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -125,7 +126,7 @@ export function LineItems({
   shownOptionId?: string | null;
   /** The quote's options, for where each line is ("On every option", "Only on Better"). */
   options?: ReadonlyArray<{ id: string; name: string }>;
-  /** The page header's save status (useSaveStatus): each field's save shows there, and its failure too, in place of a toast. */
+  /** The page header's save status (useSaveStatus): each field's save shows there, and its failure too; a toast only says why one was turned down. */
   saveStatus?: SaveStatusHandle;
   /** On a quote that offers no options yet: "Offer options" in the add row, beside "Custom item". */
   onOfferOptions?: () => void;
@@ -479,11 +480,15 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
   const [draft, setDraft] = useState(line);
   useEffect(() => setDraft(line), [line]);
   const save = useMutation({
-    // With a save status in the header, a failure says so there instead of in a toast.
+    // With a save status in the header, a failure says so there instead of in a toast, unless it
+    // was turned down (an approved quote's lines, say): then the toast says why, as trying again won't help.
     meta: { inline: Boolean(saveStatus) },
     mutationFn: async (patch: Partial<Line>) => unwrap(await supabase().from(table).update(patch as never).eq("id", line.id)),
     onSuccess: onChanged,
-    onError: () => setDraft(line),
+    onError: (error) => {
+      setDraft(line);
+      if (saveStatus && !isNetworkError(error) && !isAuthError(error) && !(error instanceof ApiError && isRestarting(error.status))) toast.error(errorMessage(error));
+    },
   });
   // Moved onto another option, the line leaves this list: the toast says where it went.
   const moveTo = useMutation({

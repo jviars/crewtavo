@@ -136,7 +136,8 @@ export function RestartBanner() {
             Crewtavo is restarting. <span aria-hidden="true">{trying ? "Trying again…" : `Trying again in ${seconds}s`}</span>
             <span className="sr-only">It tries again by itself.</span>
           </span>
-          <button type="button" className="restart-banner-try" disabled={trying} onClick={() => void tryNow()}>Try now</button>
+          {/* While it tries it ignores presses but keeps focus (aria-disabled, not disabled). */}
+          <button type="button" className="restart-banner-try" aria-disabled={trying || undefined} onClick={() => !trying && void tryNow()}>Try now</button>
         </>
       )}
     </div>

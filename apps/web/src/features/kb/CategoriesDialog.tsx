@@ -2,6 +2,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
+import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -10,7 +11,6 @@ import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
-import { undoable } from "@/lib/undo";
 import { useCategories } from "./kbData";
 
 export function CategoriesDialog({ onClose, counts }: { onClose: () => void; counts: (id: string) => number }) {
@@ -45,26 +45,10 @@ export function CategoriesDialog({ onClose, counts }: { onClose: () => void; cou
     onSettled: refresh,
   });
   const remove = useMutation({
-    meta: { inline: true },
+    meta: { success: "Category removed" },
     mutationFn: async (id: string) => unwrap(await supabase().from("sop_categories").delete().eq("id", id)),
     onSettled: refresh,
   });
-  type Category = NonNullable<typeof categories.data>[number];
-  // Gone at once, with Undo. Once it's removed for real its guides move to Uncategorized; nothing is deleted.
-  const removeCategory = (category: Category) => {
-    const key = ["kb", company.id, "categories"];
-    const n = counts(category.id);
-    undoable({
-      title: "Category removed",
-      description: n ? `Its ${n} ${n === 1 ? "guide moves" : "guides move"} to Uncategorized.` : undefined,
-      hide: () => {
-        void queryClient.cancelQueries({ queryKey: key });
-        queryClient.setQueryData<Category[]>(key, (old) => old?.filter((c) => c.id !== category.id));
-      },
-      restore: () => queryClient.setQueryData<Category[]>(key, (old) => (old && !old.some((c) => c.id === category.id) ? [...old, category].sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name)) : old)),
-      commit: () => remove.mutateAsync(category.id),
-    });
-  };
 
   const added = useJustDone(add);
   const list = useListAnimation<HTMLDivElement>();
@@ -100,7 +84,10 @@ export function CategoriesDialog({ onClose, counts }: { onClose: () => void; cou
                 type="button"
                 className="icon-btn"
                 aria-label={`Remove ${c.name}`}
-                onClick={() => removeCategory(c)}
+                onClick={async () => {
+                  const n = counts(c.id);
+                  if (await confirm({ title: `Remove “${c.name}”?`, body: n ? `Its ${n} ${n === 1 ? "guide moves" : "guides move"} to Uncategorized. Nothing is deleted.` : "This category is empty.", confirmLabel: "Remove", danger: true })) remove.mutate(c.id);
+                }}
               >
                 <Icon name="trash" size={16} />
               </button>

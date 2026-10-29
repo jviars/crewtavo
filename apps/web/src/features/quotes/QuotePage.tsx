@@ -33,7 +33,7 @@ import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { ApiError, errorMessage } from "@/lib/errors";
+import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
 import { addressLine, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -389,11 +389,15 @@ export function QuotePage() {
     onSuccess: refresh,
   });
   // A field saved in place (title, message, discount, tax, deposit, end date, template): the
-  // header's save status says how it went, so it has no toast of its own.
+  // header's save status says how it went, so it has no toast of its own. Offline or restarting,
+  // "Couldn't save" is enough; a refusal also says why in a toast, since trying again won't help.
   const edit = useMutation({
     meta: { inline: true },
     mutationFn: async (patch: TablesUpdate<"quotes">) => unwrap(await supabase().from("quotes").update(patch).eq("id", id)),
     onSuccess: refresh,
+    onError: (error) => {
+      if (!isNetworkError(error) && !isAuthError(error) && !(error instanceof ApiError && isRestarting(error.status))) toast.error(errorMessage(error));
+    },
   });
   const saveField = (patch: TablesUpdate<"quotes">) => save.track(edit.mutateAsync(patch));
   // A field left without a change takes back its "Edited".
@@ -676,6 +680,7 @@ export function QuotePage() {
               suggestedCode={sitePriced ? null : q.request?.promo_code}
               onSaveDiscount={(v) => saveField({ discount_amount: v })}
               onEditDiscount={save.edited}
+              onUnchangedDiscount={unchanged}
               onChanged={refresh}
             />
             {offers && (editable || Number(q.discount_amount) > 0) && (
@@ -683,13 +688,13 @@ export function QuotePage() {
             )}
             <div className="line">
               <span>Tax {editable ? "" : `(${formatTaxRate(q.tax_rate)})`}</span>
-              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} /> : <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />}
+              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />}
             </div>
             {editable && <div className="line"><span>Tax amount</span><AnimatedNumber value={tab.tax} format={MONEY_CENTS} /></div>}
             <div className="line grand"><span>Total</span><AnimatedNumber value={tab.total} format={MONEY_CENTS} /></div>
             <div className="line">
               <span>Deposit required</span>
-              {editable ? <MoneyInput label="Deposit" value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => saveField({ deposit_amount: v })} onEdit={save.edited} /> : <span>{formatMoneyCents(q.deposit_amount)}</span>}
+              {editable ? <MoneyInput label="Deposit" value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => saveField({ deposit_amount: v })} onEdit={save.edited} onUnchanged={unchanged} /> : <span>{formatMoneyCents(q.deposit_amount)}</span>}
             </div>
             {cap.name && editable && Number(q.deposit_amount) > cap.amount && (
               <p className={styles.warn}>That's more than {cap.name} comes to ({formatMoneyCents(cap.amount)}). Lower it so it fits whichever option they choose.</p>

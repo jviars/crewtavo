@@ -241,7 +241,8 @@ export function Field({ label, hint, error, optional, requiredMessage, children,
         {fine && !note && <span className="field-ok"><Icon name="check" size={14} strokeWidth={2} /></span>}
       </span>
       {children}
-      {note ? <span id={noteId} className="field-error" role="alert">{note}</span> : hint && <span id={noteId} className="hint">{hint}</span>}
+      {/* Only a server's answer interrupts; a check of what was typed is read with the field it describes. */}
+      {note ? <span id={noteId} className="field-error" role={error ? "alert" : undefined}>{note}</span> : hint && <span id={noteId} className="hint">{hint}</span>}
     </div>
   );
 }

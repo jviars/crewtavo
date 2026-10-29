@@ -22,7 +22,7 @@ import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus, StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage, isAuthError } from "@/lib/errors";
 import { signedUrls, uploadFile } from "@/lib/files";
 import { addressLine, formatDateTime, timeAgo } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
@@ -127,6 +127,7 @@ export function FieldVisitPage() {
   const going = statusTap.locating === id ? "locating" : statusMutation.isPending && !statusMutation.isPaused ? (statusMutation.variables?.status ?? null) : null;
 
   // Notes save a moment after the crew stops typing, and when they leave the box.
+  const showing = useShowing();
   const saveNotes = useMutation({
     mutationKey: ["visit-notes"],
     scope: FIELD_SCOPE,
@@ -134,7 +135,9 @@ export function FieldVisitPage() {
     onMutate: (change: VisitNotesSave) => {
       queryClient.setQueryData<typeof visit.data>(["field-visit", id], (old) => old && { ...old, notes: change.notes });
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["field-visit", id], exact: true }),
+    onError: toastIfGone(showing),
+    // Not waited on: the next field action in line goes without waiting for this reload.
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["field-visit", id], exact: true }),
   });
   const notesSave = useAutoSave((text: string) => saveNotes.mutateAsync({ companyId: session.company.id, visitId: id, notes: text.trim() || null }), 1000);
   const notesSending = useIsMutating({ mutationKey: ["visit-notes"], predicate: (m) => (m.state.variables as VisitNotesSave | undefined)?.visitId === id });
@@ -256,7 +259,7 @@ export function FieldVisitPage() {
         </section>
       )}
 
-      <VisitWork visitId={v.id} checklist={checklist} onProgress={setProgress} jobId={v.job && !sub ? v.job.id : null} />
+      <VisitWork visitId={v.id} visitStatus={v.status} checklist={checklist} onProgress={setProgress} jobId={v.job && !sub ? v.job.id : null} />
 
       <section className="card card-pad stack-sm">
         <div className="row-between">
@@ -287,11 +290,11 @@ export function FieldVisitPage() {
 }
 
 /** The checklist, materials and photos, sharing the visit's photos (a checklist item can ask for them). */
-function VisitWork({ visitId, checklist, onProgress, jobId }: { visitId: string; checklist: RefObject<ChecklistHandle>; onProgress: (p: ChecklistProgress | null | undefined) => void; jobId: string | null }) {
+function VisitWork({ visitId, visitStatus, checklist, onProgress, jobId }: { visitId: string; visitStatus: string; checklist: RefObject<ChecklistHandle>; onProgress: (p: ChecklistProgress | null | undefined) => void; jobId: string | null }) {
   const photos = useVisitPhotos(visitId);
   return (
     <>
-      <Checklist ref={checklist} visitId={visitId} photos={photos} onProgress={onProgress} />
+      <Checklist ref={checklist} visitId={visitId} visitStatus={visitStatus} photos={photos} onProgress={onProgress} />
       {jobId && <MaterialsCard jobId={jobId} visitId={visitId} compact />}
       <Photos photos={photos} />
     </>
@@ -342,6 +345,27 @@ function useAutoSave<V>(send: (variables: V) => Promise<unknown>, delay: number)
   return { status, change, flush, waiting: () => next.current !== null };
 }
 
+/** False once the screen has gone, for saves that come back after it. */
+function useShowing() {
+  const showing = useRef(false);
+  useEffect(() => {
+    showing.current = true;
+    return () => {
+      showing.current = false;
+    };
+  }, []);
+  return showing;
+}
+
+/**
+ * For a save whose error the screen shows (meta.inline): turned down once the screen has gone (sent
+ * as the crew left it, or when the signal came back), a toast says so instead. A lost sign-in is
+ * said by lib/queryClient.ts.
+ */
+const toastIfGone = (showing: RefObject<boolean>) => (error: Error) => {
+  if (!showing.current && !isAuthError(error)) toast.error(errorMessage(error));
+};
+
 /**
  * How a part that saves as the crew goes stands: SaveStatus, or kept on the phone until there's
  * signal. `waiting` is a save of it not sent yet, from this screen or from before the app was
@@ -381,12 +405,13 @@ function Required() {
   );
 }
 
-const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPhotos; onProgress: (p: ChecklistProgress | null | undefined) => void }>(function Checklist({ visitId, photos, onProgress }, ref) {
+const Checklist = forwardRef<ChecklistHandle, { visitId: string; visitStatus: string; photos: VisitPhotos; onProgress: (p: ChecklistProgress | null | undefined) => void }>(function Checklist({ visitId, visitStatus, photos, onProgress }, ref) {
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
   const root = useRef<HTMLElement>(null);
   const flashing = useRef<number | undefined>(undefined);
+  const showing = useShowing();
   const data = useQuery({
     queryKey: ["checklist", visitId],
     queryFn: async () => {
@@ -394,9 +419,10 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPh
         supabase().from("checklist_templates").select("id, name, items").eq("company_id", company.id).eq("active", true).order("name"),
         supabase().from("checklist_responses").select("id, template_id, answers, completed_at, completed_by").eq("visit_id", visitId).limit(1),
       ]);
-      // A save still waiting on this phone is newer than what the server has.
+      // A save still waiting on this phone is newer than what the server has (its answers too, unless it only marks the checklist done).
       const queued = pendingVisitSave<ChecklistSave>(queryClient, "checklist-save", visitId);
-      const response = queued ? { id: queued.responseId, template_id: queued.templateId, answers: queued.answers as never, completed_at: queued.completedAt, completed_by: null } : (unwrap(responses)[0] ?? null);
+      const saved = unwrap(responses)[0] ?? null;
+      const response = queued ? { id: queued.responseId, template_id: queued.templateId, answers: (queued.answers ?? saved?.answers ?? {}) as never, completed_at: queued.completedAt, completed_by: null } : saved;
       return { templates: unwrap(templates), response };
     },
   });
@@ -414,10 +440,12 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPh
     meta: { inline: true },
     onMutate: (v: ChecklistSave) => {
       queryClient.setQueryData<typeof data.data>(["checklist", visitId], (old) =>
-        old && { ...old, response: { id: v.responseId, template_id: v.templateId, answers: v.answers as never, completed_at: v.completedAt, completed_by: null } },
+        old && { ...old, response: { id: v.responseId, template_id: v.templateId, answers: (v.answers ?? old.response?.answers ?? {}) as never, completed_at: v.completedAt, completed_by: null } },
       );
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["checklist", visitId] }),
+    onError: toastIfGone(showing),
+    // Not waited on: the next field action in line goes without waiting for this reload.
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["checklist", visitId] }),
   });
   const autosave = useAutoSave((v: ChecklistSave) => saveMutation.mutateAsync(v), 500);
   const sending = useIsMutating({ mutationKey: ["checklist-save"], predicate: (m) => (m.state.variables as ChecklistSave | undefined)?.visitId === visitId });
@@ -457,12 +485,12 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPh
   }, [data.isPending, template?.id, done, required, missingKeys]);
   useEffect(() => () => onProgress(null), [onProgress]);
 
-  const variables = (next: Record<string, unknown>, chosen: string, completedAt: string | null = null): ChecklistSave => ({
+  const variables = (next: Record<string, unknown> | undefined, chosen: string, completedAt: string | null = null): ChecklistSave => ({
     companyId: company.id,
     visitId,
     responseId: data.data?.response?.id ?? newId,
     templateId: chosen || null,
-    answers: next,
+    ...(next && { answers: next }),
     completedAt,
   });
   const set = (key: string, value: unknown) => {
@@ -476,10 +504,17 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPh
     autosave.change(variables(answersNow.current, id));
   };
 
+  // Marked done, the answers go along only while some made here are still to send. Otherwise the
+  // saved ones stay: this phone's copy may be older than a crewmate's answers from another phone.
+  const markDone = () => {
+    autosave.change(variables(sending > 0 || autosave.waiting() ? answersNow.current : undefined, templateId, new Date().toISOString()));
+    autosave.flush();
+  };
+
   useImperativeHandle(ref, () => ({
     finish: (complete) => {
-      // Done: what's in goes once more, marked done. Completed anyway: as it is, unfinished.
-      if (complete && template && !done) autosave.change(variables(answersNow.current, templateId, new Date().toISOString()));
+      // Done: marked done. Completed anyway: what's in goes as it is, unfinished.
+      if (complete && template && !done) return markDone();
       autosave.flush();
     },
     showMissing: () => {
@@ -493,8 +528,9 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPh
       row.setAttribute("data-flash", "");
       window.clearTimeout(flashing.current);
       flashing.current = window.setTimeout(() => row.removeAttribute("data-flash"), 1300);
-      // A box or a list takes the focus without opening the keyboard; a text field would.
-      row.querySelector<HTMLElement>('input[type="checkbox"], select')?.focus({ preventScroll: true });
+      // A box takes the focus; for anything else the row does. A list or a text field would count as
+      // typing (AppShell hides the phone's bars for the keyboard), with no keyboard or picker open.
+      (row.querySelector<HTMLElement>('input[type="checkbox"]') ?? row).focus({ preventScroll: true });
     },
   }));
 
@@ -523,7 +559,7 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPh
       )}
       <div>
         {items.map((item) => (
-          <div key={item.key} className="check-row" data-check={item.key}>
+          <div key={item.key} className="check-row" data-check={item.key} tabIndex={-1}>
             {item.type === "check" ? (
               // The whole row is the box's label, so a tap anywhere on it ticks it.
               <label className="checkbox">
@@ -553,6 +589,8 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; photos: VisitPh
         ))}
       </div>
       <FormError error={saveMutation.error} />
+      {/* Under way, Complete visit marks it done. Otherwise this does: completed on My day, by the office, or anyway with the rest done after. */}
+      {template && !done && !missing.length && visitStatus !== "in_progress" && <Button icon="check" style={{ justifySelf: "start" }} onClick={markDone}>Mark done</Button>}
       {done && hasRole(session, "admin", "office", "crew_lead") && <Button variant="ghost" icon="undo" style={{ justifySelf: "start" }} loading={reopen.isPending} onClick={() => reopen.mutate()}>Reopen checklist</Button>}
     </section>
   );
@@ -582,8 +620,11 @@ function useVisitPhotos(visitId: string) {
     },
   });
   const upload = useMutation({
+    // With no signal the photos wait here, on the screen as they will be, and go up once it's back
+    // (not kept on the phone like the field actions: closing the app loses them).
+    networkMode: "online",
+    onMutate: (files: File[]) => setUploading((n) => n + files.length),
     mutationFn: async (files: File[]) => {
-      setUploading((n) => n + files.length);
       let stopped = false;
       const task = startTask({ label: files.length === 1 ? "Adding a photo" : `Adding ${files.length} photos`, total: files.length, cancel: () => (stopped = true) });
       const problems: string[] = [];

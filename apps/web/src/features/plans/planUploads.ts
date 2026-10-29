@@ -74,7 +74,12 @@ export async function addPlanFiles({ companyId, card, files, target, replaces = 
     const control: { stopped: boolean; upload: Upload | null } = { stopped: false, upload: null };
     const stop = () => {
       control.stopped = true;
-      control.upload?.abort();
+      if (control.upload) control.upload.abort();
+      else {
+        // Still waiting its turn: out of the line now, not once the files ahead of it are through.
+        update(uploads.filter((u) => u.key !== key));
+        task.dismiss();
+      }
     };
     const task = startTask({ label: `Uploading ${file.name}`, detail: fileSize(file.size), total: file.size, cancel: stop });
     const entry: PlanUpload = { key, card, name: file.name, size: file.size, progress: null, stop };
@@ -86,8 +91,9 @@ export async function addPlanFiles({ companyId, card, files, target, replaces = 
   let added = 0;
   let lastId: string | null = null;
   for (const { key, file, control, task } of queue) {
+    // Taken out of the line before its turn (stop): already gone from the card and the island.
+    if (control.stopped) continue;
     try {
-      if (control.stopped) throw new DOMException("Stopped", "AbortError");
       control.upload = uploadPlanFile(companyId, file, (fraction) => {
         progress(key, fraction);
         task.progress(fraction * file.size);

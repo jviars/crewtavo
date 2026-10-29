@@ -41,6 +41,7 @@ export function ErrorState({ error, onRetry, title, compact }: { error: unknown;
         <span className="empty-icon"><Icon name="refresh" size={compact ? 20 : 24} /></span>
         <h3>{title ?? "Crewtavo is restarting"}</h3>
         <p>This loads again on its own in a moment.</p>
+        {onRetry && <div className="actions"><Button icon="refresh" onClick={onRetry}>Try again</Button></div>}
       </div>
     );
   }

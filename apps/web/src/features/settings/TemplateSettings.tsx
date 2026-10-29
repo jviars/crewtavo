@@ -96,16 +96,18 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   );
 
   const save = useMutation({
-    meta: { inline: true },
+    // The button says it saved, except after the first save: the editor starts again on the new
+    // template then, so a toast says it instead.
+    meta: { inline: true, success: (r: { first: boolean }) => (r.first ? "Template saved" : null) },
     mutationFn: async () => {
       const settings = templateSettings(t);
       if (row) {
         unwrap(await supabase().from("document_templates").update({ settings: settings as never }).eq("id", row.id));
-        return { id: row.id, settings };
+        return { id: row.id, settings, first: false };
       }
       // The first save keeps the built-in look as the business's own "Standard", used everywhere.
       const created = unwrap(await supabase().from("document_templates").insert({ company_id: company.id, name: "Standard", is_default: true, settings: settings as never }).select("id").single());
-      return { id: created.id, settings };
+      return { id: created.id, settings, first: true };
     },
     onSuccess: ({ id, settings }) => {
       setT(settings);

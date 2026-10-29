@@ -24,6 +24,7 @@ export function DiscountRows({
   suggestedCode,
   onSaveDiscount,
   onEditDiscount,
+  onUnchangedDiscount,
   onChanged,
 }: {
   kind: "quote" | "invoice";
@@ -40,6 +41,8 @@ export function DiscountRows({
   onSaveDiscount: (amount: number) => void;
   /** Each keystroke in the discount, for the page's save status. */
   onEditDiscount?: () => void;
+  /** The discount left without a change (or with one it turned down), for the page's save status. */
+  onUnchangedDiscount?: () => void;
   onChanged: () => void;
 }) {
   const [entering, setEntering] = useState(false);
@@ -79,7 +82,7 @@ export function DiscountRows({
       {(canEditDiscount || discount > 0) && (
         <div className="line">
           <span>Discount</span>
-          {canEditDiscount ? <MoneyInput label="Discount" value={discount} max={Math.max(subtotal, 0)} onSave={onSaveDiscount} onEdit={onEditDiscount} /> : <span>−{formatMoneyCents(shown)}</span>}
+          {canEditDiscount ? <MoneyInput label="Discount" value={discount} max={Math.max(subtotal, 0)} onSave={onSaveDiscount} onEdit={onEditDiscount} onUnchanged={onUnchangedDiscount} /> : <span>−{formatMoneyCents(shown)}</span>}
         </div>
       )}
       {canChangePromo && suggestedCode && !entering && (

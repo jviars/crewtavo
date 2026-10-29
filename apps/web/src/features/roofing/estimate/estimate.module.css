@@ -144,6 +144,7 @@
 .track { position: relative; height: 14px; border-radius: var(--radius-pill); background: var(--green-tint-2); }
 .marker { position: absolute; top: -5px; width: 6px; height: 24px; margin-left: -3px; border-radius: var(--radius-pill); background: var(--green-dark); box-shadow: 0 0 0 2px var(--surface); transition: left var(--dur) var(--ease-out); }
 .marker[data-where="above"] { background: var(--req); }
+@media (prefers-reduced-motion: reduce) { .marker { transition: none; } }
 .ends { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-13); color: var(--text-2); font-variant-numeric: tabular-nums; }
 
 /* ---------- What changed ---------- */

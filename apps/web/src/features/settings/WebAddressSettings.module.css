@@ -94,6 +94,7 @@
 .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
 .choice { display: grid; align-content: start; justify-items: start; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-xs); text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color var(--dur-fast), transform var(--dur-fast); }
 .choice:hover { border-color: var(--green); transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) { .choice:hover { transform: none; } }
 .choice:focus-visible { outline: none; box-shadow: var(--ring); }
 .choice strong { font-size: var(--fs-16); }
 .choiceIcon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-control); background: var(--green-tint); color: var(--green); }

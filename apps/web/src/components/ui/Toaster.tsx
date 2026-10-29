@@ -86,6 +86,16 @@ export function Toaster() {
     if (focused && !ref.current?.contains(document.activeElement)) setFocused(false);
   }, [count, showing, focused]);
 
+  // A stack fanned out by a tap folds back when the person taps anywhere else, so the timers run again.
+  useEffect(() => {
+    if (!tapped) return;
+    const fold = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setTapped(false);
+    };
+    document.addEventListener("pointerdown", fold, true);
+    return () => document.removeEventListener("pointerdown", fold, true);
+  }, [tapped]);
+
   const onHeight = useCallback((id: number, height: number) => {
     setHeights((all) => (all[id] === height ? all : { ...all, [id]: height }));
   }, []);
@@ -268,6 +278,7 @@ function Toast({ toast, index, offset, expanded, frontHeight, paused, onHeight }
         <button
           type="button"
           className="toast-action"
+          data-toast={toast.id}
           onClick={() => {
             toast.action!.onClick();
             dismissToast(toast.id, "action");

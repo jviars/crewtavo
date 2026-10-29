@@ -148,8 +148,9 @@ function snapshot(queryClient: QueryClient, keepQueries: boolean): DehydratedSta
   });
   // All saved as waiting, the one on its way included, so if the app closes before the server
   // answers it goes again on the next start (as do any turned away for the sign-in). Each field
-  // action is safe to repeat on its own.
-  return { ...state, mutations: state.mutations.map((m) => ({ ...m, state: { ...m.state, status: "pending" as const, error: null, isPaused: true } })) };
+  // action is safe to repeat on its own. Put back, it has no screen to show an error on: one the
+  // server turns down says so in a toast (meta.inline off).
+  return { ...state, mutations: state.mutations.map((m) => ({ ...m, meta: { ...m.meta, inline: undefined }, state: { ...m.state, status: "pending" as const, error: null, isPaused: true } })) };
 }
 
 function write(key: string, state: DehydratedState, budget = Infinity): boolean {

@@ -459,6 +459,8 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
   const change = isChangeOffer(pay);
   // Lines and notes save as they lose focus: "Saving…", then "Saved" beside the status, no toast.
   const save = useSaveStatus();
+  // A line or the notes left without a change takes back its "Edited".
+  const unchanged = () => save.status === "edited" && save.reset();
 
   const updateLine = useMutation({
     meta: { inline: true },
@@ -592,6 +594,7 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
                   setDrafts((all) => ({ ...all, [l.id]: d }));
                 }}
                 onSave={(patch) => void save.track(updateLine.mutateAsync({ id: l.id, patch }))}
+                onUnchanged={unchanged}
                 onRemove={() => removeLine.mutate(l.id)}
               />
             ))}
@@ -629,7 +632,7 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
             }}
             onBlur={() => {
               if (notes.trim() !== (pay.notes ?? "")) void save.track(saveNotes.mutateAsync(notes.trim() || null));
-              else if (save.status === "edited") save.reset();
+              else unchanged();
             }}
           />
         </Field>
@@ -670,8 +673,8 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
   );
 }
 
-/** One line: description, quantity × rate and the amount. Each field saves when it loses focus. */
-function LineRow({ line, editable, draft, note, saving, onDraft, onSave, onRemove }: {
+/** One line: description, quantity × rate and the amount. Each field saves when it loses focus (`onUnchanged` when there's nothing to save). */
+function LineRow({ line, editable, draft, note, saving, onDraft, onSave, onUnchanged, onRemove }: {
   line: PayLine;
   editable: boolean;
   draft: LineDraft | undefined;
@@ -679,6 +682,7 @@ function LineRow({ line, editable, draft, note, saving, onDraft, onSave, onRemov
   saving: boolean;
   onDraft: (d: LineDraft) => void;
   onSave: (patch: Partial<{ description: string; quantity: number; rate: number }>) => void;
+  onUnchanged: () => void;
   onRemove: () => void;
 }) {
   const [problem, setProblem] = useState<string | null>(null);
@@ -688,6 +692,7 @@ function LineRow({ line, editable, draft, note, saving, onDraft, onSave, onRemov
     const change = lineChange(line, draft);
     setProblem(change.problem);
     if (change.patch && Object.keys(change.patch).length) onSave(change.patch);
+    else if (change.patch) onUnchanged();
   };
   const amount = draft ? draftAmount(draft) : Number(line.amount);
   const unit = line.basis === "per_unit" ? line.unit : line.basis === "per_day" ? "day" : "job";

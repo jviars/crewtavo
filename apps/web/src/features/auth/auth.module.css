@@ -16,6 +16,7 @@
   transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast) var(--ease-out);
 }
 .preset:hover { border-color: var(--border-strong, #c9cfd1); transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) { .preset:hover { transform: none; } }
 .preset input { position: absolute; opacity: 0; pointer-events: none; }
 .preset:has(input:focus-visible) { box-shadow: var(--ring); }
 .preset strong { font-size: var(--fs-14); }

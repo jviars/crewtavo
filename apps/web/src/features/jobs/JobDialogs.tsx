@@ -38,6 +38,7 @@ export function NewJobDialog({ open, onClose, onCreated }: { open: boolean; onCl
   const create = useMutation({
     meta: { inline: true, success: kind === "recurring" ? "Recurring job created and visits scheduled" : "Job created" },
     mutationFn: async () => {
+      if (!title.trim()) throw new Error("Give the job a title.");
       if (kind === "recurring") parseRule(recurrence.rule); // says what's wrong before anything is saved
       const job = unwrap(
         await supabase()
@@ -83,7 +84,7 @@ export function NewJobDialog({ open, onClose, onCreated }: { open: boolean; onCl
         <Field label="Client" error={tried && !client ? "Choose who the job is for." : null}><ClientPicker value={client} onChange={setClient} /></Field>
         {client && <Field label="Property"><PropertySelect clientId={client.id} value={propertyId} onChange={setPropertyId} /></Field>}
         <div className="form-grid">
-          <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} placeholder="Weekly mowing, driveway repair…" /></Field>
+          <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value.trimStart())} required maxLength={200} placeholder="Weekly mowing, driveway repair…" /></Field>
           <Field label="Crew" optional>
             <select className="select" value={crewId} onChange={(e) => setCrewId(e.target.value)}>
               <option value="">No crew yet</option>
@@ -157,6 +158,7 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
   const save = useMutation({
     meta: { inline: true, success: "Job saved" },
     mutationFn: async () => {
+      if (!f.title.trim()) throw new Error("Give the job a title.");
       if (!(retainage >= 0 && retainage <= 100)) throw new Error("Retainage must be between 0 and 100%.");
       const recurring = f.kind === "recurring";
       if (recurring) parseRule(recurrence.rule); // says what's wrong before anything is saved
@@ -195,7 +197,7 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
   return (
     <Dialog open onClose={onClose} title="Job details" size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <Field label="Title"><input className="input" value={f.title} onChange={set("title")} required maxLength={200} /></Field>
+        <Field label="Title"><input className="input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value.trimStart() })} required maxLength={200} /></Field>
         <div className="segmented" role="group" aria-label="Job type">
           <button type="button" aria-pressed={f.kind === "one_off"} onClick={() => setF({ ...f, kind: "one_off" })}>One-off job</button>
           <button type="button" aria-pressed={f.kind === "recurring"} onClick={() => setF({ ...f, kind: "recurring" })}>Recurring job</button>

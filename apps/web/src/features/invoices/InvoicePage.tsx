@@ -18,10 +18,12 @@ import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
 import { addDaysIso, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
 import { undoable } from "@/lib/undo";
 import { contractTemplate, documentCompany, invoiceDocument, invoiceFill, NO_CONTRACT, useDocumentTemplate, useInvoiceContract, useLetterhead, type DocumentInvoice, type InvoiceQuote } from "../documents/data";
 import { DocumentSheet } from "../documents/EstimateDocument";
@@ -86,8 +88,14 @@ function InvoicePageScreen() {
     meta: { inline: true },
     mutationFn: async (patch: TablesUpdate<"invoices">) => unwrap(await supabase().from("invoices").update(patch).eq("id", id)),
     onSuccess: refresh,
+    // Offline or restarting, "Couldn't save" in the header is enough; a refusal also says why in a toast, since trying again won't help.
+    onError: (error) => {
+      if (!isNetworkError(error) && !isAuthError(error) && !(error instanceof ApiError && isRestarting(error.status))) toast.error(errorMessage(error));
+    },
   });
   const saveField = (patch: TablesUpdate<"invoices">) => void save.track(edit.mutateAsync(patch));
+  // A field left without a change takes back its "Edited".
+  const unchanged = () => save.status === "edited" && save.reset();
   // Written off: what's left isn't counted as owed any more (or is again, undone).
   const writeOff = useMutation({
     meta: { success: (_: unknown, on: boolean) => (on ? "Invoice written off" : "Write-off undone"), tone: "invoice" },
@@ -246,9 +254,9 @@ function InvoicePageScreen() {
 
       <div className="two-col">
         <div className="wide stack-lg">
-          {draft && <SubjectCard value={inv.subject} onEdit={save.edited} onSave={(subject) => saveField({ subject })} />}
+          {draft && <SubjectCard value={inv.subject} onEdit={save.edited} onUnchanged={unchanged} onSave={(subject) => saveField({ subject })} />}
           <LineItems table="invoice_line_items" parent="invoice_id" parentId={inv.id} lines={inv.lines} editable={draft} onChanged={refresh} />
-          <NotesCard value={inv.notes} editable={!isVoid} onEdit={save.edited} onSave={(notes) => saveField({ notes })} />
+          <NotesCard value={inv.notes} editable={!isVoid} onEdit={save.edited} onUnchanged={unchanged} onSave={(notes) => saveField({ notes })} />
           <section className="stack">
             <h2 className="section-title">Payments</h2>
             <div className="card" ref={paymentRows}>
@@ -300,11 +308,12 @@ function InvoicePageScreen() {
               canChangePromo={!isVoid && !fromStripe && inv.payments.length === 0 && ["draft", "sent", "overdue"].includes(inv.status)}
               onSaveDiscount={(v) => saveField({ discount_amount: v })}
               onEditDiscount={save.edited}
+              onUnchangedDiscount={unchanged}
               onChanged={refresh}
             />
             <div className="line">
               <span>Tax {draft ? "" : `(${formatTaxRate(inv.tax_rate)})`}</span>
-              {draft ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
+              {draft ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
             </div>
             {draft && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
             <div className="line grand"><span>Total</span><AnimatedNumber value={Number(inv.total)} format={MONEY_CENTS} /></div>
@@ -417,26 +426,26 @@ function StripeCard({ stripe }: { stripe: { stripe_id: string | null; origin: st
   );
 }
 
-/** `onEdit` on every keystroke (the header says "Edited"), `onSave` when the field is left changed. */
-function SubjectCard({ value, onEdit, onSave }: { value: string | null; onEdit: () => void; onSave: (v: string | null) => void }) {
+/** `onEdit` on every keystroke (the header says "Edited"), `onSave` when the field is left changed, `onUnchanged` when it's left as it was. */
+function SubjectCard({ value, onEdit, onUnchanged, onSave }: { value: string | null; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
   return (
     <label className="card card-pad field">
       <span>Subject <span className="optional">(shown at the top of the invoice)</span></span>
-      <input className="input" value={draft} maxLength={200} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => draft.trim() !== (value ?? "") && onSave(draft.trim() || null)} placeholder="Spring cleanup, May services…" />
+      <input className="input" value={draft} maxLength={200} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => (draft.trim() !== (value ?? "") ? onSave(draft.trim() || null) : onUnchanged())} placeholder="Spring cleanup, May services…" />
     </label>
   );
 }
 
-function NotesCard({ value, editable, onEdit, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onSave: (v: string | null) => void }) {
+function NotesCard({ value, editable, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
   if (!editable) return value ? <div className="card card-pad"><strong>Note to client</strong><p className="pre-wrap" style={{ margin: "6px 0 0" }}>{value}</p></div> : null;
   return (
     <label className="card card-pad field">
       <span>Note to client <span className="optional">(thank-you, payment instructions)</span></span>
-      <textarea className="textarea" value={draft} maxLength={4000} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => draft.trim() !== (value ?? "") && onSave(draft.trim() || null)} placeholder="Thank you for your business. Checks payable to…" />
+      <textarea className="textarea" value={draft} maxLength={4000} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => (draft.trim() !== (value ?? "") ? onSave(draft.trim() || null) : onUnchanged())} placeholder="Thank you for your business. Checks payable to…" />
     </label>
   );
 }

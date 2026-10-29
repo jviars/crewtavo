@@ -369,7 +369,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .toast .toast-x:hover { color: inherit; background: color-mix(in srgb, currentColor 12%, transparent); }
 @media (max-width: 900px) { .toaster { inset: auto max(16px, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + 12px + env(safe-area-inset-bottom) + var(--island-space, 0px)) max(16px, env(safe-area-inset-left)); width: auto; } }
 /* Less motion: no draining ring, and the stack settles into place without sliding. */
-@media (prefers-reduced-motion: reduce) { .toast-ring { display: none; } }
+@media (prefers-reduced-motion: reduce) { .toast-ring { display: none; } .toast { transition: opacity var(--dur) var(--ease-out); } .toaster { transition: none; } }
 
 /* ---------- Menus and popovers ---------- */
 .menu {
@@ -427,12 +427,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .restart-banner[data-back] { background: var(--green-solid); color: #fff; padding-right: 14px; }
 .restart-banner > svg { flex: none; }
 .restart-banner-try { flex: none; height: var(--control-sm); padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, currentColor 16%, transparent); color: inherit; font-size: var(--fs-13); font-weight: 700; }
-.restart-banner-try:hover:not(:disabled) { background: color-mix(in srgb, currentColor 26%, transparent); }
-.restart-banner-try:disabled { opacity: 0.6; cursor: default; }
+.restart-banner-try:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, currentColor 26%, transparent); }
+.restart-banner-try[aria-disabled="true"] { opacity: 0.6; cursor: default; }
 @media (max-width: 600px) { .restart-banner { border-radius: var(--radius-card); } }
 
 /* ---------- Task island (components/ui/TaskIsland.tsx) ---------- */
-/* Bottom center in the top layer (above the tab bar on a phone). Its list of tasks opens above the pill. */
+/* Bottom center in the top layer (above the tab bar on a phone). Its list of tasks opens above the pill (after it in the page, for Tab). */
 .task-island {
   position: fixed; inset: auto 0 max(20px, env(safe-area-inset-bottom)); margin: 0 auto; width: max-content; max-width: calc(100vw - 32px); z-index: 150; overflow: visible;
   display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: var(--on-solid);
@@ -444,11 +444,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .task-island-main { display: flex; align-items: center; gap: 10px; min-width: 0; height: 100%; padding: 0 16px 0 10px; border: 0; border-radius: inherit; background: none; color: inherit; font-size: var(--fs-13); font-weight: 600; }
 .task-island-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-island-count { flex: none; min-width: 22px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: color-mix(in srgb, currentColor 16%, transparent); font-size: var(--fs-12); font-weight: 700; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }
-.task-island-count[data-failed] { background: #d9443a; color: #fff; }
+.task-island-count[data-failed] { background: var(--danger-solid); color: #fff; }
 .task-island-dismiss { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin: 0 6px 0 -8px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; }
 .task-island-dismiss:hover { background: color-mix(in srgb, currentColor 24%, transparent); }
 .task-island-list {
-  display: grid; gap: 2px; width: min(360px, calc(100vw - 32px)); max-height: min(360px, 50vh); overflow-y: auto; padding: 6px; border-radius: var(--radius-card);
+  order: -1; display: grid; gap: 2px; width: min(360px, calc(100vw - 32px)); max-height: min(360px, 50vh); overflow-y: auto; padding: 6px; border-radius: var(--radius-card);
   background: var(--solid); color: var(--on-solid); box-shadow: var(--shadow-lg); transform-origin: bottom center; animation: task-list-in var(--dur-enter) var(--ease-enter);
 }
 @keyframes task-list-in { from { opacity: 0; transform: translateY(6px) scale(0.97); } to { opacity: 1; transform: none; } }

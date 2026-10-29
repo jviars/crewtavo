@@ -1,6 +1,6 @@
 import type { TablesUpdate } from "@crewtavo/core/database";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
@@ -47,6 +47,15 @@ export function JobPage() {
   const [showPast, setShowPast] = useState(false);
   // The empty section an add button under the line items just opened, shown while its dialog is up.
   const [adding, setAdding] = useState<Extra | null>(null);
+  // The add button pressed goes as its section shows, so when the dialog closes keyboard focus goes back
+  // to it, or (something was added, so it's gone for good) to the section's own add button, not the page.
+  const wasAdding = useRef<Extra | null>(null);
+  useEffect(() => {
+    const was = wasAdding.current;
+    wasAdding.current = adding;
+    if (adding || !was || (document.activeElement && document.activeElement !== document.body)) return;
+    (document.querySelector<HTMLElement>(`[data-add="${was}"]`) ?? document.querySelector<HTMLElement>(`[data-extra="${was}"] .section-head button`))?.focus({ preventScroll: true });
+  }, [adding]);
   const visitsRef = useListAnimation<HTMLDivElement>();
   const isOffice = hasRole(session, "admin", "office");
   const seesInvoices = isOffice && can(session, "invoices");
@@ -165,7 +174,7 @@ export function JobPage() {
   }
   const addButtons = offers.length > 0 && (
     <div className="add-chips" role="group" aria-label="Add to this job">
-      {offers.map((o) => <Button key={o.key} size="sm" icon="plus" className="add-chip" aria-label={o.name} onClick={() => setAdding(o.key)}>{o.label}</Button>)}
+      {offers.map((o) => <Button key={o.key} size="sm" icon="plus" className="add-chip" aria-label={o.name} data-add={o.key} onClick={() => setAdding(o.key)}>{o.label}</Button>)}
     </div>
   );
   const doneAdding = () => setAdding(null);
@@ -287,11 +296,12 @@ export function JobPage() {
 
           <PlansCard scope={{ kind: "job", id: j.id, propertyId: j.property?.id ?? null }} />
 
-          {shows.materials && <MaterialsCard jobId={j.id} showCosts={seesCosts} startAdding={adding === "materials"} onAddClosed={doneAdding} />}
+          {/* Each wrapped (display: contents) so focus can find its add button as its dialog closes. */}
+          {shows.materials && <div data-extra="materials" style={{ display: "contents" }}><MaterialsCard jobId={j.id} showCosts={seesCosts} startAdding={adding === "materials"} onAddClosed={doneAdding} /></div>}
 
-          {shows.expenses && <ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} startAdding={adding === "expenses"} onAddClosed={doneAdding} />}
+          {shows.expenses && <div data-extra="expenses" style={{ display: "contents" }}><ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} startAdding={adding === "expenses"} onAddClosed={doneAdding} /></div>}
 
-          {shows.pay && <JobPayCard job={{ id: j.id, number: j.number, title: j.title, archived: j.status === "archived" }} visits={visits} lines={j.lines} startAdding={adding === "pay"} onAddClosed={doneAdding} />}
+          {shows.pay && <div data-extra="pay" style={{ display: "contents" }}><JobPayCard job={{ id: j.id, number: j.number, title: j.title, archived: j.status === "archived" }} visits={visits} lines={j.lines} startAdding={adding === "pay"} onAddClosed={doneAdding} /></div>}
 
           {seesInvoices && (
             <section className="stack">

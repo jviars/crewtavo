@@ -20,6 +20,7 @@ export function TaskIsland() {
   const tasks = useTasks();
   const ref = useRef<HTMLDivElement>(null);
   const pill = useRef<HTMLDivElement>(null);
+  const main = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   // In the top layer from the first task until its exit has played.
   const [shown, setShown] = useState(false);
@@ -77,14 +78,10 @@ export function TaskIsland() {
   const failedOthers = list.some((t) => t !== head && t.status === "failed");
   return (
     <div ref={ref} className="task-island" data-open={open || undefined} data-shown={shown || undefined} {...topLayerProps}>
-      {open && (
-        <div className="task-island-list" id="task-island-list" aria-label="Background tasks">
-          {list.map((task) => <TaskRow key={task.id} task={task} />)}
-        </div>
-      )}
       {head && (
         <div ref={pill} className="task-island-pill" data-status={head.status}>
           <button
+            ref={main}
             type="button"
             className="task-island-main"
             aria-expanded={open}
@@ -103,6 +100,12 @@ export function TaskIsland() {
           )}
         </div>
       )}
+      {/* After the pill, so Tab goes on into it; drawn above the pill (order in components.css). */}
+      {open && (
+        <div className="task-island-list" id="task-island-list" role="group" aria-label="Background tasks">
+          {list.map((task) => <TaskRow key={task.id} task={task} onCancel={() => main.current?.focus()} />)}
+        </div>
+      )}
       <span className="sr-only" role="status">{head && head.status !== "running" ? says(head) : ""}</span>
     </div>
   );
@@ -118,7 +121,8 @@ function says(task: Task): string {
   return task.message ?? (task.status === "done" ? "Done" : task.status === "stopped" ? "Stopped" : "That didn't go through");
 }
 
-function TaskRow({ task }: { task: Task }) {
+/** `onCancel`: Cancel turns into a disabled "Stopping…" (or the row goes), so focus moves to the pill rather than the page. */
+function TaskRow({ task, onCancel }: { task: Task; onCancel: () => void }) {
   const fraction = taskFraction(task);
   const running = task.status === "running";
   const detail = running ? [task.detail, fraction !== undefined && `${Math.round(fraction * 100)}%`].filter(Boolean).join(" · ") : task.status === "failed" ? task.message : task.detail;
@@ -133,7 +137,15 @@ function TaskRow({ task }: { task: Task }) {
         )}
       </div>
       {running && task.cancel && (
-        <button type="button" className="task-row-action" disabled={task.stopping} onClick={() => cancelTask(task.id)}>
+        <button
+          type="button"
+          className="task-row-action"
+          disabled={task.stopping}
+          onClick={() => {
+            onCancel();
+            cancelTask(task.id);
+          }}
+        >
           {task.stopping ? "Stopping…" : "Cancel"}
         </button>
       )}

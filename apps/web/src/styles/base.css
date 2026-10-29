@@ -239,7 +239,9 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
   * { scroll-behavior: auto !important; }
   /* Nothing shrinks as it's pressed or lifts as it's hovered. */
   :is(button, a, label, summary, [role="button"], [role="tab"]):active, .mobile-nav :active svg, .app-tile:active .app-icon,
-  .card-link:hover, .stat-button:hover, .thumb:hover img, .back-link:hover svg, .nav-link:hover .nav-create-dot { transform: none !important; }
+  .card-link:hover, .stat-button:hover, .thumb:hover img, .back-link:hover svg, .nav-link:hover .nav-create-dot,
+  .deal:hover, .category-card:hover, .guide-card:hover, .hub-actions button:hover { transform: none !important; }
+  .switch::after { transition-duration: 1ms; }
   .spinner { animation-duration: 1.6s !important; }
   .skeleton { animation: none !important; background: var(--fill-2) !important; }
   /* Screens and the theme still cross-fade, briefly; nothing moves or resizes on the way. */

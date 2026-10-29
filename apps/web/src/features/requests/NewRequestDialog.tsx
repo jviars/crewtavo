@@ -51,7 +51,7 @@ export function NewRequestDialog({ open, onClose, onCreated, initialClient = nul
         </Field>
         {client && <Field label="Property"><PropertySelect clientId={client.id} value={propertyId} onChange={setPropertyId} /></Field>}
         <Field label="What do they need?" requiredMessage="Say what they need, like a driveway estimate.">
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} placeholder="Driveway estimate, gutter repair…" />
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value.trimStart())} required maxLength={200} placeholder="Driveway estimate, gutter repair…" />
         </Field>
         <Field label="Details" optional><textarea className="textarea" value={details} onChange={(e) => setDetails(e.target.value)} maxLength={4000} /></Field>
         <Field label="How did it come in?">

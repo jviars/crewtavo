@@ -56,7 +56,7 @@ export function NewQuoteDialog({ open, onClose, onCreated, initialClient = null 
         </Field>
         {client && <Field label="Property"><PropertySelect clientId={client.id} value={propertyId} onChange={setPropertyId} /></Field>}
         <Field label="Title" requiredMessage="Give it a title, like Driveway replacement.">
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} placeholder="Driveway replacement" />
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value.trimStart())} required maxLength={200} placeholder="Driveway replacement" />
         </Field>
         <FormError error={create.error} />
         <div className="form-actions">

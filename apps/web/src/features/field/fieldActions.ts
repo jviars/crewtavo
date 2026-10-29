@@ -98,7 +98,11 @@ export interface ChecklistSave {
   /** Made on the phone, so saving twice offline updates one row instead of adding two. */
   responseId: string;
   templateId: string | null;
-  answers: Record<string, unknown>;
+  /**
+   * Left out when the checklist is only marked done with nothing of this phone's waiting: the
+   * answers saved stay as they are, a crewmate's from another phone included.
+   */
+  answers?: Record<string, unknown>;
   completedAt: string | null;
 }
 
@@ -106,7 +110,7 @@ export async function saveChecklist(v: ChecklistSave) {
   unwrap(
     await supabase()
       .from("checklist_responses")
-      .upsert({ id: v.responseId, company_id: v.companyId, visit_id: v.visitId, template_id: v.templateId, answers: v.answers as never, completed_at: v.completedAt }),
+      .upsert({ id: v.responseId, company_id: v.companyId, visit_id: v.visitId, template_id: v.templateId, ...(v.answers && { answers: v.answers as never }), completed_at: v.completedAt }),
   );
 }
 
