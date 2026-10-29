@@ -68,7 +68,7 @@ export function RoofSteps({
         <li data-done={marked || undefined}>
           <Dot n={3} done={marked} />
           <div className="stack-sm grow">
-            <strong>Mark the edges <span className="muted small" style={{ fontWeight: 500 }}>(for drip edge, ridge cap and flashing)</span></strong>
+            <strong>Mark the edges <span className="muted small" style={{ fontWeight: 400 }}>(for drip edge, ridge cap and flashing)</span></strong>
             <span className="muted small">{activeEdge ? `Draw along ${EDGE_HINTS[activeEdge]}. Double-click to finish each one.` : "Pick one, then draw along each of those edges."}</span>
             <div className="roof-edge-picks" role="group" aria-label="Draw roof edges">
               {ROOF_EDGES.map((e) => (
@@ -102,5 +102,5 @@ export function RoofSteps({
 }
 
 function Dot({ n, done }: { n: number; done: boolean }) {
-  return <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={13} strokeWidth={3} /> : n}</span>;
+  return <span className="paving-progress-dot" data-done={done || undefined} aria-hidden="true">{done ? <Icon name="check" size={14} strokeWidth={2} /> : n}</span>;
 }

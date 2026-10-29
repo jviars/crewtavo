@@ -117,7 +117,7 @@ function Warning({ warning, links }: { warning: HostingWarning; links: HostingOv
   const href = action ? links[action.link] : null;
   return (
     <div className={`callout ${warning.level === "urgent" ? "callout-danger" : "callout-warning"}`} role={warning.level === "urgent" ? "alert" : undefined}>
-      <Icon name="alert" size={18} />
+      <Icon name="alert" size={20} />
       <div className="grow">
         <div>{warning.title}</div>
         <div style={{ fontWeight: 400 }}>{warning.body}</div>

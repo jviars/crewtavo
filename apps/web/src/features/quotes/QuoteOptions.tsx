@@ -17,7 +17,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -65,9 +65,15 @@ export interface QuoteOptionsProps {
   onChanged: () => void;
   /** The id of what shows the viewed option's lines, for the tabs to point at. */
   panelId?: string;
+  /**
+   * With no options yet, a dashed bar inviting them (the default). The office quote page leaves it
+   * out and offers them from its lines' add row instead (AddOptionsDialog), so the document being
+   * finished carries no suggestion of its own.
+   */
+  invite?: boolean;
 }
 
-export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onChanged, panelId }: QuoteOptionsProps) {
+export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onChanged, panelId, invite = true }: QuoteOptionsProps) {
   const session = useSession();
   const queryClient = useQueryClient();
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
@@ -85,13 +91,13 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
     onChanged();
   };
   const show = useMutation({
-    meta: { success: mode === "visit" ? "Marked as their choice" : "Shown first now" },
+    meta: { success: mode === "visit" ? "Marked as their choice" : "Option shown first", tone: "quote" },
     mutationFn: (optionId: string) => showOption(quote.id, optionId),
     // The tab stays on it, now the one shown.
     onSuccess: changed,
   });
   const remove = useMutation({
-    meta: { success: (r: { options: unknown[] }) => (r.options.length ? "Option taken off" : "Back to a single estimate") },
+    meta: { success: (r: { options: unknown[] }) => (r.options.length ? "Option taken off" : "Back to a single estimate"), tone: "quote" },
     mutationFn: (optionId: string) => removeOption(quote.id, optionId),
     onSuccess: (_, optionId) => {
       if (viewing === optionId) onView(null);
@@ -143,10 +149,10 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
   );
 
   if (!options.length) {
-    if (!open) return null;
+    if (!open || !invite) return null;
     return (
       <div className={styles.offer}>
-        <Icon name="package" size={18} />
+        <Icon name="package" size={20} />
         {lines.length ? (
           <>
             <span className="grow">Offer two or three packages side by side, like Good, Better and Best.</span>
@@ -194,7 +200,7 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
                 {/* Only in the office: the homeowner looks on at the iPad. */}
                 {mode === "office" && isExampleWarranty(option.warranty) && (
                   <span className={styles.tabFlag}>
-                    <Icon name="alert" size={13} />
+                    <Icon name="alert" size={14} />
                     Example warranty
                   </span>
                 )}
@@ -209,7 +215,8 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
           {current.shown ? (
             <span className={styles.note}>{words.note}</span>
           ) : (
-            <Button size="sm" variant="primary" icon="check" loading={show.isPending} onClick={() => choose(current.option)}>
+            // In the office the page's own next step is the solid button; on the iPad, the homeowner's choice is the step.
+            <Button size="sm" variant={mode === "visit" ? "primary" : "secondary"} icon="check" loading={show.isPending} onClick={() => choose(current.option)}>
               {mode === "visit" ? "They chose this one" : "Show this one first"}
             </Button>
           )}
@@ -248,9 +255,10 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
  * Packages to offer as options. Added to the estimate, the packages already on it are picked and
  * locked: the options' own, and the estimate's package as its lines become option 1 (with the lines
  * that stay on every option ticked). On an estimate with nothing on it, one package prices it as a
- * single estimate. Starting over takes every option and line off first.
+ * single estimate. Starting over takes every option and line off first. The office quote page opens
+ * it from its lines' add row ("Offer options").
  */
-function AddOptionsDialog({ quote, options, lines, startOver: startingOver, mode, onClose, onDone }: {
+export function AddOptionsDialog({ quote, options, lines, startOver: startingOver, mode, onClose, onDone }: {
   quote: OptionsQuote;
   options: QuoteOptionRow[];
   lines: readonly OptionsLine[];
@@ -294,7 +302,7 @@ function AddOptionsDialog({ quote, options, lines, startOver: startingOver, mode
     },
     onSuccess: ({ result, lines: count }) => {
       const message = addedMessage(result, { name: nameOf(fresh[0] ?? ""), startOver, lines: count, roofing: isRoofingCompany(session.company) });
-      toast.success(message.title, { description: message.description ?? undefined });
+      toast.success(message.title, { description: message.description ?? undefined, tone: "quote" });
       onDone();
     },
   });
@@ -377,7 +385,7 @@ function EditOptionDialog({ option, onClose, onSaved }: { option: QuoteOptionRow
   const [highlights, setHighlights] = useState(option.highlights);
   const [warranty, setWarranty] = useState(option.warranty);
   const save = useMutation({
-    meta: { inline: true, success: "Option saved" },
+    meta: { inline: true, success: "Option saved", tone: "quote" },
     mutationFn: () => saveOption(option.id, { name: name.trim(), tier: tier.trim() || null, highlights: cleanHighlights(highlights), warranty: warranty.trim() }),
     onSuccess: onSaved,
   });
@@ -391,7 +399,7 @@ function EditOptionDialog({ option, onClose, onSaved }: { option: QuoteOptionRow
       >
         <div className={styles.nameRow}>
           <Field label="Name" className={styles.nameField}>
-            <input className="input" required value={name} maxLength={PACKAGE_LIMITS.name} onChange={(e) => setName(e.target.value)} />
+            <input className="input" required value={name} maxLength={PACKAGE_LIMITS.name} onChange={(e) => setName(e.target.value.trimStart())} />
           </Field>
           <Field label="Tier" optional className={styles.tierField}>
             <input className="input" list={tiersId} value={tier} maxLength={PACKAGE_LIMITS.tier} placeholder="Good, Better…" onChange={(e) => setTier(e.target.value)} />
@@ -405,8 +413,9 @@ function EditOptionDialog({ option, onClose, onSaved }: { option: QuoteOptionRow
         {isExampleWarranty(warranty) && <p className="callout callout-info" style={{ margin: 0 }}>{STARTER_NOTE}</p>}
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!name.trim()}>Save</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>Save</Button>
         </div>
       </form>
     </Dialog>

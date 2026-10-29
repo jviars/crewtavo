@@ -123,7 +123,7 @@ export function PackagePicker(props: PackagePickerProps) {
                   {extras && <small>{extras}</small>}
                   {flag && isExampleWarranty(p.warranty) && (
                     <span className={styles.pickFlag}>
-                      <Icon name="alert" size={13} />
+                      <Icon name="alert" size={14} />
                       Example warranty
                     </span>
                   )}
@@ -132,18 +132,18 @@ export function PackagePicker(props: PackagePickerProps) {
                   (numbered ? (
                     <span className={styles.pickNumber}><span className="sr-only">Option </span>{order + 1}</span>
                   ) : (
-                    <span className={styles.pickCheck} aria-hidden="true"><Icon name="check" size={15} strokeWidth={3} /></span>
+                    <span className={styles.pickCheck} aria-hidden="true"><Icon name="check" size={14} strokeWidth={2} /></span>
                   ))}
               </button>
               {fixed ? (
                 <span className={styles.pickFoot}>On the estimate now</span>
               ) : many && !on && !multi ? (
                 <button type="button" className={styles.pickOffer} aria-label={`Offer ${p.name} as an option`} onClick={() => pick(p.id, true)}>
-                  <Icon name="plus" size={14} strokeWidth={2.5} />Offer as an option
+                  <Icon name="plus" size={14} />Offer as an option
                 </button>
               ) : numbered && on ? (
                 <button type="button" className={styles.pickOffer} aria-label={`Don't offer ${p.name}`} onClick={() => pick(p.id)}>
-                  <Icon name="x" size={14} strokeWidth={2.5} />Take it off
+                  <Icon name="x" size={14} />Take it off
                 </button>
               ) : null}
             </div>
@@ -223,7 +223,7 @@ export function HighlightsField({ value, onChange, onCommit, disabled }: { value
         </ol>
       )}
       {canAdd ? (
-        <button type="button" className="link-btn small" style={{ justifySelf: "start" }} disabled={disabled} onClick={add}>+ Add a highlight</button>
+        <button type="button" className="link-btn small" style={{ justifySelf: "start" }} disabled={disabled} onClick={add}>Add a highlight</button>
       ) : (
         <span className="hint">That's as many as fit on its card.</span>
       )}

@@ -20,8 +20,8 @@ export function PhotoButtons({ userId, photo }: { userId: string; photo: string 
     await queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "photo" });
     if (userId === session.userId) await session.refresh();
   };
+  // The face changing in place says it worked.
   const set = useMutation({
-    meta: { success: "Photo saved" },
     mutationFn: async (file: File) => {
       const square = await squarePhoto(file);
       if (!square) throw new Error("Crewtavo can't open that picture. Try a JPEG or PNG photo.");
@@ -30,13 +30,12 @@ export function PhotoButtons({ userId, photo }: { userId: string; photo: string 
     onSuccess: changed,
   });
   const remove = useMutation({
-    meta: { success: "Photo removed" },
     mutationFn: () => api.delete(`/team/${userId}/photo`),
     onSuccess: changed,
   });
   return (
     <div className="row wrap" style={{ gap: 8 }}>
-      <Button size="sm" icon="camera" loading={set.isPending} disabled={remove.isPending} onClick={() => input.current?.click()}>
+      <Button size="sm" icon="camera" loading={set.isPending} slowHint={false} disabled={remove.isPending} onClick={() => input.current?.click()}>
         {photo ? "Change photo" : "Add a photo"}
       </Button>
       {photo && <Button size="sm" variant="ghost" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()}>Remove photo</Button>}

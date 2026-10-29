@@ -87,12 +87,12 @@ export function useMySignature(options: { enabled?: boolean } = {}) {
   });
 }
 
-/** Saves the signed-in person's signature for every estimate they sign after. */
+/** Saves the signed-in person's signature for every estimate they sign after. The saved signature showing in place of the pad says it worked. */
 export function useSaveMySignature() {
   const { company, userId } = useSession();
   const queryClient = useQueryClient();
   return useMutation({
-    meta: { inline: true, success: "Signature saved" },
+    meta: { inline: true },
     mutationFn: async (image: string) => (await api.put<{ image: string }>("/me/signature", { image })).image,
     onSuccess: (image) => queryClient.setQueryData(mySignatureKey(company.id, userId), image),
   });
@@ -103,7 +103,6 @@ export function useRemoveMySignature() {
   const { company, userId } = useSession();
   const queryClient = useQueryClient();
   return useMutation({
-    meta: { success: "Signature removed" },
     mutationFn: () => api.delete<{ ok: true }>("/me/signature"),
     onSuccess: () => queryClient.setQueryData(mySignatureKey(company.id, userId), null),
   });

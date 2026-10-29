@@ -15,7 +15,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
@@ -23,6 +23,7 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { formatPhoneTyping } from "@/lib/validate";
 import { useQuoteOptions } from "../../quotes/options";
 import type { EstimateQuote } from "../estimate";
 import { capital, estimateSubject, homeownerName, OPEN, rangeWords, sendWords, type RangeEstimate } from "./model";
@@ -70,7 +71,7 @@ export function SendEstimateDialog(props: SendProps) {
         ) : (
           <Loading label="Loading the estimate">
             <div className="stack-sm">
-              <Skeleton height={34} radius={10} />
+              <Skeleton height={38} radius={8} />
               <Skeleton height={40} radius={8} />
               <Skeleton height={120} radius={8} />
             </div>
@@ -146,12 +147,12 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
         <div className="dialog-body">
           {done.sent ? (
             <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center", padding: "8px 0" }}>
-              <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+              <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
               <strong style={{ fontSize: 16 }}>{channel === "email" ? `Emailed to ${to}` : `Texted to ${to}`}</strong>
               {config.features.devMail && <span className="muted small">Development mode: it's in the local Mailpit inbox.</span>}
             </div>
           ) : (
-            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
+            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
           )}
           <div className="field">
             <span>{capital(who)}'s link</span>
@@ -174,19 +175,19 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
           </div>
           {leavesRange && (
             <div className="callout callout-info">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow">From now on, {who}'s link shows this exact price instead of the range.</div>
             </div>
           )}
           {unavailable && (
             <div className="callout callout-info">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow">{channel === "email" ? "Email" : "Texting"} isn't turned on yet. Use “Copy link” and send it yourself.</div>
             </div>
           )}
           {channel !== "link" && (
             <Field label={channel === "email" ? "To" : "Mobile number"}>
-              <input className="input" type={channel === "email" ? "email" : "tel"} value={to} onChange={(e) => setTo(e.target.value)} required placeholder={channel === "email" ? "client@example.com" : "(555) 555-0123"} />
+              <input className="input" type={channel === "email" ? "email" : "tel"} value={to} onChange={(e) => setTo(channel === "sms" ? formatPhoneTyping(e.target.value) : e.target.value)} required placeholder={channel === "email" ? "client@example.com" : "(555) 555-0123"} />
             </Field>
           )}
           {channel === "email" && <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} required /></Field>}
@@ -208,6 +209,7 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
           )}
           <FormError error={send.error} />
           <div className="form-actions">
+            <FormChecks />
             <Button onClick={onClose}>Cancel</Button>
             <Button type="submit" variant="primary" icon={channel === "link" ? "copy" : "send"} loading={send.isPending} disabled={unavailable}>
               {channel === "link" ? "Copy link" : channel === "email" ? "Send email" : "Send text"}

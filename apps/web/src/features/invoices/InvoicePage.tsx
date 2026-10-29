@@ -3,22 +3,28 @@ import { paymentProblem, taxPercent, taxRateFromPercent } from "@crewtavo/core/m
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
-import { EntityStatus } from "@/components/ui/StatusPill";
+import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
 import { addDaysIso, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
+import { undoable } from "@/lib/undo";
 import { contractTemplate, documentCompany, invoiceDocument, invoiceFill, NO_CONTRACT, useDocumentTemplate, useInvoiceContract, useLetterhead, type DocumentInvoice, type InvoiceQuote } from "../documents/data";
 import { DocumentSheet } from "../documents/EstimateDocument";
 import { InvoiceDrawings } from "../measure/drawings";
@@ -26,9 +32,11 @@ import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
 import { SendDialog } from "../quotes/SendDialog";
 import { refundable } from "./refunds";
+import { settle } from "./settle";
 import { bankPayment, bankPaymentNote, paidInStripe, paymentAmount, RECORD_IN_STRIPE } from "./stripeInvoices";
 
 const METHODS: Record<string, string> = { check: "Check", cash: "Cash", card: "Card", ach: "Bank transfer", other: "Other" };
+/** The totals roll to their new figures, cents and all, as lines, payments and the tax rate change. */
 
 export function InvoicePage() {
   const session = useSession();
@@ -68,30 +76,47 @@ function InvoicePageScreen() {
     queryClient.invalidateQueries({ queryKey: ["invoices", session.company.id] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
+  // Status changes, from the header and its menu.
   const update = useMutation({
-    meta: { success: (_: unknown, p: TablesUpdate<"invoices">) => (p.status === "void" ? "Invoice voided" : p.status === "sent" ? "Marked as sent" : p.status === "draft" ? "Back to draft" : null) },
+    meta: { success: (_: unknown, p: TablesUpdate<"invoices">) => (p.status === "void" ? "Invoice voided" : p.status === "sent" ? "Invoice marked as sent" : p.status === "draft" ? "Invoice moved back to draft" : null), tone: "invoice" },
     mutationFn: async (patch: TablesUpdate<"invoices">) => unwrap(await supabase().from("invoices").update(patch).eq("id", id)),
     onSuccess: refresh,
   });
+  // The fields on the page, saved as they're left: "Saving…" and "Saved" beside the status.
+  const save = useSaveStatus();
+  const edit = useMutation({
+    meta: { inline: true },
+    mutationFn: async (patch: TablesUpdate<"invoices">) => unwrap(await supabase().from("invoices").update(patch).eq("id", id)),
+    onSuccess: refresh,
+    // Offline or restarting, "Couldn't save" in the header is enough; a refusal also says why in a toast, since trying again won't help.
+    onError: (error) => {
+      if (!isNetworkError(error) && !isAuthError(error) && !(error instanceof ApiError && isRestarting(error.status))) toast.error(errorMessage(error));
+    },
+  });
+  const saveField = (patch: TablesUpdate<"invoices">) => void save.track(edit.mutateAsync(patch));
+  // A field left without a change takes back its "Edited".
+  const unchanged = () => save.status === "edited" && save.reset();
   // Written off: what's left isn't counted as owed any more (or is again, undone).
   const writeOff = useMutation({
-    meta: { success: (_: unknown, on: boolean) => (on ? "Invoice written off" : "It's owed again") },
+    meta: { success: (_: unknown, on: boolean) => (on ? "Invoice written off" : "Write-off undone"), tone: "invoice" },
     mutationFn: async (on: boolean) => unwrap(await supabase().from("invoices").update({ status: on ? "written_off" : "sent" }).eq("id", id)),
     onSuccess: refresh,
   });
   const remove = useMutation({
-    meta: { success: "Draft invoice deleted" },
+    meta: { success: "Draft invoice deleted", tone: "invoice" },
     mutationFn: async () => unwrap(await supabase().from("invoices").delete().eq("id", id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["invoices", session.company.id] });
       navigate("/invoices", { replace: true });
     },
   });
+  // Undone from its toast (see takeOff below), which also says when it fails.
   const removePayment = useMutation({
-    meta: { success: "Payment removed" },
+    meta: { inline: true },
     mutationFn: async (paymentId: string) => unwrap(await supabase().from("payments").delete().eq("id", paymentId)),
     onSuccess: refresh,
   });
+  const paymentRows = useListAnimation<HTMLDivElement>();
   const openClientView = useMutation({
     mutationFn: (print: boolean) => api.get<{ link: string }>(`/invoices/${id}/link`).then((r) => ({ ...r, print })),
     onSuccess: ({ link, print }) => window.open(print ? `${link}?print=1` : link, "_blank", "noopener"),
@@ -116,6 +141,25 @@ function InvoicePageScreen() {
   const fromStripe = inv.stripe.some((s) => s.origin === "stripe");
   // And while it's open there, so do its payments.
   const paysInStripe = paidInStripe(inv.stripe);
+
+  // A payment marked by mistake goes at once, with Undo, and the balance goes back up with it.
+  type Loaded = typeof inv;
+  const takeOff = (payment: Loaded["payments"][number]) => {
+    const key = ["invoice", id];
+    undoable({
+      title: "Payment removed",
+      tone: "invoice",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<Loaded>(key, (current) => current && settle(current, current.payments.filter((p) => p.id !== payment.id), today));
+      },
+      restore: () =>
+        queryClient.setQueryData<Loaded>(key, (current) =>
+          current && !current.payments.some((p) => p.id === payment.id) ? settle(current, [...current.payments, payment].sort((a, b) => a.received_at.localeCompare(b.received_at)), today) : current,
+        ),
+      commit: () => removePayment.mutateAsync(payment.id),
+    });
+  };
 
   return (
     <>
@@ -175,6 +219,7 @@ function InvoicePageScreen() {
       />
       <div className="page-meta">
         <EntityStatus kind="invoice" status={inv.status} />
+        <SaveStatus status={save.status} />
         {inv.client && <Link to={`/clients/${inv.client.id}`} className="strong">{inv.client.display_name}</Link>}
         {inv.job && <Link to={`/jobs/${inv.job.id}`} className="muted">Job #{inv.job.number}: {inv.job.title}</Link>}
         {inv.kind === "progress" && <span className="chip">Pay application {inv.pay_app_number}</span>}
@@ -183,44 +228,44 @@ function InvoicePageScreen() {
         {inv.kind === "visits" && <span className="chip">Completed visits</span>}
       </div>
 
-      {isVoid && <div className="callout"><Icon name="x" size={18} /><div className="grow">This invoice is void and isn't owed.</div></div>}
+      {isVoid && <div className="callout"><Icon name="x" size={20} /><div className="grow">This invoice is void and isn't owed.</div></div>}
       {writtenOff && (
         <div className="callout">
-          <Icon name="archive" size={18} />
+          <Icon name="archive" size={20} />
           <div className="grow">
             Written off{inv.written_off_at ? ` on ${formatDate(inv.written_off_at)}` : ""}: {formatMoneyCents(balance)} isn't counted as owed. If the client pays after all, record it and the invoice is marked paid.
           </div>
           <Button size="sm" icon="undo" disabled={writeOff.isPending} onClick={() => writeOff.mutate(false)}>Undo write-off</Button>
         </div>
       )}
-      {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
-      {bankNote && <div className="callout callout-info"><Icon name="clock" size={18} /><div className="grow">{bankNote}</div></div>}
+      {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={20} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
+      {bankNote && <div className="callout callout-info"><Icon name="clock" size={20} /><div className="grow">{bankNote}</div></div>}
       {/* Up front, rather than refused once someone has filled in a payment. */}
-      {paysInStripe && !bank && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">{RECORD_IN_STRIPE}</div></div>}
+      {paysInStripe && !bank && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">{RECORD_IN_STRIPE}</div></div>}
       {daysLate > 0 && !bank && (
         <div className="callout callout-danger">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.</div>
           <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>
         </div>
       )}
-      {draft && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">This invoice hasn't been sent yet.</div></div>}
-      {!isVoid && balance < 0 && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">The client paid {formatMoneyCents(-balance)} more than they owed. Record a refund, or keep it as a credit for their next invoice.</div></div>}
+      {draft && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">This invoice hasn't been sent yet.</div></div>}
+      {!isVoid && balance < 0 && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">The client paid {formatMoneyCents(-balance)} more than they owed. Record a refund, or keep it as a credit for their next invoice.</div></div>}
 
       <div className="two-col">
         <div className="wide stack-lg">
-          {draft && <SubjectCard value={inv.subject} onSave={(subject) => update.mutate({ subject })} />}
+          {draft && <SubjectCard value={inv.subject} onEdit={save.edited} onUnchanged={unchanged} onSave={(subject) => saveField({ subject })} />}
           <LineItems table="invoice_line_items" parent="invoice_id" parentId={inv.id} lines={inv.lines} editable={draft} onChanged={refresh} />
-          <NotesCard value={inv.notes} editable={!isVoid} onSave={(notes) => update.mutate({ notes })} />
+          <NotesCard value={inv.notes} editable={!isVoid} onEdit={save.edited} onUnchanged={unchanged} onSave={(notes) => saveField({ notes })} />
           <section className="stack">
             <h2 className="section-title">Payments</h2>
-            <div className="card">
-              {inv.payments.length === 0 && <EmptyState compact icon="dollar" title="No payments yet" />}
+            <div className="card" ref={paymentRows}>
+              {inv.payments.length === 0 && <EmptyState inline title="No payments yet" />}
               {inv.payments.map((p) => {
                 const shown = paymentAmount(p);
                 return (
                   <div key={p.id} className="card-row">
-                    <span className="n-icon" style={{ width: 32, height: 32, borderRadius: 9, display: "grid", placeItems: "center", background: shown.back ? "var(--danger-tint)" : "var(--green-tint)", color: shown.back ? "var(--danger)" : "var(--green-dark)", flex: "none" }}><Icon name="dollar" size={15} /></span>
+                    <span className="n-icon" style={{ width: 32, height: 32, borderRadius: "var(--radius-control)", display: "grid", placeItems: "center", background: shown.back ? "var(--danger-tint)" : "var(--green-tint)", color: shown.back ? "var(--danger)" : "var(--green-dark)", flex: "none" }}><Icon name="dollar" size={16} /></span>
                     <span className="grow">
                       <strong className="tabular">{shown.amount}</strong>
                       {shown.tip && <span className="muted"> {shown.tip}</span>}
@@ -239,7 +284,7 @@ function InvoicePageScreen() {
                         items={[
                           // Hidden once it's all been refunded.
                           { label: "Record a refund", icon: "undo", hidden: refundable(p, inv.payments) <= 0, onSelect: () => setRefunding({ id: p.id, amount: Number(p.amount), method: p.method }) },
-                          { label: "Remove payment", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Remove this payment?", body: "Use this to fix a mistake. The invoice balance goes back up.", confirmLabel: "Remove", danger: true })) && removePayment.mutate(p.id) },
+                          { label: "Remove payment", icon: "trash", danger: true, onSelect: () => takeOff(p) },
                         ]}
                       />
                     )}
@@ -252,7 +297,7 @@ function InvoicePageScreen() {
         </div>
         <aside className="narrow stack">
           <div className="card card-pad totals">
-            <div className="line"><span>Subtotal</span><span>{formatMoneyCents(inv.subtotal)}</span></div>
+            <div className="line"><span>Subtotal</span><AnimatedNumber value={Number(inv.subtotal)} format={MONEY_CENTS} /></div>
             <DiscountRows
               kind="invoice"
               id={inv.id}
@@ -261,35 +306,37 @@ function InvoicePageScreen() {
               subtotal={Number(inv.subtotal)}
               canEditDiscount={draft}
               canChangePromo={!isVoid && !fromStripe && inv.payments.length === 0 && ["draft", "sent", "overdue"].includes(inv.status)}
-              onSaveDiscount={(v) => update.mutate({ discount_amount: v })}
+              onSaveDiscount={(v) => saveField({ discount_amount: v })}
+              onEditDiscount={save.edited}
+              onUnchangedDiscount={unchanged}
               onChanged={refresh}
             />
             <div className="line">
               <span>Tax {draft ? "" : `(${formatTaxRate(inv.tax_rate)})`}</span>
-              {draft ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => update.mutate({ tax_rate: taxRateFromPercent(v) })} /> : <span>{formatMoneyCents(inv.tax_amount)}</span>}
+              {draft ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
             </div>
-            {draft && <div className="line"><span>Tax amount</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
-            <div className="line grand"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
-            {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}
-            {paid !== 0 && <div className="line"><span>Paid</span><span>−{formatMoneyCents(paid)}</span></div>}
-            <div className="line grand" style={{ fontSize: 20, color: balance > 0 && daysLate > 0 ? "var(--danger)" : writtenOff ? "var(--text-2)" : undefined }}><span>{writtenOff ? "Written off" : "Balance due"}</span><span>{formatMoneyCents(balance)}</span></div>
+            {draft && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
+            <div className="line grand"><span>Total</span><AnimatedNumber value={Number(inv.total)} format={MONEY_CENTS} /></div>
+            {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−<AnimatedNumber value={Number(inv.retainage_amount)} format={MONEY_CENTS} /></span></div>}
+            {paid !== 0 && <div className="line"><span>Paid</span><span>−<AnimatedNumber value={paid} format={MONEY_CENTS} /></span></div>}
+            <div className="line grand" style={{ fontSize: 20, color: balance > 0 && daysLate > 0 ? "var(--danger)" : writtenOff ? "var(--text-2)" : undefined }}><span>{writtenOff ? statusText("invoice", "written_off") : "Balance due"}</span><AnimatedNumber value={balance} format={MONEY_CENTS} /></div>
           </div>
           <div className="card card-pad stack-sm">
             <strong>Dates</strong>
             <div className="totals">
               <div className="line">
                 <span>Issued</span>
-                {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.issued_on} onChange={(e) => e.target.value && update.mutate({ issued_on: e.target.value })} aria-label="Issued on" /> : <span>{formatDate(inv.issued_on)}</span>}
+                {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.issued_on} onChange={(e) => e.target.value && saveField({ issued_on: e.target.value })} aria-label="Issued on" /> : <span>{formatDate(inv.issued_on)}</span>}
               </div>
               <div className="line">
                 <span>Due</span>
-                {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.due_on ?? ""} min={inv.issued_on} onChange={(e) => update.mutate({ due_on: e.target.value || null })} aria-label="Due on" /> : <span>{inv.due_on ? formatDate(inv.due_on) : "On receipt"}</span>}
+                {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.due_on ?? ""} min={inv.issued_on} onChange={(e) => saveField({ due_on: e.target.value || null })} aria-label="Due on" /> : <span>{inv.due_on ? formatDate(inv.due_on) : "On receipt"}</span>}
               </div>
             </div>
             {draft && (
               <div className="row wrap" style={{ gap: 6 }}>
                 {[["On receipt", 0], ["Net 15", 15], ["Net 30", 30], ["Net 45", 45]].map(([l, d]) => (
-                  <button key={l} type="button" className="tab" aria-pressed={inv.due_on === addDaysIso(inv.issued_on, Number(d))} onClick={() => update.mutate({ due_on: addDaysIso(inv.issued_on, Number(d)) })}>{l}</button>
+                  <button key={l} type="button" className="tab" aria-pressed={inv.due_on === addDaysIso(inv.issued_on, Number(d))} onClick={() => saveField({ due_on: addDaysIso(inv.issued_on, Number(d)) })}>{l}</button>
                 ))}
               </div>
             )}
@@ -351,11 +398,12 @@ function InvoicePaper({ invoice }: { invoice: DocumentInvoice & { client: { disp
   );
 }
 
+// Stripe's invoice states in Crewtavo's words where there's one for it.
 const STRIPE_STATUS: Record<string, string> = {
-  open: "Waiting on payment",
+  open: statusText("invoice", "sent"),
   processing: "Bank payment on its way",
-  paid: "Paid",
-  void: "Voided",
+  paid: statusText("invoice", "paid"),
+  void: statusText("invoice", "void"),
   uncollectible: "Written off in Stripe",
 };
 
@@ -370,7 +418,7 @@ function StripeCard({ stripe }: { stripe: { stripe_id: string | null; origin: st
         <div className="line"><span>Status</span><span>{STRIPE_STATUS[stripe.status] ?? stripe.status}</span></div>
       </div>
       <div className="row wrap" style={{ gap: 6 }}>
-        <a className="btn btn-sm" href={dashboard} target="_blank" rel="noreferrer">Open in Stripe <Icon name="external" size={13} /></a>
+        <a className="btn btn-sm" href={dashboard} target="_blank" rel="noreferrer">Open in Stripe <Icon name="external" size={14} /></a>
         {stripe.hosted_url && stripe.status === "open" && <Button size="sm" icon="copy" onClick={() => copyText(stripe.hosted_url!, "Payment link copied")}>Copy payment link</Button>}
       </div>
       {!stripe.livemode && <span className="muted small">Test mode: no real money moves.</span>}
@@ -378,25 +426,26 @@ function StripeCard({ stripe }: { stripe: { stripe_id: string | null; origin: st
   );
 }
 
-function SubjectCard({ value, onSave }: { value: string | null; onSave: (v: string | null) => void }) {
+/** `onEdit` on every keystroke (the header says "Edited"), `onSave` when the field is left changed, `onUnchanged` when it's left as it was. */
+function SubjectCard({ value, onEdit, onUnchanged, onSave }: { value: string | null; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
   return (
     <label className="card card-pad field">
       <span>Subject <span className="optional">(shown at the top of the invoice)</span></span>
-      <input className="input" value={draft} maxLength={200} onChange={(e) => setDraft(e.target.value)} onBlur={() => draft.trim() !== (value ?? "") && onSave(draft.trim() || null)} placeholder="Spring cleanup, May services…" />
+      <input className="input" value={draft} maxLength={200} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => (draft.trim() !== (value ?? "") ? onSave(draft.trim() || null) : onUnchanged())} placeholder="Spring cleanup, May services…" />
     </label>
   );
 }
 
-function NotesCard({ value, editable, onSave }: { value: string | null; editable: boolean; onSave: (v: string | null) => void }) {
+function NotesCard({ value, editable, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
   if (!editable) return value ? <div className="card card-pad"><strong>Note to client</strong><p className="pre-wrap" style={{ margin: "6px 0 0" }}>{value}</p></div> : null;
   return (
     <label className="card card-pad field">
       <span>Note to client <span className="optional">(thank-you, payment instructions)</span></span>
-      <textarea className="textarea" value={draft} maxLength={4000} onChange={(e) => setDraft(e.target.value)} onBlur={() => draft.trim() !== (value ?? "") && onSave(draft.trim() || null)} placeholder="Thank you for your business! Checks payable to…" />
+      <textarea className="textarea" value={draft} maxLength={4000} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => (draft.trim() !== (value ?? "") ? onSave(draft.trim() || null) : onUnchanged())} placeholder="Thank you for your business. Checks payable to…" />
     </label>
   );
 }
@@ -412,7 +461,7 @@ function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: str
   const value = Number(amount);
   const tooMuch = value > invoice.balance + 0.005;
   const save = useMutation({
-    meta: { inline: true, success: (_: unknown) => (value >= invoice.balance - 0.005 ? "Payment recorded. The invoice is paid." : "Payment recorded") },
+    meta: { inline: true, success: "Payment recorded", tone: "invoice" },
     mutationFn: async () => {
       // The same check AI assistants' record_payment makes (packages/core/src/money.ts).
       const problem = paymentProblem(value, invoice.balance);
@@ -446,7 +495,7 @@ function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: str
         }}
       >
         <div className="form-grid">
-          <Field label="Amount" error={tooMuch ? `More than the ${formatMoneyCents(invoice.balance)} balance` : null}>
+          <Field label="Amount" requiredMessage="Enter the amount you received." error={tooMuch ? `More than the ${formatMoneyCents(invoice.balance)} balance.` : null}>
             <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
           </Field>
           <Field label="Tip" optional>
@@ -462,8 +511,9 @@ function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: str
         <Field label="Reference" optional><input className="input" placeholder="Check number" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={200} /></Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="dollar" loading={save.isPending} disabled={!(value > 0) || tooMuch}>Record {value > 0 ? formatMoneyCents(value) : "payment"}</Button>
+          <Button type="submit" variant="primary" icon="dollar" loading={save.isPending}>Record {value > 0 ? formatMoneyCents(value) : "payment"}</Button>
         </div>
       </form>
     </Dialog>
@@ -480,7 +530,7 @@ function RefundDialog({ invoice, payment, left, onClose, onSaved }: { invoice: {
   const tooMuch = value > left + 0.005;
   const limit = left < payment.amount ? `the ${formatMoneyCents(left)} left to refund on this payment` : `the ${formatMoneyCents(payment.amount)} payment`;
   const save = useMutation({
-    meta: { inline: true, success: "Refund recorded" },
+    meta: { inline: true, success: "Refund recorded", tone: "invoice" },
     mutationFn: async () => {
       if (!(value > 0)) throw new Error("Enter an amount greater than zero.");
       if (tooMuch) throw new Error(`That's more than ${limit}.`);
@@ -509,7 +559,7 @@ function RefundDialog({ invoice, payment, left, onClose, onSaved }: { invoice: {
     <Dialog open onClose={onClose} title="Record a refund" description="Record money you gave back to the client. The invoice balance goes back up by this amount.">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
-          <Field label="Amount" error={tooMuch ? `More than ${limit}` : null}>
+          <Field label="Amount" requiredMessage="Enter the amount you gave back." error={tooMuch ? `More than ${limit}.` : null}>
             <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
           </Field>
           <Field label="Refunded on"><input className="input" type="date" value={date} max={todayIn(session.company.timezone)} onChange={(e) => setDate(e.target.value)} required /></Field>
@@ -517,8 +567,9 @@ function RefundDialog({ invoice, payment, left, onClose, onSaved }: { invoice: {
         <Field label="Note" optional><input className="input" placeholder="Check number or reason" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={180} /></Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="undo" loading={save.isPending} disabled={!(value > 0) || tooMuch}>Record {value > 0 ? `${formatMoneyCents(value)} refund` : "refund"}</Button>
+          <Button type="submit" variant="primary" icon="undo" loading={save.isPending}>Record {value > 0 ? `${formatMoneyCents(value)} refund` : "refund"}</Button>
         </div>
       </form>
     </Dialog>

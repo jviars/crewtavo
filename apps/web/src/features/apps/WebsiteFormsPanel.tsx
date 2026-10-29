@@ -12,7 +12,7 @@ import { exampleForm } from "@crewtavo/core/websiteForms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -23,6 +23,7 @@ import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
 import styles from "./WebsiteFormsPanel.module.css";
 
 export interface WebsiteForm {
@@ -117,7 +118,7 @@ export function WebsiteFormsPanel({ kind = "contact" }: { kind?: FormKind }) {
     <>
       {!email_ready && (
         <div className="callout callout-warning" role="status">
-          <Icon name="mail" size={18} />
+          <Icon name="mail" size={20} />
           <div className="grow">
             Email isn't set up in Crewtavo yet, so {careers ? "applications only show in Applicants" : "messages only show in Requests"}. <Link to="/settings?tab=email" className="strong">Connect your email</Link> to get each one in your inbox too.
           </div>
@@ -125,7 +126,7 @@ export function WebsiteFormsPanel({ kind = "contact" }: { kind?: FormKind }) {
       )}
       {forms.map((form, i) => <FormCard key={form.id} form={form} first={i === 0} kind={kind} />)}
       <section className="card card-pad stack-sm" aria-labelledby="website-forms-add" style={{ gap: 10 }}>
-        <h2 id="website-forms-add" className="section-title" style={{ fontSize: 17 }}>{forms.length ? "Another form" : "Add a form"}</h2>
+        <h2 id="website-forms-add" className="section-title" style={{ fontSize: 16 }}>{forms.length ? "Another form" : "Add a form"}</h2>
         <span className="muted small">
           {careers
             ? "One for each website, or a separate one for seasonal hiring: each gets its own address and its own people to email."
@@ -173,18 +174,20 @@ function FormCard({ form, first, kind }: { form: WebsiteForm; first: boolean; ki
       setOwnPage(Boolean(saved.redirect_url));
       refresh();
     },
-    meta: { success: "Saved" },
   });
   const newAddress = useMutation({
     mutationFn: () => api.post<WebsiteForm>(`/website-forms/${form.id}/address`),
-    onSuccess: refresh,
-    meta: { success: "New address made. Put it in your form's action." },
+    onSuccess: () => {
+      toast.success("New address made", { description: "Put it in your form's action." });
+      refresh();
+    },
   });
   const remove = useMutation({
     mutationFn: () => api.delete(`/website-forms/${form.id}`),
     onSuccess: refresh,
     meta: { success: `${form.name} deleted` },
   });
+  const justSaved = useJustDone(save);
 
   // A careers form sends its résumé along: multipart, or the file never leaves the browser.
   const opening = careers ? `<form action="${form.url}" method="POST" enctype="multipart/form-data">` : `<form action="${form.url}" method="POST">`;
@@ -199,7 +202,7 @@ function FormCard({ form, first, kind }: { form: WebsiteForm; first: boolean; ki
     <section id={first ? "app-setup" : undefined} className="card card-pad stack" aria-labelledby={heading} style={{ gap: 14 }}>
       <div className="stack-sm" style={{ gap: 6 }}>
         <div className="row-between wrap" style={{ gap: 8 }}>
-          <h2 id={heading} className="section-title" style={{ fontSize: 17 }}>{form.name}</h2>
+          <h2 id={heading} className="section-title" style={{ fontSize: 16 }}>{form.name}</h2>
           <StatusPill label={form.last_message_at ? (careers ? "Taking applications" : "Taking messages") : careers ? "Waiting for an application" : "Waiting for a message"} tone={form.last_message_at ? "good" : "muted"} />
         </div>
         <span className="muted small" role="status">
@@ -311,7 +314,7 @@ function FormCard({ form, first, kind }: { form: WebsiteForm; first: boolean; ki
           </div>
         </details>
 
-        <Button type="submit" variant="primary" style={{ justifySelf: "start" }} loading={save.isPending} disabled={!dirty}>Save changes</Button>
+        <Button type="submit" style={{ justifySelf: "start" }} loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved}>Save changes</Button>
       </form>
     </section>
   );

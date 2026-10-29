@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/Button";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 
 export function useStartChangeOrder(job: { id: string; title: string; client: { id: string } | null; property: { id: string } | null }) {
   const session = useSession();
   const navigate = useNavigate();
   return useMutation({
-    meta: { success: "Change order started. Add what's changing, then send it." },
+    meta: { success: "Change order started", tone: "quote" },
     mutationFn: async () =>
       unwrap(
         await supabase()
@@ -29,14 +30,15 @@ export function ChangeOrders({ jobId, onStart, starting }: { jobId: string; onSt
     queryKey: ["job", jobId, "change-orders"],
     queryFn: async () => unwrap(await supabase().from("quotes").select("id, number, title, status, total").eq("change_order_for", jobId).order("created_at")),
   });
+  const listRef = useListAnimation<HTMLDivElement>();
   if (!orders.data?.length) return null;
   return (
     <section className="stack">
       <div className="section-head">
         <h2 className="section-title">Change orders</h2>
-        <Button size="sm" variant="ghost" icon="plus" loading={starting} onClick={onStart}>New change order</Button>
+        <Button size="sm" icon="plus" loading={starting} onClick={onStart}>New change order</Button>
       </div>
-      <div className="card">
+      <div className="card" ref={listRef}>
         {orders.data.map((o) => (
           <Link key={o.id} to={`/quotes/${o.id}`} className="card-row">
             <strong className="grow">#{o.number} · {o.title.replace(/^Change order: /, "")}</strong>

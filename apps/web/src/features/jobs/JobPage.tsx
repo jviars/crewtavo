@@ -1,8 +1,8 @@
-import { describeRule } from "@crewtavo/core/recurrence";
 import type { TablesUpdate } from "@crewtavo/core/database";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
@@ -11,23 +11,29 @@ import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
-import { EntityStatus, StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { EntityStatus, StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, formatDateTime, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { addressLine, formatDate, formatDateTime, formatMoney, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { LineItems } from "../quotes/LineItems";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
 import { useSchedulingRights } from "../schedule/myCrews";
+import { handlesSubPay, useJobPays } from "../subs/payData";
 import { ChangeOrders, useStartChangeOrder } from "./ChangeOrders";
-import { ExpensesCard } from "./ExpensesCard";
-import { MaterialsCard } from "./JobMaterials";
+import { ExpensesCard, useJobExpenses } from "./ExpensesCard";
+import { MaterialsCard, useJobMaterials } from "./JobMaterials";
 import { PlansCard } from "../plans/PlansCard";
 import { InvoiceJobDialog, JobDetailsDialog, type JobRecord } from "./JobDialogs";
 import { jobCosts } from "./jobCosts";
 import { JobPayCard, seesJobPay } from "./JobPayCard";
+import { repeatText } from "./repeatText";
 import { ScopeOfWork } from "./ScopeOfWork";
+
+/** The sections a job only shows once it uses them, offered under its line items until then. */
+type Extra = "materials" | "expenses" | "pay";
 
 export function JobPage() {
   const { id = "" } = useParams();
@@ -39,12 +45,29 @@ export function JobPage() {
   const [params] = useSearchParams();
   const [dialog, setDialog] = useState<null | "details" | "invoice">(() => (params.get("invoice") ? "invoice" : null));
   const [showPast, setShowPast] = useState(false);
+  // The empty section an add button under the line items just opened, shown while its dialog is up.
+  const [adding, setAdding] = useState<Extra | null>(null);
+  // The add button pressed goes as its section shows, so when the dialog closes keyboard focus goes back
+  // to it, or (something was added, so it's gone for good) to the section's own add button, not the page.
+  const wasAdding = useRef<Extra | null>(null);
+  useEffect(() => {
+    const was = wasAdding.current;
+    wasAdding.current = adding;
+    if (adding || !was || (document.activeElement && document.activeElement !== document.body)) return;
+    (document.querySelector<HTMLElement>(`[data-add="${was}"]`) ?? document.querySelector<HTMLElement>(`[data-extra="${was}"] .section-head button`))?.focus({ preventScroll: true });
+  }, [adding]);
+  const visitsRef = useListAnimation<HTMLDivElement>();
   const isOffice = hasRole(session, "admin", "office");
   const seesInvoices = isOffice && can(session, "invoices");
   const seesCosts = isOffice && can(session, "job_costs");
+  const seesPay = seesJobPay(session);
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
   const canDispatch = useSchedulingRights().canDispatch;
   const today = todayIn(session.company.timezone);
+  // The same queries the sections use, to know which ones this job has anything in.
+  const materialRows = useJobMaterials(id);
+  const expenseRows = useJobExpenses(id, seesCosts);
+  const payRows = useJobPays(session.company.id, id, seesPay);
 
   const job = useQuery({
     queryKey: ["job", id],
@@ -93,17 +116,17 @@ export function JobPage() {
     queryClient.invalidateQueries({ queryKey: ["jobs", session.company.id] });
   };
   const update = useMutation({
-    meta: { success: (_: unknown, p: TablesUpdate<"jobs">) => (p.status === "requires_invoicing" ? "Job marked complete" : p.status === "archived" ? "Job archived" : p.status === "active" ? "Job reopened" : p.status === "completed" ? "Job closed" : "Job saved") },
+    meta: { success: (_: unknown, p: TablesUpdate<"jobs">) => (p.status === "requires_invoicing" ? "Job marked complete" : p.status === "archived" ? "Job archived" : p.status === "active" ? "Job reopened" : p.status === "completed" ? "Job closed" : "Job saved"), tone: "job" },
     mutationFn: async (patch: TablesUpdate<"jobs">) => unwrap(await supabase().from("jobs").update(patch).eq("id", id)),
     onSuccess: refresh,
   });
   const completeVisit = useMutation({
-    meta: { success: "Visit completed" },
+    meta: { success: "Visit completed", tone: "job" },
     mutationFn: (visitId: string) => api.patch(`/visits/${visitId}`, { status: "completed" }),
     onSuccess: refresh,
   });
   const remove = useMutation({
-    meta: { success: "Job deleted" },
+    meta: { success: "Job deleted", tone: "job" },
     mutationFn: async () => unwrap(await supabase().from("jobs").delete().eq("id", id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["jobs", session.company.id] });
@@ -137,6 +160,27 @@ export function JobPage() {
   const finalInvoice = j.kind !== "recurring" ? live.find((i) => i.kind === "standard")?.number ?? null : null;
   const newVisit = (): VisitInput => ({ job_id: j.id, property_id: j.property?.id ?? null, title: j.title, crew_id: j.default_crew_id, kind: "job", context: { label: `Job #${j.number} · ${j.client?.display_name ?? ""}`, to: `/jobs/${j.id}` } });
 
+  // Materials, expenses and sub pay take no room until they have something (or failed to load, to
+  // say so). Until then they're small add buttons under the line items, each opening the same dialog
+  // as the section's own button and showing the section while it's open.
+  const used = (extra: Extra, rows: { data?: readonly unknown[]; error: unknown }) => Boolean(rows.data?.length) || Boolean(rows.error) || adding === extra;
+  const shows = { materials: used("materials", materialRows), expenses: seesCosts && used("expenses", expenseRows), pay: seesPay && used("pay", payRows) };
+  const offers: Array<{ key: Extra; label: string; name: string }> = [];
+  if (materialRows.data?.length === 0 && !shows.materials) offers.push({ key: "materials", label: "Materials", name: "Log materials" });
+  if (seesCosts && expenseRows.data?.length === 0 && !shows.expenses) offers.push({ key: "expenses", label: "Expense", name: "Add an expense" });
+  if (seesPay && j.status !== "archived" && payRows.data?.length === 0 && !shows.pay) {
+    const label = handlesSubPay(session) ? "Sub pay" : "Crew pay";
+    offers.push({ key: "pay", label, name: `Add ${label.toLowerCase()}` });
+  }
+  const addButtons = offers.length > 0 && (
+    <div className="add-chips" role="group" aria-label="Add to this job">
+      {offers.map((o) => <Button key={o.key} size="sm" icon="plus" className="add-chip" aria-label={o.name} data-add={o.key} onClick={() => setAdding(o.key)}>{o.label}</Button>)}
+    </div>
+  );
+  const doneAdding = () => setAdding(null);
+  // Green says the job made money: ink while there's nothing to count, red when it lost some.
+  const profitColor = profit >= 0.005 ? "var(--green-dark)" : profit <= -0.005 ? "var(--danger)" : undefined;
+
   return (
     <>
       <BackLink to="/jobs">Jobs</BackLink>
@@ -144,9 +188,8 @@ export function JobPage() {
         title={j.title}
         actions={
           <>
-            {canDispatch && j.status !== "archived" && <Button icon="calendar" onClick={() => setVisit(newVisit())}>Add visit</Button>}
             {seesInvoices && j.status !== "archived" && <Button icon="invoice" variant={j.status === "requires_invoicing" ? "primary" : "secondary"} onClick={() => setDialog("invoice")}>Create invoice</Button>}
-            {canSell && j.status === "active" && j.kind === "one_off" && <Button variant="primary" icon="check" loading={update.isPending} onClick={() => update.mutate({ status: "requires_invoicing" })}>Work complete</Button>}
+            {canSell && j.status === "active" && j.kind === "one_off" && <Button variant="primary" icon="check" loading={update.isPending} onClick={() => update.mutate({ status: "requires_invoicing" })}>Mark work complete</Button>}
             {canSell && (
               <Menu
                 items={[
@@ -173,24 +216,17 @@ export function JobPage() {
           </>
         }
       />
+      {/* The status, who it's for and how often it repeats. The number is under Details, the address with the client. */}
       <div className="page-meta">
-        <span className="muted">Job #{j.number}</span>
         <EntityStatus kind="job" status={j.status} />
-        {j.kind === "recurring" && <span className="chip chip-blue"><Icon name="refresh" size={12} />{j.recurrence_rule ? describeRule(j.recurrence_rule) : "Recurring"}</span>}
-        {j.client && <Link to={`/clients/${j.client.id}`} className="strong">{j.client.display_name}</Link>}
-        {j.property && <MapsLink className="address-link muted" place={j.property}>{addressLine(j.property)}</MapsLink>}
+        {j.client && <Link to={`/clients/${j.client.id}`}>{j.client.display_name}</Link>}
+        {j.kind === "recurring" && <span className="muted">{j.recurrence_rule ? repeatText(j.recurrence_rule) : "Recurring"}</span>}
       </div>
 
-      {j.status === "requires_invoicing" && seesInvoices && (
-        <div className="callout callout-warning">
-          <Icon name="invoice" size={18} />
-          <div className="grow">Ready to invoice.</div>
-          <Button size="sm" variant="primary" onClick={() => setDialog("invoice")}>Create invoice</Button>
-        </div>
-      )}
+      {/* Requires invoicing needs no banner: the pill says so and Create invoice is the page's green button. */}
       {uninvoiced > 0 && seesInvoices && j.status === "active" && j.billing_mode === "per_visit" && (
         <div className="callout callout-info">
-          <Icon name="invoice" size={18} />
+          <Icon name="invoice" size={20} />
           <div className="grow">{uninvoiced} completed {uninvoiced === 1 ? "visit is" : "visits are"} ready to invoice.</div>
           <Button size="sm" onClick={() => setDialog("invoice")}>Invoice visits</Button>
         </div>
@@ -201,19 +237,20 @@ export function JobPage() {
           <section className="stack">
             <div className="section-head">
               <h2 className="section-title">Visits</h2>
-              <span className="muted small">{past.filter((v) => v.status === "completed").length} of {visits.length} done</span>
+              {visits.length > 0 && <span className="muted small">{past.filter((v) => v.status === "completed").length} of {visits.length} done</span>}
+              {canDispatch && j.status !== "archived" && <Button size="sm" icon="plus" onClick={() => setVisit(newVisit())}>Add visit</Button>}
             </div>
-            <div className="card">
+            <div className="card" ref={visitsRef}>
               {visits.length === 0 && (
-                <EmptyState compact icon="calendar" title="No visits scheduled" action={canDispatch && <Button size="sm" icon="plus" onClick={() => setVisit(newVisit())}>Schedule a visit</Button>}>
-                  {j.kind === "recurring" ? "Set the schedule in “Edit details” and visits are created for the next 60 days." : "Schedule when the crew will do the work."}
+                <EmptyState inline title="No visits scheduled">
+                  {j.kind === "recurring" ? "Set how it repeats in Edit details, and visits are made for the next 60 days." : null}
                 </EmptyState>
               )}
               {shownVisits.map((v) => {
                 const overdue = !["completed", "cancelled"].includes(v.status) && v.scheduled_on && v.scheduled_on < today;
                 return (
                   <div key={v.id} className="card-row" style={{ cursor: canDispatch ? "pointer" : undefined }} onClick={() => canDispatch && setVisit({ ...v, job_id: j.id, property_id: j.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id), context: { label: `Job #${j.number}`, to: `/jobs/${j.id}` } })}>
-                    <span style={{ width: 4, alignSelf: "stretch", borderRadius: 4, background: (v.crew as { color?: string } | null)?.color || "var(--fill-3)" }} aria-hidden="true" />
+                    <span style={{ width: 4, alignSelf: "stretch", borderRadius: "var(--radius-sm)", background: (v.crew as { color?: string } | null)?.color || "var(--fill-3)" }} aria-hidden="true" />
                     <span className="grow">
                       <strong>{v.title}</strong>
                       <span className={`small ${overdue ? "text-danger strong" : "muted"}`} style={{ display: "block" }}>
@@ -222,9 +259,9 @@ export function JobPage() {
                         {overdue ? " · overdue" : ""}
                         {v.invoice_id ? " · invoiced" : ""}
                       </span>
-                      {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 700 }}>Weather: {v.hold_reason}</span>}
+                      {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>Weather: {v.hold_reason}</span>}
                     </span>
-                    <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                    <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
                     {canDispatch && !["completed", "cancelled"].includes(v.status) && (
                       <Button size="sm" variant="ghost" icon="check" aria-label={`Complete ${v.title}`} title="Mark complete" loading={completeVisit.isPending && completeVisit.variables === v.id} onClick={(e) => { e.stopPropagation(); completeVisit.mutate(v.id); }} />
                     )}
@@ -240,12 +277,18 @@ export function JobPage() {
             </div>
           </section>
 
-          {!hasRole(session, "admin", "office", "estimator") && <ScopeOfWork jobId={j.id} />}
+          {!hasRole(session, "admin", "office", "estimator") && (
+            <>
+              <ScopeOfWork jobId={j.id} />
+              {addButtons}
+            </>
+          )}
 
           {hasRole(session, "admin", "office", "estimator") && (
             <section className="stack">
               <h2 className="section-title">Line items</h2>
               <LineItems table="job_line_items" parent="job_id" parentId={j.id} lines={j.lines} editable={canSell && ["active", "requires_invoicing"].includes(j.status)} onChanged={refresh} />
+              {addButtons}
             </section>
           )}
 
@@ -253,18 +296,20 @@ export function JobPage() {
 
           <PlansCard scope={{ kind: "job", id: j.id, propertyId: j.property?.id ?? null }} />
 
-          <MaterialsCard jobId={j.id} showCosts={seesCosts} />
+          {/* Each wrapped (display: contents) so focus can find its add button as its dialog closes. */}
+          {shows.materials && <div data-extra="materials" style={{ display: "contents" }}><MaterialsCard jobId={j.id} showCosts={seesCosts} startAdding={adding === "materials"} onAddClosed={doneAdding} /></div>}
 
-          {seesCosts && <ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} />}
+          {shows.expenses && <div data-extra="expenses" style={{ display: "contents" }}><ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} startAdding={adding === "expenses"} onAddClosed={doneAdding} /></div>}
 
-          {seesJobPay(session) && <JobPayCard job={{ id: j.id, number: j.number, title: j.title, archived: j.status === "archived" }} visits={visits} lines={j.lines} />}
+          {shows.pay && <div data-extra="pay" style={{ display: "contents" }}><JobPayCard job={{ id: j.id, number: j.number, title: j.title, archived: j.status === "archived" }} visits={visits} lines={j.lines} startAdding={adding === "pay"} onAddClosed={doneAdding} /></div>}
 
           {seesInvoices && (
             <section className="stack">
               <h2 className="section-title">Invoices</h2>
               <div className="card">
                 {invoices.isPending && <div className="card-row"><Skeleton width="50%" /></div>}
-                {invoices.data?.length === 0 && <EmptyState compact icon="invoice" title="Not invoiced yet" action={<Button size="sm" icon="invoice" onClick={() => setDialog("invoice")}>Create invoice</Button>} />}
+                {/* Create invoice is in the page header, so the empty line doesn't repeat it. */}
+                {invoices.data?.length === 0 && <EmptyState inline title="Not invoiced yet" />}
                 {invoices.data?.map((inv) => (
                   <Link key={inv.id} to={`/invoices/${inv.id}`} className="card-row">
                     <strong className="grow">Invoice #{inv.number}{inv.kind === "progress" ? ` · pay app ${inv.pay_app_number}` : inv.kind === "deposit" ? " · deposit" : inv.kind === "visits" ? " · visits" : inv.kind === "retainage" ? " · retainage" : ""}</strong>
@@ -284,15 +329,16 @@ export function JobPage() {
               {costs.isPending ? <Skeleton height={60} /> : (
                 <>
                   <ProfitBar price={contract} labor={labor} crew={crew} expenses={expenses} materials={materials} />
+                  {/* The figures roll to their new values as line items, time and costs change. */}
                   <div className="totals" style={{ marginTop: 6 }}>
-                    <div className="line"><span>Price</span><span>{formatMoneyCents(contract)}</span></div>
-                    <div className="line"><span>{cost.actualLabor ? "Line item materials" : "Line item costs"}</span><span>{formatMoneyCents(materials)}</span></div>
-                    <div className="line"><span>Labor ({(costs.data?.hours ?? 0).toFixed(1)} h)</span><span>{formatMoneyCents(labor)}</span></div>
-                    <div className="line"><span>Sub and crew pay</span><span>{formatMoneyCents(crew)}</span></div>
-                    <div className="line"><span>Expenses</span><span>{formatMoneyCents(expenses)}</span></div>
-                    <div className="line grand" style={{ fontSize: 15 }}>
+                    <div className="line"><span>Price</span><AnimatedNumber value={contract} format={MONEY_CENTS} /></div>
+                    <div className="line"><span>{cost.actualLabor ? "Line item materials" : "Line item costs"}</span><AnimatedNumber value={materials} format={MONEY_CENTS} /></div>
+                    <div className="line"><span>Labor ({(costs.data?.hours ?? 0).toFixed(1)} h)</span><AnimatedNumber value={labor} format={MONEY_CENTS} /></div>
+                    <div className="line"><span>Sub and crew pay</span><AnimatedNumber value={crew} format={MONEY_CENTS} /></div>
+                    <div className="line"><span>Expenses</span><AnimatedNumber value={expenses} format={MONEY_CENTS} /></div>
+                    <div className="line grand">
                       <span>Profit</span>
-                      <span style={{ color: profit < 0 ? "var(--danger)" : "var(--green-dark)" }}>{formatMoneyCents(profit)}{margin !== null ? ` (${margin}%)` : ""}</span>
+                      <span style={{ color: profitColor }}><AnimatedNumber value={profit} format={MONEY_CENTS} />{margin !== null ? ` (${margin}%)` : ""}</span>
                     </div>
                   </div>
                   {cost.note && <span className="muted small">{cost.note}</span>}
@@ -307,9 +353,10 @@ export function JobPage() {
               {canSell && <Button size="sm" variant="ghost" icon="edit" onClick={() => setDialog("details")}>Edit</Button>}
             </div>
             <dl className="kv">
-              {canSell && <><dt>Contract</dt><dd>{formatMoneyCents(contract)}</dd></>}
+              <dt>Job number</dt><dd>#{j.number}</dd>
+              {canSell && <><dt>Contract</dt><dd><AnimatedNumber value={contract} format={MONEY_CENTS} /></dd></>}
               <dt>Billing</dt><dd>{statusLabel(j.billing_mode)}</dd>
-              {j.kind === "recurring" && <><dt>Repeats</dt><dd>{j.recurrence_rule ? describeRule(j.recurrence_rule) : "—"}{j.starts_on ? `, from ${formatDate(j.starts_on)}` : ""}{j.ends_on ? ` to ${formatDate(j.ends_on)}` : ""}</dd></>}
+              {j.kind === "recurring" && <><dt>Repeats</dt><dd>{j.recurrence_rule ? repeatText(j.recurrence_rule) : "—"}{j.starts_on ? `, from ${formatDate(j.starts_on)}` : ""}{j.ends_on ? ` to ${formatDate(j.ends_on)}` : ""}</dd></>}
               {j.crew && <><dt>Crew</dt><dd>{j.crew.name}</dd></>}
               {j.po_number && <><dt>PO</dt><dd>{j.po_number}</dd></>}
               {j.permit_number && <><dt>Permit</dt><dd>{j.permit_number}</dd></>}
@@ -317,14 +364,19 @@ export function JobPage() {
               {j.warranty_until && <><dt>Warranty</dt><dd>until {formatDate(j.warranty_until)}</dd></>}
               {j.quote && <><dt>From</dt><dd><Link to={`/quotes/${j.quote.id}`}>Quote #{j.quote.number}</Link></dd></>}
             </dl>
-            {j.instructions && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: 8, border: "1px solid var(--note-border)" }}>{j.instructions}</p>}
+            {j.instructions && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: "var(--radius-control)", border: "1px solid var(--note-border)" }}>{j.instructions}</p>}
           </div>
           {j.client && (
             <div className="card card-pad stack-sm">
               <strong>Client</strong>
-              <Link to={`/clients/${j.client.id}`} className="strong">{j.client.display_name}</Link>
+              <Link to={`/clients/${j.client.id}`}>{j.client.display_name}</Link>
               {j.client.phone && <a href={`tel:${j.client.phone}`} className="small">{j.client.phone}</a>}
-              {j.property && <span style={{ justifySelf: "start" }}><MapsLink className="btn btn-sm" place={j.property}><Icon name="navigation" size={14} />Directions</MapsLink></span>}
+              {j.property && (
+                <>
+                  <span className="small">{addressLine(j.property)}</span>
+                  <span style={{ justifySelf: "start" }}><MapsLink className="btn btn-sm" place={j.property}><Icon name="navigation" size={14} />Directions</MapsLink></span>
+                </>
+              )}
             </div>
           )}
         </aside>
@@ -357,8 +409,8 @@ function ProfitBar({ price, labor, crew, expenses, materials }: { price: number;
     { label: "Profit", value: Math.max(0, price - labor - crew - expenses - materials), color: "var(--green)" },
   ];
   return (
-    <div style={{ display: "flex", height: 12, borderRadius: 999, overflow: "hidden", background: "var(--fill-2)" }} role="img" aria-label={parts.map((p) => `${p.label} ${formatMoney(p.value)}`).join(", ")}>
-      {parts.map((p) => p.value > 0 && <span key={p.label} title={`${p.label}: ${formatMoney(p.value)}`} style={{ width: `${(p.value / total) * 100}%`, background: p.color, transition: "width 400ms" }} />)}
+    <div style={{ display: "flex", height: 12, borderRadius: "var(--radius-pill)", overflow: "hidden", background: "var(--fill-2)" }} role="img" aria-label={parts.map((p) => `${p.label} ${formatMoney(p.value)}`).join(", ")}>
+      {parts.map((p) => p.value > 0 && <span key={p.label} title={`${p.label}: ${formatMoney(p.value)}`} style={{ width: `${(p.value / total) * 100}%`, background: p.color, transition: "width var(--dur-slow) var(--ease-out)" }} />)}
     </div>
   );
 }

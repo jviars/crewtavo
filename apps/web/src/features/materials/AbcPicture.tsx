@@ -80,5 +80,5 @@ export function AbcPicture({ item, icon = "package", caption, className = "" }: 
       </span>
     );
   }
-  return <span ref={ref} data-photo={state} className={`abc-picture abc-icon ${className}`} aria-hidden="true"><Icon name={icon} size={22} /></span>;
+  return <span ref={ref} data-photo={state} className={`abc-picture abc-icon ${className}`} aria-hidden="true"><Icon name={icon} size={20} /></span>;
 }

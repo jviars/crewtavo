@@ -10,11 +10,12 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Menu } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { perUnit, rateText, readRate, squaresText } from "./pay";
 import { refreshPay, usePayRates, useServices, type PayeeRef, type PayRate } from "./payData";
@@ -24,6 +25,7 @@ export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) 
   const queryClient = useQueryClient();
   const rates = usePayRates(session.company.id, payee);
   const [editing, setEditing] = useState<PayRate | "new" | null>(null);
+  const listRef = useListAnimation<HTMLDivElement>();
   const setActive = useMutation({
     meta: { success: (_: unknown, v: { active: boolean }) => (v.active ? "Rate turned back on" : "Rate turned off") },
     mutationFn: async ({ id, active }: { id: string; active: boolean }) => unwrap(await supabase().from("pay_rates").update({ active }).eq("id", id)),
@@ -44,7 +46,7 @@ export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) 
       ) : rates.error ? (
         <div className="card-row"><ErrorState compact error={rates.error} onRetry={() => rates.refetch()} /></div>
       ) : list.length === 0 ? (
-        <EmptyState compact icon="dollar" title="No rates yet" action={<Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a rate</Button>}>
+        <EmptyState inline title="No rates yet" action={bare ? <Button onClick={() => setEditing("new")}>Add a rate</Button> : undefined}>
           {team
             ? "What they earn per square, per job or per day. Pay on a job is filled in from these."
             : "What you pay them per square, per job or per day. Pay on a job is filled in from these, and you can still change it there."}
@@ -76,15 +78,17 @@ export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) 
           </div>
         ))
       )}
-      {editing && <RateDialog payee={payee} rate={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
     </>
   );
+  // Outside the list, so the rows' animation never touches the dialog.
+  const dialog = editing && <RateDialog payee={payee} rate={editing === "new" ? null : editing} onClose={() => setEditing(null)} />;
 
   if (bare) {
     return (
       <div className="stack-sm">
-        <div className="card">{body}</div>
+        <div className="card" ref={listRef}>{body}</div>
         {list.length > 0 && <span><Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a rate</Button></span>}
+        {dialog}
       </div>
     );
   }
@@ -92,9 +96,10 @@ export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) 
     <section className="stack">
       <div className="section-head">
         <h2 className="section-title">Rates</h2>
-        {list.length > 0 && <Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a rate</Button>}
+        <Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a rate</Button>
       </div>
-      <div className="card">{body}</div>
+      <div className="card" ref={listRef}>{body}</div>
+      {dialog}
     </section>
   );
 }
@@ -157,7 +162,7 @@ function RateDialog({ payee, rate, onClose }: { payee: PayeeRef; rate: PayRate |
         {basis === "per_unit" && (
           <Field label="Counted on" hint="Its quantity on the job's line items, change orders included.">
             {services.isPending ? (
-              <Skeleton height={36} />
+              <Skeleton height={38} />
             ) : (
               <select className="select" value={serviceId} onChange={(e) => setServiceId(e.target.value)} required>
                 <option value="">Choose a service from your price list</option>
@@ -195,6 +200,7 @@ function RateDialog({ payee, rate, onClose }: { payee: PayeeRef; rate: PayRate |
         </Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending}>{rate ? "Save" : "Add rate"}</Button>
         </div>

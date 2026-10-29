@@ -21,18 +21,19 @@ export function InstallAppCard() {
   const signIn = hint === "ios" && session && isSub(session) ? homeScreenSignInNote(session.config.features, sub) : null;
   return (
     <div className="callout callout-info">
-      <Icon name={hint === "ios" ? "share" : "apps"} size={18} />
+      <Icon name={hint === "ios" ? "share" : "apps"} size={20} />
       {hint === "ios" ? (
         <div className="grow small" style={{ fontWeight: 400 }}>
-          <div style={{ fontWeight: 700 }}>Add Crewtavo to your Home Screen</div>
+          <div>Add Crewtavo to your Home Screen</div>
           Tap Share <span style={{ verticalAlign: "-2px" }}><Icon name="share" size={14} /></span>, then <strong>Add to Home Screen</strong>. It opens like any other app.
           {signIn && <> {signIn}</>}
         </div>
       ) : (
         <div className="grow small" style={{ fontWeight: 400 }}>
-          <div style={{ fontWeight: 700 }}>Get the Crewtavo app</div>
+          <div>Get the Crewtavo app</div>
           It opens from your home screen like any other app.
-          <div style={{ marginTop: 8 }}><InstallAppButton size="sm" /></div>
+          {/* Outlined: the green button on My day is the visit to do now. */}
+          <div style={{ marginTop: 8 }}><InstallAppButton size="sm" variant="secondary" /></div>
         </div>
       )}
       <button type="button" className="icon-btn" aria-label="Don't show this again" title="Don't show this again" onClick={dismissInstallTip}><Icon name="x" size={16} /></button>

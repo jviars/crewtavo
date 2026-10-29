@@ -37,25 +37,25 @@
 .pickText { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: start; min-width: 0; padding: 12px 14px 14px; }
 /* A long tier word stops at the card's edge. */
 .pickText :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
-.pickText strong { font-size: 15px; overflow-wrap: anywhere; }
-.pickPrice { font-size: 13.5px; color: var(--text-2); }
-.pickText small { font-size: 12.5px; color: var(--text-3); }
+.pickText strong { font-size: var(--fs-16); letter-spacing: var(--tracking-tight); overflow-wrap: anywhere; }
+.pickPrice { font-size: var(--fs-13); color: var(--text-2); }
+.pickText small { font-size: var(--fs-13); color: var(--text-3); }
 /* A package still on the example warranty setup gave it (flagExamples). */
-.pickFlag { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--warning); }
+.pickFlag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-13); font-weight: 600; color: var(--warning); }
 .pickCheck, .pickNumber {
   position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 26px; height: 26px;
   border-radius: 50%; background: var(--green-solid, var(--green)); color: #fff; box-shadow: 0 0 0 3px var(--surface);
 }
-.pickNumber { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pickNumber { font-size: var(--fs-14); font-weight: 700; font-variant-numeric: tabular-nums; }
 .pickOffer, .pickFoot {
-  display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 12px;
-  border: 0; border-top: 1px solid var(--divider); background: var(--fill); font: inherit; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--control); padding: 0 12px;
+  border: 0; border-top: 1px solid var(--divider); background: var(--fill); font: inherit; font-size: var(--fs-13); font-weight: 700;
 }
 .pickOffer { color: var(--green-dark); cursor: pointer; }
 .pickOffer:hover { background: var(--fill-2); }
 .pickOffer:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
 .pickFoot { color: var(--text-3); font-weight: 600; }
-.pickNote { margin: 0; font-size: 13px; color: var(--text-2); }
+.pickNote { margin: 0; font-size: var(--fs-13); color: var(--text-2); }
 /* On a phone the cards stack, so the picture moves to the side. */
 @media (max-width: 600px) {
   .pickMain { flex-direction: row; align-items: stretch; }

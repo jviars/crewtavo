@@ -37,7 +37,7 @@ export function StripePanel({ app, onChanged }: { app: AppRow; onChanged: () => 
         </div>
         {details.own && !details.webhook && (
           <span className="small" style={{ color: "var(--danger)", fontWeight: 600 }}>
-            <Icon name="alert" size={13} /> Stripe can't reach this address, so payments won't show up on their own. Once Crewtavo has a public https address, connect the key again.
+            <Icon name="alert" size={14} /> Stripe can't reach this address, so payments won't show up on their own. Once Crewtavo has a public https address, connect the key again.
           </span>
         )}
         {app.last_sync_at && <span className="muted small">Last heard from Stripe {timeAgo(app.last_sync_at)}</span>}
@@ -47,10 +47,10 @@ export function StripePanel({ app, onChanged }: { app: AppRow; onChanged: () => 
       </section>
 
       <section className="card card-pad stack-sm" aria-labelledby="stripe-history" style={{ gap: 8 }}>
-        <h2 id="stripe-history" className="section-title" style={{ fontSize: 17 }}>Bring in your Stripe history</h2>
+        <h2 id="stripe-history" className="section-title" style={{ fontSize: 16 }}>Bring in your Stripe history</h2>
         <span className="muted small">Invoices you made in Stripe, with their clients and payments, and your bank deposits. Nobody is emailed or texted, and running it again only updates what's already here.</span>
         {running ? (
-          <span className="small" role="status"><Icon name="refresh" size={13} /> Importing… {counts ? plural(counts.invoices, "invoice") : ""} so far</span>
+          <span className="small" role="status"><Icon name="refresh" size={14} /> Importing… {counts ? plural(counts.invoices, "invoice") : ""} so far</span>
         ) : (
           <div className="row wrap" style={{ gap: 8 }}>
             <select className="select grow" value={since} onChange={(e) => setSince(e.target.value)} aria-label="Import from">

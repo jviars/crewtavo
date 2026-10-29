@@ -33,7 +33,7 @@ export function OwedCard() {
           <input type="checkbox" checked={selected.size === rows.length} onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
           Pick all
         </label>
-        <Button size="sm" variant="primary" icon="check" disabled={!sel.count} onClick={() => setPaying(true)}>{sel.count > 1 ? `Mark ${sel.count} paid` : "Mark paid"}</Button>
+        <Button size="sm" icon="check" disabled={!sel.count} onClick={() => setPaying(true)}>{sel.count > 1 ? `Mark ${sel.count} paid` : "Mark paid"}</Button>
       </div>
       <table className="table table-stack">
         <thead>

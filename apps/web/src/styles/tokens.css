@@ -73,9 +73,32 @@
   --info: #2357a8;      --info-tint: #e8f0fb;
   --note: #fff8e6;      --note-border: #f1e2b8;
 
+  /*
+   * Type scale: every font size in the app is one of these eight. 400 for text, 600 for labels,
+   * 700 for headings, 800 for the page title only.
+   */
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-24: 24px;
+  --fs-32: 32px;
+  --tracking-tight: -0.01em;    /* headings from 16px up */
+  --tracking-display: -0.025em; /* the page title and big figures */
+  --tracking-caps: 0.04em;      /* small uppercase labels */
+
+  /* Corners: 4 for chips and tags, 8 for controls, 12 for cards and dialogs, plus pill and circle. */
+  --radius-sm: 4px;
   --radius-card: 12px;
   --radius-control: 8px;
   --radius-pill: 999px;
+
+  /* Control heights: small, default, and crew screens (thumbs and gloves). */
+  --control-sm: 32px;
+  --control: 38px;
+  --control-lg: 48px;
 
   --shadow-xs: 0 1px 2px rgba(15, 42, 53, 0.05);
   --shadow-sm: 0 1px 3px rgba(15, 42, 53, 0.07), 0 1px 2px rgba(15, 42, 53, 0.04);
@@ -90,6 +113,14 @@
   --dur-fast: 120ms;
   --dur: 200ms;
   --dur-slow: 320ms;
+  /* Things that open and close (dialogs, sheets, menus, panels): in a little slower than they leave. */
+  --ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-exit: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-enter: 300ms;
+  --dur-exit: 180ms;
+  /* A highlight sliding to the new choice (segmented controls, filter pills, tabs): a slight overshoot. */
+  --ease-slide: cubic-bezier(0.3, 1.25, 0.5, 1);
+  --dur-slide: 380ms;
 
   --sidebar-width: 228px;
   --topbar-height: 60px;

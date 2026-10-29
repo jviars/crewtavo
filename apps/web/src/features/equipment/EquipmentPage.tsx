@@ -22,6 +22,9 @@ const FILTERS = [
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
 
+/** What an empty filter says, in the filter's own words. */
+const EMPTY_TITLES: Record<FilterKey, string> = { all: "Nothing in use", due: "Everything is up to date", in_shop: "Nothing in the shop", retired: "Nothing retired" };
+
 export function EquipmentPage() {
   const session = useSession();
   const { company } = session;
@@ -65,7 +68,7 @@ export function EquipmentPage() {
       <PageHeader title="Equipment" actions={canManage && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" }, { replace: true })}>Add equipment</Button>} />
       {overdue > 0 && filter !== "due" && (
         <div className="callout callout-danger">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow">{overdue} {overdue === 1 ? "machine is" : "machines are"} overdue for maintenance.</div>
           <Button size="sm" onClick={() => setFilter("due")}>Show them</Button>
         </div>
@@ -90,7 +93,8 @@ export function EquipmentPage() {
         <div className="card"><ErrorState error={list.error} onRetry={() => list.refetch()} /></div>
       ) : all.length === 0 ? (
         <div className="card">
-          <EmptyState icon="truck" title="Keep track of your trucks, mowers and tools" action={canManage && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>Add equipment</Button>}>
+          {/* Add equipment is the page header's green button, so it isn't repeated here. */}
+          <EmptyState icon="truck" title="Keep track of your trucks, mowers and tools">
             Log engine hours and miles, see what maintenance is coming up, and keep every repair and receipt in one place.
           </EmptyState>
         </div>
@@ -99,7 +103,7 @@ export function EquipmentPage() {
           {term ? (
             <EmptyState icon="search" title="Nothing matches" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
           ) : (
-            <EmptyState icon="check" title={filter === "due" ? "Everything is up to date" : "Nothing here"} />
+            <EmptyState icon={filter === "due" ? "check" : "truck"} title={EMPTY_TITLES[filter]} />
           )}
         </div>
       ) : (
@@ -116,7 +120,7 @@ export function EquipmentPage() {
                       <div className="muted small">{[kindLabel(e.kind), [e.year, e.make, e.model].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</div>
                     </td>
                     <td>{e.crew ? <span className="row" style={{ gap: 6 }}><span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", flex: "none", background: e.crew.color || "var(--fill-3)" }} />{e.crew.name}</span> : <span className="muted">Shared</span>}</td>
-                    <td className="tabular" style={{ whiteSpace: "nowrap" }}>{e.meter === "none" ? <span className="muted">—</span> : e.meter_reading != null ? formatMeter(e.meter_reading, e.meter) : <span className="muted">Not logged</span>}</td>
+                    <td className="tabular" style={{ whiteSpace: "nowrap" }}>{e.meter === "none" ? <span className="muted">—</span> : e.meter_reading != null ? formatMeter(e.meter_reading, e.meter) : <span className="muted">—</span>}</td>
                     <td>
                       {n ? (
                         <>
@@ -124,7 +128,7 @@ export function EquipmentPage() {
                           <div className={`small ${n.state === "overdue" ? "text-danger strong" : n.state === "due_soon" ? "strong" : "muted"}`} style={n.state === "due_soon" ? { color: "var(--warning)" } : undefined}>{dueSummary(n)}</div>
                         </>
                       ) : (
-                        <span className="muted">{e.status === "retired" ? "—" : "No schedule"}</span>
+                        <span className="muted">—</span>
                       )}
                     </td>
                     <td>{n && n.state !== "ok" && e.status === "active" ? <StatusPill label={n.state === "overdue" ? "Overdue" : "Due soon"} tone={dueTone(n.state)} /> : <StatusPill label={STATUS_LABELS[e.status]} tone={STATUS_TONES[e.status]} />}</td>

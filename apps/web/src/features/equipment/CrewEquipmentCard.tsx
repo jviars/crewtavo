@@ -33,7 +33,7 @@ export function CrewEquipmentCard() {
     <section className="stack-sm">
       <div className="section-head">
         <h2 className="section-title">Your equipment</h2>
-        <Link to="/equipment" className="small strong">All equipment</Link>
+        <Link to="/equipment" className="small">All equipment</Link>
       </div>
       <div className="card">
         {rows.map((e) => {
@@ -49,8 +49,9 @@ export function CrewEquipmentCard() {
               </Link>
               {due && <StatusPill label={due.state === "overdue" ? "Overdue" : "Due soon"} tone={dueTone(due.state)} />}
               <span className="row" style={{ gap: 6 }}>
-                {e.meter !== "none" && <Button size="sm" icon="gauge" onClick={() => setLog({ equipment: e, kind: "reading" })}>{e.meter === "miles" ? "Miles" : "Hours"}</Button>}
-                {due && <Button size="sm" variant="primary" icon="check" onClick={() => setLog({ equipment: e, kind: "service", planId: due.plan_id })}>Done</Button>}
+                {e.meter !== "none" && <Button size="sm" icon="gauge" onClick={() => setLog({ equipment: e, kind: "reading" })}>{e.meter === "miles" ? "Log miles" : "Log hours"}</Button>}
+                {/* Outlined like Log hours: My day's green button is the visit's next step. */}
+                {due && <Button size="sm" icon="check" onClick={() => setLog({ equipment: e, kind: "service", planId: due.plan_id })}>Mark done</Button>}
               </span>
             </div>
           );

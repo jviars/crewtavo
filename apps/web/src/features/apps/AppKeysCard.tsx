@@ -60,7 +60,7 @@ export function AppKeysCard({ app, onChanged, onConnect, connecting }: { app: Ap
     const end = keys.client_id.slice(-4);
     return (
       <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="app-keys-title" style={{ gap: 8 }}>
-        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 17 }}>Your {provider} app</h2>
+        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 16 }}>Your {provider} app</h2>
         <span className="muted small">
           Client ID ending in <strong>{end}</strong>
           {qbo ? (keys.sandbox ? " · Development keys, for a sandbox company" : " · Production keys") : ` · ${regionOf(keys.accounts_server).label}`}
@@ -68,7 +68,7 @@ export function AppKeysCard({ app, onChanged, onConnect, connecting }: { app: Ap
         </span>
         {app.status === "disconnected" && (
           <div className="callout" style={{ marginTop: 4 }}>
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow stack-sm" style={{ gap: 8 }}>
               <span>Last step: sign in to {app.name} and pick your company.</span>
               <Button variant="primary" style={{ justifySelf: "start" }} loading={connecting} onClick={onConnect}>Sign in to {app.name}</Button>
@@ -86,7 +86,7 @@ export function AppKeysCard({ app, onChanged, onConnect, connecting }: { app: Ap
   return (
     <section id="app-setup" className="card card-pad stack" aria-labelledby="app-keys-title">
       <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 17 }}>{keys ? `Change your ${provider} app keys` : `Set up ${app.name}`}</h2>
+        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 16 }}>{keys ? `Change your ${provider} app keys` : `Set up ${app.name}`}</h2>
         <span className="muted small">
           {qbo
             ? "QuickBooks connects through an app you make at Intuit, for your business only. It's free, and these steps give you everything Intuit asks for."
@@ -182,7 +182,7 @@ function KeysForm({ app, initial, onSaved, onCancel }: { app: AppRow; initial: N
       <Field label="Client Secret" hint={initial ? "Paste the secret again, even if only the Client ID changed." : undefined}>
         <div className="input-group">
           <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={secret} onChange={(e) => { setSecret(e.target.value); save.reset(); }} style={{ paddingLeft: 12, paddingRight: 36 }} />
-          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={15} /></button>
+          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={14} /></button>
         </div>
       </Field>
       {qbo && (

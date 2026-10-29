@@ -9,34 +9,40 @@ import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/Button";
 import { CHART_MOTION, ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/Chart";
 import { Icon } from "@/components/ui/Icon";
+import { EmptyState } from "@/components/ui/States";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { formatNumber } from "@/lib/format";
 import type { Bucket } from "./range";
+
+export { Change } from "./change";
 
 const edgeDate = (d: string, year: boolean) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: year ? "numeric" : undefined, timeZone: "UTC" });
 
 /**
  * A line over the period's buckets, with the axis on the right and the first and last dates under
- * it. `previous` draws the period before as a dashed line for comparison.
+ * it. `previous` draws the period before as a dashed line for comparison. Ticks and the tooltip
+ * both write values in full ("$45,000"), so the axis is as wide as its longest tick.
  */
 export function TrendChart({ buckets, values, previous, format, label, color = "var(--green)", height = 150 }: { buckets: Bucket[]; values: number[]; previous?: number[]; format: (n: number) => string; label: string; color?: string; height?: number }) {
   const data = buckets.map((b, i) => ({ title: b.title, value: values[i] ?? 0, previous: previous?.[i] ?? null }));
   const empty = !values.some((v) => v !== 0) && !previous?.some((v) => v !== 0);
   // Counts (and whole-dollar sums) get whole-number ticks, so a small count doesn't show "0, 1, 1".
   const whole = [...values, ...(previous ?? [])].every(Number.isInteger);
+  // The top tick sits a little above the largest value; about 6.5px a character at the axis's 11px.
+  const widest = empty ? "" : format(Math.max(0, ...values, ...(previous ?? [])) * 1.25);
+  const axis = Math.max(40, Math.ceil(widest.length * 6.5) + 10);
   const config: ChartConfig = previous
     ? { value: { label: "This period", color }, previous: { label: "Previous period", color: "var(--text-4)", dashed: true } }
     : { value: { label, color } };
   const first = buckets[0];
   const last = buckets.at(-1);
   return (
-    <div className="trend">
+    <div className="trend" style={{ ["--axis" as string]: `${axis}px` }}>
       <ChartContainer config={config} label={label} height={height} overlay={empty && <div className="chart-empty">Nothing in this period</div>}>
         <LineChart data={data} margin={{ top: 6, right: 0, bottom: 2, left: 0 }}>
           <CartesianGrid vertical={false} />
           <XAxis dataKey="title" hide />
-          <YAxis orientation="right" width={48} tickLine={false} axisLine={false} tickMargin={8} tickCount={4} allowDecimals={!whole} domain={[0, "auto"]} tickFormatter={(n: number) => (empty ? "" : format(n))} />
+          <YAxis orientation="right" width={axis} tickLine={false} axisLine={false} tickMargin={8} tickCount={4} allowDecimals={!whole} domain={[0, "auto"]} tickFormatter={(n: number) => (empty ? "" : format(n))} />
           <ChartTooltip
             cursor={{ stroke: "var(--text-4)", strokeDasharray: "3 3" }}
             isAnimationActive={false}
@@ -68,29 +74,13 @@ export function TrendChart({ buckets, values, previous, format, label, color = "
   );
 }
 
-/** The change from the period before as a small signed percent (more is better for every figure it's used on). */
-export function Change({ now, before }: { now: number; before: number }) {
-  if (!before && !now) return null;
-  if (!before) return <span className="change" data-tone="up" title="Nothing in the previous period">New</span>;
-  const change = Math.round(((now - before) / before) * 100);
-  // Ten times or more reads better as a multiple: "24×", not "+2,300%".
-  const text = change >= 900 ? `${formatNumber(Math.round(now / before))}×` : `${change > 0 ? "+" : change < 0 ? "−" : ""}${Math.abs(change)}%`;
-  return (
-    <span className="change" data-tone={change > 0 ? "up" : change < 0 ? "down" : undefined} title="Compared with the previous period">
-      <span className="sr-only">{change < 0 ? "Down" : "Up"} </span>
-      {text}
-      <span className="sr-only"> from the previous period</span>
-    </span>
-  );
-}
-
 export interface Part { key: string; label: ReactNode; value: number; color: string; hint?: ReactNode }
 
 /** How a total splits: one bar in parts, then a row per part with its amount. Negative parts (refunds) are listed but not drawn. */
 export function Breakdown({ parts, format, empty = "Nothing in this period", label }: { parts: Part[]; format: (n: number) => string; empty?: string; label: string }) {
   const drawn = parts.filter((p) => p.value > 0);
   const total = drawn.reduce((s, p) => s + p.value, 0);
-  if (!total && !parts.some((p) => p.value < 0)) return <p className="muted small" style={{ margin: 0 }}>{empty}</p>;
+  if (!total && !parts.some((p) => p.value < 0)) return <EmptyState inline title={empty} />;
   return (
     <div className="breakdown">
       <div className="breakdown-bar" role="img" aria-label={`${label}: ${drawn.map((p) => `${typeof p.label === "string" ? p.label : p.key} ${format(p.value)}`).join(", ")}`}>
@@ -112,13 +102,13 @@ export function Breakdown({ parts, format, empty = "Nothing in this period", lab
 
 export function HBars({ rows, format, empty = "Nothing in this period" }: { rows: Array<{ key: string; label: ReactNode; value: number; hint?: ReactNode; color?: string }>; format: (n: number) => string; empty?: string }) {
   const max = Math.max(0, ...rows.map((r) => r.value));
-  if (!rows.length || max === 0) return <p className="muted small" style={{ margin: 0 }}>{empty}</p>;
+  if (!rows.length || max === 0) return <EmptyState inline title={empty} />;
   return (
     <div className="stack-sm" style={{ gap: 12 }}>
       {rows.map((r, i) => (
         <div key={r.key} className="stack-sm" style={{ gap: 6 }}>
-          <div className="row-between small"><span className="ellipsis" style={{ fontWeight: 600 }}>{r.label}</span><span className="tabular strong">{format(r.value)}{r.hint && <span className="muted" style={{ fontWeight: 500 }}> · {r.hint}</span>}</span></div>
-          <div className="hbar"><span style={{ width: `${(r.value / max) * 100}%`, animationDelay: `${i * 40}ms`, ["--c" as string]: r.color }} /></div>
+          <div className="row-between small"><span className="ellipsis" style={{ fontWeight: 600 }}>{r.label}</span><span className="tabular strong">{format(r.value)}{r.hint && <span className="muted" style={{ fontWeight: 400 }}> · {r.hint}</span>}</span></div>
+          <div className="hbar"><span style={{ width: `${(r.value / max) * 100}%`, animationDelay: `${i * 30}ms`, ["--c" as string]: r.color }} /></div>
         </div>
       ))}
     </div>
@@ -154,7 +144,7 @@ export function ReportTable<T>({ rows, columns, filename, initialSort, empty = "
   return (
     <div className="stack-sm">
       {rows.length === 0 ? (
-        <p className="muted small" style={{ margin: 0, padding: "4px 0" }}>{empty}</p>
+        <EmptyState inline title={empty} />
       ) : (
         <div className="table-scroll" style={{ margin: "0 -20px" }}>
           <table className="table" style={{ minWidth: 0 }}>

@@ -1,5 +1,5 @@
 .stars { display: flex; gap: 2px; }
-.stars button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-3); cursor: pointer; }
+.stars button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-3); cursor: pointer; }
 .stars button:hover { background: var(--fill); color: var(--warning); }
 .stars .on { color: var(--warning); }
 .stars .on svg { fill: currentColor; }

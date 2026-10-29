@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { settingsGroups } from "@/features/settings/sections";
 import { managesSubs } from "@/features/subs/subsData";
+import { afterExit, announceTopLayer } from "@/lib/motion";
 import { getRecents } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { Spinner } from "../ui/Button";
@@ -64,6 +65,17 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
+  // It keeps its last results on screen while it animates out, and starts afresh each time it opens.
+  const [wasOpen, setWasOpen] = useState(open);
+  const [leaving, setLeaving] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    setLeaving(!open);
+    if (open) {
+      setQuery("");
+      setIndex(0);
+    }
+  }
   const term = useDeferredValue(searchTerm(query));
 
   useEffect(() => {
@@ -90,14 +102,21 @@ export function CommandPalette() {
     if (!dialog) return;
     if (open && !dialog.open) {
       dialog.showModal();
+      announceTopLayer();
       requestAnimationFrame(() => input.current?.focus());
     }
     if (!open && dialog.open) dialog.close();
-    if (!open) {
+  }, [open]);
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!leaving || !dialog) return;
+    return afterExit(dialog, () => {
+      setLeaving(false);
       setQuery("");
       setIndex(0);
-    }
-  }, [open]);
+    });
+  }, [leaving]);
 
   const results = useQuery({
     queryKey: ["global-search", session.company.id, term],
@@ -210,10 +229,10 @@ export function CommandPalette() {
       }}
       onClick={(e) => e.target === ref.current && setOpen(false)}
     >
-      {open && (
+      {(open || leaving) && (
         <>
           <div className="palette-input">
-            {searching ? <Spinner size={18} /> : <Icon name="search" size={18} />}
+            {searching ? <Spinner size={20} /> : <Icon name="search" size={20} />}
             <input
               ref={input}
               value={query}

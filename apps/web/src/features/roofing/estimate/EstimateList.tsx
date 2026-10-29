@@ -9,12 +9,16 @@
  * the control beside the search says.
  */
 import type { LineChange } from "@crewtavo/core/estimates";
+import { toCents } from "@crewtavo/core/money";
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
+import { AnimatedNumber, MONEY, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Spinner } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
+import { EmptyState } from "@/components/ui/States";
 import { formatNumber } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { takeoffVariables, type TakeoffRow } from "../../paving/data";
 import type { EstimateEditor } from "./data";
 import { counts, destinationText, estimateRows, isPendingLine, lineDestination, money, ownServices, quickAddPrice, searchServices, serviceDetail, type EstimateRow, type LinePlace, type RowTag } from "./rows";
@@ -22,6 +26,8 @@ import type { EstimateLine, EstimateQuote, EstimateService, QuickAddService } fr
 import styles from "./estimate.module.css";
 
 const TAGS: Record<RowTag, string> = { added: "Added", changed: "Changed", removed: "Taken off" };
+/** Whole dollars, or cents when there are some, as money() writes it. */
+const amountFormat = (n: number) => (toCents(n) % 100 === 0 ? MONEY : MONEY_CENTS);
 
 export interface EstimateListProps {
   quote: EstimateQuote;
@@ -98,7 +104,7 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
           {editor?.busy && <><Spinner size={12} /> Saving…</>}
         </span>
       )}
-      {!roof.length && !other.length && <p className={styles.empty}>Nothing on the estimate yet.{canEdit ? " Add something below." : ""}</p>}
+      {!roof.length && !other.length && <EmptyState inline title="Nothing on the estimate yet">{canEdit ? "Add something below." : null}</EmptyState>}
       {roof.length > 0 && <Section title={roofTitle} rows={roof} canEdit={canEdit} editor={editor} onEdit={onEdit} />}
       {other.length > 0 && <Section title="Everything else" rows={other} canEdit={canEdit} editor={editor} onEdit={onEdit} />}
 
@@ -114,7 +120,7 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
                 const only = onlyHere(s, "quick");
                 return (
                   <button key={s.id} type="button" className={styles.chip} disabled={adding} aria-busy={adding || undefined} aria-label={`Add ${s.name}, ${price}${only ? `, ${only.toLowerCase()}` : ""}`} onClick={() => editor.addService(s, s.quantity, whereTo(s, "quick"))}>
-                    {adding ? <Spinner size={size === "large" ? 17 : 15} /> : <Icon name="plus" size={size === "large" ? 17 : 15} strokeWidth={2.8} />}
+                    {adding ? <Spinner size={size === "large" ? 16 : 14} /> : <Icon name="plus" size={size === "large" ? 16 : 14} strokeWidth={2} />}
                     {s.name}
                     <small>{only ? `${price} · ${only}` : price}</small>
                   </button>
@@ -123,7 +129,9 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
             </div>
           )}
           {services?.length === 0 ? (
-            <p className={styles.hint}>Your price list is empty. Add services in <Link to="/settings?tab=prices">Settings → Price list</Link>.</p>
+            <EmptyState inline title="Your price list is empty">
+              Add services in <Link to="/settings?tab=prices">Settings → Price list</Link>.
+            </EmptyState>
           ) : (
             <div className={styles.searchRow}>
               {services ? (
@@ -151,10 +159,11 @@ export function EstimateList({ quote, changes, size = "regular", editable, edito
 
 function Section({ title, rows, canEdit, editor, onEdit }: { title: string; rows: EstimateRow[]; canEdit: boolean; editor?: EstimateEditor | null; onEdit?: (line: EstimateLine) => void }) {
   const id = useId();
+  const rowsRef = useListAnimation<HTMLUListElement>();
   return (
     <section className={styles.section} aria-labelledby={id}>
       <h3 id={id} className={styles.sectionTitle}>{title}</h3>
-      <ul className={styles.rows}>
+      <ul ref={rowsRef} className={styles.rows}>
         {rows.map((row) => <Row key={row.key} row={row} editor={canEdit ? editor : null} onEdit={canEdit ? onEdit : undefined} />)}
       </ul>
     </section>
@@ -188,13 +197,13 @@ function Row({ row, editor, onEdit }: { row: EstimateRow; editor?: EstimateEdito
       <span className={styles.controls}>
         {editor && line && row.less && (
           <button type="button" className={styles.round} aria-label={row.lessLabel} disabled={saving} onClick={() => editor.dec(line)}>
-            <Icon name="minus" size={16} strokeWidth={2.5} />
+            <Icon name="minus" size={16} />
           </button>
         )}
         {editor && line && row.quantity !== null && <span className={styles.qty} aria-live="polite">{row.quantity}</span>}
         {editor && line && (row.kind === "count" || row.kind === "layers") && (
           <button type="button" className={styles.round} aria-label={row.moreLabel} disabled={saving || !row.more} onClick={() => editor.inc(line)}>
-            <Icon name="plus" size={16} strokeWidth={2.5} />
+            <Icon name="plus" size={16} />
           </button>
         )}
         {!editor && row.quantity !== null && !removed && <span className={styles.qty}>{row.quantity}</span>}
@@ -202,7 +211,8 @@ function Row({ row, editor, onEdit }: { row: EstimateRow; editor?: EstimateEdito
           <button type="button" className={styles.putBack} aria-label={`Put ${row.name} back`} onClick={() => editor.putBack(row.removed!)}>Put back</button>
         )}
       </span>
-      <span className={styles.amount}>{money(row.amount)}</span>
+      {/* Rolls to its new amount on − and +; a line taken off is crossed out, which only plain text shows. */}
+      <span className={styles.amount}>{removed ? money(row.amount) : <AnimatedNumber value={row.amount} format={amountFormat(row.amount)} />}</span>
     </li>
   );
 }

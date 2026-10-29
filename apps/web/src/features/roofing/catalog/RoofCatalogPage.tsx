@@ -24,6 +24,7 @@ import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { formatMoneyCents, formatNumber } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { AbcPicture } from "../../materials/AbcPicture";
 import { CATALOG_CATEGORIES, priceKey, uomWord, useAllMaterials, useCardLooks, useCardPrices, useSupplier, type CardPrice, type CatalogCategory, type CatalogItem, type ServiceMaterial, type Supplier, type UsualItem } from "../../materials/data";
@@ -134,7 +135,7 @@ function Catalog({ supplier }: { supplier: Supplier }) {
         <div className={styles.bar}>
           <SearchBox query={view === "search" ? query : ""} onSearch={(text) => (text ? setParams({ view: "search", q: text }, { replace: view === "search" }) : view === "search" && go({ view: "usual" }))} />
           <span className={styles.where}>
-            <Icon name="truck" size={15} />
+            <Icon name="truck" size={14} />
             Your prices at {branchLabel(supplier)}{supplier.environment === "sandbox" ? " (ABC's sandbox test prices)" : ""}
           </span>
         </div>
@@ -145,7 +146,7 @@ function Catalog({ supplier }: { supplier: Supplier }) {
         {view === "yours" ? (
           <YourMaterials materials={materials} services={services.data ?? []} packages={packages.data ?? []} canEdit={canEdit} onOpen={open} />
         ) : view === "search" && query.length >= 2 ? (
-          <Results key={`q:${query}`} query={query} title={`"${query}"`} usedIn={usedIn} onOpen={open} />
+          <Results key={`q:${query}`} query={query} title={`“${query}”`} usedIn={usedIn} onOpen={open} />
         ) : category ? (
           <Results key={category.key} query={category.search} title={category.name} icon={category.icon} usedIn={usedIn} onOpen={open} />
         ) : (
@@ -284,7 +285,7 @@ function Card({ item, eyebrow, price, unit, note, used, icon, onOpen }: {
         ) : (
           <span className={styles.noPrice}>{note ?? "No price"}</span>
         )}
-        {used && <span className="chip chip-green"><Icon name="check" size={12} strokeWidth={3} />In your price list</span>}
+        {used && <span className="chip chip-green"><Icon name="check" size={12} strokeWidth={2} />In your price list</span>}
       </span>
     </button>
   );
@@ -322,6 +323,8 @@ function Results({ query, title, icon, usedIn, onOpen }: { query: string; title:
   const shown = items.filter((i) => (!kind || i.kind === kind) && (!brand || i.brand === brand));
   // Items cut to length can't be priced until a length is picked.
   const prices = useCardPrices(items.filter((i) => !i.dimensional));
+  // Cards slide into place as a type or brand narrows them.
+  const gridRef = useListAnimation<HTMLDivElement>();
 
   return (
     <section className="stack" aria-labelledby="catalog-results" style={{ gap: 14 }}>
@@ -359,9 +362,9 @@ function Results({ query, title, icon, usedIn, onOpen }: { query: string; title:
       ) : results.error ? (
         <div className="card"><ErrorState error={results.error} onRetry={() => results.refetch()} /></div>
       ) : !shown.length ? (
-        <div className="card"><EmptyState icon="search" title="Nothing at your branch matches" compact>Try fewer words, the brand's name, or an ABC item number.</EmptyState></div>
+        <div className="card"><EmptyState inline title="Nothing at your branch matches">Try fewer words, the brand's name, or an ABC item number.</EmptyState></div>
       ) : (
-        <div className={styles.grid}>
+        <div ref={gridRef} className={styles.grid}>
           {shown.map((item) => {
             const { price, note } = item.dimensional ? { price: null, note: "Pick a length to see its price." } : priceOf(prices, item);
             return (
@@ -431,14 +434,14 @@ function Usual({ usedIn, onOpen, onCategory }: { usedIn: Map<string, ServiceMate
       ) : (
         <>
           <div className="callout callout-info" role="note">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <span className="grow" style={{ fontWeight: 400 }}>{usual.data?.note ?? "Nothing yet."}</span>
           </div>
           <h3 className="section-title" style={{ margin: "4px 0 0" }}>Start from a category</h3>
           <div className={styles.tiles}>
             {CATALOG_CATEGORIES.map((c) => (
               <button key={c.key} type="button" className={styles.tile} onClick={() => onCategory(c)}>
-                <Icon name={c.icon} size={18} />
+                <Icon name={c.icon} size={20} />
                 {c.name}
               </button>
             ))}

@@ -42,6 +42,19 @@ export function pendingVisitStatus(queryClient: QueryClient, visitId: string): s
   return waiting.at(-1)?.status;
 }
 
+/**
+ * The last checklist or notes save made on this phone for a visit that hasn't gone yet, like
+ * pendingVisitStatus: the visit's screen shows it rather than the older copy the server has.
+ */
+export function pendingVisitSave<V extends { visitId: string }>(queryClient: QueryClient, key: "checklist-save" | "visit-notes", visitId: string): V | undefined {
+  return queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: [key], status: "pending" })
+    .map((m) => m.state.variables as V | undefined)
+    .filter((v): v is V => v?.visitId === visitId)
+    .at(-1);
+}
+
 /** Show a tapped status at once, on My day and on the visit's own screen alike. */
 export function showVisitStatus(queryClient: QueryClient, change: VisitStatusChange) {
   queryClient.setQueriesData<{ today: Array<{ id: string; status: string }> }>({ queryKey: ["field"] }, (old) => old && { ...old, today: old.today.map((v) => (v.id === change.visitId ? { ...v, status: change.status } : v)) });
@@ -72,11 +85,11 @@ export async function setVisitStatus(v: VisitStatusChange) {
 /** The database turning a clock down: row-level security on time entries. */
 export const clockRefused = (error: unknown) => /row-level security|permission/i.test(error instanceof Error ? error.message : String(error));
 
-/** What a status tap's confirmation says, once the server has it. */
+/** What a status tap's confirmation says, once the server has it (a toast: no closing period). */
 export function statusSaved(result: { skipped: boolean; visitStatus?: string; clockOff?: boolean } | undefined, change: VisitStatusChange): string {
   const clocks = change.clock !== false && !result?.clockOff;
-  if (result?.skipped) return result.visitStatus === "cancelled" ? "The office cancelled this visit." : clocks ? "Your crew already moved this visit on. Your time is saved." : "This visit had already moved on.";
-  return change.status === "en_route" ? "On your way" : change.status === "in_progress" ? (clocks ? "Visit started. Your clock is running." : "Visit started.") : "Visit complete. Nice work!";
+  if (result?.skipped) return result.visitStatus === "cancelled" ? "The office cancelled this visit" : clocks ? "Your crew already moved this visit on, your time is saved" : "This visit had already moved on";
+  return change.status === "en_route" ? "On your way" : change.status === "in_progress" ? (clocks ? "Visit started, your clock is running" : "Visit started") : "Visit completed";
 }
 
 export interface ChecklistSave {
@@ -85,7 +98,11 @@ export interface ChecklistSave {
   /** Made on the phone, so saving twice offline updates one row instead of adding two. */
   responseId: string;
   templateId: string | null;
-  answers: Record<string, unknown>;
+  /**
+   * Left out when the checklist is only marked done with nothing of this phone's waiting: the
+   * answers saved stay as they are, a crewmate's from another phone included.
+   */
+  answers?: Record<string, unknown>;
   completedAt: string | null;
 }
 
@@ -93,17 +110,30 @@ export async function saveChecklist(v: ChecklistSave) {
   unwrap(
     await supabase()
       .from("checklist_responses")
-      .upsert({ id: v.responseId, company_id: v.companyId, visit_id: v.visitId, template_id: v.templateId, answers: v.answers as never, completed_at: v.completedAt }),
+      .upsert({ id: v.responseId, company_id: v.companyId, visit_id: v.visitId, template_id: v.templateId, ...(v.answers && { answers: v.answers as never }), completed_at: v.completedAt }),
   );
 }
 
-/** `companyId` is where the notes were written; notes queued before it was recorded go to the company on screen. */
-export async function saveVisitNotes(v: { visitId: string; notes: string | null; companyId?: string }) {
+export interface VisitNotesSave {
+  visitId: string;
+  notes: string | null;
+  /** Where the notes were written; notes queued before it was recorded go to the company on screen. */
+  companyId?: string;
+}
+
+export async function saveVisitNotes(v: VisitNotesSave) {
   await api.patch(`/visits/${v.visitId}`, { notes: v.notes }, { companyId: v.companyId });
 }
 
+/**
+ * Field actions wait for signal ("online" mode): with none, React Query pauses them and lib/offline.ts
+ * keeps them on the phone. Every other save fails at once instead (lib/queryClient.ts).
+ */
+const WAIT_FOR_SIGNAL = { networkMode: "online" } as const;
+
 export function registerFieldActions(queryClient: QueryClient) {
   queryClient.setMutationDefaults(["visit-status"], {
+    ...WAIT_FOR_SIGNAL,
     mutationFn: async (v: VisitStatusChange) => {
       const result = await setVisitStatus(v);
       // Their clock was turned off: what this phone knows about them (GET /me) is out of date.
@@ -111,6 +141,6 @@ export function registerFieldActions(queryClient: QueryClient) {
       return result;
     },
   });
-  queryClient.setMutationDefaults(["checklist-save"], { mutationFn: (v: ChecklistSave) => saveChecklist(v) });
-  queryClient.setMutationDefaults(["visit-notes"], { mutationFn: (v: { visitId: string; notes: string | null }) => saveVisitNotes(v) });
+  queryClient.setMutationDefaults(["checklist-save"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: ChecklistSave) => saveChecklist(v) });
+  queryClient.setMutationDefaults(["visit-notes"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: VisitNotesSave) => saveVisitNotes(v) });
 }

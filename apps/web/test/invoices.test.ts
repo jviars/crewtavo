@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { refundable } from "../src/features/invoices/refunds";
+import { settle } from "../src/features/invoices/settle";
 import { bankPayment, bankPaymentNote, paidInStripe, paymentAmount, RECORD_IN_STRIPE } from "../src/features/invoices/stripeInvoices";
 
 describe("refunds", () => {
@@ -98,5 +99,25 @@ describe("a payment in the invoice's list", () => {
   it("with an amount reads as before", () => {
     expect(paymentAmount({ amount: 160, tip_amount: 15 })).toEqual({ amount: "$160.00", tip: "+ $15.00 tip", back: false });
     expect(paymentAmount({ amount: -160, tip_amount: -15 })).toEqual({ amount: "-$160.00", tip: null, back: true });
+  });
+});
+
+describe("taking a payment off an invoice while its Undo is offered", () => {
+  const today = "2026-10-16";
+  const invoice = { status: "paid", total: 1000, retainage_amount: 0, due_on: "2026-10-30", lines: [{}], payments: [{ id: "a", amount: 600 }, { id: "b", amount: 400 }], amount_paid: 1000, balance_due: 0 };
+
+  it("puts the balance back up and works out the status as the database does", () => {
+    expect(settle(invoice, [invoice.payments[0]!], today)).toMatchObject({ amount_paid: 600, balance_due: 400, status: "partially_paid" });
+    expect(settle(invoice, [], today)).toMatchObject({ amount_paid: 0, balance_due: 1000, status: "sent" });
+    // Past its due date it's past due again.
+    expect(settle({ ...invoice, due_on: "2026-10-01" }, [], today)).toMatchObject({ status: "overdue" });
+    // Put back, it's paid again.
+    expect(settle({ ...invoice, status: "partially_paid" }, invoice.payments, today)).toMatchObject({ balance_due: 0, status: "paid" });
+  });
+
+  it("leaves drafts, voided and written-off invoices as they are", () => {
+    expect(settle({ ...invoice, status: "draft" }, [], today).status).toBe("draft");
+    expect(settle({ ...invoice, status: "void" }, [], today).status).toBe("void");
+    expect(settle({ ...invoice, status: "written_off" }, [], today).status).toBe("written_off");
   });
 });

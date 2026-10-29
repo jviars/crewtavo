@@ -37,7 +37,7 @@ export function ClockCard({ visits = [] }: { visits?: VisitUnderWay[] }) {
   const starting = action.isPending && action.variables !== "stop";
   if (!clocks) return null;
   return (
-    <div className="card card-pad row wrap" style={{ gap: 12, background: on ? "var(--green-tint)" : undefined, borderColor: on ? "transparent" : undefined, transition: "background 200ms" }}>
+    <div className="card card-pad row wrap" style={{ gap: 12, background: on ? "var(--green-tint)" : undefined, borderColor: on ? "transparent" : undefined, transition: "background var(--dur), border-color var(--dur)" }}>
       <span className="avatar" style={{ width: 40, height: 40, background: on ? "var(--green-solid)" : "var(--fill-3)", color: on ? "#fff" : "var(--text-2)" }}><Icon name="clock" size={20} /></span>
       <div className="grow">
         {on ? (

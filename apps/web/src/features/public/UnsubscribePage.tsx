@@ -36,29 +36,29 @@ export function UnsubscribePage() {
         <div className="card card-pad stack" style={{ textAlign: "center", justifyItems: "center", padding: 32 }}>
           {isTest ? (
             <>
-              <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
-              <h1 style={{ fontSize: 22 }}>This is a test email</h1>
+              <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
+              <h1 style={{ fontSize: 24, letterSpacing: "var(--tracking-display)" }}>This is a test email</h1>
               <p className="muted" style={{ margin: 0 }}>In a real campaign, this link unsubscribes the client from marketing email.</p>
             </>
           ) : status.isPending ? (
             <div className="stack-sm" style={{ width: "100%", justifyItems: "center" }}><Skeleton width={64} height={64} circle /><Skeleton width="70%" height={20} /><Skeleton width="90%" /></div>
           ) : status.error ? (
             <>
-              <span className="empty-icon" style={{ width: 52, height: 52, borderRadius: 16, display: "grid", placeItems: "center", background: "var(--danger-tint)", color: "var(--danger)" }}><Icon name="link" size={24} /></span>
-              <h1 style={{ fontSize: 22 }}>This link isn't working</h1>
+              <span className="empty-icon" style={{ width: 52, height: 52, borderRadius: "var(--radius-card)", display: "grid", placeItems: "center", background: "var(--danger-tint)", color: "var(--danger)" }}><Icon name="link" size={24} /></span>
+              <h1 style={{ fontSize: 24, letterSpacing: "var(--tracking-display)" }}>This link isn't working</h1>
               <p className="muted" style={{ margin: 0 }}>{(status.error as Error).message}</p>
             </>
           ) : status.data?.unsubscribed ? (
             <>
-              <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
-              <h1 style={{ fontSize: 22 }}>You're unsubscribed</h1>
+              <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
+              <h1 style={{ fontSize: 24, letterSpacing: "var(--tracking-display)" }}>You're unsubscribed</h1>
               <p className="muted" style={{ margin: 0 }}>You won't get marketing email from {status.data.company} anymore.</p>
               <Button variant="ghost" loading={change.isPending} onClick={() => change.mutate(true)}>Subscribe again</Button>
             </>
           ) : (
             <>
               <span className="success-mark"><Icon name="mail" size={28} /></span>
-              <h1 style={{ fontSize: 22 }}>You're subscribed</h1>
+              <h1 style={{ fontSize: 24, letterSpacing: "var(--tracking-display)" }}>You're subscribed</h1>
               <p className="muted" style={{ margin: 0 }}>You'll get occasional email from {status.data?.company}.</p>
               <Button loading={change.isPending} onClick={() => change.mutate(false)}>Unsubscribe</Button>
             </>

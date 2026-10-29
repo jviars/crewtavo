@@ -3,19 +3,19 @@
 
 .bar { display: grid; gap: 12px; }
 .intro { display: grid; gap: 2px; }
-.intro h2 { margin: 0; font-size: 17px; }
-.intro p { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.5; }
+.intro h2 { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.intro p { margin: 0; color: var(--text-2); font-size: var(--fs-14); line-height: 1.5; }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.picker { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.picker { display: flex; align-items: center; gap: 8px; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); }
 .picker select { width: auto; min-width: 200px; max-width: 100%; }
 .spacer { flex: 1; }
-.which { font-size: 12px; color: var(--text-3); }
-.dirty { font-size: 13px; font-weight: 600; color: var(--warning); }
+.which { font-size: var(--fs-12); color: var(--text-3); }
+.dirty { font-size: var(--fs-13); font-weight: 600; color: var(--warning); }
 
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .controls { display: grid; gap: 12px; min-width: 0; }
 .preview { display: grid; gap: 12px; min-width: 0; padding: 16px; border-radius: var(--radius-card); background: var(--fill-2); }
-.previewHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: 13px; color: var(--text-2); }
+.previewHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: var(--fs-13); color: var(--text-2); }
 .previewHead span { display: inline-flex; align-items: center; gap: 6px; }
 
 @container (min-width: 820px) {
@@ -33,30 +33,30 @@
 }
 .sectionHead:hover { background: var(--fill); }
 .sectionHead:focus-visible { outline: none; box-shadow: inset var(--ring); }
-.sectionIcon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--fill-2); color: var(--text-2); }
+.sectionIcon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-control); background: var(--fill-2); color: var(--text-2); }
 .sectionTitle { flex: 1; display: grid; gap: 2px; min-width: 0; }
-.sectionTitle strong { font-size: 15px; }
-.sectionTitle span { overflow: hidden; font-size: 13px; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.sectionTitle strong { font-size: var(--fs-16); }
+.sectionTitle span { overflow: hidden; font-size: var(--fs-13); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
 .chevron { flex: none; color: var(--text-3); transition: transform var(--dur) var(--ease-out); }
 .sectionHead[aria-expanded="true"] .chevron { transform: rotate(180deg); }
 .sectionBody { display: grid; gap: 18px; padding: 16px 16px 18px; border-top: 1px solid var(--row-divider); }
 .sectionBody[hidden] { display: none; }
-.label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.label { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
 .group { display: grid; gap: 8px; }
 .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
 
 /* ---- Header style tiles: a tiny page in each style ---------------------------------------- */
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .tile {
-  display: grid; gap: 8px; padding: 8px; border: 1px solid var(--button-border); border-radius: 10px;
-  background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  display: grid; gap: 8px; padding: 8px; border: 1px solid var(--button-border); border-radius: var(--radius-control);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer;
   transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
 }
 .tile:hover { border-color: var(--border-strong); }
 .tile[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); }
 .tile:focus-visible { outline: none; box-shadow: var(--ring); }
 /* The little pages are paper: white in both themes. */
-.mini { display: flex; height: 54px; overflow: hidden; border: 1px solid #ecebe6; border-radius: 6px; background: #fafaf8; }
+.mini { display: flex; height: 54px; overflow: hidden; border: 1px solid #ecebe6; border-radius: var(--radius-sm); background: #fafaf8; }
 .mini i { display: block; border-radius: 2px; background: #d9d8d2; }
 .mini .square { width: 14px; height: 14px; border-radius: 3px; background: var(--mini-color); }
 .mini .name { width: 26px; height: 5px; border-radius: 3px; background: #c9c8c1; }
@@ -75,35 +75,36 @@
 .miniBanner .line { width: 16px; height: 3px; background: rgba(255, 255, 255, 0.6); }
 
 /* ---- Logo and color ---------------------------------------------------------------------- */
-.logoTile { display: grid; place-items: center; height: 60px; min-width: 60px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.logoTile { display: grid; place-items: center; height: 60px; min-width: 60px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-control); background: #fff; }
 .logoTile img { display: block; max-height: 40px; max-width: 180px; object-fit: contain; }
 .swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .swatch {
-  width: 34px; height: 34px; padding: 0; border: 3px solid var(--surface); border-radius: 999px; cursor: pointer;
+  width: 34px; height: 34px; padding: 0; border: 3px solid var(--surface); border-radius: var(--radius-pill); cursor: pointer;
   box-shadow: 0 0 0 1px var(--button-border); transition: box-shadow var(--dur-fast);
 }
 .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--swatch); }
 .swatch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--swatch), var(--ring); }
 .brandSwatch {
   display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px 0 5px; border: 1px solid var(--button-border);
-  border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer;
 }
-.brandSwatch::before { content: ""; width: 26px; height: 26px; border-radius: 999px; background: var(--swatch); }
+.brandSwatch::before { content: ""; width: 26px; height: 26px; border-radius: var(--radius-pill); background: var(--swatch); }
 .brandSwatch[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); }
 .brandSwatch:focus-visible { outline: none; box-shadow: var(--ring); }
-.serif { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: 14px; }
+.serif { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: var(--fs-14); }
 
 /* ---- Business details from Settings → Company --------------------------------------------- */
-.readonly { display: grid; gap: 2px; padding: 12px 14px; border-radius: 10px; background: var(--fill); font-size: 14px; line-height: 1.5; color: var(--text-2); }
+.readonly { display: grid; gap: 2px; padding: 12px 14px; border-radius: var(--radius-card); background: var(--fill); font-size: var(--fs-14); line-height: 1.5; color: var(--text-2); }
 .readonly strong { color: var(--ink); }
-.readonly a { margin-top: 6px; font-size: 13px; font-weight: 700; }
-.note { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--fill); font-size: 13px; line-height: 1.5; color: var(--text-2); }
-.note a { font-weight: 700; }
+.readonly a { margin-top: 6px; font-size: var(--fs-13); font-weight: 600; }
+.note { margin: 0; padding: 10px 12px; border-radius: var(--radius-control); background: var(--fill); font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
+.note a { font-weight: 600; }
+
 
 /* ---- Contract: the library's sections each template prints ---------------------------------- */
 .picks { display: grid; gap: 8px; }
 .pick { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
-.pickMeta { font-size: 12px; font-weight: 400; color: var(--text-3); }
+.pickMeta { font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
 
 /* Phones: everything one column; the tools wrap under the picker. */
 @media (max-width: 600px) {

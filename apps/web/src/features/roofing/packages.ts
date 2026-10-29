@@ -157,7 +157,7 @@ export function setupMessage(r: SetupResult): string {
   ].filter(Boolean);
   if (!parts.length) return "You already have them";
   const added = `Added ${parts.join(" and ")}`;
-  return r.packages_created ? `${added}. ${r.packages_created === 1 ? "Its warranty is" : "Their warranties are"} example wording — have your attorney review ${r.packages_created === 1 ? "it" : "them"}.` : added;
+  return r.packages_created ? `${added}. ${r.packages_created === 1 ? "Its warranty is" : "Their warranties are"} example wording, so have your attorney review ${r.packages_created === 1 ? "it" : "them"}.` : added;
 }
 
 export interface PackagePictureResult {

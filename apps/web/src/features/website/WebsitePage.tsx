@@ -63,11 +63,11 @@ function Editor({ site }: { site: WebsiteSite }) {
             setReloads((n) => n + 1);
           }}
         >
-          <Icon name="refresh" size={17} />
+          <Icon name="refresh" size={16} />
         </button>
         <a className="btn btn-sm" href={site.admin_url} target="_blank" rel="noreferrer" aria-label="Open in a new tab" title="Open in a new tab">
           <span className="hide-mobile">Open in a new tab</span>
-          <Icon name="external" size={13} />
+          <Icon name="external" size={14} />
         </a>
       </div>
       <div className={s.frameArea}>

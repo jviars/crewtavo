@@ -7,6 +7,7 @@ import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api, loadConfig, supabase, type AppConfig } from "@/lib/api";
 import { KEY_FILE_NAME, readKeyFile } from "@/lib/keyFile";
+import { formatPhoneTyping } from "@/lib/validate";
 import styles from "./auth.module.css";
 import { BrandLockup } from "@/components/shell/BrandMark";
 import { afterAsking, ASK_THE_OFFICE, askFor, codeDigits, codeProblem, emailInstead, filledAtOnce, newPhoneOffers, NOTHING_CAME, readAddress, resendIn, resendLabel, sentTo, signInWith, TEXTING_OFF, wholeCode, type CodeStep, type CodeWay } from "./textCode";
@@ -218,7 +219,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
     return (
       <AuthLayout>
         <div className={`card card-pad ${styles.card}`} style={{ padding: 28 }}>
-          <h1 className={styles.title} style={{ fontSize: 22 }}>We can't email you a link</h1>
+          <h1 className={styles.title}>We can't email you a link</h1>
           <p className="muted" style={{ margin: 0 }}>This Crewtavo isn't set up to send email yet, so here's how to get back in:</p>
           <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 10, lineHeight: 1.5 }}>
             <li><strong>On a team?</strong> Ask the owner or an admin for a reset link. They make one under <strong>Settings → People</strong>, next to your name.</li>
@@ -235,8 +236,8 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
       <AuthLayout>
         <div className={`card card-pad ${styles.card}`} style={{ padding: 32 }}>
           <div className={styles.sent}>
-            <span className={styles.sentIcon}><Icon name="mail" size={26} /></span>
-            <h1 className={styles.title} style={{ fontSize: 22 }}>Check your email</h1>
+            <span className={styles.sentIcon}><Icon name="mail" size={24} /></span>
+            <h1 className={styles.title}>Check your email</h1>
             <p className="muted" style={{ margin: 0 }}>
               {sent.kind === "link" ? "Sign-in link sent to " : sent.kind === "reset" ? "Reset link sent to " : "Confirmation link sent to "}
               <strong style={{ color: "var(--ink)" }}>{sent.email}</strong>
@@ -296,7 +297,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
         {!(mode === "recover" && !typingKey) && <Field label="Email"><input className="input" type="email" value={email} onChange={(e) => { setEmail(e.target.value); setError(null); }} autoComplete="email" required autoFocus={mode !== "sign_up"} inputMode="email" /></Field>}
         {mode === "recover" && typingKey && (
           <Field label="Spare key" hint="Like 7K4M-PQ2X-9DRF. Dashes and capitals don't matter.">
-            <input className="input" value={code} onChange={(e) => { setCode(e.target.value); setError(null); }} autoComplete="off" autoCapitalize="characters" spellCheck={false} required minLength={12} maxLength={500} style={{ fontFamily: "ui-monospace, Menlo, Consolas, monospace", letterSpacing: "0.04em" }} />
+            <input className="input" value={code} onChange={(e) => { setCode(e.target.value); setError(null); }} autoComplete="off" autoCapitalize="characters" spellCheck={false} required minLength={12} maxLength={500} style={{ fontFamily: "ui-monospace, Menlo, Consolas, monospace" }} />
           </Field>
         )}
         {(mode === "sign_in" || mode === "sign_up") && (
@@ -465,7 +466,7 @@ function CodeSignIn({ initialWay, features, onBack }: { initialWay: CodeWay; fea
     return (
       <AuthLayout>
         <div className={`card card-pad ${styles.card}`} style={{ padding: 28 }}>
-          <h1 className={styles.title} style={{ fontSize: 22 }}>We can't text you a code</h1>
+          <h1 className={styles.title}>We can't text you a code</h1>
           <p className="muted" style={{ margin: 0 }}>{TEXTING_OFF}</p>
           {features?.emailCodes && <Button variant="primary" icon="mail" onClick={() => switchWay("email")}>Get a code by email instead</Button>}
           <Button variant="ghost" icon="arrowLeft" onClick={onBack}>Back to sign in</Button>
@@ -482,7 +483,7 @@ function CodeSignIn({ initialWay, features, onBack }: { initialWay: CodeWay; fea
             <p className="muted" style={{ margin: 0, lineHeight: 1.5 }}>{words.intro}</p>
             {way === "text" ? (
               <Field label="Mobile phone" hint="With the area code. Outside the US and Canada, start with + and your country code.">
-                <input className="input" type="tel" inputMode="tel" autoComplete="tel" value={typed.text} onChange={(e) => { setTyped({ ...typed, text: e.target.value }); setError(null); }} maxLength={40} required autoFocus />
+                <input className="input" type="tel" inputMode="tel" autoComplete="tel" value={typed.text} onChange={(e) => { setTyped({ ...typed, text: formatPhoneTyping(e.target.value) }); setError(null); }} maxLength={40} required autoFocus />
               </Field>
             ) : (
               <Field label="Email">
@@ -508,7 +509,7 @@ function CodeSignIn({ initialWay, features, onBack }: { initialWay: CodeWay; fea
                 onChange={(e) => enterCode(e.target.value)}
                 onPaste={pasteCode}
                 autoFocus
-                style={{ fontSize: 22, letterSpacing: "0.3em", fontVariantNumeric: "tabular-nums" }}
+                style={{ fontSize: 24, fontVariantNumeric: "tabular-nums" }}
               />
             </Field>
             {alert}

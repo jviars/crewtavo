@@ -5,14 +5,16 @@
  */
 import { isIsoDate, localDate, localTime, parseZonedTime } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { EmptyState } from "@/components/ui/States";
+import { statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
@@ -42,14 +44,7 @@ export interface VisitInput {
   context?: { label: string; to: string } | null;
 }
 
-const STATUSES: Array<[string, string]> = [
-  ["scheduled", "Scheduled"],
-  ["en_route", "On the way"],
-  ["in_progress", "In progress"],
-  ["completed", "Completed"],
-  ["cancelled", "Cancelled"],
-  ["unscheduled", "Unscheduled (no date yet)"],
-];
+const STATUSES = ["scheduled", "en_route", "in_progress", "completed", "cancelled", "unscheduled"];
 const KINDS: Array<[string, string]> = [["job", "Visit for a job"], ["assessment", "Assessment"], ["task", "Task"], ["event", "Event"]];
 export const lengthLabel = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} ${m === 60 ? "hour" : "hours"}`);
 const toMin = (t: string) => {
@@ -188,9 +183,12 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
     for (const key of ["schedule", "job", "request", "dashboard", "field"]) queryClient.invalidateQueries({ queryKey: [key] });
   };
 
+  // Toasts about a job's visits are green like jobs; an assessment's are amber like requests.
+  const tone = kind === "assessment" ? "request" : kind === "job" ? "job" : undefined;
   const save = useMutation({
-    meta: { inline: true, success: isNew ? (unscheduled ? "Added to unscheduled" : days > 1 ? `Scheduled ${days} days` : "Scheduled") : "Visit saved" },
+    meta: { inline: true, tone, success: isNew ? (unscheduled ? "Added to unscheduled" : days > 1 ? `Scheduled ${days} days` : "Scheduled") : "Visit saved" },
     mutationFn: async () => {
+      if (!title.trim()) throw new Error("Give it a title.");
       if (!unscheduled && !validDate) throw new Error("Pick a date for the visit.");
       const start = anytime || unscheduled ? null : parseZonedTime(date, time, tz);
       if (!anytime && !unscheduled && !start) throw new Error("Pick a start time, or choose anytime that day.");
@@ -237,7 +235,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
     },
   });
   const remove = useMutation({
-    meta: { success: "Visit deleted" },
+    meta: { success: "Visit deleted", tone },
     mutationFn: async () => unwrap(await supabase().from("visits").delete().eq("id", visit.id!)),
     onSuccess: () => {
       refresh();
@@ -256,15 +254,17 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           </div>
         )}
         {pickJob && kind === "job" && <JobPicker value={job} onChange={chooseJob} />}
-        <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} disabled={!canDispatch} placeholder={kind === "job" ? "What the crew is doing" : "Drop off estimate, supply run…"} /></Field>
+        <Field label="Title" requiredMessage={kind === "job" ? "Say what the crew is doing." : "Give it a title."}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} disabled={!canDispatch} placeholder={kind === "job" ? "What the crew is doing" : "Drop off estimate, supply run…"} /></Field>
 
         {!unscheduled && (
           <>
             <div className="form-grid">
-              <Field label="Date" error={validDate ? null : "Pick a date"}><input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setSlots(null); }} required disabled={!canDispatch} /></Field>
+              <Field label="Date" error={validDate ? null : "Pick a date."}><input className="input" type="date" value={date} onChange={(e) => { setDate(e.target.value); setSlots(null); }} required disabled={!canDispatch} /></Field>
               <Field label="Starts"><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={anytime || !canDispatch} required={!anytime} /></Field>
-              <Field label="Ends" hint={anytime ? undefined : badLength ? undefined : lengthLabel(duration)} error={badLength ? "End after it starts" : null}>
+              <Field label="Ends" hint={anytime ? undefined : badLength ? undefined : lengthLabel(duration)} error={badLength ? "End after it starts." : null}>
                 <input
+                  // Also stops Schedule, and counts in "1 field needs a look", until it's fixed.
+                  ref={(el) => el?.setCustomValidity(badLength ? "End after it starts." : "")}
                   className="input"
                   type="time"
                   value={anytime ? "" : endTime}
@@ -278,14 +278,14 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
               </Field>
             </div>
             <div className="row-between wrap">
-              <label className="switch-row" style={{ fontWeight: 500 }}>
+              <label className="switch-row" style={{ fontWeight: 400 }}>
                 <input type="checkbox" className="switch" checked={anytime} onChange={(e) => setAnytime(e.target.checked)} disabled={!canDispatch} />
                 Anytime that day
               </label>
               {canDispatch && !anytime && <Button size="sm" variant="ghost" icon="search" loading={findTime.isPending} disabled={badLength} onClick={() => findTime.mutate()}>Find a time</Button>}
             </div>
             {!anytime && canDispatch && (
-              <label className="switch-row" style={{ fontWeight: 500 }}>
+              <label className="switch-row" style={{ fontWeight: 400 }}>
                 <input type="checkbox" className="switch" checked={Boolean(timeFixed)} onChange={(e) => setTimeFixed(e.target.checked)} />
                 <span>
                   Fixed time
@@ -318,7 +318,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                   </select>
                 </Field>
                 {days > 1 && (
-                  <label className="switch-row" style={{ fontWeight: 500, paddingBottom: 26 }}>
+                  <label className="switch-row" style={{ fontWeight: 400, paddingBottom: 26 }}>
                     <input type="checkbox" className="switch" checked={skipWeekends} onChange={(e) => setSkipWeekends(e.target.checked)} />
                     Skip weekends
                   </label>
@@ -345,7 +345,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           </Field>
           <Field label="Status">
             <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
-              {STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {STATUSES.map((value) => <option key={value} value={value}>{statusText("visit", value)}{value === "unscheduled" ? " (no date yet)" : ""}</option>)}
             </select>
           </Field>
         </div>
@@ -372,9 +372,9 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                       onClick={() => toggle(m.user_id)}
                       style={{ paddingLeft: 4 }}
                     >
-                      <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
+                      <span className="avatar" style={{ width: 22, height: 22, fontSize: 11, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
                       {name}
-                      {on && <Icon name="check" size={12} strokeWidth={3} />}
+                      {on && <Icon name="check" size={12} strokeWidth={2} />}
                     </button>
                   );
                 })}
@@ -394,10 +394,10 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                   <button key={x.user_id} type="button" className="tab" aria-pressed={on} disabled={off && !on}
                     title={off ? "Can't sign in now. Tap to take them off this visit." : [x.contact_name, x.trade].filter(Boolean).join(" · ") || undefined}
                     onClick={() => toggle(x.user_id)} style={{ paddingLeft: 4 }}>
-                    <span className="avatar" style={{ width: 22, height: 22, fontSize: 9, background: "var(--text-3)" }}><Face name={x.name} /></span>
+                    <span className="avatar" style={{ width: 22, height: 22, fontSize: 11, background: "var(--text-3)" }}><Face name={x.name} /></span>
                     {x.name}
                     {off && <span className="muted small">Can't sign in now</span>}
-                    {on && <Icon name="check" size={12} strokeWidth={3} />}
+                    {on && <Icon name="check" size={12} strokeWidth={2} />}
                   </button>
                 );
               })}
@@ -415,9 +415,9 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                 const shop = m.status === "in_shop";
                 return (
                   <button key={m.id} type="button" className="tab" aria-pressed={on} disabled={shop && !on} title={shop ? "In the shop" : undefined} onClick={() => setEquipment(on ? picked.filter((x) => x !== m.id) : [...picked, m.id])}>
-                    <Icon name="truck" size={13} />
+                    <Icon name="truck" size={14} />
                     {m.name}{shop ? " (in the shop)" : ""}
-                    {on && <Icon name="check" size={12} strokeWidth={3} />}
+                    {on && <Icon name="check" size={12} strokeWidth={2} />}
                   </button>
                 );
               })}
@@ -441,6 +441,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
         <p className="muted small" style={{ margin: 0 }}>Times are in {tz.replace(/_/g, " ")}.</p>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           {!isNew && canDispatch && (
             <Button
               variant="danger"
@@ -455,7 +456,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           )}
           <span className="spacer" />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!title.trim() || (pickJob && kind === "job" && !job) || (!unscheduled && !validDate) || badLength}>{isNew ? (unscheduled ? "Add to unscheduled" : "Schedule") : "Save"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{isNew ? (unscheduled ? "Add to unscheduled" : "Schedule") : "Save"}</Button>
         </div>
       </form>
     </Dialog>
@@ -475,6 +476,9 @@ interface PickedJob {
 function JobPicker({ value, onChange }: { value: PickedJob | null; onChange: (job: PickedJob | null) => void }) {
   const session = useSession();
   const [term, setTerm] = useState("");
+  const search = useRef<HTMLInputElement>(null);
+  // Until a job is picked, the search box is what the form checks, so Schedule says to pick one.
+  useEffect(() => search.current?.setCustomValidity("Pick the job this visit is for."));
   const jobs = useQuery({
     queryKey: ["jobs", session.company.id, "visit-picker"],
     staleTime: 60_000,
@@ -493,7 +497,7 @@ function JobPicker({ value, onChange }: { value: PickedJob | null; onChange: (jo
     return (
       <div className="field">
         <span>Job</span>
-        <div className="row" style={{ gap: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 10 }}>
+        <div className="row" style={{ gap: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)" }}>
           <Icon name="job" size={16} />
           <span className="grow" style={{ minWidth: 0 }}>
             <strong>{value.title}</strong>
@@ -507,9 +511,8 @@ function JobPicker({ value, onChange }: { value: PickedJob | null; onChange: (jo
   const q = term.trim().toLowerCase();
   const matches = (jobs.data ?? []).filter((j) => !q || `${j.title} ${j.client?.display_name ?? ""} #${j.number}`.toLowerCase().includes(q)).slice(0, 6);
   return (
-    <div className="field">
-      <span>Job</span>
-      <input className="input" placeholder="Search by job, client or number" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Search jobs" autoFocus />
+    <Field label="Job">
+      <input ref={search} className="input" placeholder="Search by job, client or number" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Search jobs" autoFocus />
       <div className="card" style={{ boxShadow: "none" }}>
         {jobs.isPending && <div className="card-row"><Skeleton width="60%" /></div>}
         {matches.map((j) => (
@@ -520,9 +523,9 @@ function JobPicker({ value, onChange }: { value: PickedJob | null; onChange: (jo
             </span>
           </button>
         ))}
-        {jobs.data && !matches.length && <div className="empty" style={{ padding: 14 }}>{jobs.data.length ? "No jobs match." : "No active jobs yet. Turn a quote into a job first, or schedule a task."}</div>}
+        {jobs.data && !matches.length && (jobs.data.length ? <EmptyState inline title="No jobs match" /> : <EmptyState inline title="No active jobs yet">Turn a quote into a job first, or schedule a task.</EmptyState>)}
       </div>
-    </div>
+    </Field>
   );
 }
 

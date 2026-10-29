@@ -12,7 +12,7 @@ import { MapsLink, RouteMapsLink } from "@/components/ui/MapsLink";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
 import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
@@ -51,10 +51,11 @@ interface Visit {
 
 const clientName = (v: Visit) => visitContact(v.job?.client, v.contact).name;
 
-const NEXT: Record<string, { status: string; label: string; icon: "navigation" | "play" | "check"; primary: boolean } | null> = {
-  scheduled: { status: "en_route", label: "On my way", icon: "navigation", primary: false },
-  en_route: { status: "in_progress", label: "Start", icon: "play", primary: true },
-  in_progress: { status: "completed", label: "Complete", icon: "check", primary: true },
+/** A visit's next step, the card's main button. A scheduled visit can also go on its way first. */
+const NEXT: Record<string, { status: string; label: string; icon: "play" | "check" } | null> = {
+  scheduled: { status: "in_progress", label: "Start visit", icon: "play" },
+  en_route: { status: "in_progress", label: "Start visit", icon: "play" },
+  in_progress: { status: "completed", label: "Complete visit", icon: "check" },
 };
 
 export function FieldTodayPage() {
@@ -99,7 +100,7 @@ export function FieldTodayPage() {
     scope: FIELD_SCOPE,
     meta: { success: statusSaved },
     onMutate: async (change: VisitStatusChange) => {
-      if (!onlineManager.isOnline()) toast.info("Saved on this phone. It'll send when you have signal.");
+      if (!onlineManager.isOnline()) toast.info("Saved on this phone", { description: "It sends when you have signal." });
       await queryClient.cancelQueries({ queryKey: key });
       showVisitStatus(queryClient, change);
     },
@@ -123,11 +124,13 @@ export function FieldTodayPage() {
   const open = visits.filter((v) => v.status !== "completed");
   const done = visits.filter((v) => v.status === "completed");
   const route = dayRoute(visits, session.company);
+  // The visit to do now gets the one green button: the one under way, else the next on the route.
+  const now = open.find((v) => v.status === "in_progress") ?? open.find((v) => v.status === "en_route") ?? open[0];
 
   return (
-    <>
+    <div className="field-app">
       <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-2)" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: tz })}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-2)" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: tz })}</div>
         <h1 className="page-title" style={{ marginTop: 4 }}>My day</h1>
       </div>
 
@@ -151,7 +154,7 @@ export function FieldTodayPage() {
 
       {route.stops.length > 1 && (
         <RouteMapsLink className="btn big-action btn-block" route={route}>
-          <Icon name="map" size={18} />
+          <Icon name="map" size={20} />
           Open route in maps
         </RouteMapsLink>
       )}
@@ -159,28 +162,40 @@ export function FieldTodayPage() {
       <div className="stack">
         {open.map((v, i) => {
           const next = NEXT[v.status];
-          const busy = (setStatus.isPending && !setStatus.isPaused && setStatus.variables?.visitId === v.id) || statusTap.locating === v.id;
+          // Which of the card's steps is on its way: finding the phone's place comes first for one that clocks.
+          const going = statusTap.locating === v.id ? "locating" : setStatus.isPending && !setStatus.isPaused && setStatus.variables?.visitId === v.id ? setStatus.variables.status : null;
           return (
-            <article key={v.id} className="field-card" style={v.status === "in_progress" ? { borderColor: "var(--green)", boxShadow: "var(--ring)" } : undefined}>
-              <div className="row">
-                {v.route_order != null && <span className="chip chip-green">Stop {v.route_order}</span>}
-                <span className="chip">{v.starts_at ? time(v.starts_at) : v.route_order != null ? "Anytime" : `Stop ${i + 1}`}</span>
-                <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
-                {v.kind !== "job" && <span className="chip">{statusLabel(v.kind)}</span>}
-                {v.series_total && v.series_total > 1 && <span className="chip chip-blue">Day {v.series_day} of {v.series_total}</span>}
+            <article key={v.id} className="field-card" data-now={v.status === "in_progress" || undefined}>
+              <div className="field-card-info">
+                <div className="row wrap" style={{ gap: 6 }}>
+                  {v.route_order != null && <span className="chip chip-green">Stop {v.route_order}</span>}
+                  <span className="chip">{v.starts_at ? time(v.starts_at) : v.route_order != null ? "Anytime" : `Stop ${i + 1}`}</span>
+                  <EntityStatus kind="visit" status={v.status} />
+                  {v.kind !== "job" && <span className="chip">{statusLabel(v.kind)}</span>}
+                  {v.series_total && v.series_total > 1 && <span className="chip chip-blue">Day {v.series_day} of {v.series_total}</span>}
+                </div>
+                <Link to={`/field/visits/${v.id}`} className="field-card-title">
+                  <strong>{v.title}</strong>
+                  <span className="muted">{[clientName(v), v.property?.line1].filter(Boolean).join(" · ")}</span>
+                </Link>
+                {v.hold_reason && <div className="small" style={{ color: "var(--warning)", fontWeight: 600 }}><Icon name="cloud" size={14} /> Weather: {v.hold_reason}</div>}
               </div>
-              <Link to={`/field/visits/${v.id}`} style={{ color: "var(--ink)" }}>
-                <strong style={{ fontSize: 17, display: "block" }}>{v.title}</strong>
-                <span className="muted">{[clientName(v), v.property?.line1].filter(Boolean).join(" · ")}</span>
-              </Link>
-              {v.hold_reason && <div className="small" style={{ color: "var(--warning)", fontWeight: 700 }}><Icon name="cloud" size={14} /> Weather: {v.hold_reason}</div>}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
-                {v.property && <MapsLink className="btn big-action" place={v.property}><Icon name="navigation" size={18} />Directions</MapsLink>}
-                {next && (
-                  <Button variant={next.primary ? "primary" : "secondary"} icon={next.icon} className="big-action" loading={busy} onClick={() => changeStatus(v, next.status)}>{next.label}</Button>
-                )}
-                {v.status === "scheduled" && <Button variant="primary" icon="play" className="big-action" loading={busy} onClick={() => changeStatus(v, "in_progress")}>Start</Button>}
-              </div>
+              {/* The card's next step last and full width, where the thumb is (beside the rest on a wide screen). */}
+              {(v.property || next) && (
+                <div className="field-card-actions">
+                  {(v.property || v.status === "scheduled") && (
+                    <div className="field-card-more">
+                      {v.property && <MapsLink className="btn big-action" place={v.property}><Icon name="navigation" size={20} />Directions</MapsLink>}
+                      {v.status === "scheduled" && <Button icon="navigation" className="big-action" loading={going === "en_route"} onClick={() => changeStatus(v, "en_route")}>On my way</Button>}
+                    </div>
+                  )}
+                  {next && (
+                    <Button variant={v.id === now?.id ? "primary" : "secondary"} icon={next.icon} block className="big-action" loading={going === next.status || going === "locating"} onClick={() => changeStatus(v, next.status)}>
+                      {next.label}
+                    </Button>
+                  )}
+                </div>
+              )}
             </article>
           );
         })}
@@ -188,7 +203,7 @@ export function FieldTodayPage() {
 
       {done.length > 0 && (
         <section className="stack-sm">
-          <button type="button" className="row link-btn" style={{ color: "var(--ink)" }} onClick={() => setShowDone(!showDone)}>
+          <button type="button" className="row link-btn" style={{ color: "var(--ink)" }} aria-expanded={showDone} onClick={() => setShowDone(!showDone)}>
             <Icon name={showDone ? "chevronDown" : "chevronRight"} size={16} />
             <strong>Done today ({done.length})</strong>
           </button>
@@ -221,6 +236,6 @@ export function FieldTodayPage() {
       )}
 
       {!isSub(session) && <CrewEquipmentCard />}
-    </>
+    </div>
   );
 }

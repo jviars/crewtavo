@@ -49,9 +49,9 @@ function MyPaperwork({ sub }: { sub: SubLogin }) {
   const sendFor = (item: MyPaperworkItem) => setSending({ key: item.requirement, label: item.label, kinds: kindsFor(item.requirement) });
 
   return (
-    <>
+    <div className="field-app">
       <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-2)" }}>{sub.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-2)" }}>{sub.name}</div>
         <h1 className="page-title" style={{ marginTop: 4 }}>My paperwork</h1>
       </div>
       <p className="muted" style={{ margin: 0 }}>What {company.name} needs on file from you: your W-9, and your liability and workers' comp insurance.</p>
@@ -62,7 +62,7 @@ function MyPaperwork({ sub }: { sub: SubLogin }) {
       {paperwork.data && (
         <>
           <div className={`callout ${items.some((i) => i.state === "needed") ? "callout-warning" : "callout-good"}`} role="status">
-            <Icon name={items.some((i) => i.state === "needed") ? "alert" : "check"} size={18} />
+            <Icon name={items.some((i) => i.state === "needed") ? "alert" : "check"} size={20} />
             <div className="grow">{myPaperworkSummary(items)}</div>
           </div>
           {SECTIONS.map((section) => {
@@ -81,8 +81,8 @@ function MyPaperwork({ sub }: { sub: SubLogin }) {
                         </span>
                         <span className="muted small">{item.detail}</span>
                       </span>
-                      <Button size="sm" variant={item.state === "needed" ? "primary" : "secondary"} icon="upload" onClick={() => sendFor(item)}>
-                        {item.state === "needed" ? "Send it" : "Send a new one"}
+                      <Button icon="upload" onClick={() => sendFor(item)}>
+                        {item.state === "needed" ? "Send it" : "Send another"}
                       </Button>
                     </div>
                   ))}
@@ -96,7 +96,7 @@ function MyPaperwork({ sub }: { sub: SubLogin }) {
       <section className="stack-sm">
         <div className="section-head">
           <h2 className="section-title">What you've sent</h2>
-          <Button size="sm" icon="plus" onClick={() => setSending({ key: "other", label: "Something else", kinds: ["license", "other"] })}>Send something else</Button>
+          <Button variant="ghost" icon="plus" onClick={() => setSending({ key: "other", label: "Something else", kinds: ["license", "other"] })}>Send something else</Button>
         </div>
         <div className="card">
           {documents.isPending ? (
@@ -123,7 +123,7 @@ function MyPaperwork({ sub }: { sub: SubLogin }) {
       </section>
 
       {sending && <SendDialog sub={sub} sending={sending} today={today} onClose={() => setSending(null)} />}
-    </>
+    </div>
   );
 }
 
@@ -138,7 +138,7 @@ function SendDialog({ sub, sending, today, onClose }: { sub: SubLogin; sending: 
   const dateProblem = item.file ? endDateProblem(item.kind, item.expires_on, today) : null;
   const named = item.kind === "license" || item.kind === "other";
   const send = useMutation({
-    meta: { inline: true, success: `Sent. ${company.name} will check it.` },
+    meta: { inline: true, success: `Sent to ${company.name} to check` },
     mutationFn: () =>
       addSubDocument(company.id, sub.id, withType(item.file!), {
         kind: item.kind,
@@ -184,7 +184,7 @@ function SendDialog({ sub, sending, today, onClose }: { sub: SubLogin; sending: 
         <span className="muted small">Only {company.name} sees what you send. They'll check it and let you know if anything's missing.</span>
         <div className="form-actions">
           <Button onClick={onClose} disabled={send.isPending}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="send" loading={send.isPending}>Send</Button>
+          <Button type="submit" variant="primary" icon="send" loading={send.isPending} slowHint={false}>Send</Button>
         </div>
       </form>
     </Dialog>

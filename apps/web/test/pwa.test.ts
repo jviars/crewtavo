@@ -192,9 +192,10 @@ describe("the first paint", () => {
   it("keeps toasts clear of the notch and home indicator, sideways too, in both layouts", () => {
     const css = read("src/styles/components.css");
     const wide = css.match(/\n\.toaster \{([^}]*)\}/)![1]!;
-    expect(wide).toMatch(/inset: auto max\(20px, env\(safe-area-inset-right\)\) max\(20px, env\(safe-area-inset-bottom\)\) auto;/);
+    // Plus the room the background task island takes while it's up (--island-space).
+    expect(wide).toMatch(/inset: auto max\(20px, env\(safe-area-inset-right\)\) calc\(max\(20px, env\(safe-area-inset-bottom\)\) \+ var\(--island-space, 0px\)\) auto;/);
     const phone = css.match(/@media \(max-width: 900px\) \{ \.toaster \{([^}]*)\}/)![1]!;
-    expect(phone).toMatch(/inset: auto max\(16px, env\(safe-area-inset-right\)\) calc\(var\(--mobile-nav-height\) \+ 12px \+ env\(safe-area-inset-bottom\)\) max\(16px, env\(safe-area-inset-left\)\);/);
+    expect(phone).toMatch(/inset: auto max\(16px, env\(safe-area-inset-right\)\) calc\(var\(--mobile-nav-height\) \+ 12px \+ env\(safe-area-inset-bottom\) \+ var\(--island-space, 0px\)\) max\(16px, env\(safe-area-inset-left\)\);/);
   });
 });
 

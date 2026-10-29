@@ -26,7 +26,7 @@ import { STAFF } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
@@ -136,7 +136,8 @@ function RulePageScreen() {
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   const save = useMutation({
-    meta: { inline: true, success: isNew ? "Rule created" : "Rule saved" },
+    // A new rule opens as itself, so that's said; a change saves in place, and its button says so.
+    meta: { inline: true, success: isNew ? "Rule created" : undefined },
     mutationFn: async () => {
       const row = {
         name: draft.name.trim(),
@@ -167,6 +168,7 @@ function RulePageScreen() {
       setTimeout(() => navigate("/automations", { replace: true }), 0);
     },
   });
+  const justSaved = useJustDone(save) && !isNew;
   const preview = useMutation({
     meta: { inline: true },
     mutationFn: () =>
@@ -201,12 +203,12 @@ function RulePageScreen() {
               {draft.enabled ? "On" : "Off"}
             </label>
             <Button icon="eye" loading={preview.isPending} disabled={errors.length > 0} onClick={() => preview.mutate()}>Test</Button>
-            <Button variant="primary" icon="check" loading={save.isPending} disabled={!dirty && !isNew} onClick={submit}>{isNew ? "Create rule" : dirty ? "Save changes" : "Saved"}</Button>
+            <Button variant="primary" icon="check" loading={save.isPending} done={justSaved} disabled={!dirty && !isNew && !justSaved} onClick={submit}>{isNew ? "Create rule" : "Save changes"}</Button>
             {!isNew && <Menu items={[{ label: "Delete rule", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Delete this rule?", body: "Follow-ups it has waiting are cancelled.", confirmLabel: "Delete", danger: true })) && remove.mutate() }]} />}
           </>
         }
       />
-      <div className="callout callout-info"><Icon name="bolt" size={18} /><div className="grow" style={{ fontWeight: 600 }}>{describeRuleSentence(draft)}</div></div>
+      <div className="callout callout-info"><Icon name="bolt" size={20} /><div className="grow" style={{ fontWeight: 600 }}>{describeRuleSentence(draft)}</div></div>
 
       <div className="two-col">
         <div className="wide stack">
@@ -325,7 +327,7 @@ function RulePageScreen() {
                 {preview.data.warnings?.map((w) => <span key={w} className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>{w}</span>)}
                 {preview.data.previews.map((p, i) => (
                   <div key={i} className="email-preview" style={{ padding: 10 }}>
-                    <div className="small strong" style={{ marginBottom: 4 }}><Icon name={ACTION_ICON[p.type as ActionType] ?? "bolt"} size={13} /> {actionsFor(subject).find((a) => a.type === p.type)?.label}{p.to ? ` → ${p.to}` : ""}</div>
+                    <div className="small strong" style={{ marginBottom: 4 }}><Icon name={ACTION_ICON[p.type as ActionType] ?? "bolt"} size={14} /> {actionsFor(subject).find((a) => a.type === p.type)?.label}{p.to ? ` → ${p.to}` : ""}</div>
                     {p.title && <div className="strong text-sm">{p.title}</div>}
                     {p.body && <div className="pre-wrap text-sm muted" style={{ marginTop: 2 }}>{p.body}</div>}
                   </div>
@@ -349,9 +351,9 @@ function Step({ color, icon, title, optional, children }: { color: string; icon:
   return (
     <section className="rule-step">
       <div className="rule-step-head">
-        <span className="step-icon" style={{ background: color }}><Icon name={icon} size={15} /></span>
+        <span className="step-icon" style={{ background: color }}><Icon name={icon} size={14} /></span>
         {title}
-        {optional && <span className="muted small" style={{ fontWeight: 500 }}>(optional)</span>}
+        {optional && <span className="muted small" style={{ fontWeight: 400 }}>(optional)</span>}
       </div>
       {children}
     </section>
@@ -366,7 +368,7 @@ function ConditionRow({ subject, value, invalid, onChange, onRemove }: { subject
   const multi = value.op === "in" || def.kind === "tags";
   const asList = Array.isArray(value.value) ? value.value : String(value.value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   return (
-    <div className="rule-line" style={invalid ? { outline: "2px solid var(--danger-tint)", borderRadius: 8 } : undefined}>
+    <div className="rule-line" style={invalid ? { outline: "2px solid var(--danger-tint)", borderRadius: "var(--radius-control)" } : undefined}>
       <select className="select" value={def.field} aria-label="Field" onChange={(e) => {
         const f = fields.find((x) => x.field === e.target.value)!;
         const firstChoice = f.kind === "status" ? statusChoices(subject)[0].value : f.choices?.[0]?.value ?? "";

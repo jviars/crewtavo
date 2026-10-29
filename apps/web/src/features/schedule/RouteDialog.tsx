@@ -12,7 +12,7 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { statusLabel } from "@/components/ui/StatusPill";
+import { statusText } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { formatTime } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -72,7 +72,7 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
   const p = preview.data;
 
   const undo = useMutation({
-    meta: { success: "Route put back" },
+    meta: { success: "Route put back", tone: "job" },
     mutationFn: (previous: Previous) => api.post("/schedule/route/undo", { date, crew_id: crew, visits: previous }),
     onSettled: () => refresh(),
   });
@@ -81,13 +81,20 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
   };
   const save = useMutation({
     meta: { inline: true },
-    mutationFn: () => api.post<{ saved: number; previous: Previous }>("/schedule/route", { date, crew_id: crew, order: p!.stops.map((s) => s.id), by_hand: order !== null }),
+    mutationFn: async () => {
+      // Saved while a new order is still being planned: wait for that plan, so the order saved is the one shown next.
+      const plan = preview.isFetching ? (await preview.refetch({ cancelRefetch: false })).data : p;
+      if (!plan) throw new Error("The route didn't load. Try again.");
+      return api.post<{ saved: number; previous: Previous }>("/schedule/route", { date, crew_id: crew, order: plan.stops.map((s) => s.id), by_hand: order !== null });
+    },
     onSuccess: (r) => {
       refresh();
-      toast.success(r.saved ? `Route saved: ${r.saved} ${r.saved === 1 ? "visit" : "visits"} changed` : "Route saved. Nothing needed to change.", r.saved ? { action: { label: "Undo", onClick: () => undo.mutate(r.previous) } } : undefined);
+      toast.success(r.saved ? `Route saved: ${r.saved} ${r.saved === 1 ? "visit" : "visits"} changed` : "Route saved: no visits changed", { tone: "job", ...(r.saved > 0 && { action: { label: "Undo", onClick: () => undo.mutate(r.previous) } }) });
       onClose();
     },
   });
+  // Nothing to save on a day with no open stops, or when the plan couldn't load.
+  const canSave = p ? p.stops.length > 0 : !preview.error;
 
   const move = (index: number, by: -1 | 1) => {
     if (!p) return;
@@ -136,10 +143,10 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
             <ol className="route-list" aria-label="Stops in order">
               {p.started.map((s) => (
                 <li key={s.id} className="route-stop" data-started>
-                  <span className="route-num"><Icon name="check" size={12} strokeWidth={3} /></span>
+                  <span className="route-num"><Icon name="check" size={12} strokeWidth={2} /></span>
                   <span style={{ minWidth: 0 }}>
                     <strong>{s.title}</strong>
-                    <span className="muted small" style={{ display: "block" }}>{statusLabel(s.status)}{s.address ? ` · ${s.address}` : ""}</span>
+                    <span className="muted small" style={{ display: "block" }}>{statusText("visit", s.status)}{s.address ? ` · ${s.address}` : ""}</span>
                   </span>
                   <span />
                 </li>
@@ -169,14 +176,14 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
             <p className="muted small" style={{ margin: 0 }}>
               Times count each visit's length and the drive between stops ({p.return_to_shop ? "starting and ending at the shop" : "starting at the shop"}). Use the arrows to set the order by hand.
             </p>
-            <FormError error={save.error} />
           </>
         )}
+        <FormError error={save.error} />
         <div className="form-actions">
-          {order && <Button variant="ghost" icon="refresh" onClick={() => setOrder(null)}>Shortest route</Button>}
+          {order && <Button variant="ghost" icon="refresh" onClick={() => setOrder(null)}>Use shortest route</Button>}
           <span className="spacer" />
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" icon="navigation" loading={save.isPending} disabled={!p?.stops.length || preview.isFetching} onClick={() => save.mutate()}>Save route</Button>
+          <Button onClick={onClose}>{canSave ? "Cancel" : "Close"}</Button>
+          {canSave && <Button variant="primary" icon="navigation" loading={save.isPending} onClick={() => save.mutate()}>Save route</Button>}
         </div>
       </div>
     </Dialog>

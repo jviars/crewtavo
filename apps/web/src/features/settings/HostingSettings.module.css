@@ -1,8 +1,8 @@
 .page { max-width: 860px; }
-.title { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.title { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
 
 /* The month so far, the forecast behind it, and a mark for what the plan includes. */
-.meter { position: relative; height: 12px; border-radius: 999px; background: var(--fill-2); }
+.meter { position: relative; height: 12px; border-radius: var(--radius-pill); background: var(--fill-2); }
 .meter > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; transition: width var(--dur-slow) var(--ease-out); }
 .spent { background: var(--green); }
 .forecast { background: color-mix(in srgb, var(--green) 30%, transparent); }
@@ -11,7 +11,7 @@
 
 .legend { gap: 6px 16px; color: var(--text-3); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: var(--radius-sm); }
 .keySpent { background: var(--green); }
 .keyForecast { background: color-mix(in srgb, var(--green) 30%, transparent); }
 .keyOver { background: color-mix(in srgb, var(--warning) 45%, transparent); }
@@ -19,9 +19,9 @@
 
 .services { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
 .services li { display: grid; grid-template-columns: minmax(110px, 160px) 1fr auto; align-items: center; gap: 12px; }
-.bar { height: 8px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
+.bar { height: 8px; border-radius: var(--radius-pill); background: var(--fill-2); overflow: hidden; }
 .bar > span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
-.amount { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; }
+.amount { font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-14); }
 
 .divided { padding-top: 14px; border-top: 1px solid var(--divider); }
 

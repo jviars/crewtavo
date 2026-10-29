@@ -1,15 +1,15 @@
 import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/Button";
-import { Field, FormError } from "@/components/ui/Field";
+import { Button, useJustDone } from "@/components/ui/Button";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Face } from "@/components/ui/Avatar";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { MapsAppSetting } from "@/components/ui/MapsLink";
 import { api, supabase } from "@/lib/api";
 import { can, hasRole, isSub, useSession } from "@/lib/session";
 import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
-import { toast } from "@/lib/toast";
+import { formatPhoneTyping } from "@/lib/validate";
 import { signingInNote, subCodeWays } from "../auth/textCode";
 import { MeasureMapSetting } from "../measure/ImageryPicker";
 import { CalendarFeedCard } from "./CalendarFeedCard";
@@ -35,7 +35,7 @@ export function ProfileSettings() {
   const [password, setPassword] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const save = useMutation({
-    meta: { inline: true, success: "Profile saved" },
+    meta: { inline: true },
     mutationFn: async () => {
       await api.patch("/me", { full_name: name.trim(), phone: phone.trim() || null });
       if (sub) return;
@@ -55,14 +55,15 @@ export function ProfileSettings() {
     onSuccess: () => {
       setPassword("");
       setConfirmPw("");
-      toast.success("Password changed");
     },
   });
+  const saved = useJustDone(save);
+  const changed = useJustDone(changePassword);
   return (
     <div className="two-col">
       <form className="wide card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="row" style={{ gap: 14 }}>
-          <span className="avatar" style={{ width: 72, height: 72, fontSize: 26, background: color }}><Face name={name || email} photo={session.profile.avatar_url} /></span>
+          <span className="avatar" style={{ width: 72, height: 72, fontSize: 24, background: color }}><Face name={name || email} photo={session.profile.avatar_url} /></span>
           <div className="stack-sm" style={{ gap: 8 }}>
             <div>
               <strong style={{ fontSize: 16 }}>{name || "Your name"}</strong>
@@ -74,19 +75,19 @@ export function ProfileSettings() {
         <div className="form-grid">
           <Field label="Full name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoComplete="name" /></Field>
           <Field label="Mobile phone" optional hint={madeForSub ? `Texts about your jobs go here. Leave it empty to get them at the number ${session.company.name} has for you.` : undefined}>
-            <input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={40} autoComplete="tel" />
+            <input className="input" type="tel" value={phone} onChange={(e) => setPhone(formatPhoneTyping(e.target.value))} maxLength={40} autoComplete="tel" />
           </Field>
         </div>
         {!sub && <div className="field">
           <span>Color on the schedule</span>
           <div className="row wrap" style={{ gap: 8 }}>
             {COLORS.map((c) => (
-              <button key={c} type="button" aria-label={`Color ${c}`} aria-pressed={color === c} onClick={() => setColor(c)} style={{ width: 30, height: 30, borderRadius: "50%", background: c, border: color === c ? "3px solid var(--surface)" : "0", boxShadow: color === c ? `0 0 0 2px ${c}` : "none", cursor: "pointer", transition: "box-shadow 150ms" }} />
+              <button key={c} type="button" aria-label={`Color ${c}`} aria-pressed={color === c} onClick={() => setColor(c)} style={{ width: 32, height: 32, borderRadius: "50%", background: c, border: color === c ? "3px solid var(--surface)" : "0", boxShadow: color === c ? `0 0 0 2px ${c}` : "none", cursor: "pointer", transition: "box-shadow 150ms" }} />
             ))}
           </div>
         </div>}
         <FormError error={save.error} />
-        <div className="form-actions"><Button type="submit" variant="primary" loading={save.isPending} disabled={!name.trim()}>Save profile</Button></div>
+        <div className="form-actions"><FormChecks /><Button type="submit" variant="primary" loading={save.isPending} done={saved}>Save profile</Button></div>
       </form>
       <div className="narrow stack">
       {signs && <SignatureCard />}
@@ -104,10 +105,10 @@ export function ProfileSettings() {
       )}
       {!madeForSub && <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>
         <strong>Change password</strong>
-        <Field label="New password" hint="At least 8 characters."><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} /></Field>
-        <Field label="Confirm new password" error={confirmPw && password !== confirmPw ? "Doesn't match" : null}><input className="input" type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} autoComplete="new-password" /></Field>
+        <Field label="New password" hint="At least 8 characters."><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required minLength={8} /></Field>
+        <Field label="Confirm new password" error={confirmPw && password !== confirmPw ? "The passwords don't match." : null}><input className="input" type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} autoComplete="new-password" required /></Field>
         <FormError error={changePassword.error} />
-        <Button type="submit" loading={changePassword.isPending} disabled={!password || !confirmPw} style={{ justifySelf: "start" }}>Change password</Button>
+        <Button type="submit" loading={changePassword.isPending} done={changed} doneLabel="Password changed" style={{ justifySelf: "start" }}>Change password</Button>
       </form>}
       </div>
     </div>
@@ -129,7 +130,7 @@ function Appearance() {
       <div className="segmented" role="group" aria-labelledby="appearance-title" style={{ justifySelf: "start" }}>
         {THEMES.map((t) => (
           <button key={t.value} type="button" aria-pressed={theme === t.value} onClick={() => setTheme(t.value)}>
-            <Icon name={t.icon} size={15} />
+            <Icon name={t.icon} size={14} />
             {t.label}
           </button>
         ))}

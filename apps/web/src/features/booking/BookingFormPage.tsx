@@ -3,16 +3,20 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
+import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
 import { postToHost } from "./embed";
 
 /** The most files a request can bring (the API's limit too). */
 const MAX_FILES = 10;
 const isFileQuestion = (q: Question) => q.type === "files" || q.type === "photos";
+/** What the field says when it's left empty: why it's needed, in the business's voice. */
+const NAME_NEEDED = "Enter your name, so we know who to reply to.";
+const ADDRESS_NEEDED = "Enter the address where the work is.";
 interface Sent { reference: number; uploads?: Array<{ name: string; path: string; token: string } | null>; files_token?: string }
 
 interface Question {
@@ -101,7 +105,7 @@ export function BookingFormPage() {
       return { reference: sent.reference, sentFiles: recorded, failed };
     },
     onSettled: () => setSending(null),
-    onSuccess: () => (embedded ? postToHost({ crewtavo: "top" }) : window.scrollTo({ top: 0, behavior: "smooth" })),
+    onSuccess: () => (embedded ? postToHost({ crewtavo: "top" }) : window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })),
   });
   const set = (key: keyof typeof contact) => (e: { target: { value: string } }) => setContact({ ...contact, [key]: e.target.value });
 
@@ -109,19 +113,19 @@ export function BookingFormPage() {
     // Embedded, just enough room around the card for its shadow; index.html clears the page's own background.
     <div ref={page} className="public-page" style={embedded ? { padding: "1px 1px 4px", background: "transparent", minHeight: 0 } : undefined}>
       <div className="public-wrap" style={{ maxWidth: 640 }}>
-        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="40%" height={12} /><Skeleton width="65%" height={26} /><Skeleton height={300} radius={10} /></div>}
+        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="40%" height={12} /><Skeleton width="65%" height={26} /><Skeleton height={300} radius={8} /></div>}
         {view.error && (
           <div className="card"><div className="empty-state error-state"><span className="empty-icon"><Icon name="search" size={24} /></span><h3>This form isn't available</h3><p>{(view.error as Error).message}</p></div></div>
         )}
         {view.data && submit.data && (
           <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 32 }}>
-            <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
-            <h1 style={{ fontSize: 24, fontWeight: 800 }}>Thanks, {contact.name.trim().split(" ")[0]}!</h1>
+            <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
+            <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>Thanks, {contact.name.trim().split(" ")[0]}</h1>
             <p style={{ margin: 0 }}>{view.data.company.name} got your request (reference #{submit.data.reference}) and will be in touch soon.</p>
             {submit.data.sentFiles > 0 && <p className="muted" style={{ margin: 0 }}>{submit.data.sentFiles === 1 ? "Your file came with it." : `Your ${submit.data.sentFiles} files came with it.`}</p>}
             {submit.data.failed.length > 0 && (
               <div className="callout callout-warning" style={{ textAlign: "left", width: "100%" }}>
-                <Icon name="alert" size={18} />
+                <Icon name="alert" size={20} />
                 <div className="grow">
                   <div>{submit.data.failed.length === 1 ? "One file didn't come through:" : `${submit.data.failed.length} files didn't come through:`} {submit.data.failed.join(", ")}</div>
                   <div className="small" style={{ fontWeight: 400 }}>Your request is in. Email {submit.data.failed.length === 1 ? "it" : "them"} to {view.data.company.name}{view.data.company.phone ? `, or call ${view.data.company.phone}` : ""}.</div>
@@ -148,14 +152,14 @@ export function BookingFormPage() {
           >
             <div>
               {!embedded && <div className="muted strong">{view.data.company.name}</div>}
-              <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em" }}>{view.data.form.name}</h1>
+              <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{view.data.form.name}</h1>
             </div>
             <div className="form-grid">
-              <Field label="Your name" error={touched && contact.name.trim().length < 2 ? "Enter your name" : null}><input className="input" value={contact.name} onChange={set("name")} required minLength={2} maxLength={120} autoComplete="name" /></Field>
-              <Field label="Email" error={touched && noContact ? "Add an email or a phone number" : null}><input className="input" type="email" value={contact.email} onChange={set("email")} maxLength={200} autoComplete="email" aria-invalid={touched && noContact} /></Field>
-              <Field label="Phone"><input className="input" type="tel" value={contact.phone} onChange={set("phone")} maxLength={30} autoComplete="tel" aria-invalid={touched && noContact} /></Field>
+              <Field label="Your name" requiredMessage={NAME_NEEDED} error={touched && contact.name.trim().length < 2 ? NAME_NEEDED : null}><input className="input" value={contact.name} onChange={set("name")} required minLength={2} maxLength={120} autoComplete="name" /></Field>
+              <Field label="Email" error={touched && noContact ? "Add an email or a phone number, so we can reach you." : null}><input className="input" type="email" value={contact.email} onChange={set("email")} maxLength={200} autoComplete="email" aria-invalid={touched && noContact} /></Field>
+              <Field label="Phone"><input className="input" type="tel" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="tel" aria-invalid={touched && noContact} /></Field>
             </div>
-            <Field label="Service address" error={touched && contact.line1.trim().length < 3 ? "Enter the address for the work" : null}><input className="input" value={contact.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="street-address" /></Field>
+            <Field label="Service address" requiredMessage={ADDRESS_NEEDED} error={touched && contact.line1.trim().length < 3 ? ADDRESS_NEEDED : null}><input className="input" value={contact.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="street-address" /></Field>
             <div className="form-grid">
               <Field label="City"><input className="input" value={contact.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
               <Field label="ZIP"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" inputMode="numeric" /></Field>
@@ -169,7 +173,7 @@ export function BookingFormPage() {
             ))}
             {promo.offer ? (
               <div className="callout callout-good">
-                <Icon name="tag" size={18} />
+                <Icon name="tag" size={20} />
                 <div className="grow"><strong className="mono">{promo.code}</strong>: {promo.offer}. It'll be applied to your quote.</div>
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setPromo({ code: "", offer: "", open: false }); checkPromo.reset(); }}>Remove</button>
               </div>
@@ -192,6 +196,7 @@ export function BookingFormPage() {
                 <span className="muted small">Keep this page open until they're done.</span>
               </div>
             )}
+            <FormChecks />
             <Button type="submit" variant="primary" size="lg" icon="send" loading={submit.isPending} disabled={turnstile.required && !turnstile.token}>Send request</Button>
           </form>
         )}
@@ -236,7 +241,7 @@ function FileQuestion({ q, files, room, invalid, disabled, onChange }: { q: Ques
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); if (!disabled) add([...e.dataTransfer.files]); }}
-      style={over ? { outline: "2px dashed var(--green)", outlineOffset: 4, borderRadius: 8 } : undefined}
+      style={over ? { outline: "2px dashed var(--green)", outlineOffset: 4, borderRadius: "var(--radius-control)" } : undefined}
     >
       <span>{label}</span>
       {files.length > 0 && (
@@ -255,14 +260,14 @@ function FileQuestion({ q, files, room, invalid, disabled, onChange }: { q: Ques
         <input type="file" multiple hidden accept={photos ? "image/*" : undefined} disabled={disabled || room <= 0} onChange={(e) => { const picked = [...(e.target.files ?? [])]; e.target.value = ""; add(picked); }} />
       </label>
       <span className="muted small">{photos ? "Pictures" : "Plans, PDFs or pictures"}, up to {fileSize(PLAN_MAX_BYTES)} each. You can also drop them here.</span>
-      {(problem || invalid) && <span className="field-error">{problem ?? "Please add a file"}</span>}
+      {(problem || invalid) && <span className="field-error">{problem ?? "Add a file to send with your request."}</span>}
     </div>
   );
 }
 
 function QuestionField({ q, value, invalid, onChange }: { q: Question; value: unknown; invalid: boolean; onChange: (v: unknown) => void }) {
   const label = <>{q.label}{!q.required && <span className="optional"> (optional)</span>}</>;
-  const error = invalid ? "Please answer this" : null;
+  const error = invalid ? "Answer this one to send your request." : null;
   switch (q.type) {
     case "long_text":
       return <Field label={label} error={error}><textarea className="textarea" value={String(value ?? "")} maxLength={4000} onChange={(e) => onChange(e.target.value)} aria-invalid={invalid} /></Field>;
@@ -280,8 +285,8 @@ function QuestionField({ q, value, invalid, onChange }: { q: Question; value: un
             {options.map((o) => {
               const on = q.type === "multi_choice" ? list.includes(o) : value === o;
               return (
-                <button key={o} type="button" className="tab" aria-pressed={on} style={{ height: 38, padding: "0 14px" }} onClick={() => onChange(q.type === "multi_choice" ? (on ? list.filter((x) => x !== o) : [...list, o]) : o)}>
-                  {on && <Icon name="check" size={13} strokeWidth={3} />}{o}
+                <button key={o} type="button" className="tab" aria-pressed={on} style={{ height: "var(--control)", padding: "0 14px" }} onClick={() => onChange(q.type === "multi_choice" ? (on ? list.filter((x) => x !== o) : [...list, o]) : o)}>
+                  {on && <Icon name="check" size={14} strokeWidth={2} />}{o}
                 </button>
               );
             })}

@@ -11,6 +11,7 @@ import { countsOn, lineTotal, optionTotals, toCents, type Amount, type OptionLin
 import { isPavingTakeoff, pavingQuantities } from "@crewtavo/core/paving";
 import { savedRoofingQuantities } from "@crewtavo/core/roofing";
 import type { IconName } from "@/components/ui/Icon";
+import { statusText } from "@/components/ui/StatusPill";
 
 /** One step of a trade's project, as its progress pills and the trade's list page show it. */
 export interface FlowStep<Id extends string = string> {
@@ -131,13 +132,13 @@ export function currentStep(q: QuoteForFlow | null, takeoff: TakeoffRow | null, 
 
 /** A short word for the project list. */
 export function stageLabel(q: { status: string; lines?: unknown[]; jobs?: Array<{ status: string }> }, hasTakeoff: boolean): { label: string; tone: "muted" | "info" | "warning" | "good" | "danger" } {
-  if (q.status === "lost") return { label: "Lost", tone: "danger" };
-  if (q.status === "archived") return { label: "Archived", tone: "muted" };
+  if (q.status === "lost") return { label: statusText("quote", q.status), tone: "danger" };
+  if (q.status === "archived") return { label: statusText("quote", q.status), tone: "muted" };
   if (!hasTakeoff) return { label: "Takeoff", tone: "muted" };
   if (!q.lines?.length) return { label: "Estimate", tone: "muted" };
   if (q.status === "draft") return { label: "Ready to send", tone: "info" };
   if (q.status === "sent") return { label: "Proposal sent", tone: "info" };
-  if (q.status === "changes_requested") return { label: "Changes requested", tone: "warning" };
+  if (q.status === "changes_requested") return { label: statusText("quote", q.status), tone: "warning" };
   if (q.status === "approved") return { label: "Won", tone: "good" };
   const job = q.jobs?.[0];
   if (job?.status === "completed") return { label: "Done", tone: "good" };

@@ -1,17 +1,19 @@
 /* A quote's Contract card: the sections it prints, and the ones added for this job. */
 .body { display: grid; gap: 16px; padding: 16px 20px 18px; }
 .group { display: grid; gap: 8px; min-width: 0; }
-.label { font-size: 13px; font-weight: 600; color: var(--ink); }
-.headLink { flex: none; font-size: 13px; font-weight: 700; }
+.label { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.headLink { flex: none; font-size: var(--fs-13); font-weight: 600; }
 
 .list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.item { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; }
+.item { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-14); }
 .item > svg { flex: none; margin-top: 3px; color: var(--text-3); }
 .pick { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
-.meta { font-size: 12px; font-weight: 400; color: var(--text-3); }
-.initials { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--green-dark); }
-.note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-3); }
+.meta { font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+.initials { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); font-weight: 600; color: var(--green-dark); }
+.note { margin: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--text-3); }
 
-.setup { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.5; color: var(--text-2); }
+/* The once-only tip to set up contract terms (ContractTermsTip), with its × to put it away. */
+.setup { display: flex; align-items: flex-start; gap: 10px; font-size: var(--fs-14); line-height: 1.5; color: var(--text-2); }
 .setup > svg { flex: none; margin-top: 2px; color: var(--text-3); }
-.setup a { font-weight: 700; white-space: nowrap; }
+.setup a { font-weight: 600; white-space: nowrap; }
+.setup > :global(.icon-btn) { flex: none; margin: -8px -10px -8px 0; color: var(--text-3); }

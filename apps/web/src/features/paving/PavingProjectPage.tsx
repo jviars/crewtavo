@@ -14,12 +14,12 @@ import { PAVING_ITEMS } from "@crewtavo/core/paving";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { toast } from "@/lib/toast";
 import { formatItemTotal, ItemSwatch } from "../measure/PavingItems";
 import { optionTabs, quoteOptionsKey, viewedOption } from "../quotes/options";
 import { QuoteOptions } from "../quotes/QuoteOptions";
@@ -156,7 +156,6 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
       }
     },
     onSuccess: onChanged,
-    onError: (error) => toast.error((error as Error).message),
   });
   // Off the option looked at and the shared lines (viewedLines); another option keeps its own.
   const remove = useMutation({
@@ -165,13 +164,12 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
       unwrap(await (viewed ? lines.or(`option_id.is.null,option_id.eq.${viewed}`) : lines));
     },
     onSuccess: onChanged,
-    onError: (error) => toast.error((error as Error).message),
   });
   const reprice = useMutation({
-    meta: { success: "Quantities updated from the takeoff" },
     mutationFn: () => api.post(`/quotes/${quote.id}/apply-measurement`, { measurement_id: takeoff.id, ...(depthIn ? { depth_in: depthIn } : {}) }),
     onSuccess: onChanged,
   });
+  const repriced = useJustDone(reprice);
   const notYet = rows.filter((r) => !onEstimate.has(r.service.id));
   const busy = add.isPending || remove.isPending || reprice.isPending;
 
@@ -217,9 +215,9 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
           {loadingServices ? (
             <span className="muted small">Loading your price list…</span>
           ) : !rows.length ? (
-            <span className="muted small">
-              None of your services price from what this takeoff measured. Add the standard paving services on the <Link to="/paving">Paving</Link> page, or give your own a formula in <Link to="/settings?tab=prices">Settings → Price list</Link>.
-            </span>
+            <EmptyState inline title="None of your services price from this takeoff">
+              Add the standard paving services on the <Link to="/paving">Paving</Link> page, or give your own a formula in <Link to="/settings?tab=prices">Settings → Price list</Link>.
+            </EmptyState>
           ) : (
             <div className="paving-services">
               {rows.map(({ service, qty }) => {
@@ -246,8 +244,12 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
             </div>
           )}
           <div className="row wrap" style={{ gap: 8 }}>
-            {notYet.length > 1 && <Button variant="primary" icon="plus" loading={add.isPending} disabled={busy} onClick={() => add.mutate(notYet.filter((r) => r.qty !== null).map((r) => r.service))}>Add all {notYet.length} to the estimate</Button>}
-            {quote.lines.some((l) => l.formula) && <Button icon="refresh" loading={reprice.isPending} disabled={busy} onClick={() => reprice.mutate()}>Update quantities from the takeoff</Button>}
+            {notYet.length > 1 && <Button icon="plus" loading={add.isPending} disabled={busy} onClick={() => add.mutate(notYet.filter((r) => r.qty !== null).map((r) => r.service))}>Add all {notYet.length}</Button>}
+            {quote.lines.some((l) => l.formula) && (
+              <Button icon="refresh" loading={reprice.isPending} done={repriced} doneLabel="Updated" disabled={busy} onClick={() => reprice.mutate()} title="Work the quantities out again from the takeoff">
+                Update quantities
+              </Button>
+            )}
           </div>
         </div>
       )}

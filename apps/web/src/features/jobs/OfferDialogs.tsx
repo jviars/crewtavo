@@ -10,7 +10,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -65,9 +65,9 @@ function InsuranceCallout({ items, subId }: { items: readonly InsuranceWarningIt
   if (!items.length) return null;
   return (
     <div className="callout callout-warning">
-      <Icon name="alert" size={18} />
+      <Icon name="alert" size={20} />
       <div className="grow small" style={{ fontWeight: 400 }}>
-        <div style={{ fontWeight: 700 }}>Check their insurance</div>
+        <div style={{ fontWeight: 600 }}>Check their insurance</div>
         {items.map((i) => <div key={`${i.requirement}-${i.problem}`}>{insuranceWarningText(i, "office")}</div>)}
         <div>You can still send it. The offer notes this, and work given without current certificates may cost you at your workers' comp audit. <Link to={`/subs/${subId}`}>Their paperwork</Link></div>
       </div>
@@ -116,7 +116,7 @@ export function SendOfferDialog({ pay, name, jobTitle, dates, warning, onClose }
         </div>
         {noVisits && (
           <div className="callout callout-warning">
-            <Icon name="alert" size={18} />
+            <Icon name="alert" size={20} />
             <div className="grow small" style={{ fontWeight: 400 }}>
               This offer doesn't cover any visits, so they won't be put on the job when they accept it. To fix that, close this and tick the visits it covers.
             </div>
@@ -126,9 +126,11 @@ export function SendOfferDialog({ pay, name, jobTitle, dates, warning, onClose }
         <ReplyByPicker state={replyBy} disabled={send.isPending} />
         {nothing && <div className="form-error" role="alert">Add what you'll pay them first.</div>}
         <FormError error={send.error} />
+        {/* Send stays pressable: what's missing is said above it. */}
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose} disabled={send.isPending}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="send" disabled={nothing || Boolean(replyBy.problem)} loading={send.isPending}>{warning.length || noVisits ? "Send anyway" : "Send offer"}</Button>
+          <Button type="submit" variant="primary" icon="send" loading={send.isPending}>{warning.length || noVisits ? "Send anyway" : "Send offer"}</Button>
         </div>
       </form>
     </Dialog>
@@ -163,7 +165,7 @@ export function ChangePriceDialog({ pay, name, warning, onClose }: { pay: JobPay
     <Dialog
       open
       onClose={onClose}
-      title="Change the price"
+      title="Change price"
       size="lg"
       description={`${name} will be asked to accept the new price. If they say no or don't answer in time, the price they agreed (${moneyShort(pay.total)}) stays, and they stay on the job.`}
     >
@@ -214,7 +216,7 @@ export function ChangePriceDialog({ pay, name, warning, onClose }: { pay: JobPay
         <FormError error={send.error} />
         <div className="form-actions">
           <Button onClick={onClose} disabled={send.isPending}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="send" disabled={Boolean(replyBy.problem) || same} loading={send.isPending}>{warning.length ? "Send anyway" : "Send the new price"}</Button>
+          <Button type="submit" variant="primary" icon="send" loading={send.isPending}>{warning.length ? "Send anyway" : "Send new price"}</Button>
         </div>
       </form>
     </Dialog>

@@ -17,8 +17,8 @@ export function CompanyLogo({ path }: { path: string | null }) {
   const input = useRef<HTMLInputElement>(null);
   // Settings → Company saves the settings it loaded, so it reloads them with the new logo.
   const changed = () => queryClient.invalidateQueries({ queryKey: ["company", company.id] });
+  // The logo changing in place says it worked.
   const set = useMutation({
-    meta: { success: "Logo saved" },
     mutationFn: async (file: File) => {
       const png = await logoPicture(file);
       if (!png) throw new Error("Crewtavo can't open that picture. Try a PNG, JPEG or SVG.");
@@ -27,7 +27,6 @@ export function CompanyLogo({ path }: { path: string | null }) {
     onSuccess: changed,
   });
   const remove = useMutation({
-    meta: { success: "Logo removed" },
     mutationFn: () => api.delete("/company/logo"),
     onSuccess: changed,
   });
@@ -35,13 +34,13 @@ export function CompanyLogo({ path }: { path: string | null }) {
     <div className="row wrap" style={{ gap: 12 }}>
       {/* On white, as clients see it. */}
       {path && (
-        <span style={{ display: "grid", placeItems: "center", height: 64, minWidth: 64, padding: "0 14px", background: "#fff", border: "1px solid var(--border)", borderRadius: 10 }}>
+        <span style={{ display: "grid", placeItems: "center", height: 64, minWidth: 64, padding: "0 14px", background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-control)" }}>
           <img src={`/api/public/logo/${path.replace("/logo/", "/")}`} alt="Your logo" style={{ display: "block", maxHeight: 40, maxWidth: 180, objectFit: "contain" }} />
         </span>
       )}
       <div className="stack-sm" style={{ gap: 6 }}>
         <div className="row wrap" style={{ gap: 8 }}>
-          <Button size="sm" icon="upload" loading={set.isPending} disabled={remove.isPending} onClick={() => input.current?.click()}>
+          <Button size="sm" icon="upload" loading={set.isPending} slowHint={false} disabled={remove.isPending} onClick={() => input.current?.click()}>
             {path ? "Change logo" : "Add your logo"}
           </Button>
           {path && <Button size="sm" variant="ghost" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()}>Remove logo</Button>}

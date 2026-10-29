@@ -119,7 +119,7 @@ export function ImportPriceListDialog({ existing, onClose }: { existing: string[
         <FormError error={error ?? run.error} />
         <div className="form-actions">
           <Button onClick={onClose} disabled={run.isPending}>Cancel</Button>
-          <Button variant="primary" icon="upload" loading={run.isPending} disabled={!items.length} onClick={() => run.mutate()}>Import {items.length || ""}</Button>
+          <Button variant="primary" icon="upload" loading={run.isPending} slowHint={false} disabled={!items.length} onClick={() => run.mutate()}>Import {items.length || ""}</Button>
         </div>
       </div>
     </Dialog>

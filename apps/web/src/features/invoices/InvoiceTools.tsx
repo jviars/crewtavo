@@ -2,79 +2,93 @@
  * The money at a glance on the Invoices screen, invoicing every finished job in one go, and
  * reminding everyone who's past due.
  */
+import { localDate } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { FormError } from "@/components/ui/Field";
+import { FormChecks, FormError } from "@/components/ui/Field";
 import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
-import { Sparkline } from "@/components/ui/Chart";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { receivablesTrend } from "@/lib/trends";
+import { Change } from "../finance/change";
 
-const TREND_WEEKS = 12;
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
+/**
+ * What's owed and past due today, and what came in over the past 30 days, each with its change: the
+ * balances against 30 days ago, money in against the 30 days before. Balances back then are walked
+ * back from today's through the payments since (lib/trends.ts), so they're close rather than exact.
+ */
 export function InvoiceSummary({ onPick }: { onPick: (filter: "open" | "overdue" | "paid") => void }) {
   const { company } = useSession();
-  const today = todayIn(company.timezone);
-  const since = addDaysIso(today, -30);
+  const tz = company.timezone;
+  const today = todayIn(tz);
+  const monthAgo = addDaysIso(today, -30);
   const summary = useQuery({
     queryKey: ["invoices", company.id, "summary"],
     queryFn: async () => {
-      const [open, paid, history] = await Promise.all([
+      const [open, history] = await Promise.all([
         supabase().from("invoices").select("id, status, balance_due, issued_on, due_on").eq("company_id", company.id).in("status", ["sent", "partially_paid", "overdue"]).limit(5000),
-        supabase().from("payments").select("amount").eq("company_id", company.id).gte("received_at", `${since}T00:00:00`).limit(5000),
-        // Everything received in the trend window (plus 30 days for the rolling "collected" figure).
-        supabase().from("payments").select("amount, received_at, invoice_id").eq("company_id", company.id).gte("received_at", `${addDaysIso(today, -(7 * (TREND_WEEKS - 1) + 31))}T00:00:00`).limit(5000),
+        // Everything received in the past 60 days (and a day either side for time zones): this 30 days and the 30 before.
+        supabase().from("payments").select("amount, received_at, invoice_id").eq("company_id", company.id).gte("received_at", `${addDaysIso(today, -61)}T00:00:00`).limit(5000),
       ]);
       const rows = unwrap(open);
       const late = rows.filter((r) => r.status === "overdue");
       const payments = unwrap(history);
-      // Invoices paid during the window aren't open any more but still count toward earlier weeks.
+      // Invoices paid off since then aren't open any more but were owed 30 days ago.
       const openIds = new Set(rows.map((r) => r.id));
       const paidIds = [...new Set(payments.map((p) => p.invoice_id).filter((id): id is string => Boolean(id) && !openIds.has(id!)))];
-      const closed = [];
+      const closed: typeof rows = [];
       for (let i = 0; i < paidIds.length; i += 200) {
         closed.push(...unwrap(await supabase().from("invoices").select("id, status, balance_due, issued_on, due_on").in("id", paidIds.slice(i, i + 200)).not("status", "in", "(draft,void)")));
       }
-      const s = {
+      const at = (day: string) => receivablesTrend({ invoices: [...rows, ...closed], payments, today: day, tz, weeks: 1 })[0]!;
+      const now = at(today);
+      return {
         owed: rows.reduce((sum, r) => sum + Number(r.balance_due), 0),
         owedCount: rows.length,
         late: late.reduce((sum, r) => sum + Number(r.balance_due), 0),
         lateCount: late.length,
-        collected: unwrap(paid).reduce((sum, p) => sum + Number(p.amount), 0),
+        collected: now.collected,
+        payments: payments.filter((p) => Number(p.amount) > 0 && localDate(new Date(p.received_at), tz) > monthAgo).length,
+        before: at(monthAgo),
       };
-      const trend = receivablesTrend({ invoices: [...rows, ...closed], payments, today, tz: company.timezone, weeks: TREND_WEEKS });
-      // The last point is exactly what the tile shows.
-      trend[trend.length - 1] = { label: "Today", owed: s.owed, pastDue: s.late, collected: s.collected };
-      return { ...s, trend };
     },
   });
   const s = summary.data;
-  const stat = (label: string, value: number, hint: string, filter: "open" | "overdue" | "paid", series: "owed" | "pastDue" | "collected", tone?: "bad") => (
+  const stat = (label: string, value: number, change: ReactNode, hint: string, filter: "open" | "overdue" | "paid", tone?: "bad") => (
     <button type="button" className="card stat stat-button" onClick={() => onPick(filter)}>
       <span className="label">{label}</span>
-      <span className="value" style={tone ? { color: "var(--danger)" } : undefined}><AnimatedNumber value={value} format={MONEY} /></span>
+      <span className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="value" style={tone ? { color: "var(--danger)" } : undefined}><AnimatedNumber value={value} format={MONEY} /></span>
+        {change}
+      </span>
       <span className="hint">{hint}</span>
-      <Sparkline
-        data={s!.trend.map((p) => ({ label: p.label, [series]: p[series] }))}
-        config={{ [series]: { label, color: tone ? "var(--danger)" : series === "collected" ? "var(--green)" : "var(--invoice)" } }}
-        format={formatMoney}
-      />
     </button>
   );
-  if (!s) return <div className="stat-row">{[0, 1, 2].map((i) => <div key={i} className="card stat"><Skeleton width="50%" height={11} /><Skeleton width="70%" height={24} /><Skeleton width="100%" height={40} style={{ marginTop: 10 }} /></div>)}</div>;
+  if (!s) return <div className="stat-row">{[0, 1, 2].map((i) => <div key={i} className="card stat"><Skeleton width="50%" height={11} /><Skeleton width="70%" height={24} /><Skeleton width="60%" height={11} style={{ marginTop: 6 }} /></div>)}</div>;
+  // A balance's chip compares it with 30 days ago, which the hint then says.
+  const since = (shown: boolean) => (shown ? " · vs 30 days ago" : "");
   return (
     <div className="stat-row">
-      {stat("Waiting on payment", s.owed, `${s.owedCount} ${s.owedCount === 1 ? "invoice" : "invoices"}`, "open", "owed")}
-      {stat("Past due", s.late, s.lateCount ? `${s.lateCount} ${s.lateCount === 1 ? "invoice" : "invoices"}` : "Nothing late", "overdue", "pastDue", s.lateCount ? "bad" : undefined)}
-      {stat("Collected, last 30 days", s.collected, "Payments received", "paid", "collected")}
+      {stat(statusText("invoice", "sent"), s.owed, <Change now={s.owed} before={s.before.owed} compared="30 days ago" same="No change" />, `${plural(s.owedCount, "invoice")}${since(s.before.owed > 0)}`, "open")}
+      {stat(
+        statusText("invoice", "overdue"),
+        s.late,
+        <Change now={s.late} before={s.before.pastDue} compared="30 days ago" same="No change" better="down" />,
+        `${s.lateCount ? plural(s.lateCount, "invoice") : "Nothing late"}${since(s.before.pastDue > 0)}`,
+        "overdue",
+        s.lateCount ? "bad" : undefined,
+      )}
+      {stat("Collected", s.collected, <Change now={s.collected} before={s.before.collected} compared="the 30 days before" />, `${plural(s.payments, "payment")} · Past 30 days`, "paid")}
     </div>
   );
 }
@@ -119,12 +133,12 @@ export function ReadyToInvoice() {
   return (
     <>
       <div className="callout callout-info">
-        <Icon name="invoice" size={18} />
+        <Icon name="invoice" size={20} />
         <div className="grow">
           <strong>{jobs.length} {jobs.length === 1 ? "job is" : "jobs are"} ready to invoice.</strong>{" "}
           <span className="muted">{jobs.slice(0, 3).map((j) => j.client?.display_name ?? j.title).join(", ")}{jobs.length > 3 ? ` and ${jobs.length - 3} more` : ""}</span>
         </div>
-        <Button size="sm" variant="primary" onClick={() => setOpen(true)}>Invoice them</Button>
+        <Button size="sm" onClick={() => setOpen(true)}>Invoice them</Button>
       </div>
       {open && <BatchDialog jobs={jobs} onClose={() => setOpen(false)} />}
     </>
@@ -139,7 +153,10 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
   const [send, setSend] = useState(false);
   const run = useMutation({
     meta: { inline: true },
-    mutationFn: () => api.post<{ results: Array<{ number: number; ok: boolean; sent?: boolean; error?: string }> }>("/invoices/batch", { job_ids: picked, send }),
+    mutationFn: async () => {
+      if (!picked.length) throw new Error("Pick at least one job to invoice.");
+      return api.post<{ results: Array<{ number: number; ok: boolean; sent?: boolean; error?: string }> }>("/invoices/batch", { job_ids: picked, send });
+    },
     onSuccess: ({ results }) => {
       const made = results.filter((r) => r.ok);
       const failed = results.filter((r) => !r.ok);
@@ -147,10 +164,12 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      if (made.length) toast.success(`Created ${made.length} ${made.length === 1 ? "invoice" : "invoices"}${send ? `, emailed ${emailed}` : ". They're drafts until you send them"}.`);
-      if (failed.length) toast.error(`${failed.length} couldn't be invoiced: ${failed.map((f) => `job #${f.number} (${f.error})`).join("; ")}`);
+      if (made.length) {
+        toast.success(`${plural(made.length, "invoice")} created${send && emailed ? ` and ${emailed} emailed` : ""}`, { tone: "invoice", description: send ? undefined : "They're drafts until you send them." });
+      }
+      if (failed.length) toast.error(`${failed.length} couldn't be invoiced`, { description: failed.map((f) => `Job #${f.number}: ${f.error}`).join(". ") });
       const unsent = made.filter((r) => send && !r.sent);
-      if (unsent.length) toast.error(`${unsent.length} not emailed (no email address on file). They're in Drafts.`);
+      if (unsent.length) toast.error(`${unsent.length} not emailed`, { description: "No email address on file. They're in Drafts." });
       onClose();
     },
   });
@@ -171,16 +190,17 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
           ))}
         </div>
         {canEmail && (
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row" style={{ fontWeight: 400 }}>
             <input type="checkbox" className="switch" checked={send} onChange={(e) => setSend(e.target.checked)} />
             Email each client their invoice now
           </label>
         )}
         <FormError error={run.error} />
         <div className="form-actions">
+          <FormChecks />
           <span className="muted small" style={{ marginRight: "auto" }}>{total > 0 ? `${formatMoney(total)} before tax` : null}</span>
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon={send ? "send" : "invoice"} loading={run.isPending} disabled={!picked.length}>
+          <Button type="submit" variant="primary" icon={send ? "send" : "invoice"} loading={run.isPending}>
             {send ? "Create and send" : "Create"} {picked.length} {picked.length === 1 ? "invoice" : "invoices"}
           </Button>
         </div>
@@ -194,8 +214,8 @@ export function RemindAllButton({ ids }: { ids: string[] }) {
   const remind = useMutation({
     mutationFn: () => api.post<{ sent: number; skipped: Array<{ number: number; reason: string }> }>("/invoices/remind", { invoice_ids: ids }),
     onSuccess: (r) => {
-      if (r.sent) toast.success(`Sent ${r.sent} ${r.sent === 1 ? "reminder" : "reminders"}`);
-      if (r.skipped.length) toast.error(`${r.skipped.length} not sent: ${r.skipped.map((s) => `#${s.number} (${s.reason})`).join("; ")}`);
+      if (r.sent) toast.success(`${plural(r.sent, "reminder")} sent`, { tone: "invoice" });
+      if (r.skipped.length) toast.error(`${r.skipped.length} not sent`, { description: r.skipped.map((s) => `Invoice #${s.number}: ${s.reason}`).join(". ") });
     },
   });
   if (!ids.length || !config.features.email) return null;

@@ -33,7 +33,7 @@ test("a crew member works a visit from My day on a phone", async ({ as, data }) 
 
   // On the way, then started, from the card itself.
   await card.getByRole("button", { name: "On my way" }).click();
-  await expect(card).toContainText("En route");
+  await expect(card).toContainText("On the way");
   await card.getByRole("button", { name: "Start" }).click();
   await expect(card).toContainText("In progress");
 
@@ -41,12 +41,16 @@ test("a crew member works a visit from My day on a phone", async ({ as, data }) 
   await card.getByRole("link", { name: new RegExp(visit.title) }).click();
   await expect(page.getByRole("heading", { level: 1, name: visit.title })).toBeVisible();
   await expectAccessible(page, "a visit on a phone");
-  await page.getByRole("button", { name: "Complete visit" }).click();
-  const unfinished = page.getByRole("button", { name: "Complete anyway" });
-  if (await unfinished.isVisible().catch(() => false)) await unfinished.click();
+  const complete = page.getByRole("button", { name: "Complete visit" });
+  await complete.click();
+  // With required checklist items left, that tap showed the first one; tapped again, it offers to go without.
+  if (await page.getByText(/required left/).isVisible().catch(() => false)) {
+    await complete.click();
+    await page.getByRole("button", { name: "Complete anyway" }).click();
+  }
   await expect(page.getByText(/^Completed/).first()).toBeVisible();
   // The screen updates at once (it works offline); this message comes once the server has it.
-  await expect(page.getByText("Visit complete. Nice work!")).toBeVisible();
+  await expect(page.getByText("Visit completed")).toBeVisible();
 
   const done = must(await data.db.from("visits").select("status, completed_at").eq("id", visit.id).single(), "completed visit");
   expect(done.status).toBe("completed");
@@ -79,7 +83,7 @@ test("a visit started on My day shows as started on its own screen while the tap
   await expect(page.getByRole("button", { name: "Complete visit" })).toBeVisible();
 
   release();
-  await expect(page.getByText("Visit started. Your clock is running.")).toBeVisible();
+  await expect(page.getByText("Visit started, your clock is running")).toBeVisible();
   await expect(page.getByRole("button", { name: "Complete visit" })).toBeVisible();
   expect(must(await data.db.from("visits").select("status").eq("id", visit.id).single(), "visit").status).toBe("in_progress");
 });
@@ -102,7 +106,7 @@ test("with no signal, My day and the visit's own screen agree, and the visit end
   await expect(page.getByRole("button", { name: "Complete visit" })).toBeVisible();
 
   await page.context().setOffline(false);
-  await expect(page.getByText("Visit started. Your clock is running.")).toBeVisible();
+  await expect(page.getByText("Visit started, your clock is running")).toBeVisible();
   await expect.poll(async () => must(await data.db.from("visits").select("status").eq("id", visit.id).single(), "visit").status).toBe("in_progress");
 });
 
@@ -118,12 +122,12 @@ test("the foreman logs hours and marks maintenance done from My day on a phone",
   const page = await as("foreman", PHONE);
   await page.goto("/field");
   await expect(page.getByRole("heading", { name: "Your equipment" })).toBeVisible();
-  const row = page.locator("div", { has: page.getByRole("link", { name: new RegExp(name) }) }).filter({ has: page.getByRole("button", { name: "Hours" }) }).last();
+  const row = page.locator("div", { has: page.getByRole("link", { name: new RegExp(name) }) }).filter({ has: page.getByRole("button", { name: "Log hours" }) }).last();
   await expect(row).toContainText("Overdue");
   await expectAccessible(page, "My day with equipment (phone)");
 
   // Today's hour meter reading.
-  await row.getByRole("button", { name: "Hours" }).click();
+  await row.getByRole("button", { name: "Log hours" }).click();
   const reading = page.getByRole("dialog", { name: "Update the reading" });
   await reading.getByLabel("Hour meter").fill("312");
   await expectAccessible(page, "the hour meter dialog");
@@ -132,7 +136,7 @@ test("the foreman logs hours and marks maintenance done from My day on a phone",
   await expect(row).toContainText("312");
 
   // The overdue maintenance, done.
-  await row.getByRole("button", { name: "Done" }).click();
+  await row.getByRole("button", { name: "Mark done" }).click();
   const service = page.getByRole("dialog", { name: "Log maintenance" });
   await expect(service.getByLabel("What was done")).toHaveValue(plan.id);
   await service.getByRole("button", { name: "Mark done" }).click();

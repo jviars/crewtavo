@@ -10,10 +10,10 @@ import { fieldLabel } from "@crewtavo/core/websiteForms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
@@ -24,6 +24,7 @@ import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { can, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { formatPhoneTyping } from "@/lib/validate";
 import { ContactLine } from "../clients/ContactsCard";
 import { storedUndoToast, TRASH_PATH } from "../drive/trash";
 import { WebVisitRows } from "../marketing/WebVisitRows";
@@ -78,13 +79,14 @@ function ApplicantDetail() {
   const save = useMutation({
     meta: {
       success: (_: unknown, p: Patch) =>
-        p.status ? `Moved to ${applicantStatusLabel(p.status)}` : "notes" in p ? "Notes saved" : "rating" in p ? null : "interview_at" in p ? (p.interview_at ? "Interview set" : "Interview cleared") : "Saved",
+        // Notes and the rating save where they're changed, and say so there.
+        p.status ? `Moved to ${applicantStatusLabel(p.status)}` : "notes" in p || "rating" in p ? null : "interview_at" in p ? (p.interview_at ? "Interview set" : "Interview cleared") : "Details saved",
     },
     mutationFn: async (patch: Patch) => unwrap(await supabase().from("job_applicants").update({ ...patch, files: patch.files && filesJson(patch.files) }).eq("id", id)),
     onSuccess: () => refreshApplicants(queryClient),
   });
+  // The file appearing in the list, or leaving it, says it worked.
   const addFile = useMutation({
-    meta: { success: "File added" },
     mutationFn: async (file: File) => {
       const added = await uploadApplicantFile(companyId, id, file, a!.files.some((f) => isResume(f, a!.files)) ? "attachment" : "resume");
       const { error } = await supabase().from("job_applicants").update({ files: filesJson([...a!.files, added]) }).eq("id", id);
@@ -113,6 +115,7 @@ function ApplicantDetail() {
     },
   });
 
+  const notesSaved = useJustDone(save) && Boolean(save.variables && "notes" in save.variables);
   if (item.isPending) return <DetailSkeleton />;
   if (item.error || !a) return <PageError error={item.error} onRetry={() => item.refetch()} back={<BackLink to="/applicants">Applicants</BackLink>} />;
 
@@ -172,14 +175,14 @@ function ApplicantDetail() {
       </div>
 
       {isWaiting(a) && (
-        <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">{first} applied {timeAgo(a.created_at)} and hasn't heard back yet.</div></div>
+        <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">{first} applied {timeAgo(a.created_at)} and hasn't heard back yet.</div></div>
       )}
       {a.status === "interview" && a.interview_at && (
-        <div className="callout callout-info"><Icon name="calendar" size={18} /><div className="grow">Interview {formatDateTime(a.interview_at, tz)}.</div></div>
+        <div className="callout callout-info"><Icon name="calendar" size={20} /><div className="grow">Interview {formatDateTime(a.interview_at, tz)}.</div></div>
       )}
       {a.status === "hired" && (
         <div className="callout callout-good" role="status">
-          <Icon name="check" size={18} />
+          <Icon name="check" size={20} />
           <div className="grow">
             {managesTeam ? `Hired. Invite ${first} to your team so they can sign in and see their visits.` : `Hired. An admin can invite ${first} to your team in Settings → People.`}
           </div>
@@ -221,19 +224,17 @@ function ApplicantDetail() {
           <section className="stack">
             <div className="section-head">
               <h2 className="section-title">Résumé and files</h2>
-              {a.files.length > 0 && a.files.length < 5 && <Button size="sm" icon="upload" loading={addFile.isPending} onClick={() => fileInput.current?.click()}>Add a file</Button>}
+              {a.files.length > 0 && a.files.length < 5 && <Button size="sm" icon="upload" loading={addFile.isPending} slowHint={false} onClick={() => fileInput.current?.click()}>Add a file</Button>}
             </div>
             <div className="card">
               {a.files.length === 0 && (
-                <EmptyState compact icon="file" title="No résumé" action={<Button size="sm" icon="upload" loading={addFile.isPending} onClick={() => fileInput.current?.click()}>Add their résumé</Button>}>
-                  If {first} sends one another way, add it here so it's with the rest.
-                </EmptyState>
+                <EmptyState inline title="No résumé yet" action={<Button loading={addFile.isPending} slowHint={false} onClick={() => fileInput.current?.click()}>Add their résumé</Button>} />
               )}
               {a.files.map((f) => {
                 const link = a.links[f.path];
                 return (
                   <div key={f.path} className="card-row">
-                    <Icon name="file" size={18} />
+                    <Icon name="file" size={20} />
                     <span className="grow" style={{ minWidth: 0 }}>
                       <strong style={{ display: "block" }}>{isResume(f, a.files) ? "Résumé" : fileLabel(f.field)}</strong>
                       <span className="muted small" style={{ overflowWrap: "anywhere" }}>{f.name} · {fileSize(f.size)}</span>
@@ -253,7 +254,7 @@ function ApplicantDetail() {
             </div>
           </section>
 
-          <NotesCard key={a.notes ?? ""} notes={a.notes} saving={save.isPending && save.variables && "notes" in save.variables} onSave={(notes) => save.mutate({ notes })} />
+          <NotesCard key={a.notes ?? ""} notes={a.notes} saving={save.isPending && save.variables && "notes" in save.variables} saved={notesSaved} onSave={(notes) => save.mutate({ notes })} />
         </div>
 
         <aside className="narrow stack">
@@ -261,8 +262,8 @@ function ApplicantDetail() {
             <strong style={{ fontSize: 16 }}>{a.name}</strong>
             {a.email && <ContactLine icon="mail" href={`mailto:${a.email}`}>{a.email}</ContactLine>}
             {a.phone && <ContactLine icon="phone" href={`tel:${a.phone}`}>{a.phone}</ContactLine>}
-            {a.phone && <a href={`sms:${a.phone}`} className="row small" style={{ gap: 8 }}><Icon name="messages" size={15} />Text them</a>}
-            {a.location && <span className="row muted small" style={{ gap: 8 }}><Icon name="pin" size={15} />{a.location}</span>}
+            {a.phone && <a href={`sms:${a.phone}`} className="row small" style={{ gap: 8 }}><Icon name="messages" size={14} />Text them</a>}
+            {a.location && <span className="row muted small" style={{ gap: 8 }}><Icon name="pin" size={14} />{a.location}</span>}
           </div>
 
           <div className="card card-pad stack-sm">
@@ -333,7 +334,7 @@ function Stars({ value, onChange }: { value: number | null; onChange: (value: nu
   );
 }
 
-function NotesCard({ notes, saving, onSave }: { notes: string | null; saving: boolean | undefined; onSave: (notes: string | null) => void }) {
+function NotesCard({ notes, saving, saved, onSave }: { notes: string | null; saving: boolean | undefined; saved: boolean; onSave: (notes: string | null) => void }) {
   const [text, setText] = useState(notes ?? "");
   const dirty = text.trim() !== (notes ?? "");
   return (
@@ -341,7 +342,7 @@ function NotesCard({ notes, saving, onSave }: { notes: string | null; saving: bo
       <strong>Notes</strong>
       <span className="muted small">For the office: how the call went, references, what to ask in the interview. The applicant never sees them.</span>
       <textarea className="textarea" rows={5} maxLength={10000} value={text} onChange={(e) => setText(e.target.value)} aria-label="Notes" />
-      <Button style={{ justifySelf: "start" }} loading={saving} disabled={!dirty} onClick={() => onSave(text.trim() || null)}>Save notes</Button>
+      <Button style={{ justifySelf: "start" }} loading={saving} done={saved} disabled={!dirty && !saved} onClick={() => onSave(text.trim() || null)}>Save notes</Button>
     </section>
   );
 }
@@ -368,7 +369,7 @@ function InterviewDialog({ name, value, onClose, onSave }: { name: string; value
         <div className="form-actions">
           {value && <Button variant="ghost" onClick={() => onSave(null).catch(setError)}>Clear it</Button>}
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={!at}>Save</Button>
+          <Button type="submit" variant="primary">Save</Button>
         </div>
       </form>
     </Dialog>
@@ -400,7 +401,7 @@ function EditApplicantDialog({ applicant: a, onClose, onSave }: { applicant: App
         <Field label="Name"><input className="input" value={form.name} onChange={set("name")} required maxLength={200} /></Field>
         <div className="form-grid">
           <Field label="Email" optional><input className="input" type="email" value={form.email} onChange={set("email")} maxLength={254} /></Field>
-          <Field label="Phone" optional><input className="input" type="tel" value={form.phone} onChange={set("phone")} maxLength={30} /></Field>
+          <Field label="Phone" optional><input className="input" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formatPhoneTyping(e.target.value) }))} maxLength={30} /></Field>
           <Field label={DETAIL_LABELS.position} optional><input className="input" value={form.position} onChange={set("position")} maxLength={200} /></Field>
           <Field label={DETAIL_LABELS.location} optional><input className="input" value={form.location} onChange={set("location")} maxLength={300} /></Field>
           <Field label={DETAIL_LABELS.start_date} optional><input className="input" value={form.start_date} onChange={set("start_date")} maxLength={100} /></Field>
@@ -413,8 +414,9 @@ function EditApplicantDialog({ applicant: a, onClose, onSave }: { applicant: App
         <Field label="In their words" optional><textarea className="textarea" rows={4} value={form.message} onChange={set("message")} maxLength={5000} /></Field>
         <FormError error={error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={saving} disabled={!form.name.trim()}>Save</Button>
+          <Button type="submit" variant="primary" loading={saving}>Save</Button>
         </div>
       </form>
     </Dialog>

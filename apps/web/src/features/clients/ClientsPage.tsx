@@ -169,7 +169,8 @@ export function ClientsPage() {
             <EmptyState
               icon="clients"
               title="No clients yet"
-              action={canEdit && (<><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Add your first client</Button><Button icon="upload" onClick={() => setImporting(true)}>Import from a spreadsheet</Button></>)}
+              // New client in the header is the page's one green button; these are the two ways to start.
+              action={canEdit && (<><Button icon="plus" onClick={() => setCreating(true)}>Add your first client</Button><Button icon="upload" onClick={() => setImporting(true)}>Import from a spreadsheet</Button></>)}
             />
           )}
         </div>
@@ -187,15 +188,24 @@ export function ClientsPage() {
                       <Link className="cell-link" to={`/clients/${c.id}`} onClick={(e) => e.stopPropagation()}>{c.display_name}</Link>
                       {c.company_name && c.company_name !== c.display_name && <div className="muted small">{c.company_name}</div>}
                     </td>
+                    {/* "—" is the one mark for a missing value. A phone alone takes the email's line; on a
+                        phone, where rows stack without column names, a dash says nothing and is left out. */}
                     <td>
-                      <div className="ellipsis" style={{ maxWidth: 240 }}>{c.email ?? <span className="muted">No email</span>}</div>
-                      <div className="muted small">{c.phone}</div>
+                      {c.email && <div className="ellipsis" style={{ maxWidth: 240 }}>{c.email}</div>}
+                      {c.phone && <div className={c.email ? "muted small" : undefined}>{c.phone}</div>}
+                      {!c.email && !c.phone && <span className="muted hide-mobile">—</span>}
                     </td>
                     <td>
-                      {c.properties[0] ? [c.properties[0].line1, c.properties[0].city].filter(Boolean).join(", ") : <span className="muted">—</span>}
+                      {c.properties[0] ? [c.properties[0].line1, c.properties[0].city].filter(Boolean).join(", ") : <span className="muted hide-mobile">—</span>}
                       {c.properties.length > 1 && <span className="muted"> +{c.properties.length - 1}</span>}
                     </td>
-                    <td><div className="row wrap" style={{ gap: 4 }}>{c.tags.slice(0, 3).map((t) => <span key={t} className="chip">{t}</span>)}{c.tags.length > 3 && <span className="chip">+{c.tags.length - 3}</span>}</div></td>
+                    <td>
+                      {c.tags.length ? (
+                        <div className="row wrap" style={{ gap: 4 }}>{c.tags.slice(0, 3).map((t) => <span key={t} className="tag">{t}</span>)}{c.tags.length > 3 && <span className="tag">+{c.tags.length - 3}</span>}</div>
+                      ) : (
+                        <span className="muted hide-mobile">—</span>
+                      )}
+                    </td>
                     <td><EntityStatus kind="client" status={c.status} /></td>
                   </tr>
                 ))}

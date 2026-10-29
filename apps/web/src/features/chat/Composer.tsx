@@ -256,8 +256,8 @@ export function Composer({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => choose(o)}
               >
-                {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={28} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={18} />}
-                <span style={{ fontWeight: 700, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? "@everyone" : o.label}</span>
+                {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={28} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={20} />}
+                <span style={{ fontWeight: 600, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? "@everyone" : o.label}</span>
                 {o.hint && <small>{o.hint}</small>}
               </button>
             ))}
@@ -265,9 +265,9 @@ export function Composer({
         )}
         {replyTo && (
           <div className={s.bar}>
-            <Icon name="reply" size={15} />
+            <Icon name="reply" size={14} />
             <span className="grow">Replying to <strong>{replyTo.author?.name ?? "Crewtavo"}</strong></span>
-            <button type="button" className="icon-btn" aria-label="Cancel reply" onClick={onCancelReply}><Icon name="x" size={15} /></button>
+            <button type="button" className="icon-btn" aria-label="Cancel reply" onClick={onCancelReply}><Icon name="x" size={14} /></button>
           </div>
         )}
         {(uploads.length > 0 || job) && (
@@ -276,14 +276,14 @@ export function Composer({
               <span key={u.id} className={s.chip} title={u.status === "error" ? "Couldn't upload this photo" : u.name}>
                 <img src={u.preview} alt="" />
                 <span>{u.status === "uploading" ? "Uploading…" : u.status === "error" ? "Didn't upload" : u.name}</span>
-                <button type="button" className="icon-btn" aria-label={`Remove ${u.name}`} onClick={() => setUploads((list) => list.filter((x) => x.id !== u.id))}><Icon name="x" size={13} /></button>
+                <button type="button" className="icon-btn" aria-label={`Remove ${u.name}`} onClick={() => setUploads((list) => list.filter((x) => x.id !== u.id))}><Icon name="x" size={14} /></button>
               </span>
             ))}
             {job && (
               <span className={s.chip}>
                 <span className={s.jobIcon}><Icon name="job" size={16} /></span>
                 <span>{job.number ? `Job #${job.number} · ` : ""}{job.title}</span>
-                <button type="button" className="icon-btn" aria-label="Remove the job" onClick={() => setJob(null)}><Icon name="x" size={13} /></button>
+                <button type="button" className="icon-btn" aria-label="Remove the job" onClick={() => setJob(null)}><Icon name="x" size={14} /></button>
               </span>
             )}
           </div>
@@ -307,10 +307,10 @@ export function Composer({
             maxLength={4000}
           />
           <button type="button" className={`icon-btn ${s.composerBtn}`} aria-label="Link a job" title="Link a job" onClick={() => setPickingJob(true)}>
-            <Icon name="job" size={19} />
+            <Icon name="job" size={20} />
           </button>
           <button type="button" className={s.sendBtn} aria-label="Send" title="Send" disabled={!canSend} onClick={submit}>
-            <Icon name="send" size={18} />
+            <Icon name="send" size={20} />
           </button>
         </div>
       </div>
@@ -379,7 +379,7 @@ function JobPicker({ open, onClose, onPick }: { open: boolean; onClose: () => vo
         {jobs.data?.length === 0 && <span className="muted small">No jobs match.</span>}
         <div className="stack-sm" style={{ gap: 4 }}>
           {jobs.data?.map((j) => (
-            <button key={j.id} type="button" className="card-row" style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", textAlign: "left", cursor: "pointer" }} onClick={() => onPick(j)}>
+            <button key={j.id} type="button" className="card-row" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--surface)", textAlign: "left", cursor: "pointer" }} onClick={() => onPick(j)}>
               <span className={s.jobIcon}><Icon name="job" size={16} /></span>
               <span className="grow">
                 <strong style={{ display: "block" }}>{j.number ? `#${j.number} · ` : ""}{j.title}</strong>

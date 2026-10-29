@@ -1,7 +1,8 @@
 /**
  * The bell: notifications for me (from automations such as "a quote was approved") and the
  * company's activity feed. New notifications are checked for every 30 seconds while Crewtavo is open
- * (and whenever it comes back into view), and show as a toast.
+ * (and whenever it comes back into view), and show as a toast. Opening the bell to "For you" marks
+ * what's there as read; the new ones keep their dot until it closes, so it's clear which they were.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
@@ -10,7 +11,6 @@ import { supabase, unwrap } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { Button } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 
@@ -28,6 +28,8 @@ export function NotificationsButton() {
   const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"mine" | "activity">("mine");
+  /** Marked read while the bell is open: still shown as new until it closes. */
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   const key = ["notifications", session.company.id, session.userId];
   const showActivity = hasRole(session, "admin", "office", "estimator");
 
@@ -89,6 +91,7 @@ export function NotificationsButton() {
     const onToggle = (e: Event) => {
       const isOpen = (e as Event & { newState: string }).newState === "open";
       setOpen(isOpen);
+      if (!isOpen) setFresh(new Set());
       if (isOpen && button.current) {
         const r = button.current.getBoundingClientRect();
         p.style.top = `${r.bottom + 8}px`;
@@ -102,18 +105,27 @@ export function NotificationsButton() {
   }, []);
 
   const markRead = useMutation({
-    mutationFn: async (ids: string[] | "all") => {
-      let q = supabase().from("notifications").update({ read_at: new Date().toISOString() }).eq("user_id", session.userId).eq("company_id", session.company.id).is("read_at", null);
-      if (ids !== "all") q = q.in("id", ids);
-      unwrap(await q);
-    },
+    // Marking happens by itself as the bell opens; if it doesn't go through, the dots simply come back.
+    meta: { inline: true },
+    mutationFn: async (ids: string[]) =>
+      unwrap(await supabase().from("notifications").update({ read_at: new Date().toISOString() }).eq("user_id", session.userId).eq("company_id", session.company.id).is("read_at", null).in("id", ids)),
     onMutate: async (ids) => {
       await queryClient.cancelQueries({ queryKey: key });
       const now = new Date().toISOString();
-      queryClient.setQueryData<typeof notifications.data>(key, (old) => old?.map((n) => (ids === "all" || ids.includes(n.id) ? { ...n, read_at: n.read_at ?? now } : n)));
+      queryClient.setQueryData<typeof notifications.data>(key, (old) => old?.map((n) => (ids.includes(n.id) ? { ...n, read_at: n.read_at ?? now } : n)));
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
   });
+
+  // Seen once they're on screen: as the bell opens to "For you", and any that arrive while it's open.
+  useEffect(() => {
+    if (!open || tab !== "mine") return;
+    const ids = notifications.data?.filter((n) => !n.read_at && !fresh.has(n.id)).map((n) => n.id) ?? [];
+    if (!ids.length) return;
+    setFresh((shown) => new Set([...shown, ...ids]));
+    markRead.mutate(ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, tab, notifications.data]);
 
   const openLink = (path: string | null) => {
     panel.current?.hidePopover();
@@ -129,7 +141,6 @@ export function NotificationsButton() {
       <div ref={panel} id={id} className="panel" popover="auto" role="dialog" aria-label="Notifications">
         <div className="panel-head">
           <h2>Notifications</h2>
-          {tab === "mine" && unread > 0 && <Button size="sm" variant="ghost" icon="check" onClick={() => markRead.mutate("all")}>Mark all read</Button>}
         </div>
         {showActivity && (
           <div className="underline-tabs" role="tablist" style={{ padding: "0 16px" }}>
@@ -152,11 +163,8 @@ export function NotificationsButton() {
                   key={n.id}
                   type="button"
                   className="notice"
-                  data-unread={!n.read_at || undefined}
-                  onClick={() => {
-                    if (!n.read_at) markRead.mutate([n.id]);
-                    openLink(n.link);
-                  }}
+                  data-unread={!n.read_at || fresh.has(n.id) || undefined}
+                  onClick={() => openLink(n.link)}
                 >
                   <span className="n-icon"><Icon name={ICONS[n.kind] ?? "bell"} size={16} /></span>
                   <span style={{ minWidth: 0, flex: 1 }}>
@@ -199,7 +207,7 @@ function PanelSkeleton() {
     <div className="skeleton-wrap" aria-hidden="true">
       {[0, 1, 2].map((i) => (
         <div key={i} className="notice" style={{ pointerEvents: "none" }}>
-          <Skeleton width={32} height={32} radius={10} />
+          <Skeleton width={32} height={32} radius={8} />
           <span style={{ flex: 1, display: "grid", gap: 6 }}>
             <Skeleton width="60%" height={12} />
             <Skeleton width="90%" height={10} />

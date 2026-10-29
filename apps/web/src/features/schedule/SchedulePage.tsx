@@ -13,24 +13,26 @@ import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { RouteMapsLink } from "@/components/ui/MapsLink";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
+import { EmptyState, ErrorState } from "@/components/ui/States";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatTime, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
 import { dayRoute } from "./dayRoute";
 import { RouteDialog } from "./RouteDialog";
-import { clock, lengthOf, minutesOf, TimeGrid, useGridScale, type GridColumn, type GridExternal } from "./TimeGrid";
+import { clock, fitBlock, lengthOf, minutesOf, TimeGrid, TimeRange, useGridScale, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
 import { VisitDetails } from "./VisitDetails";
 import { VisitDialog, type VisitInput } from "./VisitDialog";
@@ -151,6 +153,7 @@ export function SchedulePage() {
     writePref("crewtavo.schedule.person", id);
   };
   const ppm = useGridScale();
+  const unscheduledList = useListAnimation<HTMLDivElement>();
 
   const range = useMemo(() => {
     if (view === "day") return { from: anchor, to: anchor };
@@ -272,7 +275,7 @@ export function SchedulePage() {
     onError: (_e, _v, context) => context?.previous && queryClient.setQueryData(key, context.previous),
     onSuccess: (_d, { visit, patch, message, undoable }) => {
       const before = Object.fromEntries(Object.keys(patch).map((k) => [k, visit[k as keyof Patch]])) as Patch;
-      toast.success(message, undoable ? { action: { label: "Undo", onClick: () => update.mutate({ visit: { ...visit, ...patch } as Visit, patch: before, message: "Change undone", undoable: false }) } } : undefined);
+      toast.success(message, { tone: "job", ...(undoable && { action: { label: "Undo", onClick: () => update.mutate({ visit: { ...visit, ...patch } as Visit, patch: before, message: "Change undone", undoable: false }) } }) });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["schedule", session.company.id] });
@@ -369,24 +372,33 @@ export function SchedulePage() {
     );
   };
 
-  const content = (v: Visit, size: "tiny" | "short" | "full") => {
+  /**
+   * A visit's words: an Anytime chip's one line, or the rows a block's height has room for
+   * (fitBlock). The time keeps a row of its own, so the people never squeeze it.
+   */
+  const content = (v: Visit, height?: number) => {
     const who = v.job?.client?.display_name ?? v.property?.line1;
     const done = v.status === "completed" ? "✓ " : "";
     const day = v.series_total && v.series_total > 1 ? ` · day ${v.series_day}/${v.series_total}` : "";
     const stop = v.route_order && v.status === "scheduled" ? `${v.route_order}. ` : "";
-    if (size === "tiny") return <span className="tg-line"><span className="tg-n" style={{ WebkitLineClamp: 1 }}>{stop}{done}{v.title}{day}</span>{faces(v)}</span>;
-    // A short visit keeps the people beside its time; a longer one has room to name them.
-    const time = v.starts_at && <span className="tg-t">{stop}{timeOf(v.starts_at)}{v.ends_at ? ` – ${timeOf(v.ends_at)}` : ""}</span>;
+    if (height === undefined) return <span className="tg-line"><span className="tg-n" style={{ WebkitLineClamp: 1 }}>{stop}{done}{v.title}{day}</span>{faces(v)}</span>;
+    const fit = fitBlock(height, { time: Boolean(v.starts_at), people: v.assignees.length > 0, hold: Boolean(v.hold_reason), client: Boolean(who) });
+    const time = fit.time && v.starts_at && <span className="tg-t">{stop}<TimeRange start={timeOf(v.starts_at)} end={v.ends_at && timeOf(v.ends_at)} /></span>;
+    const title = <span className="tg-n" style={{ WebkitLineClamp: fit.title }}>{time ? "" : stop}{done}{v.title}{day}</span>;
     return (
       <>
-        {size === "short" ? <span className="tg-line">{time}{faces(v)}</span> : time}
-        <span className="tg-n">{done}{v.title}{day}</span>
-        {size === "full" && who && <span className="tg-m">{who}</span>}
-        {size === "full" && v.assignees.length > 0 && <span className="tg-line tg-who">{faces(v)}<span className="tg-m" aria-hidden="true">{firstNames(v)}</span></span>}
-        {size === "full" && v.hold_reason && <span className="tg-w" title={v.hold_reason}>⚠ {v.hold_reason.split(";")[0]}</span>}
+        {time}
+        {fit.people === "inline" ? <span className="tg-line">{title}{faces(v)}</span> : title}
+        {fit.client && <span className="tg-m">{who}</span>}
+        {fit.people === "row" && <span className="tg-line tg-who">{faces(v)}<span className="tg-m" aria-hidden="true">{firstNames(v)}</span></span>}
+        {fit.hold && <span className="tg-w" title={v.hold_reason ?? undefined}>⚠ {v.hold_reason?.split(";")[0]}</span>}
+        {!fit.people && v.assignees.length > 0 && <span className="sr-only">With {namesOn(v).replace(/^You\b/, "you")}</span>}
       </>
     );
   };
+
+  /** How many visits a day (or a crew's lane) has, rolling to the new count as visits move. */
+  const visitCount = (n: number) => n > 0 && <span className="muted small"><AnimatedNumber value={n} /><span className="sr-only">{n === 1 ? " visit" : " visits"}</span></span>;
 
   const newAt = (col: GridColumn, minutes: number | null) => {
     const start = minutes === null ? null : zonedTimeToUtc(col.date, hhmm(minutes), tz);
@@ -424,9 +436,9 @@ export function SchedulePage() {
             </RouteMapsLink>
           )}
           {canDispatch && stops.length > 0 && anchor >= today && rights.canChange(col.crew || null) && (
-            <Button size="sm" variant="ghost" icon="navigation" title="Organize this crew's route by distance" onClick={() => setRouting({ crew: col.crew ?? "", name: typeof col.label === "string" ? col.label : "Crew" })}>Route</Button>
+            <Button size="sm" variant="ghost" icon="navigation" title="Organize this crew's route by distance" onClick={() => setRouting({ crew: col.crew ?? "", name: typeof col.label === "string" ? col.label : "Crew" })}>Plan route</Button>
           )}
-          <span className="muted small">{lane.length || ""}</span>
+          {visitCount(lane.length)}
         </span>
       ),
     };
@@ -441,7 +453,7 @@ export function SchedulePage() {
       setAnchor(date);
       setView("day");
     },
-    headerExtra: <span className="muted small">{byDay(date).length || ""}</span>,
+    headerExtra: visitCount(byDay(date).length),
   }));
 
   const showPanel = (panel ?? unscheduled.length > 0) && (canDispatch || unscheduled.length > 0);
@@ -461,6 +473,7 @@ export function SchedulePage() {
     externalFor,
     onOpenExternal: openExternal,
     stale: schedule.isPlaceholderData,
+    selected: details?.id ?? editing?.id ?? null,
   };
 
   return (
@@ -488,11 +501,14 @@ export function SchedulePage() {
           <Button size="sm" onClick={() => setAnchor(today)}>Today</Button>
           <Button size="sm" icon="chevronRight" aria-label="Next" onClick={() => step(1)} />
         </div>
-        <strong style={{ fontSize: 16, minWidth: 200 }}>{heading}</strong>
+        <strong style={{ fontSize: 16, letterSpacing: "var(--tracking-tight)", minWidth: 200 }}>{heading}</strong>
         {schedule.isFetching && !schedule.isPending && <span className="spinner" style={{ width: 14, height: 14, color: "var(--text-3)" }} aria-label="Refreshing" />}
         <span className="grow" />
         {(canDispatch || unscheduled.length > 0) && !showPanel && (
-          <Button size="sm" icon="inbox" onClick={() => setPanel(true)}>Unscheduled{unscheduled.length ? ` · ${unscheduled.length}` : ""}</Button>
+          <Button size="sm" icon="inbox" onClick={() => setPanel(true)}>
+            Show unscheduled
+            {unscheduled.length > 0 && <span className="badge">{unscheduled.length}</span>}
+          </Button>
         )}
         {(allEvents.length > 0 || !showCalendars) && (
           <Button size="sm" icon="calendar" title={showCalendars ? "Hide events from other calendars" : "Show events from other calendars"} onClick={() => setShowCalendars(!showCalendars)}>
@@ -500,19 +516,19 @@ export function SchedulePage() {
           </Button>
         )}
         {canPickPerson && (
-          <select className="select" style={{ width: "auto" }} value={shownPerson} onChange={(e) => setPerson(e.target.value)} aria-label="Whose visits to show">
-            <option value="">Everyone</option>
-            <option value={session.userId}>Just mine</option>
-            {pickable.map((p) => <option key={p.user_id} value={p.user_id}>{nameOf(p.user_id)}</option>)}
-            {canDispatch && <option value="none">Nobody assigned yet</option>}
-          </select>
+          <FilterSelect
+            label="Person"
+            value={shownPerson}
+            onChange={setPerson}
+            options={[
+              ["", "Everyone"],
+              [session.userId, "You"],
+              ...pickable.map((p): [string, string] => [p.user_id, nameOf(p.user_id)]),
+              ...(canDispatch ? [["none", "Nobody assigned"] as [string, string]] : []),
+            ]}
+          />
         )}
-        {crews.length > 1 && (
-          <select className="select" style={{ width: "auto" }} value={crewId} onChange={(e) => setCrewId(e.target.value)} aria-label="Filter by crew">
-            <option value="">All crews</option>
-            {crews.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        )}
+        {crews.length > 1 && <FilterSelect label="Crew" value={crewId} onChange={setCrewId} options={[["", "All"], ...crews.map((c): [string, string] => [c.id, c.name])]} />}
         <div className="segmented" role="group" aria-label="View">
           {(["day", "week", "month"] as const).map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>)}
         </div>
@@ -553,7 +569,7 @@ export function SchedulePage() {
                     >
                       <button type="button" className="month-day" onClick={() => { setAnchor(date); setView("day"); }}>
                         <span>{Number(date.slice(8))}</span>
-                        {visits.length > 0 && <span className="muted small">{visits.length}</span>}
+                        {visitCount(visits.length)}
                       </button>
                       {shown.map((v) => (
                         <button
@@ -561,6 +577,7 @@ export function SchedulePage() {
                           type="button"
                           className="month-chip"
                           data-status={v.status}
+                          data-selected={grid.selected === v.id || undefined}
                           style={{ ["--crew" as string]: v.crewColor }}
                           title={v.assignees.length ? `${v.title} · ${namesOn(v)}` : v.title}
                           onPointerDown={canDispatch && canMove(v) && !["completed", "cancelled"].includes(v.status) ? startDrag(v, "move") : undefined}
@@ -595,24 +612,25 @@ export function SchedulePage() {
               {unscheduled.length === 0 ? (
                 <span className="muted small">Nothing waiting. Drag a visit here to take it off the calendar.</span>
               ) : (
-                <>
-                  {canDispatch && <span className="muted small">Drag onto the calendar to schedule.</span>}
-                  {unscheduled.map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      className="tg-chip"
-                      data-dragging={drag?.visit.id === v.id || undefined}
-                      style={{ "--crew": v.crewColor } as CSSProperties}
-                      onPointerDown={canDispatch && canMove(v) ? startDrag(v, "move") : undefined}
-                      onClick={() => !wasDragging() && show(v)}
-                    >
-                      <span className="tg-line"><strong className="grow">{v.title}</strong>{faces(v)}</span>
-                      {(v.job?.client || v.property) && <span className="muted small">{v.job?.client?.display_name ?? v.property?.line1}</span>}
-                    </button>
-                  ))}
-                </>
+                canDispatch && <span className="muted small">Drag onto the calendar to schedule.</span>
               )}
+              <div className="unscheduled-list" ref={unscheduledList}>
+                {unscheduled.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    className="tg-chip"
+                    data-dragging={drag?.visit.id === v.id || undefined}
+                    data-selected={grid.selected === v.id || undefined}
+                    style={{ "--crew": v.crewColor } as CSSProperties}
+                    onPointerDown={canDispatch && canMove(v) ? startDrag(v, "move") : undefined}
+                    onClick={() => !wasDragging() && show(v)}
+                  >
+                    <span className="tg-line"><strong className="grow">{v.title}</strong>{faces(v)}</span>
+                    {(v.job?.client || v.property) && <span className="tg-m">{v.job?.client?.display_name ?? v.property?.line1}</span>}
+                  </button>
+                ))}
+              </div>
             </aside>
           )}
         </div>
@@ -650,6 +668,23 @@ function patchFor(visit: Visit, date: string, tz: string) {
   return { starts_at: start.toISOString(), ends_at: new Date(start.getTime() + length).toISOString(), scheduled_on: localDate(start, tz) };
 }
 
+/**
+ * A filter that says what it filters, "Crew | All", the way Jobber writes it. The native select lies
+ * over the words, so the whole pill opens the phone's or browser's own list, and it's heard as "Crew".
+ */
+function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: Array<[string, string]>; onChange: (value: string) => void }) {
+  return (
+    <label className="schedule-filter">
+      <span className="schedule-filter-label" aria-hidden="true">{label}</span>
+      <span aria-hidden="true">{options.find(([v]) => v === value)?.[1] ?? options[0]?.[1]}</span>
+      <Icon name="chevronDown" size={14} />
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
+        {options.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function ScheduleSkeleton({ view }: { view: View }) {
   const cols = view === "day" ? 3 : 7;
   return (
@@ -673,7 +708,7 @@ function ShiftDialog({ defaultDate, crews, allCrews, onClose }: { defaultDate: s
   // A crew lead moves their own crew's day; the office can move everyone's.
   const [crewId, setCrewId] = useState(allCrews ? "" : crews[0]?.id ?? "");
   const shift = useMutation({
-    meta: { inline: true, success: (r: { moved: number }) => (r.moved ? `Moved ${r.moved} ${r.moved === 1 ? "visit" : "visits"} to ${label(toDate, { weekday: "short", month: "short", day: "numeric" })}` : "No open visits on that day") },
+    meta: { inline: true, tone: "job", success: (r: { moved: number }) => (r.moved ? `Moved ${r.moved} ${r.moved === 1 ? "visit" : "visits"} to ${label(toDate, { weekday: "short", month: "short", day: "numeric" })}` : "No open visits on that day") },
     mutationFn: () => api.post<{ moved: number }>("/schedule/shift", { from_date: fromDate, to_date: toDate, crew_id: crewId || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["schedule"] });
@@ -685,7 +720,10 @@ function ShiftDialog({ defaultDate, crews, allCrews, onClose }: { defaultDate: s
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); shift.mutate(); }}>
         <div className="form-grid">
           <Field label="From"><input className="input" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} required /></Field>
-          <Field label="To"><input className="input" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} required /></Field>
+          <Field label="To" error={fromDate && fromDate === toDate ? "Pick a different day." : null}>
+            {/* The same day twice also stops Move visits, and counts in "1 field needs a look". */}
+            <input ref={(el) => el?.setCustomValidity(fromDate && fromDate === toDate ? "Pick a different day." : "")} className="input" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} required />
+          </Field>
           <Field label="Crew">
             <select className="select" value={crewId} onChange={(e) => setCrewId(e.target.value)}>
               {allCrews && <option value="">All crews</option>}
@@ -693,11 +731,11 @@ function ShiftDialog({ defaultDate, crews, allCrews, onClose }: { defaultDate: s
             </select>
           </Field>
         </div>
-        {fromDate === toDate && <p className="error-text">Pick two different days.</p>}
         <FormError error={shift.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="cloud" loading={shift.isPending} disabled={fromDate === toDate}>Move visits</Button>
+          <Button type="submit" variant="primary" icon="cloud" loading={shift.isPending}>Move visits</Button>
         </div>
       </form>
     </Dialog>
@@ -718,8 +756,11 @@ function BulkVisitsDialog({ defaultDate, crews, onClose }: { defaultDate: string
   });
   const shown = (jobs.data ?? []).filter((j) => `${j.title} ${j.client?.display_name ?? ""} ${j.number}`.toLowerCase().includes(term.toLowerCase()));
   const create = useMutation({
-    meta: { inline: true, success: (r: { created: number }) => `Added ${r.created} ${r.created === 1 ? "visit" : "visits"}` },
-    mutationFn: () => api.post<{ created: number }>("/schedule/bulk-visits", { job_ids: picked, date, crew_id: crewId || undefined }),
+    meta: { inline: true, tone: "job", success: (r: { created: number }) => `Added ${r.created} ${r.created === 1 ? "visit" : "visits"}` },
+    mutationFn: async () => {
+      if (!picked.length) throw new Error("Pick at least one job.");
+      return api.post<{ created: number }>("/schedule/bulk-visits", { job_ids: picked, date, crew_id: crewId || undefined });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["schedule"] });
       onClose();
@@ -752,12 +793,13 @@ function BulkVisitsDialog({ defaultDate, crews, onClose }: { defaultDate: string
               <span className="grow"><strong>{j.title}</strong><span className="muted small" style={{ display: "block" }}>Job #{j.number} · {j.client?.display_name}</span></span>
             </label>
           ))}
-          {jobs.data && !shown.length && <div className="empty">No active jobs match.</div>}
+          {jobs.data && !shown.length && <EmptyState inline title="No active jobs match" />}
         </div>
         <FormError error={create.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="calendarCheck" loading={create.isPending} disabled={!picked.length}>Add {picked.length || ""} {picked.length === 1 ? "visit" : "visits"}</Button>
+          <Button type="submit" variant="primary" icon="calendarCheck" loading={create.isPending}>{picked.length ? `Add ${picked.length} ${picked.length === 1 ? "visit" : "visits"}` : "Add visits"}</Button>
         </div>
       </form>
     </Dialog>

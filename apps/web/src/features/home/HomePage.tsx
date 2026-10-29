@@ -1,24 +1,28 @@
 import { dueSummary } from "@crewtavo/core/equipment";
-import { zonedTimeToUtc } from "@crewtavo/core/time";
+import { addDays, zonedTimeToUtc } from "@crewtavo/core/time";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
-import { LazySparkline } from "@/components/ui/LazySparkline";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { monthToDate } from "@/lib/trends";
 import { managesEquipment, useEquipmentDue } from "../equipment/equipmentData";
+import { Change } from "../finance/change";
 import { seesWebsite } from "../marketing/website";
 import { InstallAppCard } from "../field/InstallAppCard";
+import styles from "./Home.module.css";
+import { SetupCard } from "./SetupCard";
 import type { Dashboard } from "./types";
 import { WebsiteCard } from "./WebsiteCard";
+import { collectedByWeek, type Week } from "./weeks";
 import { WorkflowStrip } from "./WorkflowStrip";
 
 function greeting(timeZone: string) {
@@ -27,6 +31,10 @@ function greeting(timeZone: string) {
 }
 
 const ATTENTION_ICON: Record<string, IconName> = { quote: "quote", visit: "cloud", invoice: "invoice", equipment: "truck" };
+
+/** Weeks of bars under the collected figure; fewer weeks of money than this and it's the figure alone. */
+const WEEKS = 6;
+const MIN_WEEKS = 4;
 
 export function HomePage() {
   const session = useSession();
@@ -40,7 +48,11 @@ export function HomePage() {
     queryFn: () => api.get<Dashboard>("/dashboard"),
     refetchInterval: 60_000,
   });
-  const collected = useCollectedTrend(seesMoney);
+  const collected = useCollectedHistory(seesMoney);
+  const page = useRef<HTMLDivElement>(null);
+  useFirstArrival(page, Boolean(data));
+  // Things handled elsewhere leave the list as it refreshes.
+  const attentionRows = useListAnimation<HTMLDivElement>();
   // Equipment overdue or coming due joins the list for the people who look after it.
   const gear = useEquipmentDue(session.company.id, { enabled: managesEquipment(session) });
   const attention = useMemo(() => {
@@ -64,8 +76,8 @@ export function HomePage() {
     <>
       <div className="row-between wrap" style={{ alignItems: "flex-end" }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-2)" }}>{today}</div>
-          <h1 style={{ marginTop: 6, fontSize: "clamp(30px, 4vw, 40px)", fontWeight: 800, letterSpacing: "-0.025em", lineHeight: 1.1 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-2)" }}>{today}</div>
+          <h1 style={{ marginTop: 6, fontSize: 32, fontWeight: 800, letterSpacing: "var(--tracking-display)", lineHeight: 1.1 }}>
             {greeting(tz)}, {firstName}
           </h1>
         </div>
@@ -84,7 +96,7 @@ export function HomePage() {
       {error && <div className="card"><ErrorState error={error} onRetry={() => refetch()} title="Couldn't load your dashboard" /></div>}
 
       {data && (
-        <>
+        <div ref={page} className="stack" style={{ gap: 28 }}>
           {isOffice && <WorkflowStrip workflow={data.workflow} showInvoices={seesMoney} />}
 
           <div className="two-col">
@@ -99,14 +111,14 @@ export function HomePage() {
                     <div className="row-between">
                       <span className="muted text-sm">
                         <strong style={{ color: "var(--ink)" }}>{data.today.by_status.completed ?? 0}</strong> of {data.today.total} complete
-                        {data.today.by_status.in_progress ? ` · ${data.today.by_status.in_progress} in progress` : ""}
+                        {data.today.by_status.in_progress ? ` · ${data.today.by_status.in_progress} ${statusText("visit", "in_progress").toLowerCase()}` : ""}
                       </span>
                     </div>
                     <div className="progress" aria-hidden="true"><span style={{ width: `${((data.today.by_status.completed ?? 0) / data.today.total) * 100}%` }} /></div>
                   </div>
                 )}
                 {data.today.visits.length === 0 ? (
-                  <EmptyState icon="calendar" title="Nothing on the schedule today" compact action={isOffice ? <Link className="btn btn-sm" to="/schedule?new=1"><Icon name="plus" size={14} />Schedule a visit</Link> : undefined} />
+                  <EmptyState inline title="Nothing on the schedule today" action={isOffice ? <Link className="btn" to="/schedule?new=1">Schedule a visit</Link> : undefined} />
                 ) : (
                   data.today.visits.map((v) => (
                     <button
@@ -115,16 +127,16 @@ export function HomePage() {
                       className="card-row"
                       onClick={() => navigate(isOffice && v.job_id ? `/jobs/${v.job_id}` : `/field/visits/${v.id}`)}
                     >
-                      <span style={{ width: 4, alignSelf: "stretch", borderRadius: 4, background: v.crew_color || "var(--fill-3)" }} aria-hidden="true" />
+                      <span style={{ width: 4, alignSelf: "stretch", borderRadius: "var(--radius-sm)", background: v.crew_color || "var(--fill-3)" }} aria-hidden="true" />
                       <span className="tabular" style={{ width: 76, fontWeight: 700, fontSize: 13 }}>{v.starts_at ? time(v.starts_at) : "Anytime"}</span>
                       <span className="grow">
                         <span className="strong ellipsis" style={{ display: "block" }}>{v.title}</span>
                         <span className="muted small ellipsis" style={{ display: "block" }}>
                           {[v.client, v.address, v.crew].filter(Boolean).join(" · ") || statusLabel(v.kind)}
                         </span>
-                        {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 700 }}>Weather: {v.hold_reason.split(";")[0]}</span>}
+                        {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>Weather: {v.hold_reason.split(";")[0]}</span>}
                       </span>
-                      <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                      <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
                     </button>
                   ))
                 )}
@@ -136,21 +148,11 @@ export function HomePage() {
               {seesMoney && (
                 <div className="card card-pad stack-sm">
                   <div className="muted small strong">Collected this month</div>
-                  <div className="row" style={{ alignItems: "baseline", gap: 10 }}>
+                  <div className="row" style={{ alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                     <AnimatedNumber value={data.month.collected} format={MONEY} className="hero-number" />
-                    <Trend now={data.month.collected} before={data.month.collected_last} />
+                    {collected.data && <Change now={data.month.collected} before={collected.data.sameDaysLastMonth} compared="the same days last month" same="Same as last month" />}
                   </div>
-                  {collected.data && (
-                    <div className="stack-sm" style={{ gap: 4, margin: "2px 0 6px" }}>
-                      <LazySparkline
-                        data={collected.data}
-                        height={56}
-                        format={formatMoney}
-                        config={{ now: { label: "This month", color: "var(--green)" }, before: { label: "Last month", color: "var(--text-4)", dashed: true } }}
-                      />
-                      <div className="spark-legend" aria-hidden="true"><span><i />This month</span><span><i className="dashed" />Last month</span></div>
-                    </div>
-                  )}
+                  {collected.data && collected.data.weeks.length >= MIN_WEEKS && <WeekBars weeks={collected.data.weeks} />}
                   <div className="row-between small muted"><span>Invoiced this month</span><AnimatedNumber value={data.month.invoiced} format={MONEY} className="strong ink" /></div>
                   <div className="row-between small muted"><span>Quotes won ({data.month.won_count})</span><AnimatedNumber value={data.month.won} format={MONEY} className="strong ink" /></div>
                 </div>
@@ -174,15 +176,15 @@ export function HomePage() {
                 </div>
               )}
               {seesWebsite(session) && <WebsiteCard />}
-              <div className="card">
+              <div className="card" ref={attentionRows}>
                 <div className="card-head"><strong>Needs attention</strong>{attention.length > 0 && <span className="badge">{attention.length}</span>}</div>
                 {attention.length === 0 ? (
-                  <EmptyState icon="check" title="All clear" compact />
+                  <EmptyState inline title="All clear" />
                 ) : (
                   attention.map((item, i) => (
                     <Link key={`${item.link}-${i}`} to={item.link} className="card-row">
-                      <span className="n-icon" style={{ width: 30, height: 30, borderRadius: 9, display: "grid", placeItems: "center", background: item.kind === "invoice" ? "var(--danger-tint)" : item.kind === "equipment" ? "var(--warning-tint)" : "var(--fill-2)", color: item.kind === "invoice" ? "var(--danger)" : item.kind === "equipment" ? "var(--warning)" : "var(--text-2)", flex: "none" }}>
-                        <Icon name={ATTENTION_ICON[item.kind] ?? "alert"} size={15} />
+                      <span className="n-icon" style={{ width: 32, height: 32, borderRadius: "var(--radius-control)", display: "grid", placeItems: "center", background: item.kind === "invoice" ? "var(--danger-tint)" : item.kind === "equipment" ? "var(--warning-tint)" : "var(--fill-2)", color: item.kind === "invoice" ? "var(--danger)" : item.kind === "equipment" ? "var(--warning)" : "var(--text-2)", flex: "none" }}>
+                        <Icon name={ATTENTION_ICON[item.kind] ?? "alert"} size={16} />
                       </span>
                       <span className="grow">
                         <span className="strong text-sm" style={{ display: "block" }}>{item.title}</span>
@@ -193,16 +195,42 @@ export function HomePage() {
                   ))
                 )}
               </div>
+              {/* Last in the rail, so it never pushes the day's work down. */}
+              <SetupCard />
             </section>
           </div>
-        </>
+        </div>
       )}
     </>
   );
 }
 
-/** Running total collected this month, day by day, beside last month's. */
-function useCollectedTrend(enabled: boolean) {
+/** Home's tiles and cards have risen into place once this session, so later visits and refreshes don't repeat it. */
+let arrived = false;
+
+/**
+ * The first time Home loads in a session, its workflow tiles and cards fade and rise 6px into place,
+ * 30ms apart, in page order (only fade with Reduce Motion). Never on a refresh or on coming back.
+ */
+function useFirstArrival(ref: RefObject<HTMLElement | null>, ready: boolean) {
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!ready || arrived || !root) return;
+    arrived = true;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frames = still ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }];
+    // A card inside another card (or a tile's own parts) moves with it.
+    const items = [...root.querySelectorAll<HTMLElement>("[data-rise], .card")].filter((el) => !el.parentElement?.closest("[data-rise], .card"));
+    // --dur-enter and --ease-enter.
+    items.forEach((el, i) => el.animate?.(frames, { duration: 300, delay: i * 30, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "backwards" }));
+  }, [ref, ready]);
+}
+
+/**
+ * Payments since the earlier of the 1st of last month and the start of the bars' first week: this
+ * month so far against the same days of last month, and the weeks for the bars.
+ */
+function useCollectedHistory(enabled: boolean) {
   const { company } = useSession();
   const tz = company.timezone;
   const today = todayIn(tz);
@@ -214,20 +242,31 @@ function useCollectedTrend(enabled: boolean) {
     queryFn: async () => {
       const [y, m] = today.split("-").map(Number) as [number, number];
       const lastMonth = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
-      const rows = unwrap(await supabase().from("payments").select("amount, received_at").eq("company_id", company.id).gte("received_at", zonedTimeToUtc(lastMonth, "00:00", tz).toISOString()).limit(5000));
-      return monthToDate(rows, today, tz);
+      const firstWeek = addDays(today, -7 * WEEKS);
+      const since = lastMonth < firstWeek ? lastMonth : firstWeek;
+      const rows = unwrap(await supabase().from("payments").select("amount, received_at").eq("company_id", company.id).gte("received_at", zonedTimeToUtc(since, "00:00", tz).toISOString()).limit(5000));
+      const month = monthToDate(rows, today, tz);
+      return { sameDaysLastMonth: month[Number(today.slice(8)) - 1]?.before ?? 0, weeks: collectedByWeek(rows, today, tz, WEEKS) };
     },
   });
 }
 
-function Trend({ now, before }: { now: number; before: number }) {
-  if (!before) return null;
-  const change = Math.round(((now - before) / before) * 100);
-  const up = change >= 0;
+/** A bar a week, its date under it; the latest week's amount over its bar, another week's on hover. */
+function WeekBars({ weeks }: { weeks: Week[] }) {
+  const max = Math.max(0, ...weeks.map((w) => w.total));
+  const said = weeks.map((w, i) => `${i === weeks.length - 1 ? "this week so far" : `week of ${w.label}`} ${formatMoney(w.total)}`).join(", ");
   return (
-    <span className={`chip ${up ? "chip-green" : "chip-red"}`} title="Compared with all of last month">
-      {up ? "▲" : "▼"} {Math.abs(change)}% vs last month
-    </span>
+    <figure className={styles.bars} role="img" aria-label={`Collected by week: ${said}`}>
+      {weeks.map((w, i) => (
+        <div key={w.from} className={styles.week} data-latest={i === weeks.length - 1 || undefined} aria-hidden="true">
+          <span className={styles.track}>
+            <span className={styles.amount}>{formatMoneyCompact(w.total)}</span>
+            <span className={styles.bar} style={{ ["--h" as string]: max > 0 ? Math.max(0, w.total) / max : 0 }} />
+          </span>
+          <span className={styles.label}>{w.label}</span>
+        </div>
+      ))}
+    </figure>
   );
 }
 

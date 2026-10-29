@@ -16,7 +16,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
 import { uploadFile } from "@/lib/files";
@@ -81,6 +81,8 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
   const save = useMutation({
     meta: { inline: true, success: equipment ? "Equipment saved" : "Equipment added" },
     mutationFn: async () => {
+      // The year's field says so too, but it may be folded away under More options.
+      if (!yearOk) throw new Error("Enter a year like 2021, or leave the year empty.");
       const reading = f.meter === "none" ? null : toNumber(f.meter_reading);
       const photo_path = photo ? await uploadFile(session.company.id, "equipment", photo) : equipment?.photo_path ?? null;
       const row = {
@@ -185,7 +187,7 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
           <div className="form-grid">
             <Field label="Make" optional><input className="input" value={f.make} onChange={set("make")} maxLength={80} placeholder="Ford, Scag, Bobcat" /></Field>
             <Field label="Model" optional><input className="input" value={f.model} onChange={set("model")} maxLength={80} /></Field>
-            <Field label="Year" optional error={yearOk ? null : "Enter a year like 2021"}><input className="input" inputMode="numeric" value={f.year} onChange={(e) => setF({ ...f, year: e.target.value.replace(/\D/g, "").slice(0, 4) })} /></Field>
+            <Field label="Year" optional error={yearOk ? null : "Enter a year like 2021."}><input className="input" inputMode="numeric" value={f.year} onChange={(e) => setF({ ...f, year: e.target.value.replace(/\D/g, "").slice(0, 4) })} /></Field>
             <Field label={f.kind === "truck" || f.kind === "trailer" ? "VIN or serial" : "Serial number"} optional><input className="input" value={f.serial} onChange={set("serial")} maxLength={80} /></Field>
             {(f.kind === "truck" || f.kind === "trailer") && <Field label="Plate" optional><input className="input" value={f.plate} onChange={set("plate")} maxLength={20} /></Field>}
             <Field label="Bought on" optional><input className="input" type="date" value={f.purchased_on} onChange={set("purchased_on")} /></Field>
@@ -204,8 +206,9 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
         </details>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!f.name.trim() || !yearOk}>{equipment ? "Save" : "Add equipment"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending} slowHint={photo ? false : undefined}>{equipment ? "Save" : "Add equipment"}</Button>
         </div>
       </form>
     </Dialog>
@@ -272,8 +275,8 @@ export function PlanDialog({ equipment, plan, hasHistory, onClose }: { equipment
     <Dialog open onClose={onClose} title={plan ? "Edit maintenance schedule" : "Add maintenance schedule"} description={equipment.name}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         {!plan && presets.length > 0 && (
-          <div className="row wrap" style={{ gap: 6 }}>
-            {presets.map((p) => <button key={p.name} type="button" className="chip" style={{ cursor: "pointer", border: 0 }} onClick={() => usePreset(p)}><Icon name="plus" size={12} />{p.name}</button>)}
+          <div className="add-chips" role="group" aria-label="Common schedules">
+            {presets.map((p) => <Button key={p.name} size="sm" icon="plus" className="add-chip" onClick={() => usePreset(p)}>{p.name}</Button>)}
           </div>
         )}
         <Field label="What's done"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={120} placeholder="Oil change, sharpen blades" autoFocus /></Field>
@@ -312,8 +315,9 @@ export function PlanDialog({ equipment, plan, hasHistory, onClose }: { equipment
         {valid && <div className="muted small">{describeInterval({ every_meter: everyMeter, every_count: everyCount, every_unit: f.every_unit }, equipment.meter)}{everyMeter && everyCount ? ", whichever comes first" : ""}.</div>}
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!valid}>{plan ? "Save" : "Add schedule"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{plan ? "Save" : "Add schedule"}</Button>
         </div>
       </form>
     </Dialog>
@@ -372,6 +376,8 @@ export function LogDialog({
   const save = useMutation({
     meta: { inline: true, success: kind === "service" ? "Maintenance logged" : kind === "repair" ? "Repair logged" : kind === "reading" ? "Reading saved" : "Note added" },
     mutationFn: async () => {
+      // The browser checks what's required; this catches what it can't (a cost of 0, a name of only spaces).
+      if (!valid) throw new Error(amount != null && !(amount > 0) ? "Enter a cost above zero, or leave it empty." : "Say what was done first.");
       let expense_id: string | null = null;
       if (amount != null && kind !== "reading" && kind !== "note") {
         const receipt_path = receipt ? await uploadFile(session.company.id, "receipts", receipt) : null;
@@ -461,11 +467,11 @@ export function LogDialog({
           <details className="more-options">
             <summary>Add what it cost</summary>
             <div className="form-grid">
-              <Field label="Cost" error={amount == null || amount > 0 ? null : "Enter an amount like 86.40"}><span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.amount} onChange={(e) => setF({ ...f, amount: decimal(e.target.value) })} /></span></Field>
+              <Field label="Cost" error={amount == null || amount > 0 ? null : "Enter an amount like 86.40."}><span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.amount} onChange={(e) => setF({ ...f, amount: decimal(e.target.value) })} /></span></Field>
               <Field label="Where" optional><input className="input" value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} maxLength={120} placeholder="Dealer, parts store" /></Field>
             </div>
             <label className="dropzone" style={{ padding: 12 }}>
-              <Icon name="camera" size={18} />
+              <Icon name="camera" size={20} />
               <span className="small strong">{receipt ? receipt.name : "Add a receipt photo"}</span>
               <input type="file" accept="image/*,application/pdf" capture="environment" className="sr-only" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
             </label>
@@ -474,8 +480,9 @@ export function LogDialog({
         )}
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="check" loading={save.isPending} disabled={!valid}>{kind === "service" ? "Mark done" : "Save"}</Button>
+          <Button type="submit" variant="primary" icon="check" loading={save.isPending} slowHint={receipt ? false : undefined}>{kind === "service" ? "Mark done" : "Save"}</Button>
         </div>
       </form>
     </Dialog>

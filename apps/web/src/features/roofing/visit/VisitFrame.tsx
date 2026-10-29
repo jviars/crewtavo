@@ -52,7 +52,7 @@ export function VisitFrame({ title, subtitle, back, me = true, pageTitle, childr
         <div className={styles.side}>
           {back && (
             <Link to={back.to} className={styles.back} onClick={back.onClick} aria-label={back.label}>
-              <Icon name="chevronLeft" size={20} strokeWidth={2.2} />
+              <Icon name="chevronLeft" size={20} />
               <span className={styles.backText} aria-hidden="true">{back.label}</span>
             </Link>
           )}
@@ -161,23 +161,18 @@ export function VisitLoading({ kind }: { kind: "visit" | "sign" | "signed" }) {
     <VisitFrame title={head} back={null} me={false}>
       <Loading label="Loading the estimate" className={styles.loading}>
         {kind === "visit" && (
+          // As the screen lays out: what to change on the left (a sheet in portrait), the paper on the right.
           <div className={styles.visit}>
-            <div className={styles.top}>
-              <Skeleton height={48} radius={12} />
-              <div className={`card ${styles.estimate}`}>
-                <Skeleton width={160} height={20} />
-                <EstimateListSkeleton rows={7} size="large" />
+            <div className={styles.panel}>
+              <div className={styles.panelBody}>
+                <Skeleton height={56} radius={12} />
+                <div className={`card ${styles.estimate}`}>
+                  <Skeleton width={160} height={20} />
+                  <EstimateListSkeleton rows={7} size="large" />
+                </div>
               </div>
             </div>
-            <div className={styles.aside}>
-              <div className={styles.asideScroll}>
-                <Skeleton width={60} height={12} />
-                <Skeleton width={200} height={40} />
-                <Skeleton height={14} radius={999} />
-                <Skeleton height={52} radius={10} />
-                <Skeleton height={44} radius={10} />
-              </div>
-            </div>
+            <div className={styles.paperSide}><div className={styles.docSkeleton} /></div>
           </div>
         )}
         {kind === "sign" && (
@@ -185,9 +180,9 @@ export function VisitLoading({ kind }: { kind: "visit" | "sign" | "signed" }) {
             <div className={styles.docArea}><div className={styles.docSkeleton} /></div>
             <div className={styles.signPanel}>
               <div className={styles.signScroll}>
-                <Skeleton width={280} height={22} />
-                <Skeleton height={48} radius={10} />
-                <Skeleton height={170} radius={14} />
+                <Skeleton width={280} height={24} />
+                <Skeleton height={48} radius={8} />
+                <Skeleton height={170} radius={8} />
               </div>
             </div>
           </div>

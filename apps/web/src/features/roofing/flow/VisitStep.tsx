@@ -89,7 +89,7 @@ function SignedView({ quote, extras, salesperson, canSell }: { quote: EstimateQu
   return (
     <div className={styles.signed}>
       <div className={styles.banner} role="status">
-        <span className={styles.bannerIcon} aria-hidden="true"><Icon name="check" size={18} strokeWidth={3} /></span>
+        <span className={styles.bannerIcon} aria-hidden="true"><Icon name="check" size={20} strokeWidth={2} /></span>
         <div className={styles.bannerText}>
           <strong>{signedHeadline(approval, quote.total)}</strong>
           <p>

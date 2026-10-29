@@ -273,8 +273,8 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
         <div className={styles.docArea}>
           <div className={styles.docHint}>
             <span>{first ? `${first}, look it over, then sign below.` : "Look it over, then sign below."}</span>
-            <button type="button" className={`btn ${styles.touch}`} onClick={() => panel.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-              <Icon name="pen" size={17} />
+            <button type="button" className={`btn ${styles.touch}`} onClick={() => panel.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" })}>
+              <Icon name="pen" size={16} />
               Sign now
             </button>
           </div>
@@ -302,7 +302,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
 
             {offers && !option && (
               <div className="callout callout-warning">
-                <Icon name="alert" size={18} />
+                <Icon name="alert" size={20} />
                 <div className="grow">
                   Choose the option {first || "they"} picked on the visit page first.{" "}
                   <Link to={visitPath(quote.id, "visit")}>Back to the price</Link>
@@ -311,7 +311,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
             )}
             {terms.error && (
               <div className="callout callout-danger" role="alert">
-                <Icon name="alert" size={18} />
+                <Icon name="alert" size={20} />
                 <div className="grow">The terms didn't load. Check the connection and try again.</div>
                 <button type="button" className={styles.textButton} onClick={terms.refetch}>Try again</button>
               </div>
@@ -359,7 +359,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
                             </button>
                           </>
                         ) : (
-                          <button type="button" className={`btn btn-primary ${styles.touch}`} disabled={!initials} onClick={() => initial(s, true)}>
+                          <button type="button" className={`btn ${styles.touch}`} disabled={!initials} onClick={() => initial(s, true)}>
                             <Icon name="pen" size={16} />
                             Add my initials<span className="sr-only"> to {title}</span>
                           </button>
@@ -435,12 +435,12 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
             )}
             {changed && (
               <button type="button" className={`btn ${styles.touch}`} onClick={checkAgain}>
-                <Icon name="refresh" size={17} />
+                <Icon name="refresh" size={16} />
                 Check it again
               </button>
             )}
             <button type="button" className={`btn btn-primary ${styles.bigButton}`} disabled={Boolean(missing) || sign.isPending} aria-busy={sign.isPending || undefined} onClick={submit}>
-              {sign.isPending ? <Spinner size={18} /> : !missing && <Icon name="pen" size={19} />}
+              {sign.isPending ? <Spinner size={20} /> : !missing && <Icon name="pen" size={20} />}
               {sign.isPending ? "Signing…" : (missing ?? "Sign and finish")}
             </button>
           </div>

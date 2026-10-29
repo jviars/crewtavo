@@ -77,10 +77,10 @@ export function OAuthConsentPage() {
   if (details.isPending || !details.data || !("client" in details.data))
     return shell(
       <div className="stack" style={{ gap: 16 }} aria-label="Loading" aria-busy="true">
-        <div className={styles.apps}><Skeleton width={52} height={52} radius={14} /><span className={styles.dots}>•••</span><Skeleton width={52} height={52} radius={14} /></div>
+        <div className={styles.apps}><Skeleton width={52} height={52} radius={12} /><span className={styles.dots}>•••</span><Skeleton width={52} height={52} radius={12} /></div>
         <Skeleton width="80%" height={22} style={{ justifySelf: "center" }} />
         <Skeleton height={110} radius={12} />
-        <Skeleton height={46} radius={10} />
+        <Skeleton height={46} radius={8} />
       </div>,
     );
 
@@ -94,12 +94,12 @@ export function OAuthConsentPage() {
         <span className={styles.appTile} style={{ background: "var(--solid)", color: "var(--on-solid)" }}><Icon name="layers" size={24} /></span>
       </div>
       <div className="stack-sm" style={{ gap: 6, textAlign: "center" }}>
-        <h1 className={styles.title} style={{ fontSize: 22 }}>Connect {client.name}?</h1>
+        <h1 className={styles.title}>Connect {client.name}?</h1>
         <p className="muted" style={{ margin: 0 }}>Signed in as <strong style={{ color: "var(--ink)" }}>{user.email}</strong></p>
       </div>
       <span className="muted small strong" style={{ marginBottom: -10 }}>Can look at</span>
       <ul className={styles.scopes} aria-label="Can look at">
-        {CAN.map((c) => <li key={c}><Icon name="check" size={15} strokeWidth={2.6} />{c}</li>)}
+        {CAN.map((c) => <li key={c}><Icon name="check" size={14} strokeWidth={2} />{c}</li>)}
       </ul>
       <span className="muted small" style={{ marginTop: -8 }}>It starts out read only. Choose what it can change in Crewtavo, under Settings → AI assistants.</span>
       {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}

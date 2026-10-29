@@ -8,7 +8,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { FormError } from "@/components/ui/Field";
+import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { dateIn, formatDate, formatMoney, formatMoneyCents, formatTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -164,7 +164,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
 
       <Section title={waitingQuotes.length || owed.length ? "Waiting on you" : "All caught up"}>
         {waitingQuotes.length === 0 && owed.length === 0 && (
-          <div className="hub-card hub-calm"><Icon name="check" size={18} />Nothing needs your attention right now.</div>
+          <div className="hub-card hub-calm"><Icon name="check" size={20} />Nothing needs your attention right now.</div>
         )}
         {waitingQuotes.map((q) =>
           q.range ? (
@@ -199,7 +199,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
             <div className="hub-todo-head">
               <span className={`hub-icon-tile ${i.status === "overdue" ? "red" : "amber"}`}><Icon name="invoice" size={20} /></span>
               <span className="grow stack-xs">
-                <span className="hub-meta" style={i.status === "overdue" ? { color: "var(--danger)", fontWeight: 700 } : undefined}>Invoice #{i.number}{i.due_on ? ` · ${i.status === "overdue" ? "was due" : "due"} ${formatDate(i.due_on)}` : ""}</span>
+                <span className="hub-meta" style={i.status === "overdue" ? { color: "var(--danger)", fontWeight: 600 } : undefined}>Invoice #{i.number}{i.due_on ? ` · ${i.status === "overdue" ? "was due" : "due"} ${formatDate(i.due_on)}` : ""}</span>
                 <strong className="hub-title">{i.subject ?? "Balance due"}</strong>
               </span>
               <strong className="hub-amount">{formatMoneyCents(i.balance_due)}</strong>
@@ -216,9 +216,9 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
       )}
 
       <section className="hub-actions" aria-label="Quick actions" data-count={data.refer ? 3 : 2}>
-        <button type="button" onClick={() => go("request")}><span className="hub-icon-tile brand"><Icon name="plus" size={18} /></span>Request work</button>
-        <button type="button" onClick={() => onMessage()}><span className="hub-icon-tile plain"><Icon name="messages" size={18} /></span>Message us</button>
-        {data.refer && <button type="button" onClick={share}><span className="hub-icon-tile amber"><Icon name="gift" size={18} /></span>Refer a friend</button>}
+        <button type="button" onClick={() => go("request")}><span className="hub-icon-tile brand"><Icon name="plus" size={20} /></span>Request work</button>
+        <button type="button" onClick={() => onMessage()}><span className="hub-icon-tile plain"><Icon name="messages" size={20} /></span>Message us</button>
+        {data.refer && <button type="button" onClick={share}><span className="hub-icon-tile amber"><Icon name="gift" size={20} /></span>Refer a friend</button>}
       </section>
 
       {recent.length > 0 && (
@@ -287,6 +287,7 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
   const [details, setDetails] = useState("");
   const [timing, setTiming] = useState<"asap" | "month" | "flexible">("month");
   const [promo, setPromo] = useState("");
+  const [tried, setTried] = useState(false);
   const title = [...picked, other.trim()].filter(Boolean).join(", ");
   const send = useMutation({
     mutationFn: () =>
@@ -305,7 +306,7 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
       <>
         <button type="button" className="hub-back" onClick={back}><Icon name="chevronLeft" size={16} />Your account</button>
         <div className="hub-card hub-done">
-          <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+          <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
           <h2>Request sent</h2>
           <p>{data.company.name} will get back to you with a quote or a time to come look. Your reference is #{send.data.reference}.</p>
           <Button onClick={back}>Back to your account</Button>
@@ -317,7 +318,7 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
     <>
       <button type="button" className="hub-back" onClick={back}><Icon name="chevronLeft" size={16} />Your account</button>
       <h1 className="hub-h1">Request work</h1>
-      <form className="hub-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (ready) send.mutate(); }}>
+      <form className="hub-form" onSubmit={(e: FormEvent) => { e.preventDefault(); setTried(true); if (ready) send.mutate(); }}>
         <fieldset>
           <legend>What do you need?</legend>
           {data.services.length > 0 && (
@@ -333,7 +334,9 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
               })}
             </div>
           )}
-          <input className="input" value={other} onChange={(e) => setOther(e.target.value)} placeholder={data.services.length ? "Something else" : "Fall cleanup, a repair, a new estimate…"} maxLength={160} aria-label="Something else" />
+          <input className="input" value={other} onChange={(e) => setOther(e.target.value)} placeholder={data.services.length ? "Something else" : "Fall cleanup, a repair, a new estimate…"} maxLength={160} aria-label="Something else" aria-invalid={(tried && !ready) || undefined} />
+          {/* The button stays on; trying it with nothing picked says what's missing, here. */}
+          {tried && !ready && <span className="field-error" role="alert">Pick what you need, or tell us about it below.</span>}
         </fieldset>
         {data.client.properties.length > 1 && (
           <fieldset>
@@ -364,7 +367,7 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
           <input className="input mono" value={promo} onChange={(e) => setPromo(e.target.value.toUpperCase())} maxLength={24} autoCapitalize="characters" />
         </label>
         <FormError error={send.error} />
-        <Button type="submit" variant="primary" size="lg" icon="send" className="hub-submit" loading={send.isPending} disabled={!ready}>Send request</Button>
+        <Button type="submit" variant="primary" size="lg" icon="send" className="hub-submit" loading={send.isPending}>Send request</Button>
       </form>
     </>
   );
@@ -376,20 +379,20 @@ export function MessageDialog({ token, company, visit, hubFetch, onClose }: { to
   const send = useMutation({
     mutationFn: () => hubFetch(`${token}/message`, { message: message.trim(), visit_id: visit?.id }),
     onSuccess: () => {
-      toast.success(`Sent. ${company} will get back to you.`);
+      toast.success("Message sent", { description: `${company} will get back to you.` });
       onClose();
     },
   });
   return (
     <Dialog open onClose={onClose} title={visit ? "Ask to change a visit" : `Message ${company}`} description={visit ? `${visit.title}, ${formatDate(visit.scheduled_on)}` : "They'll reply by email or text."}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); send.mutate(); }}>
-        <label className="field">{visit ? "What works better for you?" : "Your message"}
+        <Field label={visit ? "What works better for you?" : "Your message"} requiredMessage={visit ? "Tell us a day or time that works better." : "Write your message, and we'll get back to you."}>
           <textarea className="textarea" rows={5} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={4000} required autoFocus />
-        </label>
+        </Field>
         <FormError error={send.error} />
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="send" loading={send.isPending} disabled={message.trim().length < 2}>Send</Button>
+          <Button type="submit" variant="primary" icon="send" loading={send.isPending}>Send</Button>
         </div>
       </form>
     </Dialog>

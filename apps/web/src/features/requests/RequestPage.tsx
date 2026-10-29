@@ -5,13 +5,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
-import { EntityStatus, StatusPill, statusLabel, visitTone } from "@/components/ui/StatusPill";
+import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
@@ -53,7 +53,7 @@ export function RequestPage() {
     queryClient.invalidateQueries({ queryKey: ["requests", session.company.id] });
   };
   const toQuote = useMutation({
-    meta: { success: "Quote started from this request" },
+    meta: { success: "Quote started from this request", tone: "quote" },
     mutationFn: () => api.post<{ id: string }>(`/requests/${id}/quote`),
     onSuccess: (q) => {
       refresh();
@@ -61,7 +61,7 @@ export function RequestPage() {
     },
   });
   const toJob = useMutation({
-    meta: { success: "Job created" },
+    meta: { success: "Job created", tone: "job" },
     mutationFn: async () => {
       const job = unwrap(
         await supabase().from("jobs").insert({ company_id: session.company.id, client_id: r!.client!.id, property_id: r!.property?.id ?? null, title: r!.title, instructions: r!.details }).select("id").single(),
@@ -77,12 +77,12 @@ export function RequestPage() {
     },
   });
   const setStatus = useMutation({
-    meta: { success: (_: unknown, s: string) => (s === "archived" ? "Request archived" : s === "assessment_complete" ? "Assessment marked done" : "Request updated") },
+    meta: { success: (_: unknown, s: string) => (s === "archived" ? "Request archived" : s === "assessment_complete" ? "Assessment marked done" : "Request reopened"), tone: "request" },
     mutationFn: async (status: "new" | "assessment_complete" | "archived") => unwrap(await supabase().from("requests").update({ status }).eq("id", id)),
     onSuccess: refresh,
   });
   const remove = useMutation({
-    meta: { success: "Request deleted" },
+    meta: { success: "Request deleted", tone: "request" },
     mutationFn: async () => unwrap(await supabase().from("requests").delete().eq("id", id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["requests", session.company.id] });
@@ -107,7 +107,8 @@ export function RequestPage() {
           canSell && (
             <>
               {open && <Button icon="calendar" onClick={() => setVisit(assessment())}>Schedule assessment</Button>}
-              {open && <Button variant="primary" icon="quote" loading={toQuote.isPending} onClick={() => toQuote.mutate()}>Create quote</Button>}
+              {/* The next step, until it has a quote: then that quote is, and another is only an option. */}
+              {open && <Button variant={r.quotes.length ? "secondary" : "primary"} icon="quote" loading={toQuote.isPending} onClick={() => toQuote.mutate()}>Create quote</Button>}
               <Menu
                 items={[
                   { label: "Edit request", icon: "edit", onSelect: () => setEditing(true) },
@@ -133,18 +134,23 @@ export function RequestPage() {
       <div className="page-meta">
         <span className="muted">Request #{r.number}</span>
         <EntityStatus kind="request" status={r.status} />
+        {r.client && <Link to={`/clients/${r.client.id}`} className="strong">{r.client.display_name}</Link>}
         <span className="chip">{requestSource(r)}</span>
       </div>
 
       {r.status === "new" && Date.now() - Date.parse(r.created_at) > 2 * 86_400_000 && (
-        <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">Waiting over two days.</div></div>
+        <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">Waiting over 2 days. Schedule an assessment or start a quote.</div></div>
       )}
 
       <div className="two-col">
         <div className="wide stack-lg">
           <section className="card card-pad stack-sm">
             <strong>What they asked for</strong>
-            <p className="pre-wrap" style={{ margin: 0 }}>{r.details || <span className="muted">No details given.</span>}</p>
+            {r.details ? (
+              <p className="pre-wrap" style={{ margin: 0 }}>{r.details}</p>
+            ) : (
+              !answers.length && <EmptyState inline title="No details given" action={canSell && <Button onClick={() => setEditing(true)}>Add details</Button>} />
+            )}
             {answers.length > 0 && (
               <dl className="kv" style={{ marginTop: 8 }}>
                 {answers.map(([key, value]) => (
@@ -166,15 +172,15 @@ export function RequestPage() {
               {canSell && open && <Button size="sm" icon="plus" onClick={() => setVisit(assessment())}>Schedule</Button>}
             </div>
             <div className="card">
-              {r.visits.length === 0 && <EmptyState compact icon="calendar" title="No site visit scheduled" />}
+              {r.visits.length === 0 && <EmptyState inline title="No assessments yet" />}
               {r.visits.map((v) => (
                 <button key={v.id} type="button" className="card-row" onClick={() => canSell && setVisit({ ...v, request_id: r.id, property_id: r.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id) })}>
-                  <Icon name="calendar" size={18} />
+                  <Icon name="calendar" size={20} />
                   <span className="grow">
                     <strong>{v.title}</strong>
                     <span className="muted text-sm" style={{ display: "block" }}>{v.starts_at ? formatDateTime(v.starts_at, session.company.timezone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}</span>
                   </span>
-                  <StatusPill label={statusLabel(v.status)} tone={visitTone(v.status)} />
+                  <EntityStatus kind="visit" status={v.status} />
                 </button>
               ))}
             </div>
@@ -203,7 +209,7 @@ export function RequestPage() {
         <aside className="narrow stack">
           <div className="card card-pad stack-sm">
             <strong>Client</strong>
-            {r.client && <Link to={`/clients/${r.client.id}`} className="strong" style={{ fontSize: 16 }}>{r.client.display_name}</Link>}
+            {r.client && <Link to={`/clients/${r.client.id}`} className="strong">{r.client.display_name}</Link>}
             {r.client?.email && <ContactLine icon="mail" href={`mailto:${r.client.email}`}>{r.client.email}</ContactLine>}
             {r.client?.phone && <ContactLine icon="phone" href={`tel:${r.client.phone}`}>{r.client.phone}</ContactLine>}
             <dl className="kv" style={{ marginTop: 8 }}>
@@ -227,7 +233,7 @@ function EditRequestDialog({ request, onClose, onSaved }: { request: { id: strin
   const [details, setDetails] = useState(request.details ?? "");
   const [propertyId, setPropertyId] = useState<string | null>(request.property_id);
   const save = useMutation({
-    meta: { inline: true, success: "Request saved" },
+    meta: { inline: true, success: "Request saved", tone: "request" },
     mutationFn: async () => unwrap(await supabase().from("requests").update({ title: title.trim(), details: details.trim() || null, property_id: propertyId }).eq("id", request.id)),
     onSuccess: () => {
       onSaved();
@@ -236,14 +242,15 @@ function EditRequestDialog({ request, onClose, onSaved }: { request: { id: strin
   });
   return (
     <Dialog open onClose={onClose} title="Edit request">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} /></Field>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (title.trim()) save.mutate(); }}>
+        <Field label="Title" requiredMessage="Say what they need, like a driveway estimate."><input className="input" value={title} onChange={(e) => setTitle(e.target.value.trimStart())} required maxLength={200} /></Field>
         {request.client_id && <Field label="Property"><PropertySelect clientId={request.client_id} value={propertyId} onChange={setPropertyId} /></Field>}
         <Field label="Details" optional><textarea className="textarea" value={details} onChange={(e) => setDetails(e.target.value)} maxLength={4000} /></Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!title.trim()}>Save</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>Save</Button>
         </div>
       </form>
     </Dialog>

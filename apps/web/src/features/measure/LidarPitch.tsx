@@ -69,7 +69,7 @@ export function LidarPitch({
     <Dialog open onClose={onClose} title="Roof pitch from lidar" description="USGS has flown lidar over most of the US. This reads your roof's slope from it: free, and nothing to set up." size="md">
       <div className="dialog-body stack">
         {error ? (
-          <div className="callout"><Icon name="info" size={18} /><span className="grow">{error}</span></div>
+          <div className="callout"><Icon name="info" size={20} /><span className="grow">{error}</span></div>
         ) : !reading ? (
           <div className="lidar-progress" role="status" aria-live="polite">
             <span className="spinner" style={{ width: 18, height: 18 }} />
@@ -82,7 +82,7 @@ export function LidarPitch({
             <div className="lidar-sections">
               {reading.sections.map((s) => (
                 <div key={s.id} className="lidar-section">
-                  {s.pitch ? <RoofGlyph rise={riseOf(s.pitch) ?? 0} size={36} /> : <Icon name="alert" size={18} />}
+                  {s.pitch ? <RoofGlyph rise={riseOf(s.pitch) ?? 0} size={36} /> : <Icon name="alert" size={20} />}
                   <div className="grow stack-sm" style={{ gap: 2 }}>
                     <strong>{roofs.length > 1 ? name(s.id) : "Your roof"}{s.pitch ? `: ${pitchLabel(s.pitch)}` : ""}</strong>
                     <span className="muted small">
@@ -96,7 +96,7 @@ export function LidarPitch({
                 </div>
               ))}
             </div>
-            {reading.density < SPARSE && <div className="callout"><Icon name="info" size={18} /><span className="grow">The lidar is thin here ({formatNumber(reading.density, 1)} points per square meter), so check the pitch on site before you order.</span></div>}
+            {reading.density < SPARSE && <div className="callout"><Icon name="info" size={20} /><span className="grow">The lidar is thin here ({formatNumber(reading.density, 1)} points per square meter), so check the pitch on site before you order.</span></div>}
             {reading.planes.length > 0 && (
               <details className="small">
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>What it found ({reading.planes.length} roof {reading.planes.length === 1 ? "plane" : "planes"})</summary>

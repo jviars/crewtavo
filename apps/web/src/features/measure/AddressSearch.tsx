@@ -114,7 +114,7 @@ export function AddressSearch({
   return (
     <form className="measure-find" onSubmit={submit} role="search">
       <div className="input-group address-search" ref={box}>
-        <span className="addon">{busy || (suggest.isFetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={15} />}</span>
+        <span className="addon">{busy || (suggest.isFetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={14} />}</span>
         <input
           name="address"
           className="input"
@@ -156,7 +156,7 @@ export function AddressSearch({
                     onMouseMove={() => i !== index && setIndex(i)}
                     onClick={item.pick}
                   >
-                    <span className="p-icon"><Icon name={item.icon} size={15} /></span>
+                    <span className="p-icon"><Icon name={item.icon} size={14} /></span>
                     <span style={{ minWidth: 0, flex: 1 }}>
                       <span className="p-title ellipsis" style={{ display: "block" }}>{item.title}</span>
                       {item.sub && <span className="p-sub ellipsis" style={{ display: "block" }}>{item.sub}</span>}

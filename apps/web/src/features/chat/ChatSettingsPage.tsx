@@ -9,9 +9,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CHANNEL_PRESETS, CHAT_COLORS, channelSlug, type ChannelPreset, type ChatColor } from "@crewtavo/core/chat";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
@@ -126,8 +126,8 @@ function RolesTab({ data }: { data: SettingsData }) {
   useEffect(() => setDraft(initial), [initial]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
 
+  // The bar stays a moment after saving, its button saying so, then leaves. A failure is a toast.
   const save = useMutation({
-    meta: { success: "Chat roles saved" },
     mutationFn: () =>
       api.put("/chat/settings/roles", {
         settings: Object.entries(draft.settings).map(([key, v]) => ({ ...refFor(key, data.roles), ...v })),
@@ -139,6 +139,7 @@ function RolesTab({ data }: { data: SettingsData }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: chatKeys.all(company.id) }),
   });
 
+  const saved = useJustDone(save);
   const role = data.roles.find((r) => r.key === selected) ?? data.roles[0];
   const owner = role.key === "owner";
   const base = role.custom ? role.base_role : null;
@@ -174,9 +175,9 @@ function RolesTab({ data }: { data: SettingsData }) {
   return (
     <div className="row wrap" style={{ alignItems: "flex-start", gap: 28 }}>
       <nav aria-label="Roles" className="stack-sm" style={{ flex: "1 1 220px", maxWidth: 300, gap: 2 }}>
-        <span className="small strong muted" style={{ textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 10px 4px" }}>Built-in roles</span>
+        <span className="small strong muted" style={{ textTransform: "uppercase", letterSpacing: "var(--tracking-caps)", padding: "0 10px 4px" }}>Built-in roles</span>
         {builtIn.map((r) => <RoleButton key={r.key} role={r} color={(draft.settings[r.key] ?? DEFAULT_SETTING).color} on={r.key === role.key} onClick={() => setSelected(r.key)} />)}
-        {custom.length > 0 && <span className="small strong muted" style={{ textTransform: "uppercase", letterSpacing: "0.05em", padding: "14px 10px 4px" }}>Custom roles</span>}
+        {custom.length > 0 && <span className="small strong muted" style={{ textTransform: "uppercase", letterSpacing: "var(--tracking-caps)", padding: "14px 10px 4px" }}>Custom roles</span>}
         {custom.map((r) => <RoleButton key={r.key} role={r} color={(draft.settings[r.key] ?? draft.settings[r.base_role] ?? DEFAULT_SETTING).color} on={r.key === role.key} onClick={() => setSelected(r.key)} />)}
         <Link to="/settings?tab=roles" className="small" style={{ padding: "10px" }}>Add or change roles in Settings</Link>
       </nav>
@@ -185,7 +186,7 @@ function RolesTab({ data }: { data: SettingsData }) {
         <div className="row wrap" style={{ gap: 12 }}>
           <span className={s.jobIcon} style={{ width: 44, height: 44, background: badgeStyle(setting.color).background, color: roleColor(setting.color) }}><Icon name="lock" size={20} /></span>
           <div className="grow" style={{ minWidth: 200 }}>
-            <h2 style={{ margin: 0, fontSize: 21, fontWeight: 800 }}>{role.label}</h2>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>{role.label}</h2>
             <span className="muted small">{role.custom ? `Custom role, at the ${baseLabel} level` : owner ? "Can see and do everything in chat" : "Built-in role"}{role.description ? ` · ${role.description}` : ""}</span>
           </div>
           <span className="row" style={{ gap: 0 }}>
@@ -198,7 +199,7 @@ function RolesTab({ data }: { data: SettingsData }) {
 
         {customised && (
           <div className="callout">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow"><span>This role has its own chat rules.</span><span style={{ display: "block", fontWeight: 400 }}>Without them it follows {baseLabel}.</span></div>
             <Button size="sm" onClick={followBase}>Follow {baseLabel}</Button>
           </div>
@@ -209,16 +210,16 @@ function RolesTab({ data }: { data: SettingsData }) {
           <div className="card-pad stack-sm">
             <strong>Name color</strong>
             <span className="muted small">Names and @mentions for this role use this color.</span>
-            <div className="row wrap" style={{ gap: 4, marginLeft: -6 }}>
+            <div className="row wrap" style={{ gap: 4, marginLeft: -5 }}>
               {CHAT_COLORS.map((c) => (
-                <button key={c.key} type="button" className="icon-btn" style={{ width: 44, height: 44, borderRadius: "50%" }} aria-label={c.label} aria-pressed={setting.color === c.key} title={c.label} onClick={() => setSetting({ color: c.key })}>
+                <button key={c.key} type="button" className="icon-btn" style={{ borderRadius: "50%" }} aria-label={c.label} aria-pressed={setting.color === c.key} title={c.label} onClick={() => setSetting({ color: c.key })}>
                   <span style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", background: roleColor(c.key), color: "var(--page)", boxShadow: setting.color === c.key ? "0 0 0 2px var(--surface), 0 0 0 4px var(--ink)" : "inset 0 0 0 1px rgba(0,0,0,.08)" }}>
-                    {setting.color === c.key && <Icon name="check" size={15} strokeWidth={3} />}
+                    {setting.color === c.key && <Icon name="check" size={14} strokeWidth={2} />}
                   </span>
                 </button>
               ))}
             </div>
-            <div className={s.msg} data-head="" style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, marginTop: 6 }}>
+            <div className={s.msg} data-head="" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-card)", padding: 12, marginTop: 6 }}>
               <span className={s.avatar} style={{ background: role.people[0]?.color || "var(--avatar)", cursor: "default" }} aria-hidden="true">{sample.split(/\s+/).map((w) => w[0]).slice(0, 2).join("")}</span>
               <div className={s.msgMain}>
                 <div className={s.msgHead}>
@@ -230,7 +231,7 @@ function RolesTab({ data }: { data: SettingsData }) {
               </div>
             </div>
           </div>
-          <SwitchRow label="Show separately in the member list" hint={`People with this role get their own group, like "${role.label} — ${role.people.length}".`} checked={setting.show_separately} onChange={(v) => setSetting({ show_separately: v })} />
+          <SwitchRow label="Show separately in the member list" hint={`People with this role get their own group, like "${role.label} · ${role.people.length}".`} checked={setting.show_separately} onChange={(v) => setSetting({ show_separately: v })} />
           <SwitchRow label="Anyone can @mention this role" hint={`Typing @${role.label} notifies everyone who has it. When this is off, only owners, admins, the office and a channel's managers can.`} checked={setting.mentionable} onChange={(v) => setSetting({ mentionable: v })} />
           {!owner && <SwitchRow label="Crew channels: their own crew only" hint="Someone on North crew sees North's channel but not the other crews'. Crews are set in Settings → Crews." checked={setting.own_crew_only} onChange={(v) => setSetting({ own_crew_only: v })} />}
         </section>
@@ -283,11 +284,11 @@ function RolesTab({ data }: { data: SettingsData }) {
           </div>
         </section>
 
-        {dirty && (
+        {(dirty || saved) && (
           <div className="card row wrap" role="status" style={{ position: "sticky", bottom: 16, padding: "10px 10px 10px 18px", background: "var(--solid)", color: "var(--on-solid)", borderColor: "transparent", boxShadow: "var(--shadow-lg)", zIndex: 5 }}>
-            <strong className="grow" style={{ minWidth: 200 }}>You have unsaved changes.</strong>
-            <Button variant="ghost" style={{ color: "var(--on-solid)" }} onClick={() => setDraft(initial)}>Reset</Button>
-            <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Save changes</Button>
+            <strong className="grow" style={{ minWidth: 200 }}>{dirty ? "You have unsaved changes." : "Your changes are saved."}</strong>
+            {dirty && <Button variant="ghost" style={{ color: "var(--on-solid)" }} onClick={() => setDraft(initial)}>Reset</Button>}
+            <Button variant="primary" loading={save.isPending} done={saved} onClick={() => dirty && save.mutate()}>Save changes</Button>
           </div>
         )}
       </div>
@@ -407,7 +408,7 @@ function ChannelsTab({ data }: { data: SettingsData }) {
           ))}
         </section>
       )}
-      {data.channels.length === 0 && <div className="card"><EmptyState icon="hash" title="No channels yet" action={<Button variant="primary" icon="plus" onClick={() => setAdding(true)}>Add a channel</Button>} /></div>}
+      {data.channels.length === 0 && <div className="card"><EmptyState inline title="No channels yet" action={<Button onClick={() => setAdding(true)}>Add a channel</Button>} /></div>}
       <AddChannel open={adding} onClose={() => setAdding(false)} crews={data.crews} categories={categories} onAdded={refresh} />
       <EditChannel channel={editing} onClose={() => setEditing(null)} categories={categories} onSaved={refresh} />
     </div>
@@ -445,12 +446,12 @@ function AddChannel({ open, onClose, crews, categories, onAdded }: { open: boole
     <Dialog open={open} onClose={onClose} title="Add a channel">
       <form className="dialog-body stack" onSubmit={submit}>
         <Field label="Name" hint={preset !== "announcement" && name.trim() ? `It'll be #${channelSlug(name)}` : undefined}>
-          <input className="input" value={name} maxLength={50} onChange={(e) => setName(e.target.value)} placeholder={preset === "announcement" ? "Announcements" : "equipment"} autoFocus />
+          <input className="input" value={name} maxLength={50} onChange={(e) => setName(e.target.value)} placeholder={preset === "announcement" ? "Announcements" : "equipment"} required autoFocus />
         </Field>
         <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="strong" style={{ marginBottom: 6 }}>Who it's for</legend>
           {CHANNEL_PRESETS.map((p) => (
-            <label key={p.key} className="card-row" style={{ border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", borderColor: preset === p.key ? "var(--green)" : undefined }}>
+            <label key={p.key} className="card-row" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", cursor: "pointer", borderColor: preset === p.key ? "var(--green)" : undefined }}>
               <input type="radio" name="preset" checked={preset === p.key} onChange={() => setPreset(p.key)} />
               <span className="grow"><strong style={{ display: "block" }}>{p.label}</strong><span className="muted small">{p.hint}</span></span>
             </label>
@@ -474,10 +475,11 @@ function AddChannel({ open, onClose, crews, categories, onAdded }: { open: boole
         <Field label="Topic" optional>
           <input className="input" value={topic} maxLength={300} onChange={(e) => setTopic(e.target.value)} placeholder="What it's for" />
         </Field>
-        {add.error && <span className="field-error">{(add.error as Error).message}</span>}
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        <FormError error={add.error} />
+        <div className="form-actions">
+          <FormChecks />
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={add.isPending} disabled={!name.trim() || (preset === "crew" && !crew)}>Add channel</Button>
+          <Button type="submit" variant="primary" loading={add.isPending} disabled={preset === "crew" && !crew}>Add channel</Button>
         </div>
       </form>
     </Dialog>
@@ -518,8 +520,8 @@ function EditChannel({ channel, onClose, categories, onSaved }: { channel: Setti
         <Field label="Topic" optional>
           <textarea className="textarea" rows={3} value={topic} maxLength={300} onChange={(e) => setTopic(e.target.value)} />
         </Field>
-        {save.error && <span className="field-error">{(save.error as Error).message}</span>}
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        <FormError error={save.error} />
+        <div className="form-actions">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending}>Save</Button>
         </div>

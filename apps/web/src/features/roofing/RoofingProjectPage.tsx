@@ -39,7 +39,7 @@ export const ROOFING: FlowTrade<RoofStepId> = {
   current: roofStep,
   notFound: "That roofing project wasn't found. It may have been deleted.",
   takeoff: {
-    empty: "Measure the roof",
+    empty: "Nothing measured yet",
     text: "Outline the roof on the aerial (or start from the building's outline), set its pitch, and mark the eaves, rakes, ridges, hips and valleys.",
     start: "Measure the roof",
     after: "After the roof is measured",
@@ -131,7 +131,7 @@ function RoofProject() {
       <FlowProgress steps={ROOF_STEPS} step={step} />
       {(quote.status === "lost" || quote.status === "archived") && (
         <div className="callout callout-danger" role="status">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <span className="grow">This estimate was marked {quote.status === "lost" ? "lost" : "archived"}. <Link to={`/quotes/${quote.id}`}>Reopen it from the quote</Link> to pick it up again.</span>
         </div>
       )}
@@ -178,7 +178,7 @@ function RoofProject() {
         </StepCard>
 
         <StepCard id="schedule" n={5} title={label("schedule")} status={job ? `Job #${job.number}` : quote.status === "approved" ? "Ready to schedule" : "After it's signed"} done={Boolean(job)} current={step === "schedule"}>
-          <RoofSchedule quote={quote} extras={extras} invoices={invoices.data} canSell refresh={refresh} />
+          <RoofSchedule quote={quote} extras={extras} invoices={invoices.data} canSell current={step === "schedule"} refresh={refresh} />
         </StepCard>
 
         <StepCard id="invoice" n={6} title={label("invoice")} status={invoiceStatus(job, invoices.data)} done={step === "done"} current={step === "invoice"}>

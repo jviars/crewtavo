@@ -124,7 +124,7 @@ function SignedScreen({ quote }: { quote: EstimateQuote }) {
     <VisitFrame title={quote.title} subtitle={whoAndWhere(quote)} pageTitle={`Signed · ${quote.title}`}>
       <main className={styles.done}>
         <div className={styles.doneHead}>
-          <span className={styles.bigCheck} aria-hidden="true"><Icon name="check" size={38} strokeWidth={3} /></span>
+          <span className={styles.bigCheck} aria-hidden="true"><Icon name="check" size={38} strokeWidth={4.5} /></span>
           <h1>{heading}</h1>
           <p>
             {sentence.lead} <strong>{sentence.amount}</strong>
@@ -181,7 +181,7 @@ function SignedScreen({ quote }: { quote: EstimateQuote }) {
           <Link className={`btn ${styles.doneButton}`} to={`/roofing/${quote.id}`}>Open the project</Link>
           <Link className={`btn btn-dark ${styles.doneButton}`} to="/roofing">
             Back to Roofing
-            <Icon name="arrowRight" size={18} strokeWidth={2.5} />
+            <Icon name="arrowRight" size={20} strokeWidth={2} />
           </Link>
         </div>
       </main>
@@ -194,7 +194,7 @@ function ActionCard({ icon, title, text, problem, busy, disabled, onClick }: { i
   return (
     <div className={styles.actCell}>
       <button type="button" className={styles.act} disabled={disabled || busy} aria-busy={busy || undefined} onClick={onClick}>
-        <span className={styles.actIcon}>{busy ? <Spinner size={22} /> : <Icon name={icon} size={24} />}</span>
+        <span className={styles.actIcon}>{busy ? <Spinner size={24} /> : <Icon name={icon} size={24} />}</span>
         <strong className={styles.actTitle}>{title}</strong>
         <span className={styles.actText}>{text}</span>
       </button>
@@ -209,7 +209,7 @@ function DoneCard({ icon, title, text }: { icon: IconName; title: string; text: 
       <div className={styles.act} data-done="" role="status">
         <span className={styles.actIcon}><Icon name={icon} size={24} /></span>
         <strong className={styles.actTitle}>
-          <Icon name="check" size={17} strokeWidth={2.8} />
+          <Icon name="check" size={16} strokeWidth={2} />
           {title}
         </strong>
         <span className={styles.actText}>{text}</span>

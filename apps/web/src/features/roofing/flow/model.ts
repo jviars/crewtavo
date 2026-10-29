@@ -8,6 +8,7 @@
 import { optionsIntroText, optionsRange, priceRange, rangeIntroText, type RangeSettings } from "@crewtavo/core/estimates";
 import { optionBaseTotal, optionTierLabels, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { SALES, type Role } from "@crewtavo/core/roles";
+import { statusText } from "@/components/ui/StatusPill";
 import { formatMoney } from "@/lib/format";
 import type { QuoteApproval } from "../../documents/build";
 import { firstName, money, rangePosition, whenText } from "../estimate/rows";
@@ -288,7 +289,7 @@ export function visitStepStatus(q: VisitQuote, clientName: string | null | undef
     if (q.approval?.method === "manual") return `Marked approved${day(q.approved_at)}`;
     return `Signed${day(q.approval?.signed_at ?? q.approved_at)}${q.approval?.name ? ` by ${q.approval.name}` : ""}`;
   }
-  if (state === "closed") return q.status === "lost" ? "Lost" : "Archived";
+  if (state === "closed") return statusText("quote", q.status === "lost" ? "lost" : "archived");
   if (!q.lines.length) return "After the estimate";
   if (q.priced_on_site_at) return `Priced on site${day(q.priced_on_site_at)}`;
   if (state === "accepted") return "Ready to book";

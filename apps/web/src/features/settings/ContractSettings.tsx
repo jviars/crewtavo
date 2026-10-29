@@ -37,6 +37,8 @@ import { supabase, unwrap } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
+import { undoable } from "@/lib/undo";
 import { templatesKey, templatesQuery } from "../documents/data";
 import { packagesKey } from "../roofing/packages";
 import type { DocumentData } from "../documents/types";
@@ -260,9 +262,11 @@ export function ContractSettings() {
   }, [sections.data]);
 
   const addStarters = useMutation({
-    meta: { success: "Example sections added. Change them to fit your business." },
     mutationFn: async () => unwrap(await supabase().from("contract_sections").insert(starterRows(company.trade_preset, company.id, nextSort(sections.data ?? [])))),
-    onSuccess: refresh,
+    onSuccess: () => {
+      toast.success("Example sections added", { description: "Change them to fit your business." });
+      return refresh();
+    },
   });
 
   const move = useMutation({
@@ -299,9 +303,9 @@ export function ContractSettings() {
   });
 
   const remove = useMutation({
-    meta: { success: "Section deleted" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("contract_sections").delete().eq("id", id)),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 
   if (sections.isPending) {
@@ -324,9 +328,17 @@ export function ContractSettings() {
     refocus.current = { id, by };
     move.mutate({ id, by, changes, next: applySorts(rows, changes) });
   };
-  const askRemove = async (row: ContractSectionRow) => {
-    if (await confirm({ title: `Delete “${row.title}”?`, body: "Signed estimates keep the words they were signed with. Estimates that aren't signed yet stop printing it.", confirmLabel: "Delete section", danger: true })) remove.mutate(row.id);
-  };
+  // Gone at once, with Undo. Signed estimates keep the words they were signed with either way.
+  const removeRow = (row: ContractSectionRow) =>
+    undoable({
+      title: "Section deleted",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<ContractSectionRow[]>(key, (old) => old?.filter((r) => r.id !== row.id));
+      },
+      restore: () => queryClient.setQueryData<ContractSectionRow[]>(key, (old) => (old && !old.some((r) => r.id === row.id) ? [...old, row].sort((a, b) => a.sort - b.sort) : old)),
+      commit: () => remove.mutateAsync(row.id),
+    });
 
   return (
     <div className="stack">
@@ -348,14 +360,14 @@ export function ContractSettings() {
 
       {!canEdit && (
         <div className="callout">
-          <Icon name="lock" size={18} />
+          <Icon name="lock" size={20} />
           <span className="grow">Only people in the office who manage Settings can change these.</span>
         </div>
       )}
 
       {canEdit && examples.size > 0 && (
         <div className="callout">
-          <Icon name="info" size={18} />
+          <Icon name="info" size={20} />
           <span className="grow">{STARTER_NOTE}</span>
         </div>
       )}
@@ -375,31 +387,29 @@ export function ContractSettings() {
               arrowIds={[arrowId(row.id, -1), arrowId(row.id, 1)]}
               onEdit={() => setEditing(row)}
               onMove={(by) => moveRow(row.id, by)}
-              onRemove={() => void askRemove(row)}
+              onRemove={() => removeRow(row)}
             />
           ))}
         </ol>
       ) : canEdit ? (
         <div className="card">
           <EmptyState
-            icon="file"
+            inline
             title="No contract sections yet"
             action={
               <>
-                <Button variant="primary" icon="sparkle" loading={addStarters.isPending} onClick={() => addStarters.mutate()}>Add example sections</Button>
-                <Button icon="plus" onClick={() => setEditing("new")}>Write your own</Button>
+                <Button loading={addStarters.isPending} onClick={() => addStarters.mutate()}>Add example sections</Button>
+                <Button onClick={() => setEditing("new")}>Write your own</Button>
               </>
             }
-          >
-            Start from example sections for your kind of work and change them to fit, or write your own.
-          </EmptyState>
+          />
           <p className={styles.starterNote}>
-            <Icon name="info" size={15} />
+            <Icon name="info" size={16} />
             {STARTER_NOTE}
           </p>
         </div>
       ) : (
-        <div className="card"><EmptyState icon="file" title="No contract sections yet">Someone in the office who manages Settings can add them here.</EmptyState></div>
+        <div className="card"><EmptyState inline title="No contract sections yet">Someone in the office who manages Settings can add them here.</EmptyState></div>
       )}
 
       {editing && <SectionDialog section={editing === "new" ? null : editing} sort={nextSort(rows)} onClose={() => setEditing(null)} />}
@@ -434,7 +444,7 @@ function SectionRow({ row, number, example, canEdit, first, last, moving, arrowI
         {placeLabel(row.place)}
         {row.initials && (
           <span className={styles.initials}>
-            <Icon name="pen" size={13} />
+            <Icon name="pen" size={12} />
             The customer initials it
           </span>
         )}
@@ -526,7 +536,7 @@ function SectionDialog({ section, sort, onClose }: { section: ContractSectionRow
             <Suspense
               fallback={
                 <Loading label="Loading the editor">
-                  <Skeleton height={226} radius={10} />
+                  <Skeleton height={226} radius={12} />
                 </Loading>
               }
             >
@@ -557,7 +567,7 @@ function SectionDialog({ section, sort, onClose }: { section: ContractSectionRow
             Invoices print every section after their totals.
           </span>
         </div>
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row">
           <input type="checkbox" className="switch" checked={initials} onChange={(e) => setInitials(e.target.checked)} />
           The customer initials this section
         </label>

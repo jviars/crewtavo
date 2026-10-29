@@ -147,7 +147,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
         <span className={`${s.sideTitle} mobile-only`}>Team chat</span>
         {state?.me?.admin && (
-          <Link to="/chat/settings" className="icon-btn" aria-label="Chat settings" title="Chat settings"><Icon name="settings" size={18} /></Link>
+          <Link to="/chat/settings" className="icon-btn" aria-label="Chat settings" title="Chat settings"><Icon name="settings" size={20} /></Link>
         )}
       </div>
       <nav className={s.sideList} aria-label="Channels">
@@ -161,7 +161,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
           return (
             <div key={g.name}>
               <button type="button" className={s.category} aria-expanded={open} onClick={() => toggle(g.name)}>
-                <Icon name="chevronDown" size={12} strokeWidth={3} />
+                <Icon name="chevronDown" size={12} strokeWidth={2} />
                 <span>{g.name}</span>
               </button>
               {g.channels.filter((c) => open || c.id === current || c.mentions > 0).map((c) => (
@@ -294,7 +294,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
     onJumpTo: (id) => {
       if (all.some((m) => m.id === id)) {
         setFlash(id);
-        document.getElementById(`message-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+        document.getElementById(`message-${id}`)?.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       } else navigate(`/chat/${channel.id}?message=${id}`);
     },
   };
@@ -334,9 +334,9 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
           channel.topic && <p className={s.convTopic}>{channel.topic}</p>
         )}
         <div className={s.convTools}>
-          <button type="button" className="icon-btn" aria-label="Pinned messages" title="Pinned messages" onClick={() => setPinsOpen(true)}><Icon name="pushpin" size={19} /></button>
+          <button type="button" className="icon-btn" aria-label="Pinned messages" title="Pinned messages" onClick={() => setPinsOpen(true)}><Icon name="pushpin" size={20} /></button>
           <button type="button" className={`icon-btn${membersOpen ? ` ${s.toolOn}` : ""}`} aria-label={membersOpen ? "Hide the member list" : `Members${membersCount ? ` (${membersCount})` : ""}`} aria-pressed={membersOpen} title="Members" onClick={onToggleMembers}>
-            <Icon name="users" size={19} />
+            <Icon name="users" size={20} />
           </button>
         </div>
       </header>

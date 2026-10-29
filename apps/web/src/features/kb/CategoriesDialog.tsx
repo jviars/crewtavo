@@ -1,13 +1,15 @@
 /** Add, rename, reorder and remove knowledge base categories. Changes save as you make them. */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { useCategories } from "./kbData";
 
@@ -19,7 +21,8 @@ export function CategoriesDialog({ onClose, counts }: { onClose: () => void; cou
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["kb", company.id] });
 
   const add = useMutation({
-    meta: { inline: true, success: "Category added" },
+    // The new row appearing, and the button, say it worked.
+    meta: { inline: true },
     mutationFn: async (value: string) => {
       const list = categories.data ?? [];
       if (list.some((c) => c.name.toLowerCase() === value.toLowerCase())) throw new Error("There's already a category with that name.");
@@ -47,6 +50,8 @@ export function CategoriesDialog({ onClose, counts }: { onClose: () => void; cou
     onSettled: refresh,
   });
 
+  const added = useJustDone(add);
+  const list = useListAnimation<HTMLDivElement>();
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (name.trim()) add.mutate(name.trim());
@@ -55,9 +60,9 @@ export function CategoriesDialog({ onClose, counts }: { onClose: () => void; cou
   return (
     <Dialog open onClose={onClose} title="Categories" size="sm">
       <div className="stack">
-        <div className="card" style={{ boxShadow: "none" }}>
-          {categories.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton height={34} radius={8} /></div>)}
-          {categories.data?.length === 0 && <p className="muted small" style={{ margin: 0, padding: 16 }}>No categories yet.</p>}
+        <div className="card" style={{ boxShadow: "none" }} ref={list}>
+          {categories.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton height={38} radius={8} /></div>)}
+          {categories.data?.length === 0 && <EmptyState inline title="No categories yet" />}
           {categories.data?.map((c, i) => (
             <div key={c.id} className="card-row" style={{ padding: "8px 10px", gap: 6 }}>
               <input
@@ -91,7 +96,7 @@ export function CategoriesDialog({ onClose, counts }: { onClose: () => void; cou
         </div>
         <form className="row" style={{ gap: 8 }} onSubmit={submit}>
           <input className="input grow" value={name} onChange={(e) => { setName(e.target.value); add.reset(); }} placeholder="New category, e.g. Equipment" maxLength={60} aria-label="New category name" />
-          <Button type="submit" icon="plus" loading={add.isPending} disabled={!name.trim()}>Add</Button>
+          <Button type="submit" icon="plus" loading={add.isPending} done={added} doneLabel="Added" disabled={!name.trim() && !added}>Add</Button>
         </form>
         <FormError error={add.error} />
         <div className="form-actions"><Button variant="primary" onClick={onClose}>Done</Button></div>

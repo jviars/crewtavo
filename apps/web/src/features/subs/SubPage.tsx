@@ -160,14 +160,14 @@ function SubDetail() {
 
       {!s.active && (
         <div className="callout">
-          <Icon name="archive" size={18} />
+          <Icon name="archive" size={20} />
           <div className="grow" style={{ fontWeight: 400 }}>Turned off. They're not on the list, don't get reminders and can't sign in.</div>
           <Button size="sm" loading={setActive.isPending} onClick={() => setActive.mutate(true)}>Turn back on</Button>
         </div>
       )}
       {warning && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow" style={{ fontWeight: 400 }}>{warning}</div>
           <Button size="sm" onClick={() => setDialog("send")}>Ask for it</Button>
         </div>
@@ -212,13 +212,13 @@ function SubDetail() {
           <section className="stack">
             <div className="section-head">
               <h2 className="section-title">Other documents</h2>
-              <Button size="sm" icon="plus" onClick={() => setDialog({ kinds: ["license", "other"] })}>Add</Button>
+              <Button size="sm" icon="plus" onClick={() => setDialog({ kinds: ["license", "other"] })}>Add document</Button>
             </div>
             <div className="card">
               {documents.isPending ? (
                 <div className="card-row"><Skeleton width="50%" /></div>
               ) : others.length === 0 ? (
-                <EmptyState compact icon="file" title="No other documents">Licenses, signed agreements, anything else you keep for them.</EmptyState>
+                <EmptyState inline title="No other documents">Licenses, signed agreements, anything else you keep for them.</EmptyState>
               ) : (
                 others.map((d) => (
                   <div key={d.id} className="card-row" style={{ alignItems: "flex-start" }}>
@@ -279,7 +279,7 @@ function SubDetail() {
             ) : (
               <span className="muted small">Add their phone and email so you can send them their link.</span>
             )}
-            {s.notes && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: 8, border: "1px solid var(--note-border)" }}>{s.notes}</p>}
+            {s.notes && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: "var(--radius-control)", border: "1px solid var(--note-border)" }}>{s.notes}</p>}
           </div>
           <SubAccessCard sub={s} />
         </aside>
@@ -306,7 +306,7 @@ function DocumentLine({ doc, today, menu, verifying, onVerify }: { doc: SubDocum
   return (
     <span className="stack-sm" style={{ gap: 4 }}>
       <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <Icon name={doc.content_type?.startsWith("image/") ? "image" : "file"} size={15} />
+        <Icon name={doc.content_type?.startsWith("image/") ? "image" : "file"} size={14} />
         {doc.url ? (
           <a href={doc.url} target="_blank" rel="noreferrer" style={{ overflowWrap: "anywhere" }}>{doc.file_name || subDocumentLabel(doc.kind)}</a>
         ) : (

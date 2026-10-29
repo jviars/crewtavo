@@ -23,18 +23,22 @@ import { getPreset, isExampleWarranty, PACKAGE_LIMITS } from "@crewtavo/core/pre
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SaveStatus, useSaveStatus, type SaveStatusHandle } from "@/components/ui/SaveStatus";
 import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import { packagePicture } from "@/lib/files";
 import { formatMoney, formatMoneyCents, timeAgo } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
+import { startTask } from "@/lib/tasks";
 import { toast } from "@/lib/toast";
 import { CATALOG_MATERIALS, useServiceMaterials, useSupplier, type ServiceMaterial } from "../materials/data";
 import { MaterialPicker } from "../materials/MaterialPicker";
@@ -122,9 +126,12 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
   const list = packages.data ?? [];
   const selected = list.find((p) => p.id === params.get("package")) ?? list.find((p) => p.is_default) ?? list[0] ?? null;
   const select = (id: string | null) => setParams(id ? { package: id } : {}, { replace: true });
+  // The package and the price ranges save as they're changed; the header says how that's going.
+  const save = useSaveStatus();
+  const listRef = useListAnimation<HTMLUListElement>();
 
   const create = useMutation({
-    meta: { success: "Package added. Name it and pick what goes in it." },
+    meta: { success: "Package added" },
     mutationFn: async () => {
       // A roof starts from the first roof in the price list (priced by the square, with waste);
       // anything else starts empty.
@@ -138,7 +145,12 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
     },
   });
 
-  const newPackage = editable && list.length > 0 && <Button variant="primary" icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New package</Button>;
+  const newPackage = (
+    <>
+      <SaveStatus status={save.status} />
+      {editable && list.length > 0 && <Button variant="primary" icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New package</Button>}
+    </>
+  );
   const header = roofing ? (
     <>
       <PageHeader title="Roofing" actions={newPackage} />
@@ -187,12 +199,12 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
             {/* Setup's example warranties, until each package has the business's own. */}
             {examples && (
               <div className="callout callout-info">
-                <Icon name="info" size={18} />
+                <Icon name="info" size={20} />
                 <span className="grow" style={{ fontWeight: 400 }}>{examples}</span>
               </div>
             )}
             {list.length > 0 && (
-              <ul className={styles.list} aria-label="Packages">
+              <ul ref={listRef} className={styles.list} aria-label="Packages">
                 {list.map((p) => {
                   const main = services.data.find((s) => s.id === p.roof_service_id);
                   const margin = main ? marginPct(main.unit_price, main.unit_cost) : null;
@@ -206,7 +218,7 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
                           <span>{[p.tier, price, margin !== null ? `${margin}% margin` : null].filter(Boolean).join(" · ")}</span>
                           {isExampleWarranty(p.warranty) && (
                             <span className={styles.flag}>
-                              <Icon name="alert" size={13} />
+                              <Icon name="alert" size={14} />
                               Example warranty
                             </span>
                           )}
@@ -219,7 +231,7 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
                 {editable && (
                   <li>
                     <button type="button" className={styles.addPkg} onClick={() => create.mutate()} disabled={create.isPending}>
-                      <Icon name="plus" size={16} strokeWidth={2.5} />Add a package
+                      <Icon name="plus" size={16} />Add a package
                     </button>
                   </li>
                 )}
@@ -227,7 +239,7 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
             )}
             {roofing && (
               <div className={styles.sideCards}>
-                <RangeCard />
+                <RangeCard save={save} />
                 <SupplierCard packages={list} />
                 {list.length > 0 && <MissingServices services={services.data} />}
               </div>
@@ -236,7 +248,7 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
         )}
         <div className={styles.main}>
           {selected ? (
-            <PackageEditor key={selected.id} pkg={selected} packages={list} services={services.data} editable={editable} roofing={roofing} onSelect={select} />
+            <PackageEditor key={selected.id} pkg={selected} packages={list} services={services.data} editable={editable} roofing={roofing} onSelect={select} save={save} />
           ) : (
             <NoPackages roofing={roofing} onCreate={() => create.mutate()} creating={create.isPending} />
           )}
@@ -301,14 +313,14 @@ function NoPackages({ roofing, onCreate, creating }: { roofing: boolean; onCreat
 /** The example every business sees, so the sentence always reads the same way. */
 const EXAMPLE_ESTIMATE = 18304;
 
-function RangeCard() {
+function RangeCard({ save }: { save: SaveStatusHandle }) {
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
   const editable = canEditRanges(session);
   const saved = rangeSettings(company.settings);
-  const save = useMutation({
-    meta: { success: "Price ranges saved" },
+  const saveRange = useMutation({
+    meta: { inline: true },
     mutationFn: async (patch: { range_pct?: number; range_round?: number }) => {
       // Read the settings fresh, so a change someone made meanwhile isn't undone.
       const current = (unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings ?? {}) as Record<string, unknown>;
@@ -320,7 +332,8 @@ function RangeCard() {
       await session.refresh();
     },
   });
-  const shown = save.isPending && save.variables ? rangeSettings({ roofing: { range_pct: saved.pct, range_round: saved.round, ...save.variables } }) : saved;
+  const shown = saveRange.isPending && saveRange.variables ? rangeSettings({ roofing: { range_pct: saved.pct, range_round: saved.round, ...saveRange.variables } }) : saved;
+  const change = (patch: { range_pct?: number; range_round?: number }) => void save.track(saveRange.mutateAsync(patch));
   const example = priceRange(EXAMPLE_ESTIMATE, shown);
   return (
     <section className={`card card-pad ${styles.sideCard}`} aria-labelledby="roof-ranges">
@@ -331,10 +344,10 @@ function RangeCard() {
       {editable ? (
         <div className={styles.rangeFields}>
           <Field label="Room on top">
-            <MoneyInput percent max={100} width={110} value={shown.pct} onSave={(v) => save.mutate({ range_pct: v })} />
+            <MoneyInput percent max={100} width={110} value={shown.pct} onSave={(v) => change({ range_pct: v })} />
           </Field>
           <Field label="Round to">
-            <select className="select" value={shown.round} onChange={(e) => save.mutate({ range_round: Number(e.target.value) })} disabled={save.isPending}>
+            <select className="select" value={shown.round} onChange={(e) => change({ range_round: Number(e.target.value) })} disabled={saveRange.isPending}>
               {RANGE_ROUNDING.map((r) => <option key={r} value={r}>{formatMoney(r)}</option>)}
             </select>
           </Field>
@@ -360,9 +373,20 @@ function SupplierCard({ packages }: { packages: RoofPackage[] }) {
   const ids = [...new Set(packages.flatMap((p) => [p.roof_service_id, ...p.items.filter((i) => i.kind === "included").map((i) => i.service_id)]).filter((id): id is string => Boolean(id)))];
   const links = useServiceMaterials(ids);
   const pricedAt = (links.data ?? []).map((l) => l.priced_at).filter((d): d is string => Boolean(d)).sort().at(-1);
+  // ABC prices every package's materials in its own time, so the update shows in the task island.
   const update = useMutation({
-    meta: { success: (r: { priced_at: string | null; branch_name: string | null }) => (r.priced_at ? `Prices updated from ${r.branch_name}` : "None of your packages' services have ABC materials yet") },
-    mutationFn: () => api.post<{ priced_at: string | null; branch_name: string | null; services: number }>("/roofing/prices"),
+    meta: { inline: true },
+    mutationFn: async () => {
+      const task = startTask({ label: "Updating prices from ABC" });
+      try {
+        const r = await api.post<{ priced_at: string | null; branch_name: string | null; services: number }>("/roofing/prices");
+        task.done(r.priced_at ? `Prices updated from ${r.branch_name}` : "None of your packages' services have ABC materials yet");
+        return r;
+      } catch (error) {
+        task.fail(errorMessage(error));
+        throw error;
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["service-materials", company.id] });
       queryClient.invalidateQueries({ queryKey: ["services", company.id] });
@@ -444,7 +468,7 @@ function MissingServices({ services }: { services: PriceListService[] }) {
 
 type PackagePatch = Partial<Pick<RoofPackage, "name" | "style" | "roof_service_id" | "price_mode" | "markup_pct" | "tier" | "highlights" | "warranty" | "section_ids">>;
 
-function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }: { pkg: RoofPackage; packages: RoofPackage[]; services: PriceListService[]; editable: boolean; roofing: boolean; onSelect: (id: string | null) => void }) {
+function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, save }: { pkg: RoofPackage; packages: RoofPackage[]; services: PriceListService[]; editable: boolean; roofing: boolean; onSelect: (id: string | null) => void; save: SaveStatusHandle }) {
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
@@ -459,11 +483,15 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const loadingMaterials = materialIds.length > 0 && materials.isPending;
   const linksOf = (serviceId: string): ServiceMaterial[] => (materials.data ?? []).filter((m) => m.service_id === serviceId);
   const [picking, setPicking] = useState<PriceListService | null>(null);
+  const rowsRef = useListAnimation<HTMLUListElement>();
 
   // Changes save one after another (scope), each shown straight away. The lists are read again once
-  // the last one is done, which also puts back anything that failed.
+  // the last one is done, which also puts back anything that failed. The header says "Saving…",
+  // "Saved" or "Couldn't save" for all of them (inline), rather than a toast for each.
   const mutationKey = ["roof-package", pkg.id];
   const scope = { id: `roof-package-${pkg.id}` };
+  const meta = { inline: true };
+  const run = <V,>(mutation: { mutateAsync: (variables: V) => Promise<unknown> }, variables: NoInfer<V>) => void save.track(mutation.mutateAsync(variables));
   const refresh = () => {
     if (queryClient.isMutating({ mutationKey }) > 1) return;
     queryClient.invalidateQueries({ queryKey: packagesKey(company.id) });
@@ -492,6 +520,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const savePackage = useMutation({
     mutationKey,
     scope,
+    meta,
     mutationFn: async ({ patch, price }: { patch: PackagePatch; price?: number }) => {
       unwrap(await supabase().from("roof_packages").update(patch).eq("id", pkg.id));
       if (price !== undefined && roof && price > 0) unwrap(await supabase().from("services").update({ unit_price: price }).eq("id", roof.id));
@@ -507,6 +536,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const saveService = useMutation({
     mutationKey,
     scope,
+    meta,
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<Pick<PriceListService, "unit_price">> }) => unwrap(await supabase().from("services").update(patch).eq("id", id)),
     onMutate: ({ id, patch }) => patchService(id, patch),
     onSettled: refresh,
@@ -514,7 +544,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const saveLabor = useMutation({
     mutationKey,
     scope,
-    meta: { success: "Labor and the rest saved" },
+    meta,
     mutationFn: async (labor: number) => {
       await api.put(`/services/${roof!.id}/labor`, { labor_cost: labor });
       const price = pkg.price_mode === "follow" ? followed(labor, pkg.markup_pct) : undefined;
@@ -533,6 +563,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const addItem = useMutation({
     mutationKey,
     scope,
+    meta,
     mutationFn: async ({ serviceId, kind }: { serviceId: string; kind: RoofPackageItem["kind"] }) => {
       // Always on the roof means it isn't a quick add any more.
       if (kind === "included") unwrap(await supabase().from("roof_package_items").delete().eq("package_id", pkg.id).eq("service_id", serviceId).eq("kind", "quick"));
@@ -548,6 +579,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const removeItem = useMutation({
     mutationKey,
     scope,
+    meta,
     mutationFn: async (item: RoofPackageItem) => unwrap(await supabase().from("roof_package_items").delete().eq("package_id", pkg.id).eq("service_id", item.service_id).eq("kind", item.kind)),
     onMutate: (item) => patchPackage((p) => ({ ...p, items: p.items.filter((i) => !(i.service_id === item.service_id && i.kind === item.kind)) })),
     onSettled: refresh,
@@ -555,6 +587,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const setCount = useMutation({
     mutationKey,
     scope,
+    meta,
     mutationFn: async ({ item, quantity }: { item: RoofPackageItem; quantity: number }) =>
       unwrap(await supabase().from("roof_package_items").update({ quantity }).eq("package_id", pkg.id).eq("service_id", item.service_id).eq("kind", item.kind)),
     onMutate: ({ item, quantity }) => patchPackage((p) => ({ ...p, items: p.items.map((i) => (i.service_id === item.service_id && i.kind === item.kind ? { ...i, quantity } : i)) })),
@@ -562,7 +595,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   });
 
   const copy = useMutation({
-    meta: { success: "Copied. Rename it and change what's different." },
+    meta: { success: "Package copied" },
     mutationFn: async () => {
       const db = supabase();
       const sort = packages.reduce((max, p) => Math.max(max, p.sort), -1) + 1;
@@ -612,12 +645,18 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
     onSettled: refresh,
   });
 
+  // Typed and then put back as it was: nothing to save, so the header stops saying Edited.
+  const unchanged = () => save.status === "edited" && save.reset();
   const [name, setName] = useState(pkg.name);
   useEffect(() => setName(pkg.name), [pkg.name]);
   const saveName = () => {
     const clean = name.trim().slice(0, PACKAGE_NAME_MAX);
-    if (!clean) return setName(pkg.name);
-    if (clean !== pkg.name) savePackage.mutate({ patch: { name: clean } });
+    if (!clean) {
+      unchanged();
+      return setName(pkg.name);
+    }
+    if (clean !== pkg.name) run(savePackage, { patch: { name: clean } });
+    else unchanged();
   };
   const tiersId = useId();
   const [tier, setTier] = useState(pkg.tier ?? "");
@@ -625,7 +664,8 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   const saveTier = () => {
     const clean = tier.trim().slice(0, PACKAGE_LIMITS.tier) || null;
     setTier(clean ?? "");
-    if (clean !== pkg.tier) savePackage.mutate({ patch: { tier: clean } });
+    if (clean !== pkg.tier) run(savePackage, { patch: { tier: clean } });
+    else unchanged();
   };
   // Lines being typed stay as they are until they're saved (cleanHighlights), and while what's saved
   // is what they come to, so a line just added isn't taken away by the save before it.
@@ -637,14 +677,16 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
   }, [savedHighlights]);
   const saveHighlights = (lines: string[]) => {
     const clean = cleanHighlights(lines);
-    if (!sameList(clean, pkg.highlights)) savePackage.mutate({ patch: { highlights: clean } });
+    if (!sameList(clean, pkg.highlights)) run(savePackage, { patch: { highlights: clean } });
+    else unchanged();
   };
   const [warranty, setWarranty] = useState(pkg.warranty);
   useEffect(() => setWarranty(pkg.warranty), [pkg.warranty]);
   const saveWarranty = () => {
     const clean = warranty.trim().slice(0, PACKAGE_LIMITS.warranty);
     setWarranty(clean);
-    if (clean !== pkg.warranty) savePackage.mutate({ patch: { warranty: clean } });
+    if (clean !== pkg.warranty) run(savePackage, { patch: { warranty: clean } });
+    else unchanged();
   };
 
   const roofChoices = services.filter((s) => (s.active && isSquareUnit(s.unit)) || s.id === pkg.roof_service_id);
@@ -671,10 +713,16 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
         {editable ? (
           <div className={styles.head}>
             <Field label="Package name" className={styles.nameField}>
-              <input className="input" value={name} maxLength={PACKAGE_NAME_MAX} onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+              <input className="input" value={name} maxLength={PACKAGE_NAME_MAX} onChange={(e) => {
+                  setName(e.target.value);
+                  save.edited();
+                }} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
             </Field>
             <Field label="Tier" optional className={styles.tierField}>
-              <input className="input" list={tiersId} value={tier} maxLength={PACKAGE_LIMITS.tier} placeholder="Good, Better…" onChange={(e) => setTier(e.target.value)} onBlur={saveTier} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+              <input className="input" list={tiersId} value={tier} maxLength={PACKAGE_LIMITS.tier} placeholder="Good, Better…" onChange={(e) => {
+                  setTier(e.target.value);
+                  save.edited();
+                }} onBlur={saveTier} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
               <TierWords id={tiersId} />
             </Field>
             <div className={styles.headActions}>
@@ -702,7 +750,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
             {roofing && (
               <div className={styles.styleRow} role="group" aria-label="Drawing on its card, without a picture">
                 {PACKAGE_STYLES.map((s) => (
-                  <button key={s.id} type="button" className={styles.styleBtn} aria-pressed={pkg.style === s.id} onClick={() => pkg.style !== s.id && savePackage.mutate({ patch: { style: s.id } })}>
+                  <button key={s.id} type="button" className={styles.styleBtn} aria-pressed={pkg.style === s.id} onClick={() => pkg.style !== s.id && run(savePackage, { patch: { style: s.id } })}>
                     <PackageArt style={s.id} size={26} />
                     {s.label}
                   </button>
@@ -713,7 +761,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
         )}
         {editable && roofing ? (
           <Field label="The roof" hint={roof ? `Priced by the square from the roof's measurements${roof.formula ? ` (${formulaWords(roof.formula)?.toLowerCase()})` : ""}.` : "Pick the service in your price list that prices this roof by the square."}>
-            <select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => e.target.value && savePackage.mutate({ patch: { roof_service_id: e.target.value } })}>
+            <select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => e.target.value && run(savePackage, { patch: { roof_service_id: e.target.value } })}>
               {!pkg.roof_service_id && <option value="">Pick the roof…</option>}
               {(roofChoices.length ? roofChoices : services.filter((s) => s.active)).map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? "" : " (turned off)"}</option>)}
             </select>
@@ -724,7 +772,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
             optional
             hint={roof ? `Its price shows on the package's card${roof.formula ? `, measured: ${formulaWords(roof.formula)?.toLowerCase()}` : ""}.` : "What this package is mostly about, if there's one service. Its price shows on the package's card."}
           >
-            <select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => savePackage.mutate({ patch: { roof_service_id: e.target.value || null } })}>
+            <select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => run(savePackage, { patch: { roof_service_id: e.target.value || null } })}>
               <option value="">None</option>
               {[...new Set(mainChoices.map((s) => s.category?.trim() || "Other"))].map((c) => (
                 <optgroup key={c} label={c}>
@@ -746,13 +794,13 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
             </div>
             {editable && roof && roofing && (
               <div className="segmented" role="group" aria-label="How the price is set">
-                <button type="button" aria-pressed={!following} onClick={() => following && savePackage.mutate({ patch: { price_mode: "manual" } })}>Set it yourself</button>
+                <button type="button" aria-pressed={!following} onClick={() => following && run(savePackage, { patch: { price_mode: "manual" } })}>Set it yourself</button>
                 <button
                   type="button"
                   aria-pressed={following}
                   disabled={!canFollow && !following}
                   title={canFollow ? undefined : "Pick this roof's materials from ABC Supply first"}
-                  onClick={() => !following && savePackage.mutate({ patch: { price_mode: "follow" }, price: followed(roof.labor_cost, pkg.markup_pct) })}
+                  onClick={() => !following && run(savePackage, { patch: { price_mode: "follow" }, price: followed(roof.labor_cost, pkg.markup_pct) })}
                 >
                   Follow ABC prices
                 </button>
@@ -763,7 +811,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
           {!roof ? (
             <p className="callout callout-info" style={{ margin: 0 }}>Pick the roof above, and its price a square shows here.</p>
           ) : loadingMaterials ? (
-            <Skeleton height={64} radius={10} />
+            <Skeleton height={64} radius={8} />
           ) : following && canFollow ? (
             <div className="stack-sm">
               <div className={styles.sum}>
@@ -774,12 +822,12 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
                 <span className={styles.op} aria-hidden="true">+</span>
                 <span className={styles.term}>
                   <span>Labor and the rest</span>
-                  {editable ? <MoneyInput width={110} label="Labor and the rest, a square" value={roof.labor_cost ?? 0} onSave={(v) => saveLabor.mutate(v)} /> : <strong>{formatMoneyCents(roof.labor_cost ?? 0)}</strong>}
+                  {editable ? <MoneyInput width={110} label="Labor and the rest, a square" value={roof.labor_cost ?? 0} onSave={(v) => run(saveLabor, v)} /> : <strong>{formatMoneyCents(roof.labor_cost ?? 0)}</strong>}
                 </span>
                 <span className={styles.op} aria-hidden="true">+</span>
                 <span className={styles.term}>
                   <span>Markup</span>
-                  {editable ? <MoneyInput percent max={1000} width={96} label="Markup percent" value={pkg.markup_pct} onSave={(v) => savePackage.mutate({ patch: { markup_pct: v }, price: followed(roof.labor_cost, v) })} /> : <strong>{pkg.markup_pct}%</strong>}
+                  {editable ? <MoneyInput percent max={1000} width={96} label="Markup percent" value={pkg.markup_pct} onSave={(v) => run(savePackage, { patch: { markup_pct: v }, price: followed(roof.labor_cost, v) })} /> : <strong>{pkg.markup_pct}%</strong>}
                 </span>
                 <span className={styles.op} aria-hidden="true">=</span>
                 <span className={`${styles.term} ${styles.total}`}>
@@ -808,7 +856,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
               {following && <p className="callout callout-warning" style={{ margin: 0 }}>This roof has no ABC materials any more, so its price stays where it was. Set it yourself, or pick its materials again.</p>}
               <div className={styles.priceRow}>
                 {editable ? (
-                  <span className={styles.bigMoney}><MoneyInput width={160} label={roofing ? "Price a square" : "Price"} value={roof.unit_price} onSave={(v) => saveService.mutate({ id: roof.id, patch: { unit_price: v } })} /></span>
+                  <span className={styles.bigMoney}><MoneyInput width={160} label={roofing ? "Price a square" : "Price"} value={roof.unit_price} onSave={(v) => run(saveService, { id: roof.id, patch: { unit_price: v } })} /></span>
                 ) : (
                   <strong className={styles.bigPrice}>{squarePrice(roof, FORMAT)}</strong>
                 )}
@@ -852,9 +900,9 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
               className={`select ${styles.addSelect}`}
               aria-label="Add from your price list"
               value=""
-              onChange={(e) => e.target.value && addItem.mutate({ serviceId: e.target.value, kind: "included" })}
+              onChange={(e) => e.target.value && run(addItem, { serviceId: e.target.value, kind: "included" })}
             >
-              <option value="">+ Add from your price list</option>
+              <option value="">Add from your price list…</option>
               {categories.map((c) => (
                 <optgroup key={c} label={c}>
                   {addable.filter((s) => (s.category?.trim() || "Other") === c).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -864,13 +912,15 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
           )}
         </div>
         {rows.length === 0 ? (
-          <p className="muted small" style={{ margin: 0 }}>{roofing ? "Nothing yet. Pick the roof above, then add what always goes on it." : "Nothing yet. Add what always goes in this package from your price list."}</p>
+          <EmptyState inline title={roofing ? "Nothing on this roof yet" : "Nothing included yet"}>
+            {roofing ? "Pick the roof above, then add what always goes on it." : "Add what always goes in this package from your price list."}
+          </EmptyState>
         ) : (
           <div className={styles.rows}>
             <div className={`${styles.row} ${styles.rowHead}`} aria-hidden="true">
               <span>On the estimate</span><span>How much</span><span className={styles.num}>Price</span><span>Your cost</span><span className={styles.num}>Margin</span><span />
             </div>
-            <ul className={styles.rowList} aria-label={roofing ? "Always on this roof" : "Always included"}>
+            <ul ref={rowsRef} className={styles.rowList} aria-label={roofing ? "Always on this roof" : "Always included"}>
               {rows.map(({ service, item }) => (
                 <AlwaysRow
                   key={service.id}
@@ -881,8 +931,8 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
                   editable={editable}
                   canPick={editable && connected}
                   onPick={() => setPicking(service)}
-                  onRemove={() => item && removeItem.mutate(item)}
-                  onCount={(quantity) => item && setCount.mutate({ item, quantity })}
+                  onRemove={() => item && run(removeItem, item)}
+                  onCount={(quantity) => item && run(setCount, { item, quantity })}
                 />
               ))}
             </ul>
@@ -903,7 +953,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
             </div>
           </div>
           {chips.length === 0 ? (
-            <p className="muted small" style={{ margin: 0 }}>Everything in your price list is already on this roof.</p>
+            <EmptyState inline title="Everything in your price list is already on this roof" />
           ) : editable ? (
             <>
               <div className={styles.chips} role="group" aria-label="Quick adds">
@@ -915,11 +965,11 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
                     aria-pressed={on}
                     onClick={() => {
                       const item = pkg.items.find((i) => i.kind === "quick" && i.service_id === service.id);
-                      if (item) removeItem.mutate(item);
-                      else addItem.mutate({ serviceId: service.id, kind: "quick" });
+                      if (item) run(removeItem, item);
+                      else run(addItem, { serviceId: service.id, kind: "quick" });
                     }}
                   >
-                    <Icon name={on ? "check" : "plus"} size={15} strokeWidth={3} />
+                    <Icon name={on ? "check" : "plus"} size={14} strokeWidth={2} />
                     {service.name}
                     <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
                   </button>
@@ -931,14 +981,14 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
             <div className={styles.chips}>
               {chips.filter((c) => c.on).map(({ service }) => (
                 <span key={service.id} className={styles.quick} data-on="">
-                  <Icon name="check" size={15} strokeWidth={3} />
+                  <Icon name="check" size={14} strokeWidth={2} />
                   {service.name}
                   <small>{unitPrice(service.unit_price, service.unit, FORMAT, true)}</small>
                 </span>
               ))}
             </div>
           ) : (
-            <p className="muted small" style={{ margin: 0 }}>No quick adds on this package.</p>
+            <EmptyState inline title="No quick adds on this package" />
           )}
         </div>
       )}
@@ -953,9 +1003,19 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
         </div>
         {editable ? (
           <>
-            <HighlightsField value={highlights} onChange={setHighlights} onCommit={saveHighlights} />
+            <HighlightsField
+              value={highlights}
+              onChange={(lines) => {
+                setHighlights(lines);
+                save.edited();
+              }}
+              onCommit={saveHighlights}
+            />
             <Field label="Warranty" optional hint="One line: what it covers, and for how long.">
-              <textarea className="textarea" rows={2} style={{ minHeight: 0 }} value={warranty} maxLength={PACKAGE_LIMITS.warranty} onChange={(e) => setWarranty(e.target.value)} onBlur={saveWarranty} />
+              <textarea className="textarea" rows={2} style={{ minHeight: 0 }} value={warranty} maxLength={PACKAGE_LIMITS.warranty} onChange={(e) => {
+                setWarranty(e.target.value);
+                save.edited();
+              }} onBlur={saveWarranty} />
             </Field>
             {isExampleWarranty(warranty) && <p className="callout callout-info" style={{ margin: 0 }}>{STARTER_NOTE}</p>}
           </>
@@ -970,12 +1030,12 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect }:
             {isExampleWarranty(pkg.warranty) && <p className="callout callout-info" style={{ margin: 0 }}>{STARTER_NOTE}</p>}
           </div>
         ) : (
-          <p className="muted small" style={{ margin: 0 }}>No highlights or warranty yet.</p>
+          <EmptyState inline title="No highlights or warranty yet" />
         )}
       </div>
 
       {/* Contract sections */}
-      <ContractPart pkg={pkg} editable={editable} onChange={(section_ids) => savePackage.mutate({ patch: { section_ids } })} />
+      <ContractPart pkg={pkg} editable={editable} onChange={(section_ids) => run(savePackage, { patch: { section_ids } })} />
 
       {picking && (
         <MaterialPicker
@@ -1006,7 +1066,7 @@ function PictureControl({ pkg, customer, children }: { pkg: RoofPackage; custome
     queryClient.invalidateQueries({ queryKey: packagesKey(company.id) });
   };
   const set = useMutation({
-    meta: { inline: true, success: "Picture saved" },
+    meta: { inline: true },
     mutationFn: async (file: File) => {
       const jpeg = await packagePicture(file);
       if (!jpeg) throw new Error("Crewtavo can't open that picture here. Try a JPEG or PNG.");
@@ -1015,17 +1075,18 @@ function PictureControl({ pkg, customer, children }: { pkg: RoofPackage; custome
     onSuccess: (r) => saved({ picture: r.path, picture_width: r.width, picture_height: r.height }),
   });
   const remove = useMutation({
-    meta: { inline: true, success: "Picture removed" },
+    meta: { inline: true },
     mutationFn: () => removePackagePicture(pkg.id),
     onSuccess: () => saved({ picture: null, picture_width: null, picture_height: null }),
   });
+  const setDone = useJustDone(set);
   return (
     <div className="stack-sm">
       <div className={styles.pictureRow}>
         <PackagePicture path={pkg.picture} style={pkg.style} className={styles.editorPicture} />
         <div className={styles.pictureSide}>
           <div className="row wrap" style={{ gap: 8 }}>
-            <Button size="sm" icon="image" loading={set.isPending} disabled={remove.isPending} onClick={() => input.current?.click()}>
+            <Button size="sm" icon="image" loading={set.isPending} done={setDone} slowHint={false} disabled={remove.isPending} onClick={() => input.current?.click()}>
               {pkg.picture ? "Change picture" : "Add a picture"}
             </Button>
             {pkg.picture && <Button size="sm" variant="ghost" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()}>Remove picture</Button>}
@@ -1080,14 +1141,13 @@ function ContractPart({ pkg, editable, onChange }: { pkg: RoofPackage; editable:
         {writes && sections.length > 0 && <Link className="link-btn small" to="/settings?tab=contracts">Contract terms</Link>}
       </div>
       {library.isPending ? (
-        <Skeleton height={44} radius={10} />
+        <Skeleton height={44} radius={8} />
       ) : library.error ? (
         <ErrorState compact error={library.error} onRetry={() => library.refetch()} />
       ) : !sections.length ? (
-        <p className="muted small" style={{ margin: 0 }}>
-          No contract sections yet.{" "}
+        <EmptyState inline title="No contract sections yet">
           {writes ? <>Write them in <Link to="/settings?tab=contracts">Settings → Contract terms</Link>, then pick the ones for this package here.</> : "The office writes them in Settings → Contract terms."}
-        </p>
+        </EmptyState>
       ) : (
         <ul className={styles.sections} aria-label="Contract sections">
           {sections.map((s) => {

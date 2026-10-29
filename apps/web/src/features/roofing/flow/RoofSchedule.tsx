@@ -16,12 +16,14 @@ import type { RoofProjectExtras } from "./data";
 import { depositLabel, jobLinesText, OPEN, SIGNED } from "./model";
 import styles from "./flow.module.css";
 
-export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
+export function RoofSchedule({ quote, extras, invoices, canSell, current, refresh }: {
   quote: EstimateQuote;
   extras: RoofProjectExtras;
   /** The job's invoices, for whether the deposit's been billed (undefined until they load). */
   invoices: FlowInvoice[] | undefined;
   canSell: boolean;
+  /** This is the step the project is at, so its next step is the page's green button. */
+  current?: boolean;
   refresh: () => void;
 }) {
   const session = useSession();
@@ -33,7 +35,7 @@ export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
   const billed = (invoices ?? []).some((i) => i.kind === "deposit" && i.status !== "void");
 
   const convert = useMutation({
-    meta: { success: "Job created. Schedule the work next." },
+    meta: { success: "Job created", tone: "job" },
     mutationFn: () => api.post<{ job_id: string }>(`/quotes/${quote.id}/convert`),
     onSuccess: (r) => {
       refresh();
@@ -41,7 +43,7 @@ export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
     },
   });
   const bill = useMutation({
-    meta: { success: "Deposit invoice ready to send" },
+    meta: { success: "Deposit invoice created", tone: "invoice" },
     mutationFn: async () => {
       const jobId = job?.id ?? (await api.post<{ job_id: string }>(`/quotes/${quote.id}/convert`)).job_id;
       return (await api.post<{ invoice_id: string }>(`/jobs/${jobId}/invoice`, { kind: "deposit", amount: deposit })).invoice_id;
@@ -68,7 +70,7 @@ export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
           <EntityStatus kind="job" status={job.status} />
         </Link>
         <div className={styles.actions}>
-          <Link className="btn btn-primary" to={`/jobs/${job.id}`}><Icon name="calendar" size={16} /> Schedule the visits</Link>
+          <Link className={current ? "btn btn-primary" : "btn"} to={`/jobs/${job.id}`}><Icon name="calendar" size={16} /> Schedule the visits</Link>
           {depositButton}
         </div>
         <span className="muted small">Put it on a crew's day; the crew app shows them the scope, checklist and photos.</span>
@@ -81,7 +83,7 @@ export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
       <div className={styles.stepBody}>
         <p className={styles.stepLead}>Turn the signed estimate into a job. {jobLinesText(quote)}</p>
         <div className={styles.actions}>
-          <Button variant="primary" icon="calendar" loading={convert.isPending} disabled={bill.isPending} onClick={() => convert.mutate()}>Schedule the job</Button>
+          <Button variant={current ? "primary" : undefined} icon="calendar" loading={convert.isPending} disabled={bill.isPending} onClick={() => convert.mutate()}>Schedule the job</Button>
           {depositButton}
         </div>
       </div>
@@ -101,7 +103,7 @@ export function RoofSchedule({ quote, extras, invoices, canSell, refresh }: {
     <div className={styles.stepBody}>
       <span className="muted small">Usually after it's signed. If {quote.client?.display_name ?? "the client"} said yes another way, you can make the job now.</span>
       <div className={styles.actions}>
-        <Button size="sm" icon="job" loading={convert.isPending} onClick={() => convert.mutate()}>Create the job now</Button>
+        <Button size="sm" icon="job" loading={convert.isPending} onClick={() => convert.mutate()}>Create the job</Button>
       </div>
     </div>
   );

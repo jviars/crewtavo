@@ -61,7 +61,7 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
           <label htmlFor={`${id}-qty`}>How many</label>
           <div className={styles.qtyRow}>
             <button type="button" className={styles.qtyStep} aria-label="One fewer" onClick={() => step(-1)}>
-              <Icon name="minus" size={18} strokeWidth={2.5} />
+              <Icon name="minus" size={20} strokeWidth={2} />
             </button>
             <input
               id={`${id}-qty`}
@@ -75,7 +75,7 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
               onChange={(e) => setQuantity(e.target.value)}
             />
             <button type="button" className={styles.qtyStep} aria-label="One more" onClick={() => step(1)}>
-              <Icon name="plus" size={18} strokeWidth={2.5} />
+              <Icon name="plus" size={20} strokeWidth={2} />
             </button>
           </div>
           {q === null && <span className={styles.priceError} role="alert">Type how many, like 3.</span>}
@@ -120,10 +120,11 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
         <strong>{amount === null ? "—" : money(amount)}</strong>
       </p>
 
+      {/* Sized for a finger; Save stays on, and the line under a field says what it needs. */}
       <div className="form-actions">
         <Button
           variant="ghost"
-          className={styles.takeOff}
+          className={`${styles.touch} ${styles.takeOff}`}
           onClick={() => {
             editor.remove(line);
             onClose();
@@ -132,8 +133,8 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
           Take it off
         </Button>
         <span className="spacer" />
-        <Button onClick={onClose}>Cancel</Button>
-        <Button type="submit" variant="primary" disabled={q === null || p === null}>Save</Button>
+        <Button className={styles.touch} onClick={onClose}>Cancel</Button>
+        <Button type="submit" variant="primary" className={styles.touch}>Save</Button>
       </div>
     </form>
   );

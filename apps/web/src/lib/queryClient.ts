@@ -4,9 +4,9 @@
  */
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { activeCompany, api, refreshSignIn } from "./api";
-import { ApiError, errorMessage, isAuthError, OFFLINE, SESSION_EXPIRED } from "./errors";
+import { ApiError, errorMessage, isAuthError, isRestarting, OFFLINE, SESSION_EXPIRED } from "./errors";
 import { reportError } from "./monitoring";
-import { toast } from "./toast";
+import { toast, type ToastTone } from "./toast";
 
 /**
  * After any change, ask the API to run automations that are due now (notifications, follow-ups),
@@ -26,6 +26,8 @@ declare module "@tanstack/react-query" {
     mutationMeta: {
       /** Toast after success. A function can build the message from the result, or return null for none. */
       success?: string | ((data: never, variables: never) => string | null | undefined);
+      /** The workflow color of the record it's about, for the success toast's icon. */
+      tone?: ToastTone;
       /** The screen shows this mutation's error itself (forms in dialogs). */
       inline?: boolean;
     };
@@ -75,6 +77,8 @@ export const queryClient = new QueryClient({
       };
       if (handleAuth(error, reload)) return;
       reportUnexpected(error, { query: String(query.queryKey[0]) });
+      // Crewtavo restarting says so once for the whole app (components/shell/RestartBanner.tsx).
+      if (error instanceof ApiError && isRestarting(error.status)) return;
       // A first load that fails shows an error state on the screen. A refresh that fails while
       // data is already showing gets a toast instead, so stale data isn't silently presented as fresh.
       if (query.state.data !== undefined && !query.meta?.silent) toast.error("Couldn't refresh", { description: errorMessage(error) });
@@ -84,7 +88,7 @@ export const queryClient = new QueryClient({
     onSuccess: (data, variables, _context, mutation) => {
       const success = mutation.meta?.success;
       const message = typeof success === "function" ? (success as (d: unknown, v: unknown) => string | null | undefined)(data, variables) : success;
-      if (message) toast.success(message);
+      if (message) toast.success(message, mutation.meta?.tone ? { tone: mutation.meta.tone } : undefined);
       kickAutomations();
       // Sidebar badges are cheap to recount after any change.
       queryClient.invalidateQueries({ queryKey: ["nav-counts"] });
@@ -103,6 +107,9 @@ export const queryClient = new QueryClient({
       // Don't retry permission, validation or not-found errors; they won't fix themselves.
       retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
     },
-    mutations: { retry: false },
+    // Saves go out at once and fail at once with no connection, rather than waiting (React Query's
+    // "online" mode) with the button spinning. The crew's field actions wait for signal instead:
+    // their own defaults (features/field/fieldActions.ts) put them back in "online" mode.
+    mutations: { retry: false, networkMode: "always" },
   },
 });

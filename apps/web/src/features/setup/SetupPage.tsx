@@ -82,7 +82,7 @@ export function FirstRun({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-const Code = ({ children }: { children: ReactNode }) => <code style={{ fontSize: 13, padding: "1px 5px", borderRadius: 5, background: "var(--fill)" }}>{children}</code>;
+const Code = ({ children }: { children: ReactNode }) => <code style={{ fontSize: 13, padding: "1px 5px", borderRadius: "var(--radius-sm)", background: "var(--fill)" }}>{children}</code>;
 
 function steps(s: SetupStatus): { title: string; summary: string; steps: ReactNode[] } {
   const railway = s.platform === "railway";

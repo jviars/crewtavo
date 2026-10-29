@@ -3,12 +3,13 @@ import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { PRESETS } from "@crewtavo/core/presets";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/Button";
-import { Field, FormError } from "@/components/ui/Field";
+import { Button, useJustDone } from "@/components/ui/Button";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { CardSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { formatPhoneTyping } from "@/lib/validate";
 import { CompanyLogo } from "./CompanyLogo";
 
 const ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu", "America/Puerto_Rico", "America/Toronto", "America/Vancouver", "Europe/London", "Australia/Sydney"];
@@ -46,7 +47,8 @@ export function CompanySettings() {
   }, [details.data, f]);
 
   const save = useMutation({
-    meta: { inline: true, success: (r: { located: boolean | null }) => (r.located === false ? "Saved. We couldn't find the shop address on the map; route planning will start from the first stop." : "Company settings saved") },
+    // The button says it saved. Only an address the map couldn't find is worth a toast, since it changes how routes start.
+    meta: { inline: true, success: (r: { located: boolean | null }) => (r.located === false ? "Shop address not found on the map. Routes start from the first stop." : null) },
     mutationFn: async () => {
       const v = f!;
       // Kept to 0.0001%, as quotes and invoices keep it (8.875% stays 8.875%).
@@ -89,6 +91,7 @@ export function CompanySettings() {
     },
   });
 
+  const saved = useJustDone(save);
   if (details.isPending || !f) return details.error ? <div className="card"><ErrorState error={details.error} onRetry={() => details.refetch()} /></div> : <CardSkeleton lines={8} />;
   const set = (key: string) => (e: { target: { value: string } }) => setF({ ...f, [key]: e.target.value });
 
@@ -98,7 +101,7 @@ export function CompanySettings() {
         <strong>Business</strong>
         <div className="form-grid">
           <Field label="Business name"><input className="input" value={f.name} onChange={set("name")} required maxLength={200} /></Field>
-          <Field label="Phone"><input className="input" type="tel" value={f.phone} onChange={set("phone")} maxLength={40} /></Field>
+          <Field label="Phone"><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={40} /></Field>
           <Field label="Email"><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={200} /></Field>
           <Field label="Website" optional><input className="input" value={f.website} onChange={set("website")} maxLength={200} placeholder="https://" /></Field>
           <Field label="Trade" hint={f.trade === "paving" ? "Paving adds the Paving section to the sidebar: takeoff, estimate, proposal, schedule and invoice in one place." : "What's opened up front for your kind of work, like roof tools for roofers and the Paving section for pavers."}>
@@ -114,8 +117,8 @@ export function CompanySettings() {
         <div className="field">
           <span>Brand color <span className="optional">(Client Hub and emails)</span></span>
           <div className="row wrap" style={{ gap: 8 }}>
-            {BRAND_COLORS.map((c) => <button key={c} type="button" aria-label={`Brand color ${c}`} aria-pressed={f.color === c} onClick={() => setF({ ...f, color: c })} style={{ width: 30, height: 30, borderRadius: 8, background: c, border: 0, boxShadow: f.color === c ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : "none", cursor: "pointer" }} />)}
-            <input type="color" value={f.color} onChange={set("color")} aria-label="Custom brand color" style={{ width: 34, height: 30, padding: 0, border: 0, background: "none" }} />
+            {BRAND_COLORS.map((c) => <button key={c} type="button" aria-label={`Brand color ${c}`} aria-pressed={f.color === c} onClick={() => setF({ ...f, color: c })} style={{ width: 32, height: 32, borderRadius: "var(--radius-control)", background: c, border: 0, boxShadow: f.color === c ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : "none", cursor: "pointer" }} />)}
+            <input type="color" value={f.color} onChange={set("color")} aria-label="Custom brand color" style={{ width: 38, height: 32, padding: 0, border: 0, background: "none" }} />
           </div>
         </div>
       </div>
@@ -142,7 +145,7 @@ export function CompanySettings() {
           <Field label="Workday starts"><input className="input" type="time" value={f.hours_start} onChange={set("hours_start")} /></Field>
           <Field label="Workday ends"><input className="input" type="time" value={f.hours_end} onChange={set("hours_end")} /></Field>
         </div>
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row" style={{ fontWeight: 400 }}>
           <input type="checkbox" className="switch" checked={f.hub_tips === "1"} onChange={(e) => setF({ ...f, hub_tips: e.target.checked ? "1" : "" })} />
           Let clients add a tip when they pay online
         </label>
@@ -156,13 +159,13 @@ export function CompanySettings() {
             </select>
           </Field>
         </div>
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row" style={{ fontWeight: 400 }}>
           <input type="checkbox" className="switch" checked={f.record_location === "1"} onChange={(e) => setF({ ...f, record_location: e.target.checked ? "1" : "" })} />
           Save where people are when they clock in and out (the office and crew leads see it on Timesheets)
         </label>
       </div>
       <FormError error={save.error} />
-      <div className="form-actions" style={{ justifyContent: "flex-start" }}><Button type="submit" variant="primary" loading={save.isPending}>Save company settings</Button></div>
+      <div className="form-actions" style={{ justifyContent: "flex-start" }}><FormChecks /><Button type="submit" variant="primary" loading={save.isPending} done={saved}>Save company settings</Button></div>
     </form>
   );
 }

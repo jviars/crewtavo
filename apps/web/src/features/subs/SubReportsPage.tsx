@@ -57,7 +57,7 @@ function YearEnd() {
         actions={
           <>
             <label className="select-pill">
-              <Icon name="calendar" size={15} />
+              <Icon name="calendar" size={14} />
               <select value={year} onChange={(e) => setParams({ year: e.target.value }, { replace: true })} aria-label="Year">
                 {(choices.includes(year) ? choices : [year, ...choices]).map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -75,7 +75,7 @@ function YearEnd() {
       {d && (
         <div className="stack">
           <div className="callout callout-info">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow stack-sm" style={{ fontWeight: 400 }}>
               <span>{thresholdText(year, d.threshold)}{d.threshold_note ? ` ${d.threshold_note}` : ""}</span>
               <span>Card and payment-app payments are left out: the card company or app reports those on a 1099-K.</span>
@@ -161,8 +161,9 @@ function WorkersComp() {
       <FormError error={csv.error} />
 
       <div className="toolbar" style={{ flexWrap: "wrap", marginBottom: 16 }}>
-        <div className="btn-group">
-          {presets.map((p) => <Button key={p.key} size="sm" variant={from === p.from && to === p.to ? "primary" : undefined} onClick={() => setRange(p.from, p.to)}>{p.label}</Button>)}
+        {/* A choice, not an action: the highlight slides to the period picked. */}
+        <div className="segmented" role="group" aria-label="Period">
+          {presets.map((p) => <button key={p.key} type="button" aria-pressed={from === p.from && to === p.to} onClick={() => setRange(p.from, p.to)}>{p.label}</button>)}
         </div>
         {/* Wraps on a phone: the label above, the two dates sharing the width. */}
         <div className="row" style={{ gap: 6, flexWrap: "wrap", minWidth: 0, flex: "1 1 300px" }}>
@@ -173,7 +174,7 @@ function WorkersComp() {
         </div>
       </div>
 
-      {!valid && <div className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow">The period has to end on or after it starts.</div></div>}
+      {!valid && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">The period has to end on or after it starts.</div></div>}
       {valid && audit.isPending && <Loading><CardSkeleton lines={5} /></Loading>}
       {audit.error && <div className="card"><ErrorState error={audit.error} onRetry={() => audit.refetch()} /></div>}
       {d && (

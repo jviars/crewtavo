@@ -3,17 +3,30 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { downloadBlob } from "@/lib/csv";
+import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/session";
+import { startTask } from "@/lib/tasks";
 import { exportEverything } from "./exportData";
 
 export function DataSettings() {
   const session = useSession();
   const [step, setStep] = useState<string | null>(null);
+  // Reading everything can take a while, so it reports in the task island too, and carries on if you leave the page.
   const download = useMutation({
-    meta: { success: "Your data is downloaded" },
+    meta: { inline: true },
     mutationFn: async () => {
-      const { name, blob } = await exportEverything(session, setStep);
-      downloadBlob(name, blob);
+      const task = startTask({ label: "Downloading your data", detail: "Getting ready…" });
+      try {
+        const { name, blob } = await exportEverything(session, (what) => {
+          setStep(what);
+          task.rename("Downloading your data", what);
+        });
+        downloadBlob(name, blob);
+        task.done("Your data is downloaded");
+      } catch (error) {
+        task.fail(errorMessage(error));
+        throw error;
+      }
     },
     onSettled: () => setStep(null),
   });
@@ -33,7 +46,7 @@ export function DataSettings() {
         </ul>
         <span className="muted small">Photos, signed documents and messages aren&apos;t in it yet. It includes pay rates and subcontractors&apos; details, so keep it somewhere safe.</span>
         <div>
-          <Button variant="primary" icon="download" loading={download.isPending} onClick={() => download.mutate()}>
+          <Button variant="primary" icon="download" loading={download.isPending} slowHint={false} onClick={() => download.mutate()}>
             {download.isPending ? step ?? "Getting ready…" : "Download all your data"}
           </Button>
         </div>

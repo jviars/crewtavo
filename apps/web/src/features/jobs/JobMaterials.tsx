@@ -6,22 +6,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
-import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
 import { formatDate, formatMoneyCents } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
+import { undoable } from "@/lib/undo";
 
 const UNITS = ["ton", "yd³", "gal", "load", "bag", "ea", "lf", "sq yd"];
 const qty = (n: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(n);
 
+const materialsKey = (jobId: string) => ["job", jobId, "materials"];
+
 export function useJobMaterials(jobId: string) {
   return useQuery({
-    queryKey: ["job", jobId, "materials"],
+    queryKey: materialsKey(jobId),
     queryFn: async () => {
       const rows = unwrap(await supabase().from("job_materials").select("id, visit_id, name, quantity, unit, ticket, supplier, photo_path, logged_by, logged_at").eq("job_id", jobId).order("logged_at", { ascending: false }));
       const urls = await signedUrls(rows.flatMap((r) => (r.photo_path ? [r.photo_path] : []))).catch(() => ({}) as Record<string, string>);
@@ -29,12 +33,18 @@ export function useJobMaterials(jobId: string) {
     },
   });
 }
+type Material = NonNullable<ReturnType<typeof useJobMaterials>["data"]>[number];
 
-/** On the job page (all of it) or a visit (just that day's), with a "Log material" button. */
-export function MaterialsCard({ jobId, visitId, showCosts, compact = false }: { jobId: string; visitId?: string; showCosts?: boolean; compact?: boolean }) {
+/**
+ * On the job page (all of it) or a visit (just that day's), with a "Log material" button. The job
+ * page shows it once something's logged, or opens it with the dialog up (startAdding) from its add
+ * buttons; onAddClosed tells it that dialog has closed, so an empty card can go again.
+ */
+export function MaterialsCard({ jobId, visitId, showCosts, compact = false, startAdding = false, onAddClosed }: { jobId: string; visitId?: string; showCosts?: boolean; compact?: boolean; startAdding?: boolean; onAddClosed?: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
-  const [logging, setLogging] = useState(false);
+  const [logging, setLogging] = useState(startAdding);
+  const listRef = useListAnimation<HTMLDivElement>();
   const materials = useJobMaterials(jobId);
   const costs = useQuery({
     queryKey: ["job", jobId, "material-costs"],
@@ -42,10 +52,28 @@ export function MaterialsCard({ jobId, visitId, showCosts, compact = false }: { 
     queryFn: async () => unwrap(await supabase().rpc("job_material_costs", { p_job: jobId })),
   });
   const remove = useMutation({
-    meta: { success: "Removed" },
+    meta: { inline: true },
     mutationFn: async (id: string) => unwrap(await supabase().from("job_materials").delete().eq("id", id)),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["job", jobId] }),
   });
+  // Gone at once with Undo on the toast; deleted for real once the toast leaves.
+  const removeEntry = (m: Material) => {
+    const key = materialsKey(jobId);
+    undoable({
+      title: "Material removed",
+      tone: "job",
+      hide: () => {
+        void queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData<Material[]>(key, (all) => all?.filter((x) => x.id !== m.id));
+      },
+      restore: () => queryClient.setQueryData<Material[]>(key, (all) => (all && !all.some((x) => x.id === m.id) ? [...all, m].sort((a, b) => b.logged_at.localeCompare(a.logged_at)) : all)),
+      commit: () => remove.mutateAsync(m.id),
+    });
+  };
+  const closeLog = () => {
+    setLogging(false);
+    onAddClosed?.();
+  };
   const rows = (materials.data ?? []).filter((m) => !visitId || m.visit_id === visitId);
   const canFix = (m: { logged_by: string | null; logged_at: string }) => hasRole(session, "admin", "office", "crew_lead") || (m.logged_by === session.userId && Date.now() - Date.parse(m.logged_at) < 86_400_000);
   // Totals by material, for the whole job.
@@ -63,21 +91,25 @@ export function MaterialsCard({ jobId, visitId, showCosts, compact = false }: { 
         {compact ? <strong>Materials used</strong> : <h2 className="section-title">Materials used</h2>}
         <Button size="sm" icon="plus" onClick={() => setLogging(true)}>Log material</Button>
       </div>
-      <div className={compact ? undefined : "card"}>
+      <div className={compact ? undefined : "card"} ref={listRef}>
         {materials.isPending && <div className="card-row"><Skeleton width="50%" /></div>}
-        {materials.data && rows.length === 0 && <div className={compact ? "muted small" : "card-row muted small"}>{visitId ? "Log tons, gallons or loads as they come in, with the ticket number." : "Nothing logged yet. Crews log materials from the visit on their phone."}</div>}
+        {materials.data && rows.length === 0 && (
+          <EmptyState inline title={visitId ? "Nothing logged yet" : "No materials logged yet"}>
+            {visitId ? "Log tons, gallons or loads as they come in, with the ticket number." : null}
+          </EmptyState>
+        )}
         {rows.map((m) => (
           <div key={m.id} className="card-row" style={compact ? { paddingLeft: 0, paddingRight: 0 } : undefined}>
             {m.photo_url ? (
               <a href={m.photo_url} target="_blank" rel="noreferrer" className="thumb" style={{ width: 38, height: 38, flex: "none" }} aria-label="Open ticket photo"><img src={m.photo_url} alt="" /></a>
             ) : (
-              <span style={{ width: 38, height: 38, borderRadius: 10, display: "grid", placeItems: "center", background: "var(--fill-2)", color: "var(--text-3)", flex: "none" }}><Icon name="truck" size={17} /></span>
+              <span style={{ width: 38, height: 38, borderRadius: 8, display: "grid", placeItems: "center", background: "var(--fill-2)", color: "var(--text-3)", flex: "none" }}><Icon name="truck" size={16} /></span>
             )}
             <span className="grow" style={{ minWidth: 0 }}>
               <strong>{qty(Number(m.quantity))} {m.unit} · {m.name}</strong>
               <span className="muted small" style={{ display: "block" }}>{[m.ticket && `Ticket ${m.ticket}`, m.supplier, formatDate(m.logged_at)].filter(Boolean).join(" · ")}</span>
             </span>
-            {canFix(m) && <Button size="sm" variant="ghost" icon="trash" aria-label={`Remove ${m.name}`} onClick={async () => (await confirm({ title: "Remove this entry?", confirmLabel: "Remove", danger: true })) && remove.mutate(m.id)} />}
+            {canFix(m) && <Button size="sm" variant="ghost" icon="trash" aria-label={`Remove ${m.name}`} onClick={() => removeEntry(m)} />}
           </div>
         ))}
         {!visitId && totals.length > 1 && (
@@ -90,12 +122,13 @@ export function MaterialsCard({ jobId, visitId, showCosts, compact = false }: { 
           {costs.data.some((c) => c.unit_cost == null) ? ". Some materials have no cost in the price list yet." : ""}
         </span>
       )}
-      {logging && <MaterialDialog jobId={jobId} visitId={visitId ?? null} onClose={() => setLogging(false)} onSaved={() => queryClient.invalidateQueries({ queryKey: ["job", jobId] })} />}
+      {logging && <MaterialDialog jobId={jobId} visitId={visitId ?? null} onClose={closeLog} onSaved={() => queryClient.invalidateQueries({ queryKey: ["job", jobId] })} />}
     </section>
   );
 }
 
-export function MaterialDialog({ jobId, visitId, onClose, onSaved }: { jobId: string; visitId: string | null; onClose: () => void; onSaved: () => void }) {
+/** onSaved may return a promise (a refetch): the dialog stays until it's done, so the new row is there as it closes. */
+export function MaterialDialog({ jobId, visitId, onClose, onSaved }: { jobId: string; visitId: string | null; onClose: () => void; onSaved: () => unknown }) {
   const session = useSession();
   const choices = useQuery({
     queryKey: ["material-choices", session.company.id],
@@ -132,8 +165,8 @@ export function MaterialDialog({ jobId, visitId, onClose, onSaved }: { jobId: st
         }),
       );
     },
-    onSuccess: () => {
-      onSaved();
+    onSuccess: async () => {
+      await onSaved();
       onClose();
     },
   });
@@ -148,9 +181,9 @@ export function MaterialDialog({ jobId, visitId, onClose, onSaved }: { jobId: st
             </select>
           )}
         </Field>
-        {!serviceId && <Field label="What was it"><input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="Surface mix, #57 stone, sealer…" required /></Field>}
+        {!serviceId && <Field label="What was it" requiredMessage="Say what material it was."><input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder="Surface mix, #57 stone, sealer…" required /></Field>}
         <div className="form-grid">
-          <Field label="How much"><input className="input" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ""))} required autoFocus /></Field>
+          <Field label="How much" requiredMessage="Enter how much was used."><input className="input" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ""))} required autoFocus /></Field>
           <Field label="Unit">
             <select className="select" value={unit} onChange={(e) => setUnit(e.target.value)}>
               {[...new Set([unit, ...UNITS])].map((u) => <option key={u}>{u}</option>)}
@@ -166,8 +199,10 @@ export function MaterialDialog({ jobId, visitId, onClose, onSaved }: { jobId: st
         </label>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!(amount > 0)}>Log it</Button>
+          {/* With a ticket photo it uploads, which is slow anyway. */}
+          <Button type="submit" variant="primary" loading={save.isPending} slowHint={file ? false : undefined}>Log it</Button>
         </div>
       </form>
     </Dialog>

@@ -186,29 +186,29 @@ export function offerActions(p: OfferState, signIns: number | null | undefined, 
   }
 }
 
-/** The offer buttons' words; the rest are actionLabel's. */
+/** The offer buttons' words (a verb and two or three words, like every button); the rest are actionLabel's. */
 export function offerActionLabel(action: "send" | "withdraw" | "change" | "other", p: OfferState): string {
   switch (action) {
     case "send":
       return "Send offer";
     case "withdraw":
-      return isChangeOffer(p) ? "Withdraw the new price" : "Withdraw the offer";
+      return isChangeOffer(p) ? "Withdraw new price" : "Withdraw offer";
     case "change":
-      return "Change the price";
+      return "Change price";
     case "other":
-      return "Offer to someone else";
+      return "Offer someone else";
   }
 }
 
-/** Agree, on a new price waiting for their answer: it sets their price without waiting for them. */
-export const AGREE_CHANGE_LABEL = "They agreed the new price";
+/** Agree, on a new price waiting for their answer: it sets their price without waiting for them (the confirm says so). */
+export const AGREE_CHANGE_LABEL = "Agree new price";
 
 /** What's asked before the office agrees a new price for the sub (they said yes on the phone). */
 export function agreeChangeConfirm(p: OfferState, name: string) {
   return {
     title: "Agree the new price for them?",
     body: `This sets ${name}'s price to ${moneyShort(p.total)} (was ${moneyShort(p.accepted_snapshot?.total)}) without waiting for their answer. They're told.`,
-    confirmLabel: "Agree the new price",
+    confirmLabel: "Agree new price",
     cancelLabel: "Wait for them",
   };
 }

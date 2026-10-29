@@ -100,7 +100,7 @@ export function PaperworkPage() {
       setSent((s) => [...s, ...list.filter((i) => done.includes(i.key)).map((i) => i.label)]);
       setItems((all) => (all ?? []).filter((i) => !done.includes(i.key)));
       setTouched(false);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     },
   });
 
@@ -116,7 +116,7 @@ export function PaperworkPage() {
   return (
     <div className="public-page" style={{ paddingTop: 20 }}>
       <div className="public-wrap" style={{ maxWidth: 560 }}>
-        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="45%" height={14} /><Skeleton width="80%" height={26} /><Skeleton height={220} radius={10} /></div>}
+        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="45%" height={14} /><Skeleton width="80%" height={26} /><Skeleton height={220} radius={8} /></div>}
         {view.error && (
           <div className="card">
             <div className="empty-state error-state">
@@ -135,8 +135,8 @@ export function PaperworkPage() {
 
             {sent.length > 0 && (
               <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }} role="status">
-                <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
-                <h1 style={{ fontSize: 22, fontWeight: 800 }}>Thanks, it's in</h1>
+                <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
+                <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>Thanks, it's in</h1>
                 <p style={{ margin: 0 }}>{data.company.name} got {askingFor(sent.map((label) => ({ label })))}. They'll check {sent.length === 1 ? "it" : "them"} and get in touch if anything's missing.</p>
                 {allSent && <Button variant="ghost" onClick={() => setSent([])}>Send something else</Button>}
               </div>
@@ -145,7 +145,7 @@ export function PaperworkPage() {
             {!allSent && (
               <form className="card card-pad stack" noValidate onSubmit={onSubmit}>
                 {sent.length === 0 && (
-                  <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.01em", margin: 0 }}>
+                  <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)", margin: 0 }}>
                     {list.length ? greeting(data.sub.name, data.company.name) : `Hi ${data.sub.name}, you're all set`}
                   </h1>
                 )}
@@ -154,7 +154,7 @@ export function PaperworkPage() {
                 )}
                 {data.waiting.length > 0 && sent.length === 0 && (
                   <div className="callout callout-info">
-                    <Icon name="info" size={18} />
+                    <Icon name="info" size={20} />
                     <div className="grow" style={{ fontWeight: 400 }}>Already sent, waiting for {data.company.name} to check: {data.waiting.map((w) => REQUIREMENT_LABELS[w] ?? w).join(", ")}.</div>
                   </div>
                 )}
@@ -238,7 +238,7 @@ export function ItemCard({
     if (file) onChange({ file });
   };
   return (
-    <section className="stack-sm" style={{ padding: 14, borderRadius: 12, border: `1px solid ${fileProblem || dateProblem ? "var(--danger)" : "var(--border)"}` }} aria-label={item.label}>
+    <section className="stack-sm" style={{ padding: 14, borderRadius: "var(--radius-card)", border: `1px solid ${fileProblem || dateProblem ? "var(--danger)" : "var(--border)"}` }} aria-label={item.label}>
       <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
         <span className="grow">
           <strong style={{ fontSize: 16 }}>{item.label}</strong>

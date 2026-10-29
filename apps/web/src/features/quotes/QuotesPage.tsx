@@ -6,7 +6,7 @@ import { Icon } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { EntityStatus } from "@/components/ui/StatusPill";
+import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatMoney, timeAgo } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
@@ -15,12 +15,13 @@ import { choiceLabel, isSignedQuote } from "../documents/build";
 import { NewQuoteDialog } from "./NewQuoteDialog";
 import { listPrice, withOptionLines } from "./options";
 
+// A tab for one status says it as the status pill does.
 const FILTERS = [
   { key: "open", label: "Open", statuses: ["draft", "sent", "changes_requested", "approved"] },
-  { key: "draft", label: "Draft", statuses: ["draft"] },
-  { key: "sent", label: "Awaiting response", statuses: ["sent"] },
-  { key: "changes", label: "Changes requested", statuses: ["changes_requested"] },
-  { key: "approved", label: "Approved", statuses: ["approved"] },
+  { key: "draft", label: statusText("quote", "draft"), statuses: ["draft"] },
+  { key: "sent", label: statusText("quote", "sent"), statuses: ["sent"] },
+  { key: "changes", label: statusText("quote", "changes_requested"), statuses: ["changes_requested"] },
+  { key: "approved", label: statusText("quote", "approved"), statuses: ["approved"] },
   { key: "closed", label: "Converted or lost", statuses: ["converted", "lost", "archived"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
@@ -100,7 +101,7 @@ export function QuotesPage() {
           {term ? (
             <EmptyState icon="search" title="No quotes match" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
           ) : (
-            <EmptyState icon="quote" title={filter === "open" ? "No open quotes" : "Nothing here"} action={canSell && filter === "open" && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>Create a quote</Button>}>
+            <EmptyState icon="quote" title={filter === "open" ? "No open quotes" : "Nothing here"} action={canSell && filter === "open" && <Button icon="plus" onClick={() => setParams({ new: "1" })}>New quote</Button>}>
               {filter === "open" ? "Quotes your clients can approve online, with optional add-ons and deposits." : "No quotes have this status."}
             </EmptyState>
           )}
@@ -124,7 +125,7 @@ export function QuotesPage() {
                       {price.from ? <span title="Its cheapest option">From {formatMoney(price.amount)}</span> : formatMoney(price.amount)}
                       {note && <div className="muted small">{note}</div>}
                     </td>
-                    <td title={q.sent_at ? formatDate(q.sent_at) : undefined}>{q.sent_at ? timeAgo(q.sent_at) : <span className="muted">Not sent</span>}</td>
+                    <td title={q.sent_at ? formatDate(q.sent_at) : undefined}>{q.sent_at ? timeAgo(q.sent_at) : <span className="muted">—</span>}</td>
                     <td><EntityStatus kind="quote" status={q.status} /></td>
                   </tr>
                 );

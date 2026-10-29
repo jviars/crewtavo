@@ -12,8 +12,12 @@ export function readAmount(draft: string, { percent, max }: { percent?: boolean;
   return Number(toUnits(draft, decimals)) / 10 ** decimals;
 }
 
-/** Dollar or percent field that saves on blur or Enter and rejects bad values. */
-export function MoneyInput({ value, onSave, percent, max, width = 120, label }: { value: number; onSave: (v: number) => void; percent?: boolean; max?: number; width?: number; label?: string }) {
+/**
+ * Dollar or percent field that saves on blur or Enter and rejects bad values. `onEdit` hears each
+ * keystroke, for a page's "Edited" save status (components/ui/SaveStatus), and
+ * `onUnchanged` hears a blur that saves nothing (the same value, or one it turned down).
+ */
+export function MoneyInput({ value, onSave, onEdit, onUnchanged, percent, max, width = 120, label }: { value: number; onSave: (v: number) => void; onEdit?: () => void; onUnchanged?: () => void; percent?: boolean; max?: number; width?: number; label?: string }) {
   const [draft, setDraft] = useState(String(value));
   const [error, setError] = useState(false);
   useEffect(() => setDraft(String(value)), [value]);
@@ -23,9 +27,11 @@ export function MoneyInput({ value, onSave, percent, max, width = 120, label }: 
       setError(true);
       setDraft(String(value));
       setTimeout(() => setError(false), 1500);
+      onUnchanged?.();
       return;
     }
     if (rounded !== value) onSave(rounded);
+    else onUnchanged?.();
   };
   return (
     <span className="input-group" style={{ width }}>
@@ -38,7 +44,10 @@ export function MoneyInput({ value, onSave, percent, max, width = 120, label }: 
         aria-label={label}
         aria-invalid={error || undefined}
         title={error ? (max !== undefined ? `Enter 0 to ${max}` : "Enter a number") : undefined}
-        onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+        onChange={(e) => {
+          setDraft(e.target.value.replace(/[^0-9.]/g, ""));
+          onEdit?.();
+        }}
         onFocus={(e) => e.target.select()}
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}

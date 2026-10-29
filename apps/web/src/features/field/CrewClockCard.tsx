@@ -127,7 +127,7 @@ export function CrewClockCard({ visits }: { visits: VisitTarget[] }) {
             {entry ? (
               <Button size="sm" variant="ghost" icon="pause" aria-label={`Clock out ${name}`} loading={act.isPending && act.variables?.who.length === 1 && act.variables.who[0] === id} onClick={() => act.mutate({ who: [id], target: null })} />
             ) : (
-              clockIn([id], `Clock in ${name}`, "In")
+              clockIn([id], `Clock in ${name}`, "Clock in")
             )}
           </div>
         );

@@ -1,9 +1,16 @@
-/* The quote page (QuotePage.tsx): what its totals are for when it offers options, and "Which option
-   did they choose?", one card per option to pick from. */
+/* The quote page (QuotePage.tsx): what its totals are for when it offers options, its end date, and
+   "Which option did they choose?", one card per option to pick from. */
 
-.totalsFor { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text-2); overflow-wrap: anywhere; }
-.note { margin: 2px 0 6px; font-size: 12.5px; color: var(--text-3); }
-.warn { margin: 2px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--warning); }
+.totalsFor { margin: 0 0 6px; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); overflow-wrap: anywhere; }
+.note { margin: 2px 0 6px; font-size: var(--fs-13); color: var(--text-3); }
+.warn { margin: 2px 0 6px; font-size: var(--fs-13); font-weight: 600; color: var(--warning); }
+
+/* "Valid until": the date (or "No end date") with small buttons to pick, change or remove it. The
+   ghost buttons' own padding is tucked in, so the date lines up with the figures above it. */
+.validUntil { display: inline-flex; align-items: center; gap: 4px; margin-right: -10px; }
+.validUntil :global(.btn-icon) { margin-left: -6px; }
+/* The date reads as the figures do; only its hover says it opens the picker. */
+.validUntil .validUntilDate { font-size: inherit; font-weight: 400; }
 
 /* Which option did they choose? */
 .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 12px; }
@@ -25,8 +32,8 @@
 .choiceChips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; }
 /* A long tier word stops at the card's edge. */
 .choiceText :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
-.choiceName { font-size: 15px; overflow-wrap: anywhere; }
-.choiceTotal { font-size: 13.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.choiceName { font-size: var(--fs-16); overflow-wrap: anywhere; }
+.choiceTotal { font-size: var(--fs-13); color: var(--text-2); font-variant-numeric: tabular-nums; }
 /* On a phone the cards stack, so the picture moves to the side. */
 @media (max-width: 600px) {
   .choice { flex-direction: row; align-items: stretch; }

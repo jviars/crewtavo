@@ -12,7 +12,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -81,9 +81,10 @@ export function PayPeriods() {
   return (
     <div className="stack">
       <div className="toolbar" style={{ flexWrap: "wrap" }}>
-        <div className="btn-group">
+        {/* A choice, not an action: the highlight slides to the period picked, and Mark paid stays the one green button. */}
+        <div className="segmented" role="group" aria-label="Period" style={{ flexWrap: "wrap", maxWidth: "100%" }}>
           {presets.map((p) => (
-            <Button key={p.label} size="sm" variant={range.from === p.from && range.to === p.to ? "primary" : undefined} onClick={() => setRange({ from: p.from, to: p.to })}>{p.label}</Button>
+            <button key={p.label} type="button" aria-pressed={range.from === p.from && range.to === p.to} onClick={() => setRange({ from: p.from, to: p.to })}>{p.label}</button>
           ))}
         </div>
         <div className="row" style={{ gap: 6 }}>
@@ -188,6 +189,7 @@ function MarkPaidDialog({ summary, people, onClose, onSaved }: { summary: Summar
         <Field label="Paid on"><input className="input" type="date" value={paidOn} onChange={(e) => e.target.value && setPaidOn(e.target.value)} /></Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending}>Mark paid</Button>
         </div>

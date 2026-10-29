@@ -17,7 +17,7 @@ test("schedule a visit, then drag it to a new time on the Schedule", async ({ as
 
   await page.goto(`/jobs/${job.id}`);
   await expect(page.getByRole("heading", { level: 1, name: job.title })).toBeVisible();
-  await page.getByRole("button", { name: "Schedule a visit" }).click();
+  await page.getByRole("button", { name: "Add visit" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByLabel("Title")).toHaveValue(job.title);
   await dialog.getByLabel("Date", { exact: true }).fill(day);

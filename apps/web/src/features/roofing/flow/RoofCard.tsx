@@ -44,12 +44,12 @@ export function RoofCard({ takeoff, picture, editLink }: { takeoff: TakeoffRow; 
           <h3 className={styles.roofTitle}>
             {pitched ? (
               <>
-                <span className={styles.roofCheck} aria-hidden="true"><Icon name="check" size={13} strokeWidth={3} /></span>
+                <span className={styles.roofCheck} aria-hidden="true"><Icon name="check" size={14} strokeWidth={2} /></span>
                 Measured: {formatNumber(values.roof_squares!, 1)} squares{pitch ? (pitch === "flat" ? ", flat" : ` at ${pitch}`) : ""}
               </>
             ) : (
               <>
-                <span className={styles.roofWarn} aria-hidden="true"><Icon name="alert" size={13} strokeWidth={2.5} /></span>
+                <span className={styles.roofWarn} aria-hidden="true"><Icon name="alert" size={14} /></span>
                 Measured from above: {formatNumber(Number(takeoff.total_area_sqft))} sq ft
               </>
             )}

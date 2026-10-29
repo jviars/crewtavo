@@ -1,7 +1,8 @@
 /**
  * The schedule's time grid: hours down the side, one column per day (week) or per crew (day).
- * Visits sit at their time and length; side-by-side when they overlap, marked when a crew is
- * double-booked. Anytime visits sit in a row above the hours. Click an empty spot to book it,
+ * Visits sit at their time and length, tinted in their crew's color; side-by-side when they overlap,
+ * marked when a crew is double-booked. A block shows only the rows its height has room for
+ * (fitBlock). Anytime visits sit in a row above the hours. Click an empty spot to book it,
  * drag a visit to move it, drag its bottom edge to change its length. Events from other calendars
  * (Zoho, Outlook, Google...) sit among the visits, hatched in their calendar's color; they can be
  * opened but not moved.
@@ -55,6 +56,41 @@ const PHONE_PPM = 1.6;
 const PHONE = "(max-width: 700px)";
 const MIN_HEIGHT = 22;
 
+/** The height of each row in a visit block, in pixels: the line heights in features.css. */
+const ROW = { line: 15, time: 13, people: 20 };
+/** A block's border and padding above and below its rows. */
+const BLOCK_PAD = 6;
+
+export interface BlockFit {
+  time: boolean;
+  /** How many lines the title gets: whole lines only, so none shows cut through its letters. */
+  title: number;
+  /** The people on a row of their own (with first names), at the end of the title's line, or left out. */
+  people: "row" | "inline" | false;
+  hold: boolean;
+  client: boolean;
+}
+
+/**
+ * What a visit block of this height has room for, most important first: the title's first line,
+ * the time, the people, a weather hold, the client, then more of the title. A row that doesn't fit
+ * is left out rather than shown cut off, and the time always has its row to itself.
+ */
+export function fitBlock(height: number, has: { time?: boolean; people?: boolean; hold?: boolean; client?: boolean }): BlockFit {
+  let room = height - BLOCK_PAD - ROW.line;
+  const take = (wanted: boolean | undefined, px: number) => {
+    if (!wanted || room < px) return false;
+    room -= px;
+    return true;
+  };
+  const time = take(has.time, ROW.time);
+  const people = take(has.people, ROW.people) ? "row" : take(has.people, ROW.people - ROW.line) ? "inline" : false;
+  const hold = take(has.hold, ROW.line);
+  const client = take(has.client, ROW.line);
+  // Faces at the end of the title's line keep it to one line.
+  return { time, title: people === "inline" ? 1 : 1 + Math.min(2, Math.floor(room / ROW.line)), people, hold, client };
+}
+
 /** Pixels per minute for this screen, following it when the phone turns or the window resizes. */
 export function useGridScale() {
   const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
@@ -79,6 +115,22 @@ export const clock = (minutes: number) => {
   const m = minutes % 60;
   return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
 };
+
+/**
+ * "1:30 – 2:30 PM", the way Google Calendar writes a time range. A narrow block drops the end and
+ * shows "1:30 PM" instead (features.css), so its time is never cut off.
+ */
+export function TimeRange({ start, end }: { start: string; end?: string | null }) {
+  const [, time = start, meridiem = ""] = /^(.*?)(\s*[AP]M)$/.exec(start) ?? [];
+  const shared = Boolean(end && meridiem && end.endsWith(meridiem.trim()));
+  return (
+    <>
+      {time}
+      <span className={shared ? "tg-ampm" : undefined}>{meridiem}</span>
+      {end && <span className="tg-end"> – {end}</span>}
+    </>
+  );
+}
 
 interface Placed<V> {
   v: V;
@@ -157,6 +209,7 @@ export function TimeGrid<V extends GridVisit>({
   onCreate,
   content,
   stale,
+  selected,
   externalFor,
   onOpenExternal,
 }: {
@@ -179,9 +232,11 @@ export function TimeGrid<V extends GridVisit>({
   wasDragging: () => boolean;
   onOpen: (visit: V) => void;
   onCreate: (column: GridColumn, minutes: number | null) => void;
-  /** The text inside a visit block. */
-  content: (visit: V, size: "tiny" | "short" | "full") => ReactNode;
+  /** The text inside a visit: a block's, for its height in pixels (fitBlock), or an Anytime chip's one line. */
+  content: (visit: V, height?: number) => ReactNode;
   stale?: boolean;
+  /** The visit open in a dialog, drawn a little stronger so it's easy to find again. */
+  selected?: string | null;
 }) {
   const now = useNowMinutes(tz);
   const height = (endMin - startMin) * ppm;
@@ -226,11 +281,12 @@ export function TimeGrid<V extends GridVisit>({
                     data-status={v.status}
                     data-kind={v.kind}
                     data-dragging={drag?.visit.id === v.id || undefined}
+                    data-selected={selected === v.id || undefined}
                     style={{ "--crew": (v as GridVisit & { crewColor?: string }).crewColor } as CSSProperties}
                     onPointerDown={draggable(v) ? startDrag(v, "move") : undefined}
                     onClick={() => !wasDragging() && onOpen(v)}
                   >
-                    {content(v, "tiny")}
+                    {content(v)}
                   </button>
                 ))}
                 {allDay.map((e) => (
@@ -270,15 +326,15 @@ export function TimeGrid<V extends GridVisit>({
               >
                 {placed.map(({ v: item, start, end, lane, lanes, conflict }) => {
                   const h = Math.max(MIN_HEIGHT, (end - start) * ppm - 2);
-                  const size = h < 34 ? "tiny" : h < 60 ? "short" : "full";
                   const box = { top: (start - startMin) * ppm + 1, height: h, left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)` };
                   if (isExternal(item)) {
                     const e = item.ext;
+                    const fit = fitBlock(h, { time: true, client: true });
                     return (
                       <button key={item.id} type="button" className="tg-event tg-ext" data-free={!e.busy || undefined} title={`${e.title} · ${e.calendar}`} style={{ ...box, "--cal": e.color ?? undefined } as CSSProperties} onClick={() => onOpenExternal?.(e)}>
-                        {size !== "tiny" && <span className="tg-t">{clock(start)} – {clock(end)}</span>}
-                        <span className="tg-n" style={size === "tiny" ? { WebkitLineClamp: 1 } : undefined}>{e.title}</span>
-                        {size === "full" && <span className="tg-m"><Icon name="calendar" size={11} /> {e.calendar}</span>}
+                        {fit.time && <span className="tg-t"><TimeRange start={clock(start)} end={clock(end)} /></span>}
+                        <span className="tg-n" style={{ WebkitLineClamp: fit.title }}>{e.title}</span>
+                        {fit.client && <span className="tg-m"><Icon name="calendar" size={12} /> {e.calendar}</span>}
                       </button>
                     );
                   }
@@ -292,19 +348,20 @@ export function TimeGrid<V extends GridVisit>({
                       data-kind={v.kind}
                       data-conflict={conflict || undefined}
                       data-dragging={drag?.visit.id === v.id || undefined}
+                      data-selected={selected === v.id || undefined}
                       title={conflict === "visit" ? "This crew is booked for another visit at the same time" : conflict === "calendar" ? "This crew's calendar shows them busy at this time" : undefined}
                       style={{ ...box, "--crew": (v as GridVisit & { crewColor?: string }).crewColor } as CSSProperties}
                       onPointerDown={draggable(v) ? startDrag(v, "move") : undefined}
                       onClick={() => !wasDragging() && onOpen(v)}
                     >
-                      {content(v, size)}
+                      {content(v, h)}
                       {draggable(v) && <span className="tg-resize" aria-hidden="true" onPointerDown={startDrag(v, "resize")} />}
                     </button>
                   );
                 })}
                 {ghost && drag && (
                   <div className="tg-ghost" style={{ top: (ghost.minutes - startMin) * ppm + 1, height: Math.max(MIN_HEIGHT, drag.duration * ppm - 2) }}>
-                    {clock(ghost.minutes)} – {clock(ghost.minutes + drag.duration)}
+                    <TimeRange start={clock(ghost.minutes)} end={clock(ghost.minutes + drag.duration)} />
                   </div>
                 )}
                 {col.today && now >= startMin && now <= endMin && <div className="tg-now" style={{ top: (now - startMin) * ppm }} aria-hidden="true" />}

@@ -16,6 +16,7 @@ import { ROOF_EDGE_COLORS } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useSearchParams } from "react-router-dom";
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -26,6 +27,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addressLine, formatNumber } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { AddressSearch, type ClientSuggestion, type PlaceSuggestion } from "./AddressSearch";
@@ -62,6 +64,10 @@ type Banner =
 interface SaveResult { id: string; total_area_sqft: number; total_area_sqyd: number; total_length_ft: number; roofing_squares: number | null }
 interface SavedView { center?: [number, number]; zoom?: number; imagery?: string; mode?: "auto" | "manual"; overlays?: string[] }
 interface Found { found: boolean; lat?: number; lng?: number; formatted?: string | null; country?: string | null }
+
+/** The totals as formatNumber writes them, rolling to each new value as shapes are drawn. */
+const WHOLE = { maximumFractionDigits: 0 };
+const TENTHS = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
 
 /** A pitch the way it's saved ("6/12" for 6-12), or as typed while it doesn't read yet. */
 const tidyPitch = (pitch: string) => (pitch.trim() && isPitch(pitch) ? normalizePitch(pitch) : pitch.trim());
@@ -341,6 +347,7 @@ export function MeasurePage() {
   const roofEdges = edgeLengths(summary);
   const cubicYards = depthIn ? (summary.total_area_sqft * (depthIn / 12)) / 27 : 0;
   const asphaltTons = depthIn ? (summary.total_area_sqyd * depthIn * 110) / 2000 : 0;
+  const shapesRef = useListAnimation<HTMLDivElement>();
   // Roofing shows the roof tools on every row; anyone else gets them once they set a pitch or an edge.
   const roofing = company.trade_preset === "roofing_exteriors" || params.has("roofing") || roofOpen || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
   // The roof, step by step (RoofSteps.tsx), for roofers and a roof opened from Roofing.
@@ -945,8 +952,7 @@ export function MeasurePage() {
       queryClient.invalidateQueries({ queryKey: ["measurements"] });
       if (ctx?.ids.quote) queryClient.invalidateQueries({ queryKey: ["quote", ctx.ids.quote] });
       if (ctx?.ids.request) queryClient.invalidateQueries({ queryKey: ["request", ctx.ids.request] });
-      const where = ctx?.quote ? ` on quote #${ctx.quote.number}` : ctx?.invoice ? ` on invoice #${ctx.invoice.number}` : "";
-      toast.success(`Saved${where}: ${formatNumber(result.total_area_sqft)} sq ft${result.total_length_ft ? `, ${formatNumber(result.total_length_ft)} ft` : ""}`);
+      // The button turns to Saved where it was pressed; a toast only for what didn't go to plan.
       if (pictureProblem) toast.error("Saved, but the map picture couldn't be kept, so clients would see the sizes only. Save again to retry.");
       else if (swapped) toast.success(`The saved picture uses ${imageryInfo(swapped).name}, since Google's terms don't allow keeping pictures of its imagery.`);
     },
@@ -1036,7 +1042,7 @@ export function MeasurePage() {
             <>
               <Button variant="ghost" icon="info" onClick={() => setHelp(true)}>How it works</Button>
               {!dirty && saved && project ? (
-                <Link to={`${project.path}#estimate`} className="btn btn-primary">Next: Estimate <Icon name="arrowRight" size={15} /></Link>
+                <Link to={`${project.path}#estimate`} className="btn btn-primary">Open the estimate <Icon name="arrowRight" size={16} /></Link>
               ) : (
                 !dirty && saved && back && <Link to={back.to} className="btn">Back to {back.label}</Link>
               )}
@@ -1112,27 +1118,27 @@ export function MeasurePage() {
                 {!aligning && <div className="measure-rail" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical">
                   {paving && (
                     <button type="button" className="measure-tool measure-tool-find" aria-pressed={Boolean(tap.item)} onClick={startFind} title={touch ? "Find paving: put a box round a lot, then press Outline" : "Find paving (B): put a box round a lot, then press Outline"}>
-                      <Icon name="sparkle" size={18} />
+                      <Icon name="sparkle" size={20} />
                       <span>Find</span>
                     </button>
                   )}
                   {TOOLS.map((t) => (
                     <button key={t.tool} type="button" className="measure-tool" aria-pressed={tool === t.tool && !tap.item} onClick={() => pickTool(t.tool)} title={touch ? t.what : `${t.label} (${t.key}): ${t.what}`}>
-                      <Icon name={t.icon} size={18} />
+                      <Icon name={t.icon} size={20} />
                       <span>{t.label}</span>
                     </button>
                   ))}
                   <span className="measure-rail-sep" aria-hidden="true" />
                   {drawing ? (
                     <button type="button" className="measure-tool" onClick={() => mapRef.current?.cancel()} title={touch ? "Stop drawing this shape" : "Stop drawing this shape (Esc)"}>
-                      <Icon name="x" size={18} /><span>Cancel</span>
+                      <Icon name="x" size={20} /><span>Cancel</span>
                     </button>
                   ) : null}
                   <button type="button" className="measure-tool" onClick={() => mapRef.current?.undo()} disabled={!history.undo && !drawing} title={touch ? "Undo" : "Undo (Ctrl+Z)"}>
-                    <Icon name="undo" size={18} /><span>Undo</span>
+                    <Icon name="undo" size={20} /><span>Undo</span>
                   </button>
                   <button type="button" className="measure-tool" onClick={() => mapRef.current?.redo()} disabled={!history.redo} title={touch ? "Redo" : "Redo (Ctrl+Shift+Z)"}>
-                    <Icon name="redo" size={18} /><span>Redo</span>
+                    <Icon name="redo" size={20} /><span>Redo</span>
                   </button>
                   {tool === "select" && selectedShape && (selectedShape.kind === "Area" || selectedShape.kind === "Cutout") && (
                     <button
@@ -1142,19 +1148,19 @@ export function MeasurePage() {
                       onClick={() => convert(selectedShape.id, selectedShape.kind === "Cutout" ? "Area" : "Cutout")}
                       title={selectedShape.kind === "Cutout" ? "This is a cutout. Tap to count it as an area again." : "Make this a cutout: leave it out of the areas under it"}
                     >
-                      <Icon name="scissors" size={18} /><span>Cut out</span>
+                      <Icon name="scissors" size={20} /><span>Cut out</span>
                     </button>
                   )}
                   {tool === "select" && selected && (
                     <button type="button" className="measure-tool" data-danger onClick={removeSelected} title={touch ? "Delete this shape" : "Delete this shape (Delete)"}>
-                      <Icon name="trash" size={18} /><span>Delete</span>
+                      <Icon name="trash" size={20} /><span>Delete</span>
                     </button>
                   )}
                 </div>}
                 <div className="measure-corner">
-                  <button type="button" className="measure-round" onClick={locate} title="Go to where I am" aria-label="Go to where I am"><Icon name="navigation" size={17} /></button>
-                  {shapes.length > 0 && <button type="button" className="measure-round" onClick={() => mapRef.current?.fitShapes()} title={touch ? "Show all shapes" : "Show all shapes (F)"} aria-label="Show all shapes"><Icon name="eye" size={17} /></button>}
-                  <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={17} /></button>
+                  <button type="button" className="measure-round" onClick={locate} title="Go to where I am" aria-label="Go to where I am"><Icon name="navigation" size={16} /></button>
+                  {shapes.length > 0 && <button type="button" className="measure-round" onClick={() => mapRef.current?.fitShapes()} title={touch ? "Show all shapes" : "Show all shapes (F)"} aria-label="Show all shapes"><Icon name="eye" size={16} /></button>}
+                  <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={16} /></button>
                 </div>
                 {aligning ? <LineUpBanner plan={plan} /> : tap.item ? <TapBanner tap={tap} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />}
                 {overlays.includes("slope") && (
@@ -1230,7 +1236,7 @@ export function MeasurePage() {
                 onWaste={setWaste}
                 finish={
                   !dirty && saved && project ? (
-                    <Link to={`${project.path}#estimate`} className="btn btn-primary btn-sm" style={{ justifySelf: "start" }}>Next: Estimate <Icon name="arrowRight" size={15} /></Link>
+                    <Link to={`${project.path}#estimate`} className="btn btn-primary btn-sm" style={{ justifySelf: "start" }}>Open the estimate <Icon name="arrowRight" size={14} /></Link>
                   ) : (
                     <Button size="sm" variant="primary" icon={!dirty && saved ? "check" : undefined} loading={save.isPending} disabled={!shapes.length || aligning || (!dirty && Boolean(saved))} onClick={() => save.mutate()} style={{ justifySelf: "start" }}>
                       {!dirty && saved ? "Saved" : project ? "Save the roof" : saved ? "Save changes" : "Save measurement"}
@@ -1242,12 +1248,13 @@ export function MeasurePage() {
 
             <div className="card">
               <div className="card-head"><strong>Shapes</strong><span className="badge">{rows.length}</span>{shapes.length > 0 && <Button size="sm" variant="ghost" icon="trash" onClick={clearAll} style={{ marginLeft: "auto" }}>Clear all</Button>}</div>
-              {rows.length === 0 ? (
-                <EmptyState compact icon="area" title="Nothing drawn yet">
+              {rows.length === 0 && (
+                <EmptyState inline title="Nothing drawn yet">
                   Pick <strong>Area</strong>, <strong>Line</strong> or <strong>Count</strong> on the map, then {touch ? "tap" : "click"} to draw. <strong>Cut out</strong> leaves the house or a bed out of an area. Sizes show up here as you go.
                 </EmptyState>
-              ) : (
-                rows.map((row, i) => {
+              )}
+              <div ref={shapesRef}>
+                {rows.map((row, i) => {
                   const section = sections.get(row.id);
                   const edge = edges[row.id];
                   const own = pitches[row.id] ?? "";
@@ -1301,14 +1308,14 @@ export function MeasurePage() {
                           aria-label={row.kind === "Cutout" ? `Count ${nameOf(row.id)} as an area` : `Make ${nameOf(row.id)} a cutout`}
                           title={row.kind === "Cutout" ? "Count it as an area again" : "Make it a cutout: leave it out of the areas under it"}
                         >
-                          <Icon name={row.kind === "Cutout" ? "area" : "scissors"} size={15} />
+                          <Icon name={row.kind === "Cutout" ? "area" : "scissors"} size={14} />
                         </button>
                       )}
-                      <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => mapRef.current?.remove(row.id)} aria-label={`Delete shape ${i + 1}`} title="Delete this shape"><Icon name="trash" size={15} /></button>
+                      <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => mapRef.current?.remove(row.id)} aria-label={`Delete shape ${i + 1}`} title="Delete this shape"><Icon name="trash" size={14} /></button>
                     </div>
                   );
-                })
-              )}
+                })}
+              </div>
               {rows.some((r) => r.kind === "Area") && (
                 <div className="card-row measure-buildings">
                   <Button size="sm" icon="home" loading={finding === "cut"} disabled={Boolean(finding)} onClick={cutBuildings}>Cut out buildings</Button>
@@ -1316,8 +1323,8 @@ export function MeasurePage() {
                 </div>
               )}
               <div className="measure-totals">
-                <div><span className="muted">Area</span><strong>{formatNumber(summary.total_area_sqft)} sq ft</strong><span className="muted small">{formatNumber(summary.total_area_sqyd, 1)} sq yd{summary.total_area_sqft >= 4356 ? ` · ${formatNumber(summary.total_area_sqft / 43_560, 2)} acres` : ""}</span></div>
-                <div><span className="muted">Length</span><strong>{formatNumber(summary.total_length_ft)} ft</strong></div>
+                <div><span className="muted">Area</span><strong><AnimatedNumber value={summary.total_area_sqft} format={WHOLE} /> sq ft</strong><span className="muted small">{formatNumber(summary.total_area_sqyd, 1)} sq yd{summary.total_area_sqft >= 4356 ? ` · ${formatNumber(summary.total_area_sqft / 43_560, 2)} acres` : ""}</span></div>
+                <div><span className="muted">Length</span><strong><AnimatedNumber value={summary.total_length_ft} format={WHOLE} /> ft</strong></div>
                 {cutTotal > 0 && <div><span className="muted">Cut out</span><strong>{formatNumber(cutTotal)} sq ft</strong><span className="muted small">not counted in the area</span></div>}
                 {counts > 0 && <div><span className="muted">Count</span><strong>{counts}</strong></div>}
                 {depthIn > 0 && summary.total_area_sqft > 0 && (
@@ -1326,7 +1333,7 @@ export function MeasurePage() {
                     <div><span className="muted">Asphalt (approx.)</span><strong>{formatNumber(asphaltTons, 1)} tons</strong><span className="muted small">at 110 lb per sq yd per inch</span></div>
                   </>
                 )}
-                {squares !== null && <div><span className="muted">Roofing squares</span><strong>{formatNumber(squares, 1)}</strong><span className="muted small">{roofPitches.length > 1 ? "mixed pitches" : `${roofPitches[0] ? pitchLabel(roofPitches[0]) : "flat"} pitch`}, {waste || 0}% waste</span></div>}
+                {squares !== null && <div><span className="muted">Roofing squares</span><strong><AnimatedNumber value={squares} format={TENTHS} /></strong><span className="muted small">{roofPitches.length > 1 ? "mixed pitches" : `${roofPitches[0] ? pitchLabel(roofPitches[0]) : "flat"} pitch`}, {waste || 0}% waste</span></div>}
               </div>
             </div>
 
@@ -1409,9 +1416,9 @@ function ImageryBanner({
     const s = banner.state;
     return (
       <div className="measure-banner measure-banner-good" role="status">
-        <Icon name="sparkle" size={16} />
+        <Icon name="image" size={16} />
         <span className="grow"><strong>Sharper imagery here.</strong> {s.name}'s free state imagery: {s.detail} · {s.flown}.</span>
-        <Button size="sm" variant="primary" onClick={() => onUse(stateId(s))}>Use it</Button>
+        <Button size="sm" onClick={() => onUse(stateId(s))}>Use it</Button>
         <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => onDismiss(s.state)} aria-label="Not now"><Icon name="x" size={14} /></button>
       </div>
     );
@@ -1421,7 +1428,7 @@ function ImageryBanner({
       <div className="measure-banner" role="status">
         <Icon name="info" size={16} />
         <span className="grow">{banner.state.name}'s imagery doesn't reach this spot.</span>
-        <Button size="sm" variant="primary" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
+        <Button size="sm" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
         <button type="button" className="btn btn-sm btn-ghost btn-icon" onClick={() => onDismiss(`left:${banner.state.state}`)} aria-label="Dismiss"><Icon name="x" size={14} /></button>
       </div>
     );
@@ -1431,7 +1438,7 @@ function ImageryBanner({
       <div className="measure-banner measure-banner-warn" role="alert">
         <Icon name="alert" size={16} />
         <span className="grow"><strong>No free US imagery here.</strong> It covers the lower 48 states. {keys.esri_key ? "Esri covers the rest of the world." : isAdmin ? "For aerial imagery anywhere, add a free Esri key." : "An admin can add a free Esri key in Settings for imagery anywhere."}</span>
-        {keys.esri_key ? <Button size="sm" variant="primary" onClick={() => onUse("esri", true)}>Use Esri</Button> : settingsLink}
+        {keys.esri_key ? <Button size="sm" onClick={() => onUse("esri", true)}>Use Esri</Button> : settingsLink}
         <Button size="sm" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
       </div>
     );
@@ -1443,8 +1450,8 @@ function ImageryBanner({
       <Icon name="alert" size={16} />
       <span className="grow">{sentence ? banner.message : <><strong>{name}</strong> {banner.message}. Their server may be busy; you can switch for now.</>}</span>
       <Button size="sm" onClick={onRetry}>Try again</Button>
-      <Button size="sm" variant="primary" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
-      {banner.imagery === "naip" && keys.esri_key && <Button size="sm" variant="primary" onClick={() => onUse("esri", true)}>Use Esri</Button>}
+      <Button size="sm" onClick={() => onUse("auto")}>Use {AUTO_NAME}</Button>
+      {banner.imagery === "naip" && keys.esri_key && <Button size="sm" onClick={() => onUse("esri", true)}>Use Esri</Button>}
       {streetMap && banner.imagery !== "street" && <Button size="sm" onClick={() => onUse("street", true)}>Street map</Button>}
     </div>
   );

@@ -8,7 +8,7 @@
  */
 import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -18,16 +18,14 @@ import { Icon } from "@/components/ui/Icon";
 import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { editKind, FileViewer } from "@/features/files/FileViewer";
-import { addEach, useStorageFull } from "@/features/settings/storage";
+import { useStorageFull } from "@/features/settings/storage";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { trashFile, trashVersion, undoToast } from "../drive/trash";
-import {
-  canMap, fileSize, isImage, isPdf, PLAN_FIELDS, planEntries, planMeta, titleFromFileName, TooLargeError, uploadPlanFile, usePlanLinks,
-  type PlanEntry, type PlanFile, type Upload,
-} from "./plans";
+import { canMap, fileSize, isImage, isPdf, PLAN_FIELDS, planEntries, planMeta, usePlanLinks, type PlanEntry, type PlanFile } from "./plans";
+import { addPlanFiles, usePlanUploads, type PlanTarget } from "./planUploads";
 import styles from "./plans.module.css";
 import { useTooLarge } from "./UploadLimit";
 
@@ -37,17 +35,7 @@ export type PlansScope =
   | { kind: "job"; id: string; propertyId: string | null }
   | { kind: "client"; properties: Array<{ id: string; label: string }> };
 
-/** Where a new file goes: the request, quote or job (the database adds the property), or a property. */
-type Target = { request_id?: string; quote_id?: string; job_id?: string; property_id?: string };
 const COLUMN = { request: "request_id", quote: "quote_id", job: "job_id" } as const;
-
-interface Sending {
-  key: string;
-  name: string;
-  size: number;
-  progress: number;
-  abort: () => void;
-}
 
 /** A file open in the viewer: an older version only to look at. */
 interface Viewing {
@@ -87,14 +75,24 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
   const entries = planEntries(rows);
   const links = usePlanLinks(rows);
   const [showArchived, setShowArchived] = useState(false);
-  const [sending, setSending] = useState<Sending[]>([]);
+  // Uploads carry on when the card goes (planUploads.ts): back on this screen, it shows them again.
+  const card = scopeKey(scope).join(":");
+  const sending = usePlanUploads(card);
   const [editing, setEditing] = useState<PlanFile | null>(null);
   const [viewing, setViewing] = useState<Viewing | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const pickFor = useRef<{ target: Target; replaces: PlanFile | null } | null>(null);
+  const pickFor = useRef<{ target: PlanTarget; replaces: PlanFile | null } | null>(null);
   const tooLarge = useTooLarge();
   const storageFull = useStorageFull();
+  // Whether the card is still on the screen when its uploads finish: if not, the task island says how they went.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // Files show here, on crews' visits and in Drive, and count toward storage.
   const refresh = () => {
@@ -102,54 +100,29 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
   };
 
   // ----- Adding files -------------------------------------------------------------------------
-  async function send(list: File[], target: Target, replaces: PlanFile | null = null) {
-    let lastId: string | null = null;
-    const { added, refused } = await addEach(
-      list,
-      async (file) => {
-        const key = crypto.randomUUID();
-        const upload: Upload = uploadPlanFile(session.company.id, file, (progress) => setSending((s) => s.map((u) => (u.key === key ? { ...u, progress } : u))));
-        setSending((s) => [...s, { key, name: file.name, size: file.size, progress: 0, abort: upload.abort }]);
-        try {
-          const path = await upload.promise;
-          const { data, error } = await supabase()
-            .from("plan_files")
-            .insert({
-              company_id: session.company.id,
-              ...target,
-              replaces_id: replaces?.id ?? null,
-              title: replaces?.title ?? titleFromFileName(file.name),
-              path,
-              file_name: file.name.slice(0, 255),
-              content_type: (file.type || null)?.slice(0, 150) ?? null,
-              size_bytes: file.size,
-              crew_visible: replaces?.crew_visible ?? true,
-            })
-            .select("id")
-            .single();
-          // A stored file with no row is tidied away by the server after a day.
-          if (error) throw new Error(error.message);
-          lastId = data.id;
-        } finally {
-          setSending((s) => s.filter((u) => u.key !== key));
-        }
+  function send(list: File[], target: PlanTarget, replaces: PlanFile | null = null) {
+    void addPlanFiles({
+      companyId: session.company.id,
+      card,
+      files: list,
+      target,
+      replaces,
+      screen: {
+        tooLarge: (error) => mounted.current && tooLarge.report(error),
+        failed: (name, message) => mounted.current && toast.error(`${name}: ${message}`),
+        // Those refused for space, in one toast: the server's sentence for the first, with the way to more room.
+        refused: (first, title) => mounted.current && storageFull(first, title),
+        added: (added, lastId) => {
+          if (!mounted.current) return;
+          if (replaces) {
+            toast.success(`New version of ${replaces.title} added`, {
+              description: "It's the current one now. The crew only sees this version.",
+              action: lastId ? { label: "Add a label", onClick: () => openEditor(lastId) } : undefined,
+            });
+          } else toast.success(added === 1 ? "File added" : `${added} files added`);
+        },
       },
-      (file, error) => {
-        if (error instanceof TooLargeError) tooLarge.report(error);
-        else toast.error(`${file.name}: ${error instanceof Error ? error.message : "Couldn't add it."}`);
-      },
-    );
-    refresh();
-    // Those refused for space, in one toast: the server's sentence for the first, with the way to more room.
-    if (refused.first) storageFull(refused.first, refused.title());
-    if (!added) return;
-    if (replaces) {
-      const id = lastId;
-      toast.success(`New version of ${replaces.title} added`, {
-        description: "It's the current one now. The crew only sees this version.",
-        action: id ? { label: "Add a label", onClick: () => openEditor(id) } : undefined,
-      });
-    } else toast.success(added === 1 ? "File added" : `${added} files added`);
+    });
   }
 
   async function openEditor(id: string) {
@@ -157,14 +130,14 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
     if (row) setEditing(row);
   }
 
-  const pick = (target: Target, replaces: PlanFile | null = null) => {
+  const pick = (target: PlanTarget, replaces: PlanFile | null = null) => {
     pickFor.current = { target, replaces };
     picker.current?.click();
   };
-  const defaultTarget = (propertyId?: string): Target | null =>
+  const defaultTarget = (propertyId?: string): PlanTarget | null =>
     scope.kind !== "client" ? { [COLUMN[scope.kind]]: scope.id } : propertyId ? { property_id: propertyId } : scope.properties.length === 1 ? { property_id: scope.properties[0].id } : null;
 
-  const dropProps = (zone: string, target: Target | null) =>
+  const dropProps = (zone: string, target: PlanTarget | null) =>
     canAdd && target
       ? {
           onDragOver: (e: DragEvent) => {
@@ -179,7 +152,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
             e.preventDefault();
             setDropOn(null);
             const list = [...e.dataTransfer.files];
-            if (list.length) void send(list, target);
+            if (list.length) send(list, target);
           },
         }
       : {};
@@ -274,7 +247,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
 
   const visible = entries.filter((e) => showArchived || !e.file.archived);
   const archivedCount = entries.filter((e) => e.file.archived).length;
-  const groups: Array<{ key: string; label: string | null; entries: PlanEntry[]; target: Target | null; empty?: ReactNode }> =
+  const groups: Array<{ key: string; label: string | null; entries: PlanEntry[]; target: PlanTarget | null; empty?: ReactNode }> =
     scope.kind === "client"
       ? scope.properties.map((p) => ({
           key: p.id,
@@ -330,7 +303,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
             e.target.value = "";
             const ask = pickFor.current;
             if (!list.length || !ask) return;
-            void send(ask.replaces ? list.slice(0, 1) : list, ask.target, ask.replaces);
+            send(ask.replaces ? list.slice(0, 1) : list, ask.target, ask.replaces);
           }}
         />
         {files.isPending && <div className="stack-sm"><Skeleton width="60%" /><Skeleton width="40%" /></div>}
@@ -341,10 +314,10 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
               <div key={u.key} className={styles.upload} role="status">
                 <div className={styles.uploadHead}>
                   <span title={u.name}>{u.name}</span>
-                  <span className="muted small tabular">{u.progress >= 1 ? "Saving…" : `${Math.round(u.progress * 100)}% of ${fileSize(u.size)}`}</span>
-                  {u.progress < 1 && <Button size="sm" variant="ghost" icon="x" aria-label={`Stop uploading ${u.name}`} onClick={u.abort} />}
+                  <span className="muted small tabular">{u.progress === null ? `Waiting · ${fileSize(u.size)}` : u.progress >= 1 ? "Saving…" : `${Math.round(u.progress * 100)}% of ${fileSize(u.size)}`}</span>
+                  {(u.progress ?? 0) < 1 && <Button size="sm" variant="ghost" icon="x" aria-label={`Stop uploading ${u.name}`} onClick={u.stop} />}
                 </div>
-                <div className="progress" aria-hidden="true"><span style={{ width: `${Math.round(u.progress * 100)}%` }} /></div>
+                <div className="progress" aria-hidden="true"><span style={{ width: `${Math.round((u.progress ?? 0) * 100)}%` }} /></div>
               </div>
             ))}
           </div>
@@ -397,7 +370,7 @@ export function PlanIcon({ file }: { file: Pick<PlanFile, "content_type" | "file
   const kind = isPdf(file) ? "pdf" : isImage(file) ? "image" : "file";
   return (
     <span className={styles.icon} data-kind={kind} aria-hidden="true">
-      <Icon name={kind === "image" ? "image" : kind === "pdf" ? "quote" : "file"} size={18} />
+      <Icon name={kind === "image" ? "image" : kind === "pdf" ? "quote" : "file"} size={20} />
     </span>
   );
 }
@@ -420,7 +393,7 @@ function PlanRow({ entry, save, links, menu, onOpen }: {
         <span className={styles.meta}>{planMeta(entry)}</span>
         {(!f.crew_visible || f.archived) && (
           <div className={styles.chips}>
-            {!f.crew_visible && <span className="chip chip-amber"><Icon name="lock" size={11} />Office only</span>}
+            {!f.crew_visible && <span className="chip chip-amber"><Icon name="lock" size={12} />Office only</span>}
             {f.archived && <span className="chip">Archived</span>}
           </div>
         )}
@@ -447,7 +420,7 @@ function PlanRow({ entry, save, links, menu, onOpen }: {
         )}
       </div>
       <div className={styles.actions}>
-        {save && <a className="btn btn-sm btn-ghost btn-icon" href={save} aria-label={`Download ${f.title}`} title="Download"><Icon name="download" size={15} /></a>}
+        {save && <a className="btn btn-sm btn-ghost btn-icon" href={save} aria-label={`Download ${f.title}`} title="Download"><Icon name="download" size={14} /></a>}
         <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${f.title}`} items={menu} />
       </div>
     </div>
@@ -497,7 +470,7 @@ function PlanDetailsDialog({ file, canChangeCrew, onClose, onSaved }: { file: Pl
           <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} placeholder="Sheets C-101 and C-501 are the ones for paving. Striping is on C-601." />
         </Field>
         {canChangeCrew && (
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row" style={{ fontWeight: 400 }}>
             <input type="checkbox" className="switch" checked={crew} onChange={(e) => setCrew(e.target.checked)} />
             The crew can see it
           </label>

@@ -3,11 +3,12 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { useSession } from "@/lib/session";
+import { formatPhoneTyping } from "@/lib/validate";
 
 type Channel = "email" | "sms" | "link";
 
@@ -48,7 +49,7 @@ export function SendDialog({
       if (channel === "link") copyText(r.link, "Link copied. Paste it into a message to your client.");
     },
   });
-  useEffect(() => setTo(channel === "email" ? email ?? "" : channel === "sms" ? phone ?? "" : ""), [channel, email, phone]);
+  useEffect(() => setTo(channel === "email" ? email ?? "" : channel === "sms" ? formatPhoneTyping(phone ?? "") : ""), [channel, email, phone]);
 
   const unavailable = (channel === "email" && !config.features.email) || (channel === "sms" && !config.features.sms);
   const done = send.data;
@@ -59,12 +60,12 @@ export function SendDialog({
         <div className="dialog-body">
           {done.sent ? (
             <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center", padding: "8px 0" }}>
-              <span className="success-mark"><Icon name="check" size={30} strokeWidth={2.5} /></span>
+              <span className="success-mark"><Icon name="check" size={30} strokeWidth={3} /></span>
               <strong style={{ fontSize: 16 }}>{channel === "email" ? `Emailed to ${to}` : `Texted to ${to}`}</strong>
               {config.features.devMail && <span className="muted small">Development mode: it's in the local Mailpit inbox.</span>}
             </div>
           ) : (
-            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
+            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
           )}
           <div className="field">
             <span>Client link</span>
@@ -87,24 +88,32 @@ export function SendDialog({
           </div>
           {unavailable && (
             <div className="callout callout-info">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow">{channel === "email" ? "Email" : "Texting"} isn't turned on yet. Use “Copy link” and send it yourself.</div>
             </div>
           )}
           {channel !== "link" && (
-            <Field label={channel === "email" ? "To" : "Mobile number"}>
-              <input className="input" type={channel === "email" ? "email" : "tel"} value={to} onChange={(e) => setTo(e.target.value)} required placeholder={channel === "email" ? "client@example.com" : "(555) 555-0123"} />
+            <Field label={channel === "email" ? "To" : "Mobile number"} requiredMessage={channel === "email" ? "Add the email to send it to." : "Add the number to text it to."}>
+              <input
+                className="input"
+                type={channel === "email" ? "email" : "tel"}
+                value={to}
+                onChange={(e) => setTo(channel === "sms" ? formatPhoneTyping(e.target.value) : e.target.value)}
+                required
+                placeholder={channel === "email" ? "client@example.com" : "(555) 555-0123"}
+              />
             </Field>
           )}
           {channel === "email" && <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} required /></Field>}
           {channel !== "link" && (
             <Field label="Message" optional hint="The link is added automatically.">
-              <textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} maxLength={channel === "sms" ? 400 : 4000} placeholder={kind === "quote" ? "Thanks for having us out. Here's what we recommend…" : "Thanks for your business!"} />
+              <textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} maxLength={channel === "sms" ? 400 : 4000} placeholder={kind === "quote" ? "Thanks for having us out. Here's what we recommend…" : "Thanks for your business."} />
             </Field>
           )}
           {channel === "link" && <p className="muted" style={{ margin: 0 }}>Copies a link you can paste into any message, and marks the {kind} as sent.</p>}
           <FormError error={send.error} />
           <div className="form-actions">
+            <FormChecks />
             <Button onClick={onClose}>Cancel</Button>
             <Button type="submit" variant="primary" icon={channel === "link" ? "copy" : "send"} loading={send.isPending} disabled={unavailable}>
               {channel === "link" ? "Copy link" : channel === "email" ? "Send email" : "Send text"}

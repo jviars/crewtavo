@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { api, supabase, unwrap } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
 
@@ -83,7 +83,8 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
     <Dialog open onClose={onClose} title={property ? "Edit property" : "Add property"} size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <Field label="Label" optional><input className="input" value={p.label} onChange={set("label")} placeholder="Main office, Lot B, Rental #2…" maxLength={80} /></Field>
-        <Field label="Street address"><input className="input" value={p.line1} onChange={set("line1")} required maxLength={200} autoComplete="off" /></Field>
+        {/* No leading spaces, so a street of only spaces is caught as missing. */}
+        <Field label="Street address" requiredMessage="Add the street address so crews can find it."><input className="input" value={p.line1} onChange={(e) => setP({ ...p, line1: e.target.value.trimStart() })} required maxLength={200} autoComplete="off" /></Field>
         <Field label="Apartment, suite or unit" optional><input className="input" value={p.line2} onChange={set("line2")} maxLength={100} /></Field>
         <div className="form-grid-3">
           <Field label="City"><input className="input" value={p.city} onChange={set("city")} maxLength={100} /></Field>
@@ -104,8 +105,9 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
         <Field label="Property notes" optional><textarea className="textarea" value={p.notes} onChange={set("notes")} maxLength={4000} /></Field>
         <FormError error={save.error} />
         <div className="form-actions">
+          <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={!p.line1.trim()}>{property ? "Save property" : "Add property"}</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{property ? "Save property" : "Add property"}</Button>
         </div>
       </form>
     </Dialog>

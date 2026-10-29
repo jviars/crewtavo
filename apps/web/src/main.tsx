@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { loadConfig } from "./lib/api";
+import { startSlidingIndicators } from "./lib/indicator";
 import { lockZoomInApp, watchInstall } from "./lib/install";
 import { registerServiceWorker } from "./lib/push";
 import { initTheme } from "./lib/theme";
@@ -17,6 +18,7 @@ initTheme();
 registerServiceWorker();
 watchInstall();
 lockZoomInApp();
+startSlidingIndicators();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

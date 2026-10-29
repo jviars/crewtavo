@@ -42,7 +42,7 @@ export function OwnLetterhead({ header, footer, onChange }: { header: Letterhead
         <p className={styles.empty}>Until you upload it, your estimates and invoices print with Crewtavo's letterhead.</p>
       )}
       <div className="stack-sm" style={{ gap: 6 }}>
-        <Button size="sm" icon="upload" loading={read.isPending} style={{ justifySelf: "start" }} onClick={() => input.current?.click()}>
+        <Button size="sm" icon="upload" loading={read.isPending} slowHint={false} style={{ justifySelf: "start" }} onClick={() => input.current?.click()}>
           {header || footer ? "Upload a different one" : "Upload your letterhead"}
         </Button>
         <span className="muted small">A PDF of a blank page of your letterhead prints cleanest: in Word, choose File → Save as PDF. A scan or photo of a printed page works too.</span>
@@ -211,7 +211,7 @@ function LetterheadDialog({ page, onClose, onSaved }: { page: LetterheadPage; on
         <FormError error={save.error} />
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" icon="check" loading={save.isPending} disabled={bands.headerEnd <= 0 && bands.footerStart >= height} onClick={() => save.mutate()}>
+          <Button variant="primary" icon="check" loading={save.isPending} slowHint={false} disabled={bands.headerEnd <= 0 && bands.footerStart >= height} onClick={() => save.mutate()}>
             Use this letterhead
           </Button>
         </div>

@@ -11,13 +11,16 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tan
 import { useMemo, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, FormError } from "@/components/ui/Field";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import { formatMoneyCents, formatNumber, timeAgo } from "@/lib/format";
+import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
+import { startTask } from "@/lib/tasks";
 import { AbcPicture } from "../../materials/AbcPicture";
 import { searchFor, uomName, type CatalogItem, type ServiceMaterial } from "../../materials/data";
 import { HowMany } from "../../materials/MaterialPicker";
@@ -57,11 +60,23 @@ export function YourMaterials({ materials, services, packages, canEdit, onOpen }
     queryClient.invalidateQueries({ queryKey: ["services", company.id] });
     queryClient.invalidateQueries({ queryKey: packagesKey(company.id) });
   };
+  // ABC answers each item in its own time, so the check runs in the task island and says how it went there.
   const check = useMutation({
-    meta: { success: (r: { flagged: number }) => (r.flagged ? `Checked with ABC: ${r.flagged} ${r.flagged === 1 ? "needs" : "need"} a look` : "Checked with ABC: everything is still carried and priced") },
-    mutationFn: () => api.post<{ priced_at: string | null; services: number; flagged: number }>("/materials/check"),
+    meta: { inline: true },
+    mutationFn: async () => {
+      const task = startTask({ label: "Checking your materials with ABC" });
+      try {
+        const r = await api.post<{ priced_at: string | null; services: number; flagged: number }>("/materials/check");
+        task.done(r.flagged ? `${r.flagged} ${r.flagged === 1 ? "needs" : "need"} a look` : "Everything is still carried and priced");
+        return r;
+      } catch (error) {
+        task.fail(errorMessage(error));
+        throw error;
+      }
+    },
     onSettled: refresh,
   });
+  const rowsRef = useListAnimation<HTMLUListElement>();
 
   return (
     <section className="stack" aria-labelledby="catalog-yours" style={{ gap: 14 }}>
@@ -71,13 +86,12 @@ export function YourMaterials({ materials, services, packages, canEdit, onOpen }
           <p>Every ABC item in your price list, the services it's in, and its last price{checkedAt ? `, from ${timeAgo(checkedAt)}` : ""}.</p>
         </div>
         {canEdit && groups.length > 0 && (
-          <Button icon="refresh" loading={check.isPending} onClick={() => check.mutate()}>Check with ABC</Button>
+          <Button icon="refresh" loading={check.isPending} slowHint={false} onClick={() => check.mutate()}>Check with ABC</Button>
         )}
       </div>
-      {check.error && <span className="field-error" role="alert">{(check.error as Error).message}</span>}
       {needLook > 0 && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <span className="grow" style={{ fontWeight: 400 }}>
             <strong>{needLook} {needLook === 1 ? "needs" : "need"} a look.</strong> Your branch couldn't price {needLook === 1 ? "it" : "them"} last time, or ABC doesn't carry {needLook === 1 ? "it" : "them"} any more.
             Each keeps its last price, so nothing gets cheaper by itself. {canEdit ? "Replace one and every service it's in changes with it." : ""}
@@ -98,7 +112,7 @@ export function YourMaterials({ materials, services, packages, canEdit, onOpen }
           </EmptyState>
         </div>
       ) : (
-        <ul className={styles.rows} aria-label="Your materials">
+        <ul ref={rowsRef} className={styles.rows} aria-label="Your materials">
           {groups.map((links) => {
             const last = newest(links);
             const note = links.find((l) => l.price_note)?.price_note ?? null;
@@ -123,11 +137,11 @@ export function YourMaterials({ materials, services, packages, canEdit, onOpen }
                 </span>
                 <span className={styles.rowActions}>
                   <Button size="sm" onClick={() => onOpen(last.item_number, { item_number: last.item_number, name: last.name })}>Open</Button>
-                  {canEdit && <Button size="sm" variant={note ? "primary" : "secondary"} onClick={() => setReplacing(links)}>Replace</Button>}
+                  {canEdit && <Button size="sm" onClick={() => setReplacing(links)}>Replace</Button>}
                 </span>
                 {note && (
                   <span className={styles.flag}>
-                    <Icon name="alert" size={15} />
+                    <Icon name="alert" size={14} />
                     <span>{note.replace(/ ?Replace it in Roofing → Catalog\.?/, "")}{price !== null ? " Until then, it counts at its last price." : ""}</span>
                   </span>
                 )}
@@ -219,7 +233,7 @@ function ReplaceForm({ links, services, item, onBack, onDone }: { links: Service
         )}
         {item.dimensional && (
           <Field label="Length">
-            <select className="select" value={chosenLength ?? ""} onChange={(e) => setLength(Number(e.target.value) || null)} disabled={!lengths.length}>
+            <select className="select" required value={chosenLength ?? ""} onChange={(e) => setLength(Number(e.target.value) || null)} disabled={!lengths.length}>
               {!lengths.length && <option value="">{detail.isPending ? "Loading lengths…" : "No lengths listed"}</option>}
               {lengths.map((l) => <option key={l} value={l}>{formatNumber(l, 2)} ft</option>)}
             </select>
@@ -239,8 +253,9 @@ function ReplaceForm({ links, services, item, onBack, onDone }: { links: Service
       </div>
       <FormError error={replace.error} />
       <div className="form-actions">
+        <FormChecks />
         <Button onClick={onBack}>Back</Button>
-        <Button type="submit" variant="primary" icon="refresh" loading={replace.isPending} disabled={!ready}>
+        <Button type="submit" variant="primary" icon="refresh" loading={replace.isPending}>
           Replace in {links.length === 1 ? (serviceOf(first)?.name ?? "its service") : `${links.length} services`}
         </Button>
       </div>

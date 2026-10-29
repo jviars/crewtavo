@@ -58,7 +58,7 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
         <h1 className={styles.title}>Set up your business</h1>
 
         <div className="form-grid">
-          <Field label="Business name" error={touched && name.trim().length < 2 ? "Enter your business name" : null}>
+          <Field label="Business name" requiredMessage="Enter your business name. It goes on your quotes and invoices." error={touched && name.trim().length < 2 ? "Enter your business name. It goes on your quotes and invoices." : null}>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Roofing" required maxLength={200} autoFocus autoComplete="organization" />
           </Field>
           <Field label="Time zone">
@@ -75,7 +75,7 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
           {presets.data?.map((p) => (
             <label key={p.id} className={styles.preset} data-selected={p.id === preset || undefined}>
               <input type="radio" name="preset" value={p.id} checked={p.id === preset} onChange={() => setPreset(p.id)} />
-              {p.id === preset && <span className={styles.check}><Icon name="check" size={12} strokeWidth={3} /></span>}
+              {p.id === preset && <span className={styles.check}><Icon name="check" size={12} strokeWidth={2} /></span>}
               <strong>{p.name}</strong>
               <span>{p.description}</span>
             </label>

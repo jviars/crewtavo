@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
 import { CardSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
@@ -53,16 +54,16 @@ export function MapsSettings() {
     },
     onSuccess: ({ provider, key }) => {
       saved();
-      toast.success(key ? `${provider === "esri" ? "Esri" : "Google"} imagery is ready. Pick it from the Imagery button on Measure, or make it the team's default above.` : "Key removed");
+      if (key) toast.success(`${provider === "esri" ? "Esri" : "Google"} imagery is ready`, { description: "Pick it from the Imagery button on Measure, or make it the team's default above." });
+      else toast.success("Key removed");
     },
   });
+  // The team's map saves as it's picked, and says so beside the menu.
+  const choosing = useSaveStatus();
   const saveDefault = useMutation({
     meta: { inline: true },
     mutationFn: (choice: ImageryChoice) => writeMaps({ default_imagery: choice }),
-    onSuccess: (_, choice) => {
-      saved();
-      toast.success(`Measure opens on ${choiceName(choice)} for the team`);
-    },
+    onSuccess: saved,
   });
 
   if (settings.isPending) return <CardSkeleton lines={6} />;
@@ -76,7 +77,7 @@ export function MapsSettings() {
     <div className="stack" style={{ maxWidth: 860 }}>
       <div className="card card-pad stack-sm">
         <div className="row" style={{ gap: 10 }}>
-          <span className="maps-settings-icon" aria-hidden="true"><Icon name="map" size={18} /></span>
+          <span className="maps-settings-icon" aria-hidden="true"><Icon name="map" size={20} /></span>
           <strong>Free imagery, nothing to set up</strong>
         </div>
         <p className="muted" style={{ margin: 0 }}>
@@ -92,23 +93,26 @@ export function MapsSettings() {
 
       <div className="card card-pad stack-sm">
         <div className="row" style={{ gap: 10 }}>
-          <span className="maps-settings-icon" aria-hidden="true"><Icon name="layers" size={18} /></span>
+          <span className="maps-settings-icon" aria-hidden="true"><Icon name="layers" size={20} /></span>
           <strong id="team-map-title">What Measure opens on</strong>
         </div>
-        <select
-          className="select"
-          aria-labelledby="team-map-title"
-          aria-describedby="team-map-help"
-          style={{ maxWidth: 320 }}
-          value={opening}
-          disabled={saveDefault.isPending}
-          onChange={(e) => saveDefault.mutate(e.target.value as ImageryChoice)}
-        >
-          {DEFAULT_CHOICES.map((c) => {
-            const ready = c === "auto" || imageryUsable(c, usableKeys);
-            return <option key={c} value={c} disabled={!ready}>{choiceName(c)}{c === "auto" ? " (recommended)" : ready ? "" : " (add a key below)"}</option>;
-          })}
-        </select>
+        <div className="row wrap" style={{ gap: 12 }}>
+          <select
+            className="select"
+            aria-labelledby="team-map-title"
+            aria-describedby="team-map-help"
+            style={{ maxWidth: 320 }}
+            value={opening}
+            disabled={saveDefault.isPending}
+            onChange={(e) => void choosing.track(saveDefault.mutateAsync(e.target.value as ImageryChoice))}
+          >
+            {DEFAULT_CHOICES.map((c) => {
+              const ready = c === "auto" || imageryUsable(c, usableKeys);
+              return <option key={c} value={c} disabled={!ready}>{choiceName(c)}{c === "auto" ? " (recommended)" : ready ? "" : " (add a key below)"}</option>;
+            })}
+          </select>
+          <SaveStatus status={choosing.status} />
+        </div>
         <span id="team-map-help" className="muted small">
           For everyone on the team. Anyone can still switch from the Imagery button on Measure, and each person can pick their own in Settings › Profile.
         </span>
@@ -196,14 +200,14 @@ function KeyCard({
     <div className="card card-pad stack">
       <div className="row-between wrap" style={{ gap: 8 }}>
         <div className="row" style={{ gap: 10 }}>
-          <span className="maps-settings-icon" aria-hidden="true"><Icon name="globe" size={18} /></span>
+          <span className="maps-settings-icon" aria-hidden="true"><Icon name="globe" size={20} /></span>
           <strong>{title}</strong>
           <span className="chip">{badge}</span>
         </div>
         {set ? (
-          <span className="chip chip-green"><Icon name="check" size={13} /> Working · key ending {current!.slice(-4)}</span>
+          <span className="chip chip-green"><Icon name="check" size={14} /> Working · key ending {current!.slice(-4)}</span>
         ) : inherited ? (
-          <span className="chip chip-green"><Icon name="check" size={13} /> Set up by whoever installed Crewtavo</span>
+          <span className="chip chip-green"><Icon name="check" size={14} /> Set up by whoever installed Crewtavo</span>
         ) : (
           <span className="chip">Not set up</span>
         )}
@@ -223,15 +227,17 @@ function KeyCard({
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   placeholder={provider === "esri" ? "AAPT…" : "AIza…"}
+                  required
+                  minLength={20}
                   aria-describedby={`${provider}-key-help`}
                 />
-                <button type="button" className="btn btn-icon" onClick={() => setShown(!shown)} aria-label={shown ? "Hide key" : "Show key"} aria-pressed={shown}><Icon name="eye" size={15} /></button>
+                <button type="button" className="btn btn-icon" onClick={() => setShown(!shown)} aria-label={shown ? "Hide key" : "Show key"} aria-pressed={shown}><Icon name="eye" size={16} /></button>
               </div>
             </Field>
             <span id={`${provider}-key-help`} className="muted small">We try the key with {provider === "esri" ? "Esri" : "Google"} before saving it, and tell you what to fix if it doesn't work.</span>
             <FormError error={error} />
             <div className="row" style={{ gap: 8 }}>
-              <Button type="submit" variant="primary" loading={saving} disabled={value.trim().length < 20}>{saving ? "Checking the key…" : "Check and save"}</Button>
+              <Button type="submit" loading={saving}>{saving ? "Checking the key…" : "Check and save"}</Button>
               {set && <Button variant="ghost" onClick={() => { setEditing(false); setValue(""); }}>Cancel</Button>}
             </div>
           </form>

@@ -183,7 +183,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
     setPhase("waiting");
   };
   useEffect(() => {
-    if (setup) document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (setup) document.getElementById("app-install")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
   }, [setup]);
   // Installed: the ring fills, held long enough to be seen when installing was quick, then Uninstall.
   useEffect(() => {
@@ -255,7 +255,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   );
   const googleSignIn = (
     <section className="card card-pad stack-sm" aria-labelledby="google-sign-in" style={{ gap: 10 }}>
-      <h2 id="google-sign-in" className="section-title" style={{ fontSize: 17 }}>Sign in with Google</h2>
+      <h2 id="google-sign-in" className="section-title" style={{ fontSize: 16 }}>Sign in with Google</h2>
       <span className="muted small">Pick which of your calendars show on the schedule, and put visits on a Google calendar that stays up to date.</span>
       <Button variant="primary" style={{ justifySelf: "start" }} loading={connect.isPending} onClick={() => connect.mutate()}>Sign in with Google</Button>
     </section>
@@ -287,7 +287,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
 
       {callback && (
         <div className={`callout ${callback.ok ? "callout-good" : "callout-warning"}`} role={callback.ok ? "status" : "alert"}>
-          <Icon name={callback.ok ? "check" : "alert"} size={18} />
+          <Icon name={callback.ok ? "check" : "alert"} size={20} />
           <div className="grow">
             {callback.ok ? `${app.name} is installed.` : (callback.message ?? `${app.name} couldn't be installed. Try again.`)}
             {callback.ok && <span style={{ display: "block", fontWeight: 400 }}>{app.id === "google_calendar" ? "Now pick the calendars to show on your schedule." : app.category === "Accounting" ? "New invoices and payments will sync automatically." : null}</span>}
@@ -363,7 +363,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           <div className="app-highlights">
             {info.highlights.map((h) => (
               <div key={h.title} className="app-highlight">
-                <span className="app-highlight-icon"><Icon name={h.icon} size={18} /></span>
+                <span className="app-highlight-icon"><Icon name={h.icon} size={20} /></span>
                 <strong>{h.title}</strong>
                 <span className="muted small">{h.text}</span>
               </div>
@@ -440,7 +440,7 @@ function GoogleBySecretAddress({ app, sources }: { app: AppRow; sources: Calenda
     <>
       <section id="google-setup" className="card card-pad stack" aria-labelledby="google-in">
         <div className="stack-sm" style={{ gap: 4 }}>
-          <h2 id="google-in" className="section-title" style={{ fontSize: 17 }}>1. Show your Google Calendar on the schedule</h2>
+          <h2 id="google-in" className="section-title" style={{ fontSize: 16 }}>1. Show your Google Calendar on the schedule</h2>
           <span className="muted small">About a minute, on a computer: Google's phone app doesn't show this address.</span>
         </div>
         <ol className="app-steps">
@@ -492,7 +492,7 @@ function AccountCard({ app }: { app: AppRow }) {
 function NotAvailable({ app }: { app: AppRow }) {
   return (
     <section className="callout" aria-label="Not available yet">
-      <Icon name="info" size={18} />
+      <Icon name="info" size={20} />
       <div className="grow stack-sm" style={{ gap: 6 }}>
         <span>Not available yet</span>
         <span style={{ fontWeight: 400 }}>Ask whoever set up Crewtavo to turn on {app.name}.</span>
@@ -517,7 +517,7 @@ function ConnectorCard({ app, mcpUrl, setup = false }: { app: AppRow; mcpUrl: st
   useAssistantConnections(setup ? 5000 : false);
   return (
     <section className="card card-pad stack-sm" aria-labelledby="connector-title" style={{ gap: 12 }}>
-      <h2 id="connector-title" className="section-title" style={{ fontSize: 17 }}>Use Crewtavo in {app.name}</h2>
+      <h2 id="connector-title" className="section-title" style={{ fontSize: 16 }}>Use Crewtavo in {app.name}</h2>
       <div className="row wrap" style={{ gap: 8 }}>
         <code className="code-pill grow">{mcpUrl}</code>
         <Button icon="copy" onClick={() => copyText(mcpUrl, "Connector link copied")}>Copy</Button>
@@ -561,7 +561,7 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
   const falSteps = fal && app.status !== "connected";
   return (
     <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="key-title" style={{ gap: 10 }}>
-      <h2 id="key-title" className="section-title" style={{ fontSize: 17 }}>
+      <h2 id="key-title" className="section-title" style={{ fontSize: 16 }}>
         {app.id === "anthropic" ? "Your own Anthropic key (optional)" : stripe ? (app.stripe?.own ? "Stripe key" : app.stripe ? "Use your own Stripe account" : "Connect your Stripe account") : fal ? (falSteps ? "Connect your fal.ai account" : "fal.ai key") : `${app.name} key`}
       </h2>
       {stripeSteps && (
@@ -602,7 +602,7 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
       <form className="row" style={{ gap: 8 }} onSubmit={submit}>
         <div className="input-group grow">
           <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} placeholder={(stripe ? app.stripe?.own : app.status === "connected") ? "Paste a new key to replace it" : stripe ? "Paste the key from Stripe" : "Paste your key"} value={key} onChange={(e) => { setKey(e.target.value); save.reset(); }} aria-label={stripe ? "Key from Stripe" : `${app.name} API key`} style={{ paddingLeft: 12, paddingRight: 36 }} />
-          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide key" : "Show key"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={15} /></button>
+          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide key" : "Show key"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={14} /></button>
         </div>
         <Button type="submit" loading={save.isPending} disabled={key.trim().length < 10}>{stripe ? "Connect" : "Save"}</Button>
       </form>

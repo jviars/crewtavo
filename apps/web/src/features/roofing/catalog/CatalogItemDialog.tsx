@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field } from "@/components/ui/Field";
+import { Field, FormChecks } from "@/components/ui/Field";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
@@ -103,11 +103,11 @@ export function CatalogItemDialog({ itemNumber, seed, supplier, uses, services, 
                 {detail.isPending ? (
                   <Skeleton width={140} height={24} />
                 ) : detail.error ? (
-                  <strong style={{ fontSize: 15 }}>{(detail.error as Error).message}</strong>
+                  <strong style={{ fontSize: 14 }}>{(detail.error as Error).message}</strong>
                 ) : detail.data!.unit_price !== null ? (
-                  <strong>{formatMoneyCents(detail.data!.unit_price)} <small style={{ fontSize: 13, fontWeight: 500 }}>/ {unit(detail.data!.uom)}</small></strong>
+                  <strong>{formatMoneyCents(detail.data!.unit_price)} <small style={{ fontSize: 13, fontWeight: 400 }}>/ {unit(detail.data!.uom)}</small></strong>
                 ) : (
-                  <strong style={{ fontSize: 15 }}>{detail.data!.note ?? "No price from the branch"}</strong>
+                  <strong style={{ fontSize: 14 }}>{detail.data!.note ?? "No price from the branch"}</strong>
                 )}
                 <span>Your price for one{detail.data?.length_ft ? `, ${formatNumber(detail.data.length_ft, 2)} ft long` : ""}, at {supplier.branch_name}</span>
               </div>
@@ -193,8 +193,8 @@ function AddToService({ item, services, has, onBack, onAdded }: { item: CatalogI
         <strong>{item.name}</strong>
         <span className="muted small">{[item.item_number, item.color, item.unit_price !== null ? `${formatMoneyCents(item.unit_price)} / ${(item.uoms.find((u) => u.code === item.uom)?.name ?? item.uom).toLowerCase()}` : item.note].filter(Boolean).join(" · ")}</span>
       </div>
-      <Field label="Which service is it in?" hint="Every estimate with that service is then priced with it, so you only pick it once.">
-        <select className="select" value={serviceId} onChange={(e) => setServiceId(e.target.value)} autoFocus>
+      <Field label="Which service is it in?" requiredMessage="Pick the service it goes into." hint="Every estimate with that service is then priced with it, so you only pick it once.">
+        <select className="select" required value={serviceId} onChange={(e) => setServiceId(e.target.value)} autoFocus>
           <option value="">Pick a service</option>
           {categories.map((c) => (
             <optgroup key={c} label={c}>
@@ -204,8 +204,9 @@ function AddToService({ item, services, has, onBack, onAdded }: { item: CatalogI
         </select>
       </Field>
       <div className="form-actions">
+        <FormChecks />
         <Button onClick={onBack}>Back</Button>
-        <Button type="submit" variant="primary" disabled={!serviceId}>Next</Button>
+        <Button type="submit" variant="primary">Next</Button>
       </div>
     </form>
   );

@@ -119,11 +119,11 @@ it("clocks a sub the office keeps hours for, and a tap saved before the flag exi
 
 it("doesn't promise a running clock to someone who has none", () => {
   const change = { companyId: "c1", userId: "sub", visitId: "v1", jobId: null, status: "in_progress", at: "2026-10-17T13:00:00Z" };
-  expect(statusSaved({ skipped: false }, { ...change, clock: false })).toBe("Visit started.");
-  expect(statusSaved({ skipped: false }, { ...change, clock: true })).toBe("Visit started. Your clock is running.");
-  expect(statusSaved({ skipped: false }, change)).toBe("Visit started. Your clock is running.");
-  expect(statusSaved({ skipped: true, visitStatus: "completed" }, { ...change, clock: false })).toBe("This visit had already moved on.");
-  expect(statusSaved({ skipped: true, visitStatus: "cancelled" }, { ...change, clock: false })).toBe("The office cancelled this visit.");
+  expect(statusSaved({ skipped: false }, { ...change, clock: false })).toBe("Visit started");
+  expect(statusSaved({ skipped: false }, { ...change, clock: true })).toBe("Visit started, your clock is running");
+  expect(statusSaved({ skipped: false }, change)).toBe("Visit started, your clock is running");
+  expect(statusSaved({ skipped: true, visitStatus: "completed" }, { ...change, clock: false })).toBe("This visit had already moved on");
+  expect(statusSaved({ skipped: true, visitStatus: "cancelled" }, { ...change, clock: false })).toBe("The office cancelled this visit");
 });
 
 it("decides at the tap whether it clocks, and only then asks the phone where it is", () => {
@@ -148,7 +148,7 @@ it("moves a sub's visit along when the office turned their clock off after the p
   const result = await setVisitStatus({ companyId: "c1", userId: "al", visitId: "v1", jobId: null, status: "in_progress", at: "2026-10-17T13:00:00Z", clock: true, sub: true });
   expect(result).toEqual({ skipped: false, visitStatus: "in_progress", clockOff: true });
   expect(server.status).toBe("in_progress");
-  expect(statusSaved(result, { companyId: "c1", userId: "al", visitId: "v1", jobId: null, status: "in_progress", at: "", clock: true, sub: true })).toBe("Visit started.");
+  expect(statusSaved(result, { companyId: "c1", userId: "al", visitId: "v1", jobId: null, status: "in_progress", at: "", clock: true, sub: true })).toBe("Visit started");
   // The team's clock refused is a real problem, shown as one.
   await expect(tap("alice", "in_progress", "2026-10-17T13:05:00Z")).rejects.toThrow(/row-level security/);
 });

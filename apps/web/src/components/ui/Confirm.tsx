@@ -41,32 +41,39 @@ export function ConfirmHost() {
     () => pending,
   );
   const [typed, setTyped] = useState("");
-  if (!current) return null;
+  // The answered question stays on screen, closed, while the dialog animates out.
+  const [shown, setShown] = useState(current);
+  if (current && current !== shown) {
+    setShown(current);
+    setTyped("");
+  }
+  const view = current ?? shown;
+  if (!view) return null;
   const finish = (ok: boolean) => {
+    if (!current) return;
     current.resolve(ok);
     pending = null;
-    setTyped("");
     emit();
   };
-  const blocked = Boolean(current.typeToConfirm) && typed.trim().toLowerCase() !== current.typeToConfirm!.toLowerCase();
+  const blocked = Boolean(view.typeToConfirm) && typed.trim().toLowerCase() !== view.typeToConfirm!.toLowerCase();
   return (
-    <Dialog open onClose={() => finish(false)} title={current.title} size="sm">
+    <Dialog open={Boolean(current)} onClose={() => finish(false)} onExited={() => setShown(null)} title={view.title} size="sm">
       <form
         onSubmit={(e) => {
           e.preventDefault();
           if (!blocked) finish(true);
         }}
       >
-        {current.body && <div className="muted" style={{ marginTop: -6 }}>{current.body}</div>}
-        {current.typeToConfirm && (
+        {view.body && <div className="muted" style={{ marginTop: -6 }}>{view.body}</div>}
+        {view.typeToConfirm && (
           <label className="field">
-            <span>Type <strong>{current.typeToConfirm}</strong> to confirm</span>
+            <span>Type <strong>{view.typeToConfirm}</strong> to confirm</span>
             <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
           </label>
         )}
         <div className="form-actions">
-          <Button onClick={() => finish(false)}>{current.cancelLabel ?? "Cancel"}</Button>
-          <Button type="submit" variant={current.danger ? "danger-solid" : "primary"} disabled={blocked}>{current.confirmLabel ?? "Confirm"}</Button>
+          <Button onClick={() => finish(false)}>{view.cancelLabel ?? "Cancel"}</Button>
+          <Button type="submit" variant={view.danger ? "danger-solid" : "primary"} disabled={blocked}>{view.confirmLabel ?? "Confirm"}</Button>
         </div>
       </form>
     </Dialog>

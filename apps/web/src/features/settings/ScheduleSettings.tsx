@@ -8,8 +8,8 @@ import { scheduleSettings, TIME_STEPS } from "@crewtavo/core/routing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
-import { Field, FormError } from "@/components/ui/Field";
+import { Button, useJustDone } from "@/components/ui/Button";
+import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { CardSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
@@ -33,7 +33,7 @@ export function ScheduleSettings() {
   }, [details.data, f]);
 
   const save = useMutation({
-    meta: { inline: true, success: "Schedule settings saved" },
+    meta: { inline: true },
     mutationFn: async () => {
       const v = f!;
       if (!(v.speedMph >= 5 && v.speedMph <= 80)) throw new Error("Driving speed has to be between 5 and 80 mph.");
@@ -51,6 +51,7 @@ export function ScheduleSettings() {
     },
   });
 
+  const saved = useJustDone(save);
   if (details.isPending || !f) return details.error ? <div className="card"><ErrorState error={details.error} onRetry={() => details.refetch()} /></div> : <CardSkeleton lines={6} />;
   const settings = (details.data?.settings ?? {}) as { depot?: { lat: number; lng: number } | null };
   const address = addressLine(details.data?.address as Record<string, string> | null);
@@ -80,7 +81,7 @@ export function ScheduleSettings() {
             <div className="grow small" style={{ fontWeight: 400 }}>Add your shop address in <Link to="/settings?tab=company">Settings → Company</Link> so routes start and end there. Until then they start at the first stop.</div>
           </div>
         )}
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row">
           <input type="checkbox" className="switch" checked={f.autoRoutes} onChange={(e) => set("autoRoutes", e.target.checked)} />
           <span>
             Organize routes automatically
@@ -89,14 +90,14 @@ export function ScheduleSettings() {
             </span>
           </span>
         </label>
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row">
           <input type="checkbox" className="switch" checked={f.routeTimes} onChange={(e) => set("routeTimes", e.target.checked)} />
           <span>
             Give each stop a time
             <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Off: stops are numbered in order and left as anytime that day.</span>
           </span>
         </label>
-        <label className="switch-row" style={{ fontWeight: 500 }}>
+        <label className="switch-row">
           <input type="checkbox" className="switch" checked={f.returnToShop} onChange={(e) => set("returnToShop", e.target.checked)} />
           End the day back at the shop
         </label>
@@ -110,7 +111,7 @@ export function ScheduleSettings() {
         </div>
       </div>
       <FormError error={save.error} />
-      <div className="form-actions" style={{ justifyContent: "flex-start" }}><Button type="submit" variant="primary" loading={save.isPending}>Save schedule settings</Button></div>
+      <div className="form-actions" style={{ justifyContent: "flex-start" }}><FormChecks /><Button type="submit" variant="primary" loading={save.isPending} done={saved}>Save schedule settings</Button></div>
     </form>
   );
 }
