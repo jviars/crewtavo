@@ -127,10 +127,8 @@ export async function addPlanFiles({ companyId, card, files, target, replaces = 
         })
         .select("id")
         .single();
-      if (error) {
-        void supabase().storage.from("files").remove([path]);
-        throw new Error(error.message);
-      }
+      // A stored file with no row is tidied away by the server after a day.
+      if (error) throw new Error(error.message);
       added++;
       lastId = data.id;
       task.done(replaces ? `New version of ${replaces.title} added` : `${file.name} added`);
