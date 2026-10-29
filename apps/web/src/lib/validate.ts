@@ -27,11 +27,12 @@ export function formatPhoneTyping(value: string): string {
   if (digits.startsWith("1") || digits.length > 10) return value;
   const laidOut = layoutPhone(digits);
   if (value === laidOut) return value;
-  // One separator gone from a laid-out number means it was just backspaced over: take the digit before it too.
+  // One separator gone from inside a laid-out number means it was just backspaced over: take the digit
+  // before it too. Gone right before the last digit, it's the digit just typed that needs one.
   if (value.length === laidOut.length - 1) {
     let at = 0;
     while (at < value.length && value[at] === laidOut[at]) at++;
-    if (!/\d/.test(laidOut[at]) && value === laidOut.slice(0, at) + laidOut.slice(at + 1)) {
+    if (!/\d/.test(laidOut[at]) && value.length - at > 1 && value === laidOut.slice(0, at) + laidOut.slice(at + 1)) {
       const before = phoneDigits(laidOut.slice(0, at)).length;
       if (!before) return value;
       return layoutPhone(digits.slice(0, before - 1) + digits.slice(before));
