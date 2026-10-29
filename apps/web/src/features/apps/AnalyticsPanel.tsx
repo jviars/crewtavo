@@ -277,14 +277,14 @@ function CheckResult({ check }: { check: WebsiteCheck }) {
   if (check.found) {
     return (
       <div className="callout callout-good" role="status">
-        <Icon name="check" size={18} />
+        <Icon name="check" size={20} />
         <div className="grow">Installed on {host}<span className="muted small" style={{ display: "block", fontWeight: 400 }}>Checked {timeAgo(check.at)}</span></div>
       </div>
     );
   }
   return (
     <div className="callout callout-warning" role="status">
-      <Icon name="alert" size={18} />
+      <Icon name="alert" size={20} />
       <div className="grow">
         {check.problem ?? <>The line isn't on {host} yet. Paste it, publish your website, and check again.</>}
         <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Checked {timeAgo(check.at)}</span>

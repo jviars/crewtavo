@@ -125,7 +125,7 @@ export function BookingFormPage() {
             {submit.data.sentFiles > 0 && <p className="muted" style={{ margin: 0 }}>{submit.data.sentFiles === 1 ? "Your file came with it." : `Your ${submit.data.sentFiles} files came with it.`}</p>}
             {submit.data.failed.length > 0 && (
               <div className="callout callout-warning" style={{ textAlign: "left", width: "100%" }}>
-                <Icon name="alert" size={18} />
+                <Icon name="alert" size={20} />
                 <div className="grow">
                   <div>{submit.data.failed.length === 1 ? "One file didn't come through:" : `${submit.data.failed.length} files didn't come through:`} {submit.data.failed.join(", ")}</div>
                   <div className="small" style={{ fontWeight: 400 }}>Your request is in. Email {submit.data.failed.length === 1 ? "it" : "them"} to {view.data.company.name}{view.data.company.phone ? `, or call ${view.data.company.phone}` : ""}.</div>
@@ -173,7 +173,7 @@ export function BookingFormPage() {
             ))}
             {promo.offer ? (
               <div className="callout callout-good">
-                <Icon name="tag" size={18} />
+                <Icon name="tag" size={20} />
                 <div className="grow"><strong className="mono">{promo.code}</strong>: {promo.offer}. It'll be applied to your quote.</div>
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setPromo({ code: "", offer: "", open: false }); checkPromo.reset(); }}>Remove</button>
               </div>

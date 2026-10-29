@@ -18,7 +18,7 @@ export function RailwayConnect({ railway, returnTo }: { railway: Railway; return
     <div className="stack">
       {railway.error && !railway.connected && (
         <div className="callout callout-danger" role="alert">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow">
             <div>Railway isn't connected</div>
             <div style={{ fontWeight: 400 }}>{railway.error}</div>

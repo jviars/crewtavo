@@ -43,13 +43,13 @@ export function MapsChooser({ place, onClose }: { place: Place; onClose: () => v
         <div className="maps-choices">
           {mapsApps().map((app) => (
             <a key={app} className="btn big-action" href={mapsUrl(app, place)} target={app === "other" ? undefined : "_blank"} rel="noreferrer" onClick={() => pick(app)}>
-              <Icon name={app === "other" ? "apps" : "navigation"} size={18} />
+              <Icon name={app === "other" ? "apps" : "navigation"} size={20} />
               {MAPS_LABELS[app]}
             </a>
           ))}
           {text && (
             <button type="button" className="btn big-action" onClick={() => { void copyText(text, "Address copied"); onClose(); }}>
-              <Icon name="copy" size={18} />
+              <Icon name="copy" size={20} />
               Copy address
             </button>
           )}
@@ -101,7 +101,7 @@ function RouteChooser({ route, apps, onClose }: { route: Route; apps: RouteApp[]
   const description = route.start ? `${stops}, from the shop${route.end ? " and back" : ""}` : `${stops} from where you are${route.end ? ", then back to the shop" : ""}`;
   const link = (app: RouteApp, url: string, label: string) => (
     <a key={url} className="btn big-action" href={url} target="_blank" rel="noreferrer" onClick={() => pick(app)}>
-      <Icon name="navigation" size={18} />
+      <Icon name="navigation" size={20} />
       {label}
     </a>
   );

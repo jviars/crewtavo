@@ -139,7 +139,7 @@ export function RequestPage() {
       </div>
 
       {r.status === "new" && Date.now() - Date.parse(r.created_at) > 2 * 86_400_000 && (
-        <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">Waiting over 2 days. Schedule an assessment or start a quote.</div></div>
+        <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">Waiting over 2 days. Schedule an assessment or start a quote.</div></div>
       )}
 
       <div className="two-col">
@@ -175,7 +175,7 @@ export function RequestPage() {
               {r.visits.length === 0 && <EmptyState inline title="No assessments yet" />}
               {r.visits.map((v) => (
                 <button key={v.id} type="button" className="card-row" onClick={() => canSell && setVisit({ ...v, request_id: r.id, property_id: r.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id) })}>
-                  <Icon name="calendar" size={18} />
+                  <Icon name="calendar" size={20} />
                   <span className="grow">
                     <strong>{v.title}</strong>
                     <span className="muted text-sm" style={{ display: "block" }}>{v.starts_at ? formatDateTime(v.starts_at, session.company.timezone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}</span>

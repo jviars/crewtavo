@@ -220,29 +220,29 @@ function InvoicePageScreen() {
         {inv.kind === "visits" && <span className="chip">Completed visits</span>}
       </div>
 
-      {isVoid && <div className="callout"><Icon name="x" size={18} /><div className="grow">This invoice is void and isn't owed.</div></div>}
+      {isVoid && <div className="callout"><Icon name="x" size={20} /><div className="grow">This invoice is void and isn't owed.</div></div>}
       {writtenOff && (
         <div className="callout">
-          <Icon name="archive" size={18} />
+          <Icon name="archive" size={20} />
           <div className="grow">
             Written off{inv.written_off_at ? ` on ${formatDate(inv.written_off_at)}` : ""}: {formatMoneyCents(balance)} isn't counted as owed. If the client pays after all, record it and the invoice is marked paid.
           </div>
           <Button size="sm" icon="undo" disabled={writeOff.isPending} onClick={() => writeOff.mutate(false)}>Undo write-off</Button>
         </div>
       )}
-      {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
-      {bankNote && <div className="callout callout-info"><Icon name="clock" size={18} /><div className="grow">{bankNote}</div></div>}
+      {inv.status === "paid" && <div className="callout callout-good"><Icon name="check" size={20} /><div className="grow">Paid in full{lastPayment ? ` on ${formatDate(lastPayment.received_at)}` : ""}.</div></div>}
+      {bankNote && <div className="callout callout-info"><Icon name="clock" size={20} /><div className="grow">{bankNote}</div></div>}
       {/* Up front, rather than refused once someone has filled in a payment. */}
-      {paysInStripe && !bank && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">{RECORD_IN_STRIPE}</div></div>}
+      {paysInStripe && !bank && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">{RECORD_IN_STRIPE}</div></div>}
       {daysLate > 0 && !bank && (
         <div className="callout callout-danger">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.</div>
           <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>
         </div>
       )}
-      {draft && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">This invoice hasn't been sent yet.</div></div>}
-      {!isVoid && balance < 0 && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">The client paid {formatMoneyCents(-balance)} more than they owed. Record a refund, or keep it as a credit for their next invoice.</div></div>}
+      {draft && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">This invoice hasn't been sent yet.</div></div>}
+      {!isVoid && balance < 0 && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">The client paid {formatMoneyCents(-balance)} more than they owed. Record a refund, or keep it as a credit for their next invoice.</div></div>}
 
       <div className="two-col">
         <div className="wide stack-lg">

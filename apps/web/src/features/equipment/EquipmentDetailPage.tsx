@@ -339,7 +339,7 @@ export function EquipmentDetailPage() {
                 <div className="totals">
                   <div className="line"><span>Bought for</span><span>{costs.data?.price ? formatMoneyCents(costs.data.price) : "—"}</span></div>
                   <div className="line"><span>Upkeep logged</span><span>{formatMoneyCents(costs.data?.upkeep ?? 0)}</span></div>
-                  <div className="line grand" style={{ fontSize: 16, fontWeight: 700 }}><span>Total</span><span>{formatMoneyCents((costs.data?.price ?? 0) + (costs.data?.upkeep ?? 0))}</span></div>
+                  <div className="line grand"><span>Total</span><span>{formatMoneyCents((costs.data?.price ?? 0) + (costs.data?.upkeep ?? 0))}</span></div>
                 </div>
               )}
             </div>

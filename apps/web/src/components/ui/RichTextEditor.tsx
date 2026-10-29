@@ -187,7 +187,7 @@ export function RichTextEditor({
               label="Insert a fill-in"
               trigger={
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <Icon name="hash" size={15} />
+                  <Icon name="hash" size={14} />
                   Fill-in
                 </span>
               }
@@ -200,7 +200,7 @@ export function RichTextEditor({
       </div>
       {linking !== null && (
         <form className="rte-link" onSubmit={(e) => { e.preventDefault(); applyLink(new FormData(e.currentTarget).get("url") as string); }}>
-          <Icon name="link" size={15} />
+          <Icon name="link" size={14} />
           <input name="url" className="input" defaultValue={linking} placeholder="Paste a link (https://…), email or phone" aria-label="Link" autoFocus onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), closeLink())} />
           <button type="submit" className="btn btn-sm btn-primary">Apply</button>
           {linking && <button type="button" className="btn btn-sm btn-ghost" onClick={() => applyLink("")}>Remove</button>}
@@ -209,7 +209,7 @@ export function RichTextEditor({
       )}
       {videoForm && (
         <form className="rte-link" onSubmit={(e) => { e.preventDefault(); addVideo(new FormData(e.currentTarget).get("url") as string); }}>
-          <Icon name="video" size={15} />
+          <Icon name="video" size={14} />
           <input
             name="url"
             className="input"

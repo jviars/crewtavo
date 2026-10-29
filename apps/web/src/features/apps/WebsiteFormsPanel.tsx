@@ -118,7 +118,7 @@ export function WebsiteFormsPanel({ kind = "contact" }: { kind?: FormKind }) {
     <>
       {!email_ready && (
         <div className="callout callout-warning" role="status">
-          <Icon name="mail" size={18} />
+          <Icon name="mail" size={20} />
           <div className="grow">
             Email isn't set up in Crewtavo yet, so {careers ? "applications only show in Applicants" : "messages only show in Requests"}. <Link to="/settings?tab=email" className="strong">Connect your email</Link> to get each one in your inbox too.
           </div>

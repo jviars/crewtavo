@@ -113,7 +113,7 @@ export function Timeline({ clientId }: { clientId: string }) {
         {messages.isPending &&
           [0, 1, 2].map((i) => (
             <div key={i} className="timeline-item">
-              <Skeleton width={32} height={32} radius={10} />
+              <Skeleton width={32} height={32} radius={8} />
               <span className="stack-sm"><Skeleton width={140} height={10} /><Skeleton width="80%" height={12} /></span>
             </div>
           ))}

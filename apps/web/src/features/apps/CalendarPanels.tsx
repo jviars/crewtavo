@@ -108,7 +108,7 @@ export function CalendarRow({ source }: { source: CalendarSource }) {
                 .join(" · ")}
           {where && <span className="cal-host"> · {where}</span>}
         </span>
-        {source.last_error && source.enabled && <span className="small" style={{ color: "var(--danger)", fontWeight: 600 }}><Icon name="alert" size={13} /> {source.last_error}</span>}
+        {source.last_error && source.enabled && <span className="small" style={{ color: "var(--danger)", fontWeight: 600 }}><Icon name="alert" size={14} /> {source.last_error}</span>}
         {reupload.error && <FormError error={reupload.error} />}
       </div>
       {file ? (
@@ -135,7 +135,7 @@ function ColorPicker({ value, onChange }: { value: string | null; onChange: (col
     <div className="color-swatches" role="radiogroup" aria-label="Color">
       {COLORS.map((c) => (
         <button key={c} type="button" role="radio" aria-checked={value === c} aria-label={c} className="color-swatch" style={{ "--c": c } as CSSProperties} onClick={() => onChange(c)}>
-          {value === c && <Icon name="check" size={13} strokeWidth={2} />}
+          {value === c && <Icon name="check" size={14} strokeWidth={2} />}
         </button>
       ))}
     </div>
@@ -371,7 +371,7 @@ export function UploadCalendarForm() {
         <ul className="stack-sm" style={{ listStyle: "none", margin: 0, padding: 0 }} aria-label="Upload results">
           {results.map((r, i) => (
             <li key={`${r.name}-${i}`} className="row small" style={{ gap: 8, alignItems: "flex-start", color: r.ok ? undefined : "var(--danger)" }}>
-              <Icon name={r.ok ? "check" : "alert"} size={15} />
+              <Icon name={r.ok ? "check" : "alert"} size={14} />
               <span><strong>{r.name}</strong>: {r.ok ? `added, ${r.text}` : r.text}</span>
             </li>
           ))}

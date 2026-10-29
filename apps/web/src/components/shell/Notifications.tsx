@@ -199,7 +199,7 @@ function PanelSkeleton() {
     <div className="skeleton-wrap" aria-hidden="true">
       {[0, 1, 2].map((i) => (
         <div key={i} className="notice" style={{ pointerEvents: "none" }}>
-          <Skeleton width={32} height={32} radius={10} />
+          <Skeleton width={32} height={32} radius={8} />
           <span style={{ flex: 1, display: "grid", gap: 6 }}>
             <Skeleton width="60%" height={12} />
             <Skeleton width="90%" height={10} />

@@ -102,7 +102,7 @@ export function Dialog({
               {view.description && <p>{view.description}</p>}
             </div>
             <button type="button" className="icon-btn dialog-close" aria-label="Close" onClick={onClose}>
-              <Icon name="x" size={18} />
+              <Icon name="x" size={20} />
             </button>
           </header>
           <div ref={bodyRef} className="dialog-content">{view.children}</div>

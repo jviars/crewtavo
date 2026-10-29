@@ -65,7 +65,7 @@ export function SendDialog({
               {config.features.devMail && <span className="muted small">Development mode: it's in the local Mailpit inbox.</span>}
             </div>
           ) : (
-            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
+            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
           )}
           <div className="field">
             <span>Client link</span>
@@ -88,7 +88,7 @@ export function SendDialog({
           </div>
           {unavailable && (
             <div className="callout callout-info">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow">{channel === "email" ? "Email" : "Texting"} isn't turned on yet. Use “Copy link” and send it yourself.</div>
             </div>
           )}

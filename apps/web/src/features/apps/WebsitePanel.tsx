@@ -61,7 +61,7 @@ function RepoLink({ site }: { site: WebsiteSite }) {
 function FramingBlocked({ site }: { site: WebsiteSite }) {
   return (
     <div className="callout callout-warning" role="note">
-      <Icon name="info" size={18} />
+      <Icon name="info" size={20} />
       <div className="grow stack-sm" style={{ gap: 8 }}>
         <span>{siteName(site)} doesn't let other sites show it, so Website opens your editor in its own tab.</span>
         <span style={{ fontWeight: 400 }}>To see it inside Crewtavo, whoever looks after your website adds this header to the editor's page, then press <strong>Check again</strong>:</span>

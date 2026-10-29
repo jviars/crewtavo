@@ -68,7 +68,7 @@ export function WebsiteSection() {
             <>
               {nothingYet && (
                 <div className="callout callout-info" role="status">
-                  <Icon name="info" size={18} />
+                  <Icon name="info" size={20} />
                   <div className="grow">
                     No visits in this period yet.
                     <span style={{ display: "block", fontWeight: 400 }}>

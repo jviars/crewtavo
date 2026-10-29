@@ -213,7 +213,7 @@ function PictureCell({ service, canEdit }: { service: { id: string; name: string
         {set.isPending ? (
           <span className={styles.thumbBusy}><Spinner size={16} /></span>
         ) : (
-          canEdit && <span className={styles.thumbHint}><Icon name="camera" size={13} />{service.picture ? "Change" : "Add"}</span>
+          canEdit && <span className={styles.thumbHint}><Icon name="camera" size={14} />{service.picture ? "Change" : "Add"}</span>
         )}
       </button>
       {canEdit && service.picture && (

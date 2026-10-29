@@ -2,14 +2,19 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-html, body { margin: 0; background: var(--page); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.45; }
+html, body { margin: 0; background: var(--page); color: var(--ink); font-family: var(--font); font-size: var(--fs-14); line-height: 1.45; }
 body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 a { color: var(--green); text-decoration: none; transition: color var(--dur-fast); }
 a:hover { color: var(--green-dark); }
+/*
+ * A plain text link underlines on hover too. Not a link drawn as something else: one with a class (a button, card or row),
+ * or a bare one in a nav, a tab bar or a list of links (contents, steps). At an element's weight, so a screen's own rule wins.
+ */
+a:where(:not([class], nav a, [role="tablist"] a, .underline-tabs a, li > a):hover) { text-decoration: underline; text-underline-offset: 2px; }
 :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
+h1, h2, h3 { margin: 0; letter-spacing: var(--tracking-tight); }
 img, svg { flex-shrink: 0; }
 ::selection { background: var(--green-tint-2); }
 
@@ -39,7 +44,7 @@ img, svg { flex-shrink: 0; }
 .brand-name { line-height: 1; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-link {
-  position: relative; display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-radius: var(--radius-control);
+  position: relative; display: flex; align-items: center; gap: 12px; height: var(--control); padding: 0 12px; border-radius: var(--radius-control);
   color: var(--ink); font-weight: 600; transition: background var(--dur-fast), box-shadow var(--dur-fast), color var(--dur-fast);
 }
 .nav-link svg { color: var(--text-2); transition: color var(--dur-fast); }
@@ -67,9 +72,9 @@ img, svg { flex-shrink: 0; }
 }
 .topbar[data-scrolled] { border-bottom-color: var(--divider); }
 .business { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
-.business-tile { width: 30px; height: 30px; border-radius: 8px; background: var(--avatar); color: #fff; font-size: 12px; font-weight: 800; display: grid; place-items: center; flex: none; }
+.business-tile { width: 30px; height: 30px; border-radius: var(--radius-control); background: var(--avatar); color: #fff; font-size: var(--fs-12); font-weight: 700; display: grid; place-items: center; flex: none; }
 .business-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-select.business-name { border: 0; background: transparent; font: inherit; font-weight: 700; padding: 4px 2px; border-radius: 6px; max-width: 260px; }
+select.business-name { border: 0; background: transparent; font: inherit; font-weight: 700; padding: 4px 2px; border-radius: var(--radius-control); max-width: 260px; }
 select.business-name:hover { background: var(--fill-2); }
 .search {
   flex: 0 1 300px; min-width: 180px; display: flex; align-items: center; gap: 8px; height: var(--control); padding: 0 8px 0 10px;
@@ -78,17 +83,17 @@ select.business-name:hover { background: var(--fill-2); }
 }
 .search:hover { border-color: var(--button-border); background: var(--surface); }
 .search span { flex: 1; }
-.kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface); font-size: 11px; font-weight: 700; color: var(--text-3); font-family: inherit; }
+.kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); font-size: var(--fs-11); font-weight: 600; color: var(--text-3); font-family: inherit; }
 .icon-btn {
-  position: relative; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: var(--radius-control);
+  position: relative; width: var(--control); height: var(--control); display: grid; place-items: center; border: 0; border-radius: var(--radius-control);
   background: transparent; color: var(--ink); transition: background var(--dur-fast), transform var(--dur-fast);
 }
 .icon-btn:hover { background: var(--fill-2); color: var(--ink); }
 .icon-btn:active { transform: scale(0.94); }
 .icon-btn[aria-expanded="true"] { background: var(--fill-2); }
 .icon-btn .dot-badge {
-  position: absolute; top: 5px; right: 5px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger-solid);
-  color: #fff; font-size: 10px; font-weight: 800; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--page); animation: pop-in var(--dur) var(--ease-spring);
+  position: absolute; top: 5px; right: 5px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--danger-solid);
+  color: #fff; font-size: var(--fs-11); font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--page); animation: pop-in var(--dur) var(--ease-spring);
 }
 
 .content { padding: 20px max(48px, env(safe-area-inset-right)) 56px 48px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
@@ -97,7 +102,7 @@ select.business-name:hover { background: var(--fill-2); }
 .content.content-flush { padding: 0; gap: 0; max-width: none; animation: none; }
 .nav-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
 .mobile-tab-icon { position: relative; display: inline-grid; place-items: center; }
-.mobile-tab-badge { position: absolute; top: -5px; left: calc(100% - 8px); min-width: 18px; height: 18px; padding: 0 5px; font-size: 10.5px; box-shadow: 0 0 0 2px var(--page); }
+.mobile-tab-badge { position: absolute; top: -5px; left: calc(100% - 8px); min-width: 18px; height: 18px; padding: 0 5px; font-size: var(--fs-11); box-shadow: 0 0 0 2px var(--page); }
 span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 0; top: -2px; left: calc(100% - 4px); }
 
 /* Main navigation cross-fades between screens (React Router's viewTransition, see AppShell). */
@@ -107,7 +112,7 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 /* Thin bar at the top while a screen downloads. */
 .route-progress { position: fixed; inset: 0 0 auto 0; height: 3px; z-index: 100; pointer-events: none; }
 .route-progress::before {
-  content: ""; display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--green), #6cbf3f); border-radius: 0 3px 3px 0;
+  content: ""; display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--green), #6cbf3f); border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
   box-shadow: 0 0 8px rgba(59, 125, 35, 0.5); opacity: 0; transition: width 0.25s var(--ease-out), opacity 0.4s 0.15s;
 }
 .route-progress[data-active]::before { width: 82%; opacity: 1; transition: width 2.5s cubic-bezier(0.1, 0.6, 0.2, 1), opacity 0.1s; }
@@ -124,11 +129,14 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 
 /* ---------- Page header ---------- */
 .page-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.page-title { flex: 1 1 360px; min-width: 0; font-size: 32px; font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; overflow-wrap: anywhere; }
+.page-title { flex: 1 1 360px; min-width: 0; font-size: var(--fs-32); font-weight: 800; letter-spacing: var(--tracking-display); line-height: 1.15; overflow-wrap: anywhere; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .page-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -16px; }
-.page-subtitle { margin: -18px 0 0; color: var(--text-3); font-size: 15px; }
-.back-link { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: -16px; }
+.page-subtitle { margin: -18px 0 0; color: var(--text-3); font-size: var(--fs-14); }
+.back-link { position: relative; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); margin-bottom: -16px; }
+/* On a touch screen (and on the crew's screens, see features.css) a 44px target, drawn around the link rather than added to it, so the link sits where it did. */
+.back-link::before { content: ""; position: absolute; inset: calc(50% - 22px) -12px calc(50% - 22px) -8px; display: none; }
+@media (pointer: coarse) { .back-link::before { display: block; } }
 .back-link:hover { color: var(--ink); }
 .back-link svg { transition: transform var(--dur-fast); }
 .back-link:hover svg { transform: translateX(-2px); }
@@ -148,8 +156,8 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 .grow { flex: 1; min-width: 0; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .muted { color: var(--text-3); }
-.small { font-size: 12px; }
-.text-sm { font-size: 13px; }
+.small { font-size: var(--fs-12); }
+.text-sm { font-size: var(--fs-13); }
 .strong { font-weight: 700; }
 .nowrap { white-space: nowrap; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -158,8 +166,8 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 .text-good { color: var(--green-dark); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .prose { line-height: 1.6; overflow-wrap: anywhere; }
-.prose img { max-width: 100%; height: auto; border-radius: 8px; }
-.prose iframe { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; margin: 0; border: 0; border-radius: 10px; background: #000; }
+.prose img { max-width: 100%; height: auto; border-radius: var(--radius-control); }
+.prose iframe { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; margin: 0; border: 0; border-radius: var(--radius-control); background: #000; }
 .prose > iframe { margin: 0 0 0.8em; }
 .prose table { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
 .prose td, .prose th { border: 1px solid var(--border); padding: 6px 8px; }
@@ -180,7 +188,7 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
     padding: 12px max(16px, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + 28px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     gap: 20px;
   }
-  .page-title { font-size: 26px; flex-basis: 100%; }
+  .page-title { font-size: var(--fs-24); flex-basis: 100%; }
   .page-meta { margin-top: -10px; }
   .back-link { margin-bottom: -10px; }
   .mobile-nav {
@@ -189,7 +197,7 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
     border-top: 1px solid var(--border); z-index: 20;
   }
   .mobile-nav a, .mobile-nav button {
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; font-weight: 700;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: var(--fs-11); font-weight: 600;
     color: var(--text-3); border: 0; background: none; min-height: 44px; -webkit-tap-highlight-color: transparent; transition: color var(--dur-fast);
   }
   .mobile-nav a:active svg, .mobile-nav button:active svg { transform: scale(0.88); }
@@ -202,10 +210,10 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 /* The phone's More sheet: up from the bottom like a dialog's sheet, and back down (AppShell keeps it a moment, marked data-leaving). */
 .sheet-backdrop { position: fixed; inset: 0; background: var(--overlay); z-index: 30; animation: fade-in var(--dur-enter) var(--ease-enter); }
 .sheet {
-  position: fixed; inset: auto 0 0 0; max-height: 82vh; overflow-y: auto; background: var(--surface); border-radius: 18px 18px 0 0;
+  position: fixed; inset: auto 0 0 0; max-height: 82vh; overflow-y: auto; background: var(--surface); border-radius: var(--radius-card) var(--radius-card) 0 0;
   padding: 8px 12px calc(16px + env(safe-area-inset-bottom)); z-index: 31; animation: sheet-up var(--dur-enter) var(--ease-enter); box-shadow: var(--shadow-lg);
 }
-.sheet::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 4px; background: var(--fill-3); margin: 4px auto 12px; }
+.sheet::before { content: ""; display: block; width: 40px; height: 4px; border-radius: var(--radius-pill); background: var(--fill-3); margin: 4px auto 12px; }
 .sheet-backdrop[data-leaving] { animation: fade-out var(--dur-exit) var(--ease-exit) forwards; pointer-events: none; }
 .sheet[data-leaving] { animation: sheet-down var(--dur-exit) var(--ease-exit) forwards; pointer-events: none; }
 
@@ -231,7 +239,7 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
   * { scroll-behavior: auto !important; }
   /* Nothing shrinks as it's pressed or lifts as it's hovered. */
   :is(button, a, label, summary, [role="button"], [role="tab"]):active, .mobile-nav :active svg, .app-tile:active .app-icon,
-  .card-link:hover, .back-link:hover svg, .nav-link:hover .nav-create-dot { transform: none !important; }
+  .card-link:hover, .stat-button:hover, .thumb:hover img, .back-link:hover svg, .nav-link:hover .nav-create-dot { transform: none !important; }
   .spinner { animation-duration: 1.6s !important; }
   .skeleton { animation: none !important; background: var(--fill-2) !important; }
   /* Screens and the theme still cross-fade, briefly; nothing moves or resizes on the way. */

@@ -184,7 +184,7 @@ function PushRow({ state, sub, busy, testing, onToggle, onTest }: {
   if (state === "needs-install") {
     return (
       <div className="callout callout-info">
-        <Icon name="phone" size={18} />
+        <Icon name="phone" size={20} />
         <div className="grow small" style={{ fontWeight: 400 }}>
           <div style={{ fontWeight: 700 }}>Get notifications on this iPhone</div>
           Tap the Share button, choose <strong>Add to Home Screen</strong>, then open Crewtavo from your Home Screen and turn notifications on here.
@@ -197,7 +197,7 @@ function PushRow({ state, sub, busy, testing, onToggle, onTest }: {
   if (state === "blocked") {
     return (
       <div className="callout callout-warning">
-        <Icon name="bell" size={18} />
+        <Icon name="bell" size={20} />
         <div className="grow small" style={{ fontWeight: 400 }}>Notifications are blocked for Crewtavo in this browser. Allow them in the browser's site settings, then come back here.</div>
       </div>
     );

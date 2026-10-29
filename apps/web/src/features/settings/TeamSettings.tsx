@@ -106,7 +106,7 @@ export function TeamSettings() {
                         {canSetPhoto(m) ? (
                           <button type="button" className="avatar avatar-edit" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }} onClick={() => setPhotoFor(m.user_id)} aria-label={me ? "Your photo" : `${name}'s photo`} title={m.profile?.avatar_url ? "Change photo" : "Add a photo"}>
                             <Face name={name} photo={m.profile?.avatar_url} />
-                            <span className="avatar-edit-badge" aria-hidden="true"><Icon name="camera" size={9} /></span>
+                            <span className="avatar-edit-badge" aria-hidden="true"><Icon name="camera" size={12} /></span>
                           </button>
                         ) : (
                           <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: m.profile?.color || "var(--text-3)" }}><Face name={name} photo={m.profile?.avatar_url} /></span>
@@ -229,7 +229,7 @@ function ResetPasswordDialog({ member, onClose }: { member: Member; onClose: () 
           ) : (
             <div className="stack-sm">
               <div className="callout callout-warning">
-                <Icon name="lock" size={18} />
+                <Icon name="lock" size={20} />
                 <div className="grow small">
                   Give this link to {first} yourself, in person or by text. Whoever opens it can choose a new password for {first}'s account, so don't share it anywhere else. It works once and stops working within a day.
                 </div>
@@ -327,7 +327,7 @@ function InviteResult({ sent, message, onClose }: { sent: InviteSent; message: s
             </p>
           ) : (
             <div className="callout callout-info">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow small">
                 {sent.reason ?? "Email isn't connected yet."} Copy the link and text it to them. It works once and expires in a day.
                 {can(session, "apps") || session.role === "owner" ? <> To send invites automatically, <Link to="/settings?tab=email">connect your email</Link>.</> : null}

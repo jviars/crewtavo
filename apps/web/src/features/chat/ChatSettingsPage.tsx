@@ -199,7 +199,7 @@ function RolesTab({ data }: { data: SettingsData }) {
 
         {customised && (
           <div className="callout">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow"><span>This role has its own chat rules.</span><span style={{ display: "block", fontWeight: 400 }}>Without them it follows {baseLabel}.</span></div>
             <Button size="sm" onClick={followBase}>Follow {baseLabel}</Button>
           </div>
@@ -210,9 +210,9 @@ function RolesTab({ data }: { data: SettingsData }) {
           <div className="card-pad stack-sm">
             <strong>Name color</strong>
             <span className="muted small">Names and @mentions for this role use this color.</span>
-            <div className="row wrap" style={{ gap: 4, marginLeft: -6 }}>
+            <div className="row wrap" style={{ gap: 4, marginLeft: -5 }}>
               {CHAT_COLORS.map((c) => (
-                <button key={c.key} type="button" className="icon-btn" style={{ width: 44, height: 44, borderRadius: "50%" }} aria-label={c.label} aria-pressed={setting.color === c.key} title={c.label} onClick={() => setSetting({ color: c.key })}>
+                <button key={c.key} type="button" className="icon-btn" style={{ borderRadius: "50%" }} aria-label={c.label} aria-pressed={setting.color === c.key} title={c.label} onClick={() => setSetting({ color: c.key })}>
                   <span style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", background: roleColor(c.key), color: "var(--page)", boxShadow: setting.color === c.key ? "0 0 0 2px var(--surface), 0 0 0 4px var(--ink)" : "inset 0 0 0 1px rgba(0,0,0,.08)" }}>
                     {setting.color === c.key && <Icon name="check" size={14} strokeWidth={2} />}
                   </span>

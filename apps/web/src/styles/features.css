@@ -150,8 +150,8 @@
 .field-app :is(.section-head a, .field-link) { margin: -10px 0; }
 /* The visit's address opens the maps app: a 44px target where it sits in the card, not a bigger card. */
 .field-app .card .address-link { display: flex; align-items: center; justify-self: start; min-height: 44px; margin: -12px 0; }
-.field-app .back-link { min-height: 44px; padding-right: 12px; margin: -12px 0 -29px; }
-@media (max-width: 900px) { .field-app .back-link { margin-bottom: -23px; } }
+/* The back link's 44px target (base.css), here with a mouse too. */
+.field-app .back-link::before { display: block; }
 .big-action, .field-app .big-action { height: var(--control-lg); font-size: var(--fs-16); border-radius: var(--radius-control); }
 /* A photo's remove button: the same small dark circle, in a 44px target. */
 .field-app .thumb .thumb-x { top: 0; right: 0; width: 44px; height: 44px; border-radius: 0; background: radial-gradient(circle, rgba(15, 42, 53, 0.7) 12px, transparent 12.5px); }
@@ -424,7 +424,7 @@ a.field-card:active { transform: scale(0.99); }
 .prose :is(td, th) > p { margin: 0; }
 .prose a { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
 .prose hr { border: 0; border-top: 1px solid var(--divider); margin: 1.4em 0; }
-.prose code { padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill-2); font-size: 0.92em; }
+.prose code { padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill-2); font-size: var(--fs-14); }
 .prose pre { padding: 12px; border-radius: var(--radius-control); background: var(--fill-2); overflow-x: auto; }
 .sop-required { display: flex; gap: 12px; align-items: center; padding: 14px 16px; border-radius: var(--radius-card); background: var(--warning-tint); color: var(--warning); }
 .category-card { display: grid; grid-template-columns: 38px minmax(0, 1fr); column-gap: 12px; row-gap: 1px; align-items: center; text-align: left; padding: 16px 18px; transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast); }
@@ -433,7 +433,7 @@ a.field-card:active { transform: scale(0.99); }
 .kb-search { display: flex; gap: 8px; flex-wrap: wrap; }
 .kb-search .input-group { flex: 1 1 320px; }
 /* As tall as the .btn-lg buttons beside it. */
-.input-lg { height: 46px; font-size: var(--fs-16); }
+.input-lg { height: var(--control-lg); font-size: var(--fs-16); }
 .input-group > .input-lg { padding-left: 38px; }
 .kb-answer { border-color: var(--green-tint-2); background: linear-gradient(180deg, var(--green-tint) 0%, var(--surface) 60%); animation: slide-up var(--dur-slow) var(--ease-out); }
 .kb-answer-icon { width: 26px; height: 26px; border-radius: var(--radius-control); display: grid; place-items: center; background: var(--green-solid); color: #fff; }
@@ -506,11 +506,11 @@ a.field-card:active { transform: scale(0.99); }
 .app-icon[data-wide] img { width: 84%; height: 84%; } /* wordmark-shaped logos (Zoho) */
 .app-icon[data-full] { border-color: transparent; background: none; }
 .app-icon[data-full] img { width: 100%; height: 100%; } /* logos that are already an app icon (Sveltia) */
-.app-icon-letter { font-weight: 800; font-size: calc(var(--size) * 0.42); color: #1f2421; }
+.app-icon-letter { font-weight: 700; font-size: calc(var(--size) * 0.42); color: #1f2421; }
 .app-icon-generic { color: #fff; background: linear-gradient(160deg, #3b82f6, #1d4ed8); border-color: transparent; }
 .app-icon-date { align-content: center; gap: 0; line-height: 1; color: #111; }
-.app-icon-date span { font-size: calc(var(--size) * 0.17); font-weight: 600; color: #e5352b; text-transform: uppercase; letter-spacing: 0.02em; }
-.app-icon-date strong { font-size: calc(var(--size) * 0.5); font-weight: 400; letter-spacing: -0.03em; margin-top: calc(var(--size) * 0.02); }
+.app-icon-date span { font-size: calc(var(--size) * 0.17); font-weight: 600; color: #e5352b; text-transform: uppercase; letter-spacing: var(--tracking-caps); }
+.app-icon-date strong { font-size: calc(var(--size) * 0.5); font-weight: 400; letter-spacing: var(--tracking-display); margin-top: calc(var(--size) * 0.02); }
 
 .app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px 8px; }
 .app-tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 4px 10px; border-radius: var(--radius-card); color: var(--ink); text-align: center; text-decoration: none; transition: background var(--dur-fast); -webkit-tap-highlight-color: transparent; }
@@ -1045,10 +1045,15 @@ body.is-dragging-visit, body.is-dragging-visit * { cursor: grabbing !important; 
 @media (max-width: 1180px) { .unscheduled-panel { position: static; max-height: none; } }
 
 /* ---- Addresses, visit details and routes --------------------------------------------------- */
-/* An address that opens a maps app (MapsLink): the app's one link style, green with an underline on hover. */
-.address-link { all: unset; display: inline; color: var(--green); font: inherit; text-align: left; text-underline-offset: 3px; cursor: pointer; overflow-wrap: anywhere; transition: color var(--dur-fast); }
+/*
+ * An address that opens a maps app (MapsLink): a text link, green with an underline on hover. Until a maps app is
+ * remembered it's a <button>, and only its button look goes. At an element's weight (:where), so its size and color
+ * can still come from around it or from a class beside it (.small, .text-sm, .muted).
+ */
+:where(.address-link) { text-align: left; text-underline-offset: 3px; overflow-wrap: anywhere; transition: color var(--dur-fast); }
+button:where(.address-link) { display: inline; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--green); letter-spacing: inherit; }
 .address-link:hover { color: var(--green-dark); text-decoration: underline; }
-.address-link:focus-visible { border-radius: var(--radius-sm); box-shadow: var(--ring); }
+.address-link:focus-visible { outline: none; border-radius: var(--radius-sm); box-shadow: var(--ring); }
 .maps-choices { display: grid; gap: 8px; }
 .maps-choices .btn { justify-content: flex-start; gap: 10px; padding: 0 16px; }
 .visit-facts { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px 10px; align-items: start; margin: 0; }

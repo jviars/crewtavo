@@ -147,7 +147,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
         <span className={`${s.sideTitle} mobile-only`}>Team chat</span>
         {state?.me?.admin && (
-          <Link to="/chat/settings" className="icon-btn" aria-label="Chat settings" title="Chat settings"><Icon name="settings" size={18} /></Link>
+          <Link to="/chat/settings" className="icon-btn" aria-label="Chat settings" title="Chat settings"><Icon name="settings" size={20} /></Link>
         )}
       </div>
       <nav className={s.sideList} aria-label="Channels">
@@ -334,9 +334,9 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
           channel.topic && <p className={s.convTopic}>{channel.topic}</p>
         )}
         <div className={s.convTools}>
-          <button type="button" className="icon-btn" aria-label="Pinned messages" title="Pinned messages" onClick={() => setPinsOpen(true)}><Icon name="pushpin" size={19} /></button>
+          <button type="button" className="icon-btn" aria-label="Pinned messages" title="Pinned messages" onClick={() => setPinsOpen(true)}><Icon name="pushpin" size={20} /></button>
           <button type="button" className={`icon-btn${membersOpen ? ` ${s.toolOn}` : ""}`} aria-label={membersOpen ? "Hide the member list" : `Members${membersCount ? ` (${membersCount})` : ""}`} aria-pressed={membersOpen} title="Members" onClick={onToggleMembers}>
-            <Icon name="users" size={19} />
+            <Icon name="users" size={20} />
           </button>
         </div>
       </header>

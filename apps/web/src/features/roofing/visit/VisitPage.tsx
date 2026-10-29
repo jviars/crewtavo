@@ -20,7 +20,7 @@ import { optionTotals, toCents } from "@crewtavo/core/money";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
+import { AnimatedNumber, MONEY, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Face } from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
@@ -125,9 +125,6 @@ const TABS: ReadonlyArray<{ id: PanelTab; label: string }> = [
 
 /** The price's +/− steps on "Price". */
 const NUDGES = [-500, -100, 100, 500];
-
-/** In whole dollars, or with cents when it has them, rolling to each new price. */
-const MONEY_CENTS = { ...MONEY, minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
 /**
  * A line's mark on the paper: the option it's on and its service (else its own id), so a line added
@@ -363,6 +360,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
   const measureLink = takeoff ? `/measure?measurement=${takeoff.id}&roofing=1` : `/measure?quote=${quote.id}&roofing=1${quote.property ? `&property=${quote.property.id}` : ""}`;
 
   const priceLabel = looking && view ? `${view.label}, if they choose it` : chosenTab ? `Price for ${labelOf(chosenTab)}` : "Price";
+  // In whole dollars, or with cents when it has them, rolling to each new price.
   const priceFigure = <AnimatedNumber className={styles.priceFigure} value={shownPrice} format={toCents(shownPrice) % 100 ? MONEY_CENTS : MONEY} />;
   const reviewButton = (
     <button type="button" className={`btn btn-primary ${styles.bigButton}`} disabled={!ready} aria-busy={sitePrice.isPending || undefined} onClick={review}>

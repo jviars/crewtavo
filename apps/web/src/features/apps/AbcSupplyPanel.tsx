@@ -52,7 +52,7 @@ export function AbcSupplyPanel({ app, onChanged }: { app: AppRow; onChanged: () 
         </span>
       </div>
       <div className="callout" role="note">
-        <Icon name="info" size={18} />
+        <Icon name="info" size={20} />
         <span className="grow" style={{ fontWeight: 400 }}>
           <strong>Before you start:</strong> have your ABC account number (top left in <a href={MY_ABC} target="_blank" rel="noreferrer">myABCSupply</a>, or on any ABC invoice) and a myABCSupply login that can see that account. No login yet? Sign up at myABCSupply or ask your branch.
         </span>
@@ -120,7 +120,7 @@ function KeysForm({ sandboxFirst, onSaved, onCancel }: { sandboxFirst: boolean; 
       <Field label="Client Secret">
         <div className="input-group">
           <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={secret} onChange={(e) => { setSecret(e.target.value); save.reset(); }} style={{ paddingLeft: 12, paddingRight: 36 }} />
-          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={15} /></button>
+          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={14} /></button>
         </div>
       </Field>
       <label className="checkbox">
@@ -157,7 +157,7 @@ function AccountCard({ app, supplier, onChanged, onChangeKeys }: { app: AppRow; 
       <h2 id="abc-account" className="section-title" style={{ fontSize: 16 }}>Where prices come from</h2>
       {supplier.environment === "sandbox" && (
         <div className="callout callout-warning" role="status">
-          <Icon name="info" size={18} />
+          <Icon name="info" size={20} />
           <span className="grow">These are ABC's sandbox test prices, not yours. Once ABC approves your Production Request, change the keys and untick Sandbox.</span>
         </div>
       )}

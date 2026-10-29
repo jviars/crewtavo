@@ -56,7 +56,7 @@
 .tile[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); }
 .tile:focus-visible { outline: none; box-shadow: var(--ring); }
 /* The little pages are paper: white in both themes. */
-.mini { display: flex; height: 54px; overflow: hidden; border: 1px solid #ecebe6; border-radius: 6px; background: #fafaf8; }
+.mini { display: flex; height: 54px; overflow: hidden; border: 1px solid #ecebe6; border-radius: var(--radius-sm); background: #fafaf8; }
 .mini i { display: block; border-radius: 2px; background: #d9d8d2; }
 .mini .square { width: 14px; height: 14px; border-radius: 3px; background: var(--mini-color); }
 .mini .name { width: 26px; height: 5px; border-radius: 3px; background: #c9c8c1; }

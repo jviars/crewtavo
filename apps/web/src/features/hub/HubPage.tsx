@@ -255,7 +255,7 @@ export function HubPage() {
         )}
         {d && (
           <>
-            {preview && <div className="callout callout-info no-print"><Icon name="eye" size={18} /><div className="grow">Preview: this is what your client sees.</div></div>}
+            {preview && <div className="callout callout-info no-print"><Icon name="eye" size={20} /><div className="grow">Preview: this is what your client sees.</div></div>}
             {home && <a className="hub-back no-print" href={home}><Icon name="chevronLeft" size={16} />Your account</a>}
             {d.kind === "quote" && <QuoteHub token={token} data={d} onChanged={() => view.refetch()} printing={printable} onPrint={print} />}
             {d.kind === "invoice" && <InvoiceHub token={token} data={d} onChanged={() => view.refetch()} printing={printable} />}
@@ -319,7 +319,7 @@ function HubSkeleton() {
   return (
     <div className="skeleton-wrap stack-lg" aria-busy="true" role="status">
       <span className="sr-only">Loading…</span>
-      <div className="row"><Skeleton width={40} height={40} radius={10} /><span className="stack-sm" style={{ flex: 1 }}><Skeleton width={160} height={14} /><Skeleton width={220} height={10} /></span></div>
+      <div className="row"><Skeleton width={40} height={40} radius={8} /><span className="stack-sm" style={{ flex: 1 }}><Skeleton width={160} height={14} /><Skeleton width={220} height={10} /></span></div>
       <div className="card card-pad stack-sm"><Skeleton width={120} height={10} /><Skeleton width="60%" height={24} /><Skeleton width="40%" height={10} /></div>
       <div className="card">{[0, 1, 2].map((i) => <div key={i} className="card-row"><span className="grow stack-sm"><Skeleton width="50%" /><Skeleton width="30%" height={10} /></span><Skeleton width={70} /></div>)}</div>
     </div>
@@ -504,12 +504,12 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
           <div className={cx(styles.headActions, "no-print")}>
             {phone && (
               <a className={styles.headBtn} href={phoneHref(phone)}>
-                <Icon name="phone" size={17} />
+                <Icon name="phone" size={16} />
                 <span className={styles.btnText}><span className="sr-only">Call </span>{phone}</span>
               </a>
             )}
             <button type="button" className={styles.headBtn} onClick={onPrint}>
-              <Icon name="printer" size={17} />
+              <Icon name="printer" size={16} />
               <span className={styles.btnText}>Print<span className="sr-only"> or save as PDF</span></span>
             </button>
           </div>
@@ -517,7 +517,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
       </header>
 
       <main className={styles.main}>
-        {data.preview && <div className="callout callout-info no-print"><Icon name="eye" size={18} /><div className="grow">Preview: this is what your client sees.</div></div>}
+        {data.preview && <div className="callout callout-info no-print"><Icon name="eye" size={20} /><div className="grow">Preview: this is what your client sees.</div></div>}
         {data.home && <a className="hub-back no-print" href={data.home}><Icon name="chevronLeft" size={16} />Your account</a>}
 
         <section className={styles.intro}>
@@ -579,7 +579,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                     <h2>{shown ? `What's included with ${shown.name}` : "What's included"}</h2>
                     <ul className={styles.checks}>
                       {range.included.map((item) => (
-                        <li key={item}><span className={styles.tick}><Icon name="check" size={13} strokeWidth={2.25} /></span><span>{item}</span></li>
+                        <li key={item}><span className={styles.tick}><Icon name="check" size={14} strokeWidth={2.25} /></span><span>{item}</span></li>
                       ))}
                     </ul>
                   </section>
@@ -616,7 +616,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
               <div className={cx(styles.card, styles.next, !accepted && "no-print")} data-done={accepted || undefined}>
                 {accepted ? (
                   <div ref={thanks} tabIndex={-1} className={styles.thanks}>
-                    <span className={styles.thanksMark}><Icon name="check" size={22} strokeWidth={2.5} /></span>
+                    <span className={styles.thanksMark}><Icon name="check" size={20} strokeWidth={2.5} /></span>
                     <strong>{first ? `Thanks, ${first}. We'll call you soon.` : "Thanks. We'll call you soon."}</strong>
                     <p>{words.thanks}</p>
                     {!data.preview && <button type="button" className={cx(styles.noteBtn, "no-print")} onClick={onAsk}>Send {company.name} a note</button>}
@@ -626,12 +626,12 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                     <h2 className={styles.nextTitle}>Ready for the next step?</h2>
                     <p className={styles.nextText}>{words.next}</p>
                     {dates.expired && dates.goodUntil && (
-                      <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">This range was good until {dates.goodUntil}. You can still say yes, and we'll confirm the price.</div></div>
+                      <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">This range was good until {dates.goodUntil}. You can still say yes, and we'll confirm the price.</div></div>
                     )}
                     {leanedOn && <p className={styles.leaning}>Leaning toward <strong>{leanedOn.tier ? `${leanedOn.tier} · ` : ""}{leanedOn.name}</strong></p>}
                     <Button variant="primary" size="lg" block className={styles.yes} loading={accept.isPending} onClick={yes}>Yes, send someone out</Button>
                     <Button size="lg" block className={styles.ask} onClick={ask}>I have a question</Button>
-                    {previewNote && <div className="callout callout-info" role="status"><Icon name="eye" size={18} /><div className="grow">This is a preview, so nothing was sent. Your client's own link sends it.</div></div>}
+                    {previewNote && <div className="callout callout-info" role="status"><Icon name="eye" size={20} /><div className="grow">This is a preview, so nothing was sent. Your client's own link sends it.</div></div>}
                     <FormError error={accept.error} />
                     <span className={styles.fine}>Saying yes doesn't commit you to anything.</span>
                   </>
@@ -950,8 +950,8 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
         </section>
       ) : (
         <>
-          {expired && <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">This quote's valid-until date has passed. You can still approve it, and {data.company.name} will confirm the price.</div></div>}
-          {q.status === "changes_requested" && <div className="callout"><Icon name="messages" size={18} /><div className="grow">You've asked for changes. {data.company.name} may send an updated quote, or you can approve this one as it is.</div></div>}
+          {expired && <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">This quote's valid-until date has passed. You can still approve it, and {data.company.name} will confirm the price.</div></div>}
+          {q.status === "changes_requested" && <div className="callout"><Icon name="messages" size={20} /><div className="grow">You've asked for changes. {data.company.name} may send an updated quote, or you can approve this one as it is.</div></div>}
 
           {steps.length > 1 && (
             <ol className="hub-steps no-print" aria-label="Steps">
@@ -959,7 +959,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
                 <li key={s} aria-current={s === current ? "step" : undefined} data-done={i < at || undefined}>
                   {i < at ? (
                     <button type="button" onClick={() => goTo(s)}>
-                      <span className="hub-step-n"><Icon name="check" size={13} strokeWidth={2} /></span>
+                      <span className="hub-step-n"><Icon name="check" size={14} strokeWidth={2} /></span>
                       {STEP_LABELS[s]}
                       <span className="sr-only"> (done, go back)</span>
                     </button>
@@ -976,7 +976,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
 
           {message && current !== "sign" && (
             <div className="callout callout-warning no-print" role="alert">
-              <Icon name="alert" size={18} />
+              <Icon name="alert" size={20} />
               <div className="grow">{message}</div>
             </div>
           )}
@@ -1040,7 +1040,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
             <section className="card card-pad stack no-print" aria-labelledby="hub-sign">
               <h2 id="hub-sign" ref={heading} tabIndex={-1} className="hub-step-title">{steps.length > 1 ? "Sign" : "Approve"}</h2>
               {data.preview ? (
-                <div className="callout callout-info"><Icon name="eye" size={18} /><div className="grow">Preview: your client signs here.</div></div>
+                <div className="callout callout-info"><Icon name="eye" size={20} /><div className="grow">Preview: your client signs here.</div></div>
               ) : (
                 <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); approve.mutate(); }}>
                   <Field label="Your full name" requiredMessage="Enter your full name, as you'd sign it."><input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={120} autoComplete="name" /></Field>

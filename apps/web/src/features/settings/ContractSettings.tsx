@@ -360,14 +360,14 @@ export function ContractSettings() {
 
       {!canEdit && (
         <div className="callout">
-          <Icon name="lock" size={18} />
+          <Icon name="lock" size={20} />
           <span className="grow">Only people in the office who manage Settings can change these.</span>
         </div>
       )}
 
       {canEdit && examples.size > 0 && (
         <div className="callout">
-          <Icon name="info" size={18} />
+          <Icon name="info" size={20} />
           <span className="grow">{STARTER_NOTE}</span>
         </div>
       )}
@@ -536,7 +536,7 @@ function SectionDialog({ section, sort, onClose }: { section: ContractSectionRow
             <Suspense
               fallback={
                 <Loading label="Loading the editor">
-                  <Skeleton height={226} radius={10} />
+                  <Skeleton height={226} radius={12} />
                 </Loading>
               }
             >

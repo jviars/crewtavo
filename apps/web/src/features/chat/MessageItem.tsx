@@ -173,7 +173,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
       <div className={s.msgMain}>
         {message.reply && (
           <button type="button" className={s.reply} onClick={() => ctx.onJumpTo(message.reply!.id)}>
-            <Icon name="reply" size={13} />
+            <Icon name="reply" size={14} />
             <strong>{message.reply.author}</strong>
             <span>{message.reply.deleted ? "Deleted message" : toEditable(message.reply.body, nameFor) || "Photo"}</span>
           </button>
@@ -227,7 +227,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
         {message.job_id && (
           job ? (
             <Link className={s.jobCard} to={`/jobs/${job.id}`}>
-              <span className={s.jobIcon}><Icon name="job" size={17} /></span>
+              <span className={s.jobIcon}><Icon name="job" size={16} /></span>
               <span className="grow">
                 <strong style={{ display: "block" }}>{job.number ? `Job #${job.number} · ` : ""}{job.title}</strong>
                 <span className="muted small">{[job.client?.display_name, job.property ? addressLine(job.property) : null].filter(Boolean).join(" · ")}</span>
@@ -236,7 +236,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             </Link>
           ) : (
             <span className={s.jobCard} style={{ color: "var(--text-3)" }}>
-              <span className={s.jobIcon}><Icon name="job" size={17} /></span>
+              <span className={s.jobIcon}><Icon name="job" size={16} /></span>
               A job you can't open
             </span>
           )
@@ -250,7 +250,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
               const names = g.users.map((u) => (u === ctx.me ? "You" : ctx.personName(u))).join(", ");
               return (
                 <button key={g.kind} type="button" className={s.reaction} aria-pressed={on} title={`${info?.label}: ${names}`} onClick={() => react.mutate({ kind: g.kind, on: !on })}>
-                  <Icon name={REACTION_ICONS[g.kind] ?? "thumbsUp"} size={15} />
+                  <Icon name={REACTION_ICONS[g.kind] ?? "thumbsUp"} size={14} />
                   {g.kind === "thumbs_up" ? g.users.length : `${info?.label} · ${g.users.length}`}
                 </button>
               );
@@ -261,17 +261,17 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
 
       {editing === null && (
         <div className={s.tools}>
-          <Menu label="React" align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={17} />} items={reactionMenu} />
+          <Menu label="React" align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />
           {ctx.canPost && (
             <button type="button" className={`icon-btn ${s.icon}`} aria-label="Reply" title="Reply" onClick={() => ctx.onReply(message)}>
-              <Icon name="reply" size={17} />
+              <Icon name="reply" size={16} />
             </button>
           )}
           <Menu
             label="More"
             align="end"
             triggerClassName={`icon-btn ${s.icon}`}
-            trigger={<Icon name="more" size={17} />}
+            trigger={<Icon name="more" size={16} />}
             items={[
               { label: "Edit", icon: "edit", onSelect: startEdit, hidden: !mine || !ctx.canPost },
               { label: message.pinned_at ? "Unpin" : "Pin to the channel", icon: message.pinned_at ? "unpin" : "pushpin", onSelect: () => pin.mutate(), hidden: !ctx.canManage },

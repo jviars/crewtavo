@@ -273,7 +273,7 @@ export function RailwaySketch({ projectName }: { projectName: string | null }) {
     <div className={styles.sketch} aria-hidden="true">
       <div className={styles.sketchTop}><i /><i /><i /><span>On Railway</span></div>
       <div className={styles.sketchBody}>
-        <span className={styles.sketchRow}><b>1</b>Projects<span className={styles.sketchSelect}><span className={styles.barText}>{projectName ?? "your project"}</span><Icon name="chevronDown" size={13} /></span></span>
+        <span className={styles.sketchRow}><b>1</b>Projects<span className={styles.sketchSelect}><span className={styles.barText}>{projectName ?? "your project"}</span><Icon name="chevronDown" size={14} /></span></span>
         <span className={styles.sketchRow}><b>2</b>Press<span className={styles.sketchAllow}>Authorize</span></span>
       </div>
     </div>
@@ -396,7 +396,7 @@ function AddressMove({ from, to }: { from: string | null; to: string | null }) {
         <span className={styles.moveLabel}>Now</span>
         <BrowserBar address={from ? bare(from) : "Not set yet"} tone="old" />
       </span>
-      <span className={styles.moveArrow}><Icon name="arrowRight" size={18} /></span>
+      <span className={styles.moveArrow}><Icon name="arrowRight" size={20} /></span>
       <span className={styles.moveSide}>
         <span className={styles.moveLabel}>Your own</span>
         <BrowserBar address={to ?? `${ADDRESS_PREFIX}.yourbusiness.com`} tone={to ? "new" : "example"} />
@@ -594,7 +594,7 @@ export function ChooseAddress({ overview, onDone, onDraft, bare = false }: { ove
           {provider && <span className="row small"><Icon name="check" size={14} />Your domain's DNS is at {provider.label}.</span>}
           {better && (
             <div className="callout">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow stack-sm">
                 <span style={{ fontWeight: 400 }}>Your domain is {result!.zone}. Most businesses use {better}.</span>
                 <Button size="sm" style={{ justifySelf: "start" }} onClick={() => fill(afterPrefix(better))}>Use {better}</Button>
@@ -603,7 +603,7 @@ export function ChooseAddress({ overview, onDone, onDraft, bare = false }: { ove
           )}
           {result && result.warnings.length > 0 && (
             <div className="callout">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <ul className={styles.list} style={{ flex: 1, minWidth: 0 }}>{result.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
             </div>
           )}
@@ -634,7 +634,7 @@ export function Waiting({ overview, change, checking, onCheck }: { overview: Add
         <Progress overview={overview} change={change} />
         {change.automatic && (
           <div className="callout callout-info">
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <span className="grow">{recordsIn(change) ? "You can close this page." : "Once the records are in, you can close this page."} Crewtavo finishes by itself and lets you know when it's done.</span>
           </div>
         )}
@@ -682,7 +682,7 @@ function Progress({ overview, change }: { overview: AddressOverview; change: Add
         const state = item.done ? "done" : item.failed ? "failed" : i === current ? "current" : "todo";
         return (
           <li key={item.label} data-state={state}>
-            <span className={styles.mark} aria-hidden="true">{item.done ? <Icon name="check" size={13} strokeWidth={2} /> : item.failed ? <Icon name="x" size={13} strokeWidth={2} /> : null}</span>
+            <span className={styles.mark} aria-hidden="true">{item.done ? <Icon name="check" size={14} strokeWidth={2} /> : item.failed ? <Icon name="x" size={14} strokeWidth={2} /> : null}</span>
             {item.label}
             <span className="sr-only">{item.done ? ": done" : item.failed ? ": failed" : ": not yet"}</span>
           </li>
@@ -844,7 +844,7 @@ function RecordsCard({ overview, change, bare = false }: { overview: AddressOver
       )}
       {provider.note && (
         <div className="callout">
-          <Icon name="info" size={18} />
+          <Icon name="info" size={20} />
           <span className="grow" style={{ fontWeight: 400 }}>{provider.note}</span>
         </div>
       )}
@@ -867,7 +867,7 @@ function RecordsCard({ overview, change, bare = false }: { overview: AddressOver
       </div>
       {added !== null && (
         <div className="callout callout-good" role="status">
-          <Icon name="check" size={18} />
+          <Icon name="check" size={20} />
           <div className="grow">
             <div>{added === 1 ? "Added 1 record in Cloudflare" : `Added ${added} records in Cloudflare`}</div>
             <div style={{ fontWeight: 400 }}>They usually show up as Done below within a few minutes. You can delete the token in Cloudflare now: Crewtavo used it once and didn't keep it.</div>
@@ -918,7 +918,7 @@ function RecordItem({ record, provider, number, unknown, steps = true }: { recor
       </dl>
       {record.status === "wrong" ? (
         <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow">
             <div>{record.hint ?? "Something else is there. Change it to the value above."}</div>
             {record.found.length > 0 && <div className="small" style={{ fontWeight: 400, overflowWrap: "anywhere" }}>Right now it says: {record.found.join(", ")}</div>}
@@ -947,7 +947,7 @@ function SendSteps({ change, below = true }: { change: AddressChange; below?: bo
   return (
     <div className={`stack-sm ${styles.send}`}>
       <span className="row" style={{ gap: 8, flexWrap: "nowrap", alignItems: "flex-start" }}>
-        <span className={styles.choiceIcon} style={{ flex: "none" }}><Icon name="users" size={18} /></span>
+        <span className={styles.choiceIcon} style={{ flex: "none" }}><Icon name="users" size={20} /></span>
         <span className="stack-sm" style={{ gap: 2 }}>
           <strong>Someone else looks after your domain?</strong>
           <span className="muted small">Send the steps to whoever set up your website. It takes them a couple of minutes, and Crewtavo notices when they're done.{below && " Or add the records yourself, below."}</span>
@@ -1125,7 +1125,7 @@ export function RailwayAccess({ overview }: { overview: AddressOverview }) {
 function Problem({ title = "Something needs attention", children }: { title?: string; children: ReactNode }) {
   return (
     <div className="callout callout-danger" role="alert">
-      <Icon name="alert" size={18} />
+      <Icon name="alert" size={20} />
       <div className="grow">
         <div>{title}</div>
         <div style={{ fontWeight: 400 }}>{children}</div>

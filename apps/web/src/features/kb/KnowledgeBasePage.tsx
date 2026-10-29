@@ -108,7 +108,7 @@ export function KnowledgeBasePage() {
 
       {(ask.isPending || ask.data || ask.error) && (
         <section className="card card-pad stack-sm kb-answer" aria-live="polite" aria-label="Answer from your guides">
-          <div className="row" style={{ gap: 8 }}><span className="kb-answer-icon"><Icon name="sparkle" size={15} /></span><strong>Answer from your guides</strong></div>
+          <div className="row" style={{ gap: 8 }}><span className="kb-answer-icon"><Icon name="sparkle" size={14} /></span><strong>Answer from your guides</strong></div>
           {ask.isPending && <Loading label="Thinking"><div className="stack-sm"><Skeleton width="92%" /><Skeleton width="85%" /><Skeleton width="60%" /></div></Loading>}
           {ask.data && <div className="pre-wrap" style={{ lineHeight: 1.6 }}>{ask.data.answer}</div>}
           {ask.data && ask.data.sources.length > 0 && (
@@ -175,14 +175,14 @@ export function KnowledgeBasePage() {
               <div className="grid-cards">
                 {categories.data.map((c) => (
                   <button key={c.id} type="button" className="card card-pad category-card" onClick={() => set({ category: c.id })}>
-                    <span className="c-icon"><Icon name="book" size={18} /></span>
+                    <span className="c-icon"><Icon name="book" size={20} /></span>
                     <strong>{c.name}</strong>
                     <span className="muted small">{index.data ? `${countFor(c.id)} ${countFor(c.id) === 1 ? "guide" : "guides"}` : <Skeleton width={50} height={10} />}</span>
                   </button>
                 ))}
                 {uncategorized > 0 && (
                   <button type="button" className="card card-pad category-card" onClick={() => set({ category: "none" })}>
-                    <span className="c-icon" style={{ background: "var(--fill-2)", color: "var(--text-3)" }}><Icon name="file" size={18} /></span>
+                    <span className="c-icon" style={{ background: "var(--fill-2)", color: "var(--text-3)" }}><Icon name="file" size={20} /></span>
                     <strong>Uncategorized</strong>
                     <span className="muted small">{uncategorized} {uncategorized === 1 ? "guide" : "guides"}</span>
                   </button>

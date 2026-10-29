@@ -77,7 +77,7 @@ export function MapsSettings() {
     <div className="stack" style={{ maxWidth: 860 }}>
       <div className="card card-pad stack-sm">
         <div className="row" style={{ gap: 10 }}>
-          <span className="maps-settings-icon" aria-hidden="true"><Icon name="map" size={18} /></span>
+          <span className="maps-settings-icon" aria-hidden="true"><Icon name="map" size={20} /></span>
           <strong>Free imagery, nothing to set up</strong>
         </div>
         <p className="muted" style={{ margin: 0 }}>
@@ -93,7 +93,7 @@ export function MapsSettings() {
 
       <div className="card card-pad stack-sm">
         <div className="row" style={{ gap: 10 }}>
-          <span className="maps-settings-icon" aria-hidden="true"><Icon name="layers" size={18} /></span>
+          <span className="maps-settings-icon" aria-hidden="true"><Icon name="layers" size={20} /></span>
           <strong id="team-map-title">What Measure opens on</strong>
         </div>
         <div className="row wrap" style={{ gap: 12 }}>
@@ -200,14 +200,14 @@ function KeyCard({
     <div className="card card-pad stack">
       <div className="row-between wrap" style={{ gap: 8 }}>
         <div className="row" style={{ gap: 10 }}>
-          <span className="maps-settings-icon" aria-hidden="true"><Icon name="globe" size={18} /></span>
+          <span className="maps-settings-icon" aria-hidden="true"><Icon name="globe" size={20} /></span>
           <strong>{title}</strong>
           <span className="chip">{badge}</span>
         </div>
         {set ? (
-          <span className="chip chip-green"><Icon name="check" size={13} /> Working · key ending {current!.slice(-4)}</span>
+          <span className="chip chip-green"><Icon name="check" size={14} /> Working · key ending {current!.slice(-4)}</span>
         ) : inherited ? (
-          <span className="chip chip-green"><Icon name="check" size={13} /> Set up by whoever installed Crewtavo</span>
+          <span className="chip chip-green"><Icon name="check" size={14} /> Set up by whoever installed Crewtavo</span>
         ) : (
           <span className="chip">Not set up</span>
         )}

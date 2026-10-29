@@ -77,7 +77,7 @@ export function AutomationsPage() {
 
       {(usesEmail && !session.config.features.email) || (usesSms && !session.config.features.sms) ? (
         <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={20} />
           <div className="grow">
             <div>{usesEmail && !session.config.features.email ? "Email isn't connected" : "Texting isn't set up on this server"}</div>
             <div className="small" style={{ fontWeight: 400 }}>Rules that send {usesEmail && !session.config.features.email ? "emails" : "texts"} will show as failed until it is. Notifications, tags and tasks still work.{usesEmail && !session.config.features.email && <ConnectEmailHint />}</div>

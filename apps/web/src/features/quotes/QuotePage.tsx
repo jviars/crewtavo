@@ -572,7 +572,7 @@ export function QuotePage() {
 
       {q.status === "approved" && (
         <div className="callout callout-good">
-          <Icon name="check" size={18} />
+          <Icon name="check" size={20} />
           <div className="grow">
             <div>
               {approval?.method === "in_person" ? "Signed on site" : "Approved"} {q.approved_at ? formatDate(q.approved_at) : ""}
@@ -587,7 +587,7 @@ export function QuotePage() {
       )}
       {changeJob && (
         <div className="callout callout-info">
-          <Icon name="job" size={18} />
+          <Icon name="job" size={20} />
           <div className="grow">
             <div>Change order for <Link to={`/jobs/${changeJob.id}`} className="strong">job #{changeJob.number}</Link>: {changeJob.title}</div>
             <div className="small" style={{ fontWeight: 400 }}>{q.status === "converted" ? "It's been added to the job." : "Once the client approves it, its items are added to the job and its total goes up."}</div>
@@ -596,7 +596,7 @@ export function QuotePage() {
       )}
       {!changeJob && q.status === "converted" && q.jobs.length > 0 && (
         <div className="callout callout-info">
-          <Icon name="job" size={18} />
+          <Icon name="job" size={20} />
           <div className="grow">
             <div>Converted to <Link to={`/jobs/${q.jobs[0].id}`} className="strong">job #{q.jobs[0].number}</Link>.</div>
             {approval && signatures}
@@ -605,7 +605,7 @@ export function QuotePage() {
       )}
       {q.status === "changes_requested" && (
         <div className="callout callout-warning">
-          <Icon name="messages" size={18} />
+          <Icon name="messages" size={20} />
           <div className="grow">
             <div>{q.client?.display_name ?? "The client"} asked for changes</div>
             {changeRequest && <div className="pre-wrap small" style={{ fontWeight: 400, marginTop: 4 }}>“{changeRequest.body}”</div>}
@@ -613,10 +613,10 @@ export function QuotePage() {
           </div>
         </div>
       )}
-      {q.status === "lost" && <div className="callout callout-danger"><Icon name="x" size={18} /><div className="grow">Marked lost{q.lost_reason ? `: ${q.lost_reason}` : ""}.</div></div>}
+      {q.status === "lost" && <div className="callout callout-danger"><Icon name="x" size={20} /><div className="grow">Marked lost{q.lost_reason ? `: ${q.lost_reason}` : ""}.</div></div>}
       {q.status === "sent" && q.sent_at && (
         <div className="callout">
-          <Icon name="clock" size={18} />
+          <Icon name="clock" size={20} />
           <div className="grow">
             {rangeAccepted
               ? `${q.client?.display_name ?? "The client"} said yes to the range, ${formatMoney(q.range_low)} to ${formatMoney(q.range_high)}, on ${dayText(q.range_accepted_at!, session.company.timezone)}. Book the site visit: the exact price is set there.`
@@ -725,7 +725,7 @@ export function QuotePage() {
               <div className="totals">
                 <div className="line"><span>Price before tax</span><AnimatedNumber value={priceForMargin} format={MONEY_CENTS} /></div>
                 <div className="line"><span>Estimated cost</span><AnimatedNumber value={cost} format={MONEY_CENTS} /></div>
-                <div className="line grand" style={{ fontSize: 16 }}>
+                <div className="line grand">
                   <span>Profit</span>
                   <span style={{ color: priceForMargin - cost < 0 ? "var(--danger)" : "var(--green-dark)" }}>
                     <AnimatedNumber value={priceForMargin - cost} format={MONEY_CENTS} /> {priceForMargin > 0 && `(${Math.round(((priceForMargin - cost) / priceForMargin) * 100)}%)`}

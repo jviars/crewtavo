@@ -199,7 +199,7 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
             {/* Setup's example warranties, until each package has the business's own. */}
             {examples && (
               <div className="callout callout-info">
-                <Icon name="info" size={18} />
+                <Icon name="info" size={20} />
                 <span className="grow" style={{ fontWeight: 400 }}>{examples}</span>
               </div>
             )}

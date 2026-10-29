@@ -306,7 +306,7 @@ export function PlanIcon({ file }: { file: Pick<PlanFile, "content_type" | "file
   const kind = isPdf(file) ? "pdf" : isImage(file) ? "image" : "file";
   return (
     <span className={styles.icon} data-kind={kind} aria-hidden="true">
-      <Icon name={kind === "image" ? "image" : kind === "pdf" ? "quote" : "file"} size={18} />
+      <Icon name={kind === "image" ? "image" : kind === "pdf" ? "quote" : "file"} size={20} />
     </span>
   );
 }
@@ -322,7 +322,7 @@ function PlanRow({ entry, open, save, links, menu }: { entry: PlanEntry; open?: 
         <span className={styles.meta}>{planMeta(entry)}</span>
         {(!f.crew_visible || f.archived) && (
           <div className={styles.chips}>
-            {!f.crew_visible && <span className="chip chip-amber"><Icon name="lock" size={11} />Office only</span>}
+            {!f.crew_visible && <span className="chip chip-amber"><Icon name="lock" size={12} />Office only</span>}
             {f.archived && <span className="chip">Archived</span>}
           </div>
         )}
@@ -349,7 +349,7 @@ function PlanRow({ entry, open, save, links, menu }: { entry: PlanEntry; open?: 
         )}
       </div>
       <div className={styles.actions}>
-        {save && <a className="btn btn-sm btn-ghost btn-icon" href={save} aria-label={`Download ${f.title}`} title="Download"><Icon name="download" size={15} /></a>}
+        {save && <a className="btn btn-sm btn-ghost btn-icon" href={save} aria-label={`Download ${f.title}`} title="Download"><Icon name="download" size={14} /></a>}
         <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${f.title}`} items={menu} />
       </div>
     </div>
@@ -399,7 +399,7 @@ function PlanDetailsDialog({ file, canChangeCrew, onClose, onSaved }: { file: Pl
           <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} placeholder="Sheets C-101 and C-501 are the ones for paving. Striping is on C-601." />
         </Field>
         {canChangeCrew && (
-          <label className="switch-row" style={{ fontWeight: 500 }}>
+          <label className="switch-row" style={{ fontWeight: 400 }}>
             <input type="checkbox" className="switch" checked={crew} onChange={(e) => setCrew(e.target.checked)} />
             The crew can see it
           </label>

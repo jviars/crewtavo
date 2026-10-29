@@ -188,7 +188,7 @@ function CampaignPageScreen() {
         {c.status === "scheduled" && c.scheduled_at && <span className="muted">Sends {formatDateTime(c.scheduled_at)}</span>}
         {c.status !== "draft" && <span className="muted">{c.sent_count} of {c.recipients_count} sent{c.failed_count ? ` · ${c.failed_count} failed` : ""}</span>}
       </div>
-      {!session.config.features.email && editable && <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">Email isn't connected yet, so this can't be sent.<ConnectEmailHint /></div></div>}
+      {!session.config.features.email && editable && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">Email isn't connected yet, so this can't be sent.<ConnectEmailHint /></div></div>}
       {c.status === "sending" && <div className="progress"><span style={{ width: `${c.recipients_count ? (c.sent_count / c.recipients_count) * 100 : 0}%` }} /></div>}
 
       <div className="two-col">
@@ -272,7 +272,7 @@ function CampaignPageScreen() {
               </div>
             )}
           </div>
-          {editable && problems.length > 0 && <div className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow">{problems.map((p) => <div key={p} style={{ fontWeight: 600 }}>{p}</div>)}</div></div>}
+          {editable && problems.length > 0 && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{problems.map((p) => <div key={p} style={{ fontWeight: 600 }}>{p}</div>)}</div></div>}
         </aside>
       </div>
 

@@ -326,7 +326,7 @@ export function JobPage() {
                     <div className="line"><span>Labor ({(costs.data?.hours ?? 0).toFixed(1)} h)</span><AnimatedNumber value={labor} format={MONEY_CENTS} /></div>
                     <div className="line"><span>Sub and crew pay</span><AnimatedNumber value={crew} format={MONEY_CENTS} /></div>
                     <div className="line"><span>Expenses</span><AnimatedNumber value={expenses} format={MONEY_CENTS} /></div>
-                    <div className="line grand" style={{ fontSize: 16, fontWeight: 700 }}>
+                    <div className="line grand">
                       <span>Profit</span>
                       <span style={{ color: profitColor }}><AnimatedNumber value={profit} format={MONEY_CENTS} />{margin !== null ? ` (${margin}%)` : ""}</span>
                     </div>

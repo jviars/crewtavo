@@ -164,7 +164,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
 
       <Section title={waitingQuotes.length || owed.length ? "Waiting on you" : "All caught up"}>
         {waitingQuotes.length === 0 && owed.length === 0 && (
-          <div className="hub-card hub-calm"><Icon name="check" size={18} />Nothing needs your attention right now.</div>
+          <div className="hub-card hub-calm"><Icon name="check" size={20} />Nothing needs your attention right now.</div>
         )}
         {waitingQuotes.map((q) =>
           q.range ? (
@@ -216,9 +216,9 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
       )}
 
       <section className="hub-actions" aria-label="Quick actions" data-count={data.refer ? 3 : 2}>
-        <button type="button" onClick={() => go("request")}><span className="hub-icon-tile brand"><Icon name="plus" size={18} /></span>Request work</button>
-        <button type="button" onClick={() => onMessage()}><span className="hub-icon-tile plain"><Icon name="messages" size={18} /></span>Message us</button>
-        {data.refer && <button type="button" onClick={share}><span className="hub-icon-tile amber"><Icon name="gift" size={18} /></span>Refer a friend</button>}
+        <button type="button" onClick={() => go("request")}><span className="hub-icon-tile brand"><Icon name="plus" size={20} /></span>Request work</button>
+        <button type="button" onClick={() => onMessage()}><span className="hub-icon-tile plain"><Icon name="messages" size={20} /></span>Message us</button>
+        {data.refer && <button type="button" onClick={share}><span className="hub-icon-tile amber"><Icon name="gift" size={20} /></span>Refer a friend</button>}
       </section>
 
       {recent.length > 0 && (

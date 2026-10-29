@@ -67,7 +67,7 @@ export function UploadLimitDialog({ onClose }: { onClose: () => void }) {
         )}
         {s?.connected && s.raised && (
           <>
-            <div className="callout callout-good"><Icon name="check" size={18} /><div className="grow">Done. This Crewtavo now takes files up to {fileSize(s.target)}.</div></div>
+            <div className="callout callout-good"><Icon name="check" size={20} /><div className="grow">Done. This Crewtavo now takes files up to {fileSize(s.target)}.</div></div>
             <p className="muted small" style={{ margin: 0 }}>File storage is restarting with the new limit, which takes about a minute. Then add the file again.</p>
             <div className="form-actions"><Button variant="primary" onClick={onClose}>Close</Button></div>
           </>

@@ -259,7 +259,7 @@ export function AppShell() {
         {tabs.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.to === "/"} className={({ isActive }) => (active(item, isActive) ? "active" : "")} aria-current={current(item)} viewTransition>
             <span className="mobile-tab-icon">
-              <Icon name={item.icon} size={22} />
+              <Icon name={item.icon} size={20} />
               {item.to === "/field/jobs" && offers > 0 && <span className="badge badge-green mobile-tab-badge" aria-label={`${offers} waiting for your answer`}>{offers}</span>}
               {item.to === "/chat" && (chat.mentions ? <span className="badge badge-red mobile-tab-badge">{chat.mentions}</span> : chat.unread ? <span className="nav-dot mobile-tab-badge" /> : null)}
             </span>
@@ -268,7 +268,7 @@ export function AppShell() {
         ))}
         {!sub && (
           <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen}>
-            <Icon name="menu" size={22} />
+            <Icon name="menu" size={20} />
             More
           </button>
         )}
@@ -362,7 +362,7 @@ function MobileCreate({ onDone }: { onDone: () => void }) {
             navigate(item.to);
           }}
         >
-          <Icon name={item.icon} size={18} />
+          <Icon name={item.icon} size={20} />
           New {item.label.toLowerCase()}
         </button>
       ))}

@@ -53,7 +53,7 @@ const POINTS: Array<{ icon: IconName; text: string }> = [
 export function TermsSummary() {
   return (
     <ul className={styles.points}>
-      {POINTS.map((p) => <li key={p.text}><Icon name={p.icon} size={15} />{p.text}</li>)}
+      {POINTS.map((p) => <li key={p.text}><Icon name={p.icon} size={14} />{p.text}</li>)}
     </ul>
   );
 }

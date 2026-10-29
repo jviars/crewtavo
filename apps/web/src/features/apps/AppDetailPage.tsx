@@ -283,7 +283,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
 
       {callback && (
         <div className={`callout ${callback.ok ? "callout-good" : "callout-warning"}`} role={callback.ok ? "status" : "alert"}>
-          <Icon name={callback.ok ? "check" : "alert"} size={18} />
+          <Icon name={callback.ok ? "check" : "alert"} size={20} />
           <div className="grow">
             {callback.ok ? `${app.name} is installed.` : (callback.message ?? `${app.name} couldn't be installed. Try again.`)}
             {callback.ok && <span style={{ display: "block", fontWeight: 400 }}>{app.id === "google_calendar" ? "Now pick the calendars to show on your schedule." : app.category === "Accounting" ? "New invoices and payments will sync automatically." : null}</span>}
@@ -358,7 +358,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
           <div className="app-highlights">
             {info.highlights.map((h) => (
               <div key={h.title} className="app-highlight">
-                <span className="app-highlight-icon"><Icon name={h.icon} size={18} /></span>
+                <span className="app-highlight-icon"><Icon name={h.icon} size={20} /></span>
                 <strong>{h.title}</strong>
                 <span className="muted small">{h.text}</span>
               </div>
@@ -487,7 +487,7 @@ function AccountCard({ app }: { app: AppRow }) {
 function NotAvailable({ app }: { app: AppRow }) {
   return (
     <section className="callout" aria-label="Not available yet">
-      <Icon name="info" size={18} />
+      <Icon name="info" size={20} />
       <div className="grow stack-sm" style={{ gap: 6 }}>
         <span>Not available yet</span>
         <span style={{ fontWeight: 400 }}>Ask whoever set up Crewtavo to turn on {app.name}.</span>
@@ -597,7 +597,7 @@ function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) {
       <form className="row" style={{ gap: 8 }} onSubmit={submit}>
         <div className="input-group grow">
           <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} placeholder={(stripe ? app.stripe?.own : app.status === "connected") ? "Paste a new key to replace it" : stripe ? "Paste the key from Stripe" : "Paste your key"} value={key} onChange={(e) => { setKey(e.target.value); save.reset(); }} aria-label={stripe ? "Key from Stripe" : `${app.name} API key`} style={{ paddingLeft: 12, paddingRight: 36 }} />
-          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide key" : "Show key"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={15} /></button>
+          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide key" : "Show key"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={14} /></button>
         </div>
         <Button type="submit" loading={save.isPending} disabled={key.trim().length < 10}>{stripe ? "Connect" : "Save"}</Button>
       </form>

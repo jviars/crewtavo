@@ -11,16 +11,19 @@ export const roleColor = (color: ChatColor | string | null | undefined) => `var(
 export const roleTint = (color: ChatColor | string | null | undefined) => `var(--chat-${color || "default"}-tint)`;
 export const badgeStyle = (color: ChatColor | string | null | undefined): CSSProperties => ({ background: roleTint(color), color: roleColor(color) });
 
+/** Initials at about a third of the face, on the type scale: 11 on the small faces up to 24 on a profile. */
+const initialsSize = (size: number) => (size >= 56 ? 24 : size >= 40 ? 14 : size >= 34 ? 12 : 11);
+
 export function Avatar({ name, color, photo, size = 40, className }: { name: string; color?: string | null; photo?: string | null; size?: number; className?: string }) {
   return (
-    <span className={className ?? s.memberAvatar} style={{ width: size, height: size, fontSize: Math.round(size * 0.35), background: color || "var(--avatar)" }} aria-hidden="true">
+    <span className={className ?? s.memberAvatar} style={{ width: size, height: size, fontSize: initialsSize(size), background: color || "var(--avatar)" }} aria-hidden="true">
       <Face name={name} photo={photo} />
     </span>
   );
 }
 
 /** The channel's icon: # for a text channel, a megaphone for announcements. */
-export function ChannelIcon({ channel, size = 18 }: { channel: Pick<ChatChannel, "kind">; size?: number }) {
+export function ChannelIcon({ channel, size = 20 }: { channel: Pick<ChatChannel, "kind">; size?: number }) {
   return <Icon name={channel.kind === "announcement" ? "megaphone" : "hash"} size={size} />;
 }
 

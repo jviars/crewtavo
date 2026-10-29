@@ -77,7 +77,7 @@ export function Menu({
         aria-controls={id}
         popovertarget={id}
       >
-        {trigger ?? <Icon name="more" size={18} />}
+        {trigger ?? <Icon name="more" size={20} />}
       </button>
       <div
         ref={menu}

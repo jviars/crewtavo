@@ -170,14 +170,14 @@ function ApplicantDetail() {
       </div>
 
       {isWaiting(a) && (
-        <div className="callout callout-warning"><Icon name="clock" size={18} /><div className="grow">{first} applied {timeAgo(a.created_at)} and hasn't heard back yet.</div></div>
+        <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">{first} applied {timeAgo(a.created_at)} and hasn't heard back yet.</div></div>
       )}
       {a.status === "interview" && a.interview_at && (
-        <div className="callout callout-info"><Icon name="calendar" size={18} /><div className="grow">Interview {formatDateTime(a.interview_at, tz)}.</div></div>
+        <div className="callout callout-info"><Icon name="calendar" size={20} /><div className="grow">Interview {formatDateTime(a.interview_at, tz)}.</div></div>
       )}
       {a.status === "hired" && (
         <div className="callout callout-good" role="status">
-          <Icon name="check" size={18} />
+          <Icon name="check" size={20} />
           <div className="grow">
             {managesTeam ? `Hired. Invite ${first} to your team so they can sign in and see their visits.` : `Hired. An admin can invite ${first} to your team in Settings → People.`}
           </div>
@@ -229,7 +229,7 @@ function ApplicantDetail() {
                 const link = a.links[f.path];
                 return (
                   <div key={f.path} className="card-row">
-                    <Icon name="file" size={18} />
+                    <Icon name="file" size={20} />
                     <span className="grow" style={{ minWidth: 0 }}>
                       <strong style={{ display: "block" }}>{isResume(f, a.files) ? "Résumé" : fileLabel(f.field)}</strong>
                       <span className="muted small" style={{ overflowWrap: "anywhere" }}>{f.name} · {fileSize(f.size)}</span>

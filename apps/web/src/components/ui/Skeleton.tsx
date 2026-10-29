@@ -123,9 +123,9 @@ export function ShellSkeleton() {
     <div className="shell skeleton-wrap" role="status" aria-busy="true">
       <span className="sr-only">Loading Crewtavo…</span>
       <aside className="sidebar" aria-hidden="true">
-        <div className="row" style={{ margin: "0 0 14px 6px" }}><Skeleton width={34} height={34} radius={10} /><Skeleton width={100} height={14} /></div>
+        <div className="row" style={{ margin: "0 0 14px 6px" }}><Skeleton width={34} height={34} radius={8} /><Skeleton width={100} height={14} /></div>
         {Array.from({ length: 11 }, (_, i) => (
-          <div key={i} className="row" style={{ height: 38, padding: "0 12px", gap: 12 }}><Skeleton width={18} height={18} radius={5} /><Skeleton width={`${50 + ((i * 17) % 35)}%`} height={11} /></div>
+          <div key={i} className="row" style={{ height: 38, padding: "0 12px", gap: 12 }}><Skeleton width={18} height={18} radius={4} /><Skeleton width={`${50 + ((i * 17) % 35)}%`} height={11} /></div>
         ))}
       </aside>
       <div className="main">

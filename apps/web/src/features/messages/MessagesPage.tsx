@@ -73,7 +73,7 @@ export function MessagesPage() {
     <div className="messages-page stack" data-open={selected ? "" : undefined} style={{ gap: "inherit" }}>
       <PageHeader title="Messages" actions={hasRole(session, "admin", "office", "estimator") && <Button icon="plus" onClick={() => setComposing(true)}>New message</Button>} />
       {!session.config.features.email && !session.config.features.sms && (
-        <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">Email and texting aren't turned on yet. You can still add notes.<ConnectEmailHint /></div></div>
+        <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">Email and texting aren't turned on yet. You can still add notes.<ConnectEmailHint /></div></div>
       )}
       <div className="inbox" data-open={selected ? "" : undefined}>
         <section className="inbox-list" aria-label="Conversations">
@@ -146,7 +146,7 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
     return (
       <Loading label="Loading conversation" className="card thread">
         <div className="thread-head"><Skeleton width={160} height={16} /></div>
-        <div className="thread-body">{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={i === 1 ? 70 : 48} width={i % 2 ? "55%" : "65%"} radius={16} style={{ alignSelf: i % 2 ? "flex-end" : "flex-start" }} />)}</div>
+        <div className="thread-body">{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={i === 1 ? 70 : 48} width={i % 2 ? "55%" : "65%"} radius={12} style={{ alignSelf: i % 2 ? "flex-end" : "flex-start" }} />)}</div>
       </Loading>
     );
   if (thread.error || !thread.data.client) return <div className="card"><ErrorState error={thread.error ?? new ApiError("This client no longer exists. They may have been deleted.", 404)} onRetry={thread.error ? () => thread.refetch() : undefined} /></div>;
@@ -155,12 +155,12 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
   return (
     <div className="card thread">
       <div className="thread-head">
-        <button type="button" className="icon-btn mobile-only" aria-label="Back to conversations" onClick={onBack}><Icon name="arrowLeft" size={18} /></button>
+        <button type="button" className="icon-btn mobile-only" aria-label="Back to conversations" onClick={onBack}><Icon name="arrowLeft" size={20} /></button>
         <span className="who">
           <Link to={`/clients/${client.id}`} className="strong ellipsis" style={{ color: "var(--ink)" }}>{client.display_name}</Link>
           <span className="muted small ellipsis">{[client.phone, client.email].filter(Boolean).join(" · ") || "No phone or email on file"}</span>
         </span>
-        {client.phone && <a className="icon-btn" href={`tel:${client.phone}`} aria-label={`Call ${client.display_name}`}><Icon name="phone" size={18} /></a>}
+        {client.phone && <a className="icon-btn" href={`tel:${client.phone}`} aria-label={`Call ${client.display_name}`}><Icon name="phone" size={20} /></a>}
       </div>
       <div className="thread-body" ref={body}>
         {rows.length === 0 && <EmptyState compact icon="messages" title="No messages yet" />}

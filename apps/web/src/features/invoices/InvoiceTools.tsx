@@ -133,7 +133,7 @@ export function ReadyToInvoice() {
   return (
     <>
       <div className="callout callout-info">
-        <Icon name="invoice" size={18} />
+        <Icon name="invoice" size={20} />
         <div className="grow">
           <strong>{jobs.length} {jobs.length === 1 ? "job is" : "jobs are"} ready to invoice.</strong>{" "}
           <span className="muted">{jobs.slice(0, 3).map((j) => j.client?.display_name ?? j.title).join(", ")}{jobs.length > 3 ? ` and ${jobs.length - 3} more` : ""}</span>

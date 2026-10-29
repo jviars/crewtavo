@@ -68,7 +68,7 @@ export function AppKeysCard({ app, onChanged, onConnect, connecting }: { app: Ap
         </span>
         {app.status === "disconnected" && (
           <div className="callout" style={{ marginTop: 4 }}>
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
             <div className="grow stack-sm" style={{ gap: 8 }}>
               <span>Last step: sign in to {app.name} and pick your company.</span>
               <Button variant="primary" style={{ justifySelf: "start" }} loading={connecting} onClick={onConnect}>Sign in to {app.name}</Button>
@@ -182,7 +182,7 @@ function KeysForm({ app, initial, onSaved, onCancel }: { app: AppRow; initial: N
       <Field label="Client Secret" hint={initial ? "Paste the secret again, even if only the Client ID changed." : undefined}>
         <div className="input-group">
           <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={secret} onChange={(e) => { setSecret(e.target.value); save.reset(); }} style={{ paddingLeft: 12, paddingRight: 36 }} />
-          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={15} /></button>
+          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={14} /></button>
         </div>
       </Field>
       {qbo && (

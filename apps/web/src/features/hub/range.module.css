@@ -141,7 +141,7 @@
 .warranty { margin: 0; font-size: var(--fs-13); line-height: 1.45; color: var(--text-3); overflow-wrap: anywhere; }
 .optionPrice { margin-top: auto; padding-top: 4px; font-size: var(--fs-16); font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 .optionPrice[data-ask] { font-size: var(--fs-14); font-weight: 600; color: var(--text-3); }
-.optionBody .pickBtn { min-height: 44px; white-space: normal; }
+.optionBody .pickBtn { min-height: var(--control-lg); white-space: normal; }
 /* A phone: each card a row, its picture small beside its words, so the cards don't push everything down. */
 @media (max-width: 479px) {
   .option { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: start; }

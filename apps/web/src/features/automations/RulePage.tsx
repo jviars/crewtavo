@@ -208,7 +208,7 @@ function RulePageScreen() {
           </>
         }
       />
-      <div className="callout callout-info"><Icon name="bolt" size={18} /><div className="grow" style={{ fontWeight: 600 }}>{describeRuleSentence(draft)}</div></div>
+      <div className="callout callout-info"><Icon name="bolt" size={20} /><div className="grow" style={{ fontWeight: 600 }}>{describeRuleSentence(draft)}</div></div>
 
       <div className="two-col">
         <div className="wide stack">
@@ -327,7 +327,7 @@ function RulePageScreen() {
                 {preview.data.warnings?.map((w) => <span key={w} className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>{w}</span>)}
                 {preview.data.previews.map((p, i) => (
                   <div key={i} className="email-preview" style={{ padding: 10 }}>
-                    <div className="small strong" style={{ marginBottom: 4 }}><Icon name={ACTION_ICON[p.type as ActionType] ?? "bolt"} size={13} /> {actionsFor(subject).find((a) => a.type === p.type)?.label}{p.to ? ` → ${p.to}` : ""}</div>
+                    <div className="small strong" style={{ marginBottom: 4 }}><Icon name={ACTION_ICON[p.type as ActionType] ?? "bolt"} size={14} /> {actionsFor(subject).find((a) => a.type === p.type)?.label}{p.to ? ` → ${p.to}` : ""}</div>
                     {p.title && <div className="strong text-sm">{p.title}</div>}
                     {p.body && <div className="pre-wrap text-sm muted" style={{ marginTop: 2 }}>{p.body}</div>}
                   </div>
@@ -351,7 +351,7 @@ function Step({ color, icon, title, optional, children }: { color: string; icon:
   return (
     <section className="rule-step">
       <div className="rule-step-head">
-        <span className="step-icon" style={{ background: color }}><Icon name={icon} size={15} /></span>
+        <span className="step-icon" style={{ background: color }}><Icon name={icon} size={14} /></span>
         {title}
         {optional && <span className="muted small" style={{ fontWeight: 400 }}>(optional)</span>}
       </div>

@@ -119,7 +119,7 @@ function Campaigns() {
   return (
     <div className="stack">
       {!session.config.features.email && (
-        <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">Email isn't connected yet, so campaigns can't be sent.<ConnectEmailHint /></div></div>
+        <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">Email isn't connected yet, so campaigns can't be sent.<ConnectEmailHint /></div></div>
       )}
       <div className="row-between">
         <span />

@@ -54,7 +54,7 @@ export function AppIcon({ id, name, size = "md" }: { id: string; name: string; s
   if (id === "ics_calendar") {
     return (
       <span className="app-icon app-icon-generic" data-size={size} aria-hidden="true">
-        <Icon name="calendar" size={size === "lg" ? 50 : size === "md" ? 28 : 18} />
+        <Icon name="calendar" size={size === "lg" ? 50 : size === "md" ? 28 : 20} />
       </span>
     );
   }
@@ -82,7 +82,7 @@ export function AppTile({ app, installed }: { app: AppRow; installed: boolean })
         <AppIcon id={app.id} name={app.name} />
         {badge && (
           <span className="app-badge" data-tone={badge.tone} aria-hidden="true">
-            <Icon name={badge.tone === "good" ? "check" : "alert"} size={11} strokeWidth={2} />
+            <Icon name={badge.tone === "good" ? "check" : "alert"} size={12} strokeWidth={2} />
           </span>
         )}
       </span>

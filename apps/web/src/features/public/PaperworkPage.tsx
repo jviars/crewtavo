@@ -154,7 +154,7 @@ export function PaperworkPage() {
                 )}
                 {data.waiting.length > 0 && sent.length === 0 && (
                   <div className="callout callout-info">
-                    <Icon name="info" size={18} />
+                    <Icon name="info" size={20} />
                     <div className="grow" style={{ fontWeight: 400 }}>Already sent, waiting for {data.company.name} to check: {data.waiting.map((w) => REQUIREMENT_LABELS[w] ?? w).join(", ")}.</div>
                   </div>
                 )}

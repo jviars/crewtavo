@@ -152,7 +152,7 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
     if (!open || !invite) return null;
     return (
       <div className={styles.offer}>
-        <Icon name="package" size={18} />
+        <Icon name="package" size={20} />
         {lines.length ? (
           <>
             <span className="grow">Offer two or three packages side by side, like Good, Better and Best.</span>

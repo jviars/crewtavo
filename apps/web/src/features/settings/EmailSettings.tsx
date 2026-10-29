@@ -116,7 +116,7 @@ export function EmailSettings() {
           </div>
           {mailbox.status === "error" && (
             <div className="callout callout-danger">
-              <Icon name="alert" size={18} />
+              <Icon name="alert" size={20} />
               <div className="grow">
                 <div>Emails aren't going out</div>
                 <div className="small" style={{ fontWeight: 400 }}>
@@ -154,7 +154,7 @@ export function EmailSettings() {
 
       {!mailbox && fallback && (
         <div className="callout callout-info">
-          <Icon name="info" size={18} />
+          <Icon name="info" size={20} />
           <div className="grow small" style={{ fontWeight: 400 }}>
             {fallback === "dev" ? "Test mode: until you connect a mailbox, emails go to the local Mailpit inbox (http://localhost:56324)." : "Until you connect a mailbox, emails go out from the address whoever installed Crewtavo set up."}
           </div>
@@ -263,7 +263,7 @@ function ConnectForm({ existing, onRailway, onSaved, onCancel }: { existing: Mai
             </ol>
           ) : (
             <div className="callout">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               <div className="grow stack-sm" style={{ fontWeight: 400 }}>
                 <ol className={styles.steps}>{preset.steps.map((s) => <li key={String(s)}>{String(s)}</li>)}</ol>
                 {preset.helpUrl && (

@@ -236,7 +236,7 @@ export function LoginPage({ notice = null }: { notice?: string | null } = {}) {
       <AuthLayout>
         <div className={`card card-pad ${styles.card}`} style={{ padding: 32 }}>
           <div className={styles.sent}>
-            <span className={styles.sentIcon}><Icon name="mail" size={26} /></span>
+            <span className={styles.sentIcon}><Icon name="mail" size={24} /></span>
             <h1 className={styles.title}>Check your email</h1>
             <p className="muted" style={{ margin: 0 }}>
               {sent.kind === "link" ? "Sign-in link sent to " : sent.kind === "reset" ? "Reset link sent to " : "Confirmation link sent to "}
