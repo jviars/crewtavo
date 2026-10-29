@@ -61,6 +61,12 @@ export interface Env {
   ZOHO_ACCOUNTS_URL?: string; // https://accounts.zoho.com (or .eu, .in, .com.au ...)
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /**
+   * Import from Google Drive (Apps → Crewtavo - Drive): a browser API key with the Google Picker API
+   * on, restricted to this deployment's web address and https://docs.google.com/*. It's public (the
+   * web app gets it from /api/config), and works with GOOGLE_CLIENT_ID's Google Cloud project.
+   */
+  GOOGLE_PICKER_API_KEY?: string;
 
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;

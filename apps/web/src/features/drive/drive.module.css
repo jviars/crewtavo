@@ -1,0 +1,130 @@
+/* Drive: the Files page (company folders, clients, recent, search and the Trash) and its dialogs. */
+
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-content: start; min-width: 0; }
+.page > :global(.page-header) { margin-bottom: 4px; }
+
+/* ----- How much storage is used, under the header ----- */
+.storage { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: -12px; color: var(--text-3); font-size: 13px; min-width: 0; }
+.storage > span { overflow-wrap: anywhere; }
+.storage > [data-level="danger"], .storage > [data-level="full"] { color: var(--danger); font-weight: 600; }
+.storage > a { font-weight: 600; }
+.storageBar { flex: none; width: 96px; height: 6px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
+.storageBar > span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+.storageBar[data-level="warning"] > span { background: var(--warning); }
+.storageBar[data-level="danger"] > span, .storageBar[data-level="full"] > span { background: var(--danger); }
+
+/* ----- Breadcrumbs ----- */
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: 14px; min-width: 0; }
+.crumbs li { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.crumbs button { max-width: 240px; height: 34px; padding: 0 8px; border: 0; border-radius: var(--radius-control); background: none; color: var(--text-2); font: inherit; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.crumbs button:hover { background: var(--fill-2); color: var(--ink); }
+.crumbs [aria-current="page"] { max-width: 320px; padding: 0 8px; color: var(--ink); font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumbSep { flex: none; color: var(--text-4); }
+.crumbBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+
+/* ----- Lists of files and folders ----- */
+.files { table-layout: fixed; }
+.whereCol { width: 34%; }
+.actionsCol { width: 56px; }
+.files td { vertical-align: middle; }
+.files tbody tr { transition: background var(--dur-fast); }
+.files tr[data-drop] td { background: var(--green-tint); }
+.name { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 9px; background: var(--fill-2); color: var(--text-2); }
+.icon[data-kind="folder"] { background: var(--warning-tint); color: var(--warning); }
+.icon[data-kind="pdf"] { background: var(--danger-tint); color: var(--danger); }
+.icon[data-kind="image"], .icon[data-kind="doc"] { background: var(--info-tint); color: var(--info); }
+.icon[data-kind="sheet"] { background: var(--green-tint); color: var(--green-dark); }
+.body { display: grid; gap: 2px; min-width: 0; }
+.title { justify-self: start; max-width: 100%; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-weight: 700; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.title:hover { color: var(--green-dark); }
+.titleText { font-weight: 700; overflow-wrap: anywhere; }
+.meta { color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
+.flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.whereCell { min-width: 0; }
+.where { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.actionsCell { text-align: right; }
+.trashButtons { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Where a file is: its job, quote, request, property or folder, in each one's own color. */
+.place { display: inline-block; max-width: 100%; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); font-size: 12px; font-weight: 600; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+a.place:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.place[data-slot="job_id"] { background: var(--job-tint); color: var(--job-text); }
+.place[data-slot="quote_id"] { background: var(--quote-tint); color: var(--quote-text); }
+.place[data-slot="request_id"] { background: var(--req-tint); color: var(--req-text); }
+.place[data-slot="folder"] { background: var(--warning-tint); color: var(--warning); }
+
+/* Dropping files on the page, a folder or a property. */
+.dropping { outline: 2px dashed var(--green); outline-offset: -6px; background: color-mix(in srgb, var(--green) 6%, var(--surface)); }
+.dropBanner {
+  position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 40; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px;
+  max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff; font-weight: 700; box-shadow: var(--shadow-lg); pointer-events: none;
+}
+.dropBanner > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Files on their way up, or being copied from Google Drive. */
+.uploads { display: grid; gap: 0; padding-top: 6px; padding-bottom: 6px; }
+.upload { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--row-divider); font-size: 13px; }
+.upload:first-child { border-top: 0; }
+.uploadHead { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.uploadHead > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.indeterminate > span { width: 35%; animation: drive-slide 1.3s var(--ease-in-out) infinite; }
+@keyframes drive-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+
+/* ----- Clients ----- */
+.clientRow { min-height: 56px; }
+.clientRow .grow { display: grid; gap: 2px; }
+.clientFind { padding: 12px 16px; }
+.group { display: grid; gap: 0; }
+.groupHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--divider); }
+.groupHead h2 { flex: 1 1 200px; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
+.groupHead h2 > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.placeHead { display: flex; align-items: center; gap: 8px; padding: 12px 16px 0; color: var(--text-3); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
+.placeHead a { color: inherit; text-decoration: none; }
+.placeHead a:hover { color: var(--green-dark); text-decoration: underline; }
+.groupEmpty { padding: 16px; color: var(--text-3); font-size: 13px; }
+
+/* ----- Trash ----- */
+.deletedCol { width: 30%; }
+.trashActionsCol { width: 150px; }
+.deletedCell { font-size: 13px; }
+.deletedCell > span { display: block; }
+
+/* ----- Dialogs ----- */
+.tree { max-height: min(52vh, 420px); overflow-y: auto; box-shadow: none; }
+.treeOption {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px 0 calc(12px + var(--depth, 0) * 18px);
+  border: 0; border-top: 1px solid var(--row-divider); background: var(--surface); color: var(--ink); font: inherit; font-weight: 600; text-align: left; cursor: pointer;
+}
+.treeOption:first-child { border-top: 0; }
+.treeOption:hover:not(:disabled) { background: var(--fill); }
+.treeOption[aria-selected="true"] { background: var(--green-tint); color: var(--green-dark); }
+.treeOption:disabled { color: var(--text-4); cursor: default; }
+.results { max-height: 300px; overflow-y: auto; box-shadow: none; }
+.resultsHead { padding: 10px 12px 4px; color: var(--text-3); font-size: 12px; font-weight: 700; }
+.result { min-height: 52px; padding: 8px 12px; }
+.result[aria-selected="true"] { background: var(--fill-2); }
+.attached { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.attached .place { flex: 0 1 auto; min-width: 0; }
+.version { gap: 10px; padding: 12px 14px; }
+.versionButtons { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+
+/* A phone, or an iPad standing up: each row is the file with its menu, and where it is under its name. */
+@media (max-width: 900px) {
+  .page { gap: 16px; }
+  .files:global(.table-stack) tr { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
+  .files:global(.table-stack) td.nameCell { grid-column: 1; }
+  .files:global(.table-stack) td.actionsCell { grid-column: 2; grid-row: 1; }
+  .files:global(.table-stack) td.whereCell { grid-column: 1 / -1; padding-left: 50px; }
+  .files:global(.table-stack) td.whereCell:empty { display: none; }
+  .files:global(.table-stack) td.deletedCell { grid-column: 1 / -1; padding-left: 50px; }
+  .trashRow .actionsCell { align-self: start; }
+  .crumbs button { max-width: 150px; }
+  .crumbs [aria-current="page"] { max-width: 200px; }
+}
+
+/* Big enough for a thumb, or a glove. */
+@media (pointer: coarse) {
+  .title { min-height: 30px; }
+  .crumbs button { height: 40px; }
+}

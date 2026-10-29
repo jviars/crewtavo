@@ -1,12 +1,13 @@
 /** Icons used across the app, from Lucide (24px grid, 2px stroke). Decorative unless given a label. */
 import {
   Archive, ArchiveRestore, ArrowLeft, AtSign, ArrowRight, Banknote, Bell, Bold, BookOpen, Calendar, CalendarCheck, Camera, ChartColumn, ChartLine, Check, ChevronDown, ChevronLeft,
-  ChevronRight, ChevronUp, CircleCheck, Construction, ClipboardCheck, Clock, Cloud, CodeXml, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileText,
-  Funnel, Gauge, Gift, Globe, GripVertical, Hash, Heading, Hexagon, History, House, Image, Inbox, Info, Italic, Kanban, Landmark, Layers, LayoutGrid, Link,
-  List, ListChecks, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Megaphone, Menu, MessageSquareText, MessageSquareWarning, MessagesSquare, Minus, Monitor, Moon, Package, Palette, PenLine, Signature, Tablet, Type, MousePointer2, Navigation,
+  ChevronRight, ChevronUp, CircleCheck, Construction, ClipboardCheck, Clock, Cloud, CodeXml, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileImage,
+  FileSpreadsheet, FileText, Folder, FolderInput, FolderOpen, FolderPlus, Funnel, Gauge, Gift, Globe, GripVertical, HardDrive, Hash, Heading, Hexagon, Highlighter, History, House, Image,
+  Inbox, Info, Italic, Kanban, Landmark, Layers, LayoutGrid, Link, List, ListChecks, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Maximize, Megaphone, Menu, MessageSquareText,
+  MessageSquareWarning, MessagesSquare, Minus, Monitor, Moon, Package, Palette, Paperclip, PenLine, Signature, Tablet, Type, MousePointer2, Navigation,
   Pause, Pencil, Percent, Phone, Pin, PinOff, Play, Plus, Printer, Quote, Receipt, ReceiptText, Redo2, RefreshCw, Reply, Ruler, Scissors, Search, Send, SeparatorHorizontal,
   Settings, Share, Smartphone, SmilePlus, Sparkles, Spline, SquareUserRound, Star, StickyNote, Sun, Table, Tag, ThumbsUp, Trash, TriangleAlert, TriangleRight, Truck, Underline, Undo2, Upload,
-  User, Users, Video, Warehouse, WifiOff, Wrench, X, Zap, type LucideIcon,
+  User, Users, Video, Warehouse, WifiOff, Wrench, X, Zap, ZoomIn, ZoomOut, type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
@@ -138,6 +139,18 @@ const ICONS = {
   pen: PenLine,
   type: Type,
   tablet: Tablet,
+  folder: Folder,
+  folderOpen: FolderOpen,
+  folderPlus: FolderPlus,
+  folderMove: FolderInput,
+  paperclip: Paperclip,
+  hardDrive: HardDrive,
+  fileImage: FileImage,
+  fileSpreadsheet: FileSpreadsheet,
+  zoomIn: ZoomIn,
+  zoomOut: ZoomOut,
+  maximize: Maximize,
+  highlighter: Highlighter,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

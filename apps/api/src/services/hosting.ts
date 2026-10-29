@@ -9,18 +9,21 @@
  * workspace:admin, which Railway shows owners in red), so the trial's days and credit are counted
  * from when the project was made, and plans, credit, the card and the usage limit are Railway's
  * pages. Each part is optional: whatever Railway doesn't share is left out and named in `missing`.
+ * Storage buckets aren't in Railway's usage figures, so each is priced from what it holds now
+ * (STORAGE_PRICES.bucket a GB-month) and shown with the volumes, without a size to fill up.
  *
  * The task runs twice a day and tells the owner and admins about each warning once (the bell, plus
  * email and push by the "hosting" notification topic); the keys of those already sent are kept in
  * companies.settings.hosting_alerts.
  */
-import { ADMINS, RAILWAY_PLANS, RAILWAY_TRIAL, serviceLabel, type HostingOverview, type HostingService, type HostingWarning, type RailwayPlan } from "@crewtavo/core";
+import { ADMINS, RAILWAY_PLANS, RAILWAY_TRIAL, serviceLabel, STORAGE_PRICES, type HostingDisk, type HostingOverview, type HostingService, type HostingWarning, type RailwayPlan } from "@crewtavo/core";
 import type { Env } from "../env";
 import { platformOf } from "../lib/address";
 import { asJson, HttpError } from "../lib/http";
 import type { Db } from "../lib/supabase";
-import { projectDetails, projectIdOf, projectUsage, RailwayError, usageMetrics, volumeSizes, type Billed, type RailwayAccess } from "../integrations/railway";
+import { bucketUsage, projectBuckets, projectDetails, projectIdOf, projectUsage, RailwayError, usageMetrics, volumeSizes, type Billed, type RailwayAccess } from "../integrations/railway";
 import { railwayAccess } from "./railway";
+import { keepStorageDefault } from "./storageUsage";
 
 const DAY_MS = 24 * 60 * 60_000;
 /** The week's charts: a point every three hours. */
@@ -30,13 +33,17 @@ const CACHE_MS = 5 * 60_000;
 /** A rate from less than this much use isn't worth a forecast. */
 const MIN_RATE_MS = 60 * 60_000;
 
-/** Railway's prices per unit it reports (railway.com/pricing). A 30-day month is 43,200 minutes. */
+/**
+ * Railway's prices per unit it reports (railway.com/pricing). A 30-day month is 43,200 minutes.
+ * Storage buckets aren't in what usage() reports: they're priced from what each holds now
+ * (STORAGE_PRICES.bucket a GB-month) and added to the month as their own lines.
+ */
 export const RATES: Record<Billed, number> = {
   CPU_USAGE: 20 / 43_200, // $20 per vCPU a month
   MEMORY_USAGE_GB: 10 / 43_200, // $10 per GB of memory a month
-  NETWORK_TX_GB: 0.05, // $0.05 per GB sent out
-  DISK_USAGE_GB: 0.15 / 43_200, // $0.15 per GB of volume a month
-  BACKUP_USAGE_GB: 0.15 / 43_200,
+  NETWORK_TX_GB: STORAGE_PRICES.network, // $0.05 per GB sent out
+  DISK_USAGE_GB: STORAGE_PRICES.volume / 43_200, // $0.15 per GB of volume a month
+  BACKUP_USAGE_GB: STORAGE_PRICES.volume / 43_200,
 };
 
 export const priced = (rows: Array<{ measurement: Billed; value: number }>) => rows.reduce((sum, r) => sum + (RATES[r.measurement] ?? 0) * r.value, 0);
@@ -52,6 +59,13 @@ async function optional<T>(work: Promise<T>): Promise<T | null> {
     if (error instanceof RailwayError) return null;
     throw error;
   }
+}
+
+/** The project's buckets that are in this environment, with what each holds. */
+async function bucketSizes(env: Env, access: RailwayAccess): Promise<Array<{ id: string; name: string; sizeBytes: number; objects: number }>> {
+  const buckets = await projectBuckets(env, access);
+  const held = await Promise.all(buckets.map(async (b) => ({ ...b, usage: await optional(bucketUsage(env, access, b.id)) })));
+  return held.flatMap((b) => (b.usage ? [{ id: b.id, name: b.name, sizeBytes: b.usage.sizeBytes, objects: b.usage.objects }] : []));
 }
 
 function monthOf(now: Date) {
@@ -76,6 +90,9 @@ export async function hostingOverview(env: Env, admin: Db, companyId: string, { 
   if (!access) throw new HttpError(409, "Connect Railway to see what Crewtavo costs.");
   const overview = await readHosting(env, access, now);
   cache.set(companyId, { at: now.getTime(), overview });
+  // Settings → Storage's default limit follows the plan and the storage service's volume (services/storageUsage.ts).
+  const volume = overview.disks.find((d) => d.kind === "volume" && d.service === "storage" && d.sizeGb);
+  await keepStorageDefault(env, admin, companyId, { access, force: fresh, hint: { plan: overview.plan, ...(volume ? { volumeBytes: volume.sizeGb! * 1e9 } : {}) } });
   return overview;
 }
 
@@ -90,12 +107,13 @@ export async function readHosting(env: Env, access: RailwayAccess, now = new Dat
   const rateFrom = new Date(Math.max(now.getTime() - DAY_MS, Number.isNaN(created) ? 0 : created));
   // The trial's credit is spent from when the project was made, which may be last month.
   const trialFrom = plan === "trial" && !Number.isNaN(created) && created < Date.parse(period.start) ? new Date(created) : null;
-  const [usage, recent, sinceMade, metrics, volumes] = await Promise.all([
+  const [usage, recent, sinceMade, metrics, volumes, buckets] = await Promise.all([
     optional(projectUsage(env, access, new Date(period.start), now)),
     now.getTime() - rateFrom.getTime() >= MIN_RATE_MS ? optional(projectUsage(env, access, rateFrom, now)) : null,
     trialFrom ? optional(projectUsage(env, access, trialFrom, now)) : null,
     optional(usageMetrics(env, access, new Date(now.getTime() - 7 * DAY_MS), STEP_SECONDS)),
     optional(volumeSizes(env, access)),
+    optional(bucketSizes(env, access)),
   ]);
   const names = new Map(project.services.map((s) => [s.id, s.name]));
 
@@ -105,6 +123,21 @@ export async function readHosting(env: Env, access: RailwayAccess, now = new Dat
     const service = services.get(id) ?? { id, name: names.get(id) ?? "Other", cost: 0 };
     service.cost += (RATES[row.measurement] ?? 0) * row.value;
     services.set(id, service);
+  }
+
+  // Buckets cost what they hold for as long as they hold it: at today's size, a day's share of a
+  // month so far and for each day left.
+  const monthDays = (Date.parse(period.end) - Date.parse(period.start)) / DAY_MS;
+  const bucketDisks: HostingDisk[] = (buckets ?? []).map((b) => {
+    const usedGb = Math.round(b.sizeBytes / 1e7) / 100;
+    return { service: b.name, kind: "bucket", usedGb, sizeGb: null, objects: b.objects, monthly: cents((b.sizeBytes / 1e9) * STORAGE_PRICES.bucket) };
+  });
+  const daysSoFar = (now.getTime() - Date.parse(period.start)) / DAY_MS;
+  let bucketDaily = 0;
+  for (const b of buckets ?? []) {
+    const daily = ((b.sizeBytes / 1e9) * STORAGE_PRICES.bucket) / monthDays;
+    bucketDaily += daily;
+    if (usage && daily > 0) services.set(b.id, { id: b.id, name: b.name, cost: daily * daysSoFar });
   }
 
   const points = new Map<number, { memory: number; cpu: number }>();
@@ -120,8 +153,8 @@ export async function readHosting(env: Env, access: RailwayAccess, now = new Dat
     }
   }
 
-  const cost = usage ? priced(usage) : 0;
-  const perDay = recent ? priced(recent) / ((now.getTime() - rateFrom.getTime()) / DAY_MS) : null;
+  const cost = usage ? priced(usage) + bucketDaily * daysSoFar : 0;
+  const perDay = recent ? priced(recent) / ((now.getTime() - rateFrom.getTime()) / DAY_MS) + bucketDaily : null;
   const forecast = usage && perDay !== null ? cost + perDay * ((Date.parse(period.end) - now.getTime()) / DAY_MS) : null;
   const spentOnTrial = trialFrom ? (sinceMade ? priced(sinceMade) : null) : usage ? cost : null;
   const overview: Omit<HostingOverview, "warnings"> = {
@@ -140,7 +173,10 @@ export async function readHosting(env: Env, access: RailwayAccess, now = new Dat
       plan === "trial" && !Number.isNaN(created) && spentOnTrial !== null
         ? { daysLeft: Math.max(0, Math.ceil(RAILWAY_TRIAL.days - (now.getTime() - created) / DAY_MS)), creditLeft: cents(Math.max(0, RAILWAY_TRIAL.credit - spentOnTrial)) }
         : null,
-    disks: (volumes ?? []).map((v) => ({ service: names.get(v.serviceId ?? "") ?? "Volume", usedGb: Math.round(v.usedMb / 10) / 100, sizeGb: Math.round(v.sizeMb / 10) / 100 })),
+    disks: [
+      ...(volumes ?? []).map((v): HostingDisk => ({ service: names.get(v.serviceId ?? "") ?? "Volume", kind: "volume", usedGb: Math.round(v.usedMb / 10) / 100, sizeGb: Math.round(v.sizeMb / 10) / 100 })),
+      ...bucketDisks,
+    ],
     week: [...points.entries()].sort(([a], [b]) => a - b).map(([at, p]) => ({ at: new Date(at * 1000).toISOString(), memory: Math.round(p.memory * 1000) / 1000, cpu: Math.round(p.cpu * 1000) / 1000 })),
     missing: [...(usage ? [] : ["usage" as const]), ...(metrics ? [] : ["charts" as const])],
     links: {
@@ -206,14 +242,18 @@ export function hostingWarnings(o: Omit<HostingOverview, "warnings">): HostingWa
   }
 
   for (const disk of o.disks) {
-    const full = disk.sizeGb > 0 ? disk.usedGb / disk.sizeGb : 0;
+    // A bucket grows as it fills, so it's never full.
+    if (disk.kind === "bucket" || !disk.sizeGb) continue;
+    const full = disk.usedGb / disk.sizeGb;
     if (full < 0.85) continue;
     const label = serviceLabel(disk.service);
     warnings.push({
       key: `disk:${disk.service}:${full >= 0.95 ? 95 : 85}`,
       level: full >= 0.95 ? "urgent" : "warning",
       title: `${label} storage is ${Math.floor(full * 100)}% full`,
-      body: `${disk.usedGb} of ${disk.sizeGb} GB is used. When it's full, Crewtavo can't save anything new there. Make the volume on the ${disk.service} service bigger in Railway; Hobby volumes go up to 5 GB, and Pro goes much higher.`,
+      body: `${disk.usedGb} of ${disk.sizeGb} GB is used. When it's full, Crewtavo can't save anything new there. Make the volume on the ${disk.service} service bigger in Railway; Hobby volumes go up to 5 GB, and Pro goes much higher.${
+        disk.service === "storage" ? " Or move photos and files to a Railway bucket, which grows as it fills, from Settings → Hosting." : ""
+      }`,
       action: "project",
     });
   }

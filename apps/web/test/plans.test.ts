@@ -3,7 +3,7 @@ import {
   cornersOf, feetPerInch, feetPerPixel, fitToView, lineUp, LineUpError, moveTo, pixelAt, placementFromCorners, pointAt, scaleLabel, toMercator, turnDegrees, type LngLat,
 } from "../src/features/measure/planAlign";
 import { takeOutPaper } from "../src/features/plans/planImage";
-import { canMap, fileSize, planEntries, planMeta, titleFromFileName, type PlanFile } from "../src/features/plans/plans";
+import { canMap, fileSize, PLAN_FIELDS, planEntries, planMeta, titleFromFileName, type PlanFile } from "../src/features/plans/plans";
 
 // Arrington's yard in Rocky Mount, VA.
 const YARD: LngLat = [-79.8717, 37.0547];
@@ -76,9 +76,9 @@ describe("lining a plan up with the map", () => {
 
 describe("plan files", () => {
   const file = (over: Partial<PlanFile>): PlanFile => ({
-    id: "f1", property_id: "p", request_id: null, quote_id: null, job_id: "j", title: "Site plan", revision: null, notes: null, path: "c/plans/f1.pdf", file_name: "Site plan.pdf",
-    content_type: "application/pdf", size_bytes: 12_400_000, crew_visible: true, archived: false, replaces_id: null, superseded_at: null, created_by: null,
-    created_at: "2026-10-01T12:00:00Z", ...over,
+    id: "f1", company_id: "c", property_id: "p", request_id: null, quote_id: null, job_id: "j", folder_id: null, title: "Site plan", revision: null, notes: null, path: "c/plans/f1.pdf",
+    file_name: "Site plan.pdf", content_type: "application/pdf", size_bytes: 12_400_000, crew_visible: true, archived: false, replaces_id: null, superseded_at: null, created_by: null,
+    created_at: "2026-10-01T12:00:00Z", deleted_at: null, ...over,
   });
 
   it("puts versions under the current one, newest first", () => {
@@ -97,6 +97,14 @@ describe("plan files", () => {
     const [entry] = planEntries([file({ id: "v3", replaces_id: "v2" })]);
     expect(entry.hiddenHistory).toBe(true);
     expect(planMeta(entry)).toBe("12 MB · PDF · updated Oct 1, 2026");
+  });
+
+  it("reads every column a file needs to open in the viewer and be versioned in place, Drive folder included", () => {
+    const columns = PLAN_FIELDS.split(",").map((c) => c.trim());
+    expect(columns).toEqual(expect.arrayContaining(["id", "company_id", "path", "file_name", "content_type", "size_bytes", "crew_visible", "replaces_id", "superseded_at", "folder_id", "property_id", "request_id", "quote_id", "job_id"]));
+    // Every column the list reads is on the type the screens use.
+    const sample = file({});
+    for (const c of columns) expect(sample).toHaveProperty(c);
   });
 
   it("names files and sizes the way people read them", () => {

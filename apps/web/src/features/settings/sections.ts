@@ -6,7 +6,7 @@
 import type { IconName } from "@/components/ui/Icon";
 import { can, hasRole, isSub, type Session } from "@/lib/session";
 
-export type SettingsTab = "profile" | "company" | "schedule" | "address" | "hosting" | "team" | "roles" | "crews" | "prices" | "templates" | "contracts" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "data" | "license";
+export type SettingsTab = "profile" | "company" | "schedule" | "address" | "hosting" | "storage" | "team" | "roles" | "crews" | "prices" | "templates" | "contracts" | "checklists" | "email" | "calendars" | "assistants" | "maps" | "data" | "license";
 export type SettingsItem = { label: string; icon: IconName; keywords: string } & ({ tab: SettingsTab } | { to: string });
 
 export function settingsGroups(session: Session): Array<{ title: string; items: SettingsItem[] }> {
@@ -31,6 +31,8 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
         isAdmin && { tab: "schedule", label: "Schedule and routes", icon: "navigation", keywords: "routes route optimize organize order stops lawn mowing drive time driving speed shop automatic time steps 5 minutes 15 minutes precision calendar snap" },
         isAdmin && session.config.singleCompany && { tab: "address", label: "Web address", icon: "globe", keywords: "domain url custom domain cloudflare railway link" },
         isAdmin && session.config.singleCompany && session.config.platform === "railway" && { tab: "hosting", label: "Hosting", icon: "cloud", keywords: "railway cost costs bill billing usage plan hobby pro trial credit card limit upgrade memory cpu disk storage server" },
+        // Every Crewtavo has files, on Railway or not.
+        isAdmin && can(session, "settings") && { tab: "storage", label: "Storage", icon: "hardDrive", keywords: "storage space room disk files photos uploads limit quota full gb tb volume bucket who's using usage per person role trash" },
         canSell && { tab: "prices", label: "Price list", icon: "list", keywords: "services products prices rates costs catalog formulas materials import" },
         sellsPackages && { to: "/packages", label: "Packages", icon: "package", keywords: "packages bundles tiers good better best options choices pictures photos highlights warranty sell offer roof systems" },
         managesSettings && { tab: "templates", label: "Estimate template", icon: "palette", keywords: "estimate quote proposal invoice template letterhead logo color font lettering terms warranty signature signatures license insurance insurer footer print pdf paper look" },

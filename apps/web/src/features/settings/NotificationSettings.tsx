@@ -22,8 +22,12 @@ import { managesSubs } from "../subs/subsData";
 
 type Prefs = Record<NotificationChannel, NotificationTopic[]>;
 
-/** Railway's warnings go to owners and admins of a Crewtavo on Railway (Settings → Hosting). */
-const railwayWarnings = (session: Session) => hasRole(session, "admin") && session.config.platform === "railway";
+/**
+ * Hosting warnings go to owners and admins: Railway's (Settings → Hosting) and storage nearing its
+ * limit (Settings → Storage). Off Railway there's only the storage one, so it's called that.
+ */
+const hostingWarnings = (session: Session) => hasRole(session, "admin");
+const OFF_RAILWAY_HOSTING = { label: "Storage", hint: "When the company's files near the storage limit" };
 
 /**
  * The kinds this person hears about. A sub hears about their visits, their job offers and pay, and
@@ -36,7 +40,9 @@ function topicsFor(session: Session) {
       t.key === "subs" ? { ...t, label: "My paperwork", hint: "When your insurance is about to run out" } : t,
     );
   }
-  return NOTIFICATION_TOPICS.filter((t) => t.key !== "jobs" && (t.key !== "chat" || chatOn(session)) && (t.key !== "hosting" || railwayWarnings(session)) && (t.key !== "subs" || managesSubs(session)));
+  return NOTIFICATION_TOPICS.filter((t) => t.key !== "jobs" && (t.key !== "chat" || chatOn(session)) && (t.key !== "hosting" || hostingWarnings(session)) && (t.key !== "subs" || managesSubs(session))).map((t) =>
+    t.key === "hosting" && session.config.platform !== "railway" ? { ...t, ...OFF_RAILWAY_HOSTING } : t,
+  );
 }
 
 const COLUMNS: Array<{ channel: NotificationChannel; label: string }> = [

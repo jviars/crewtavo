@@ -64,9 +64,36 @@ reference and works as written):
 | --- | --- | --- |
 | `auth` | `public.ecr.aws/supabase/gotrue:v2.197.0` | |
 | `rest` | `public.ecr.aws/supabase/postgrest:v16.4` | |
-| `storage` | `public.ecr.aws/supabase/storage-api:v1.82.1` | Volume mounted at `/var/lib/storage`; `PORT` = `5000` (Railway otherwise sets `PORT` and Storage listens there); `FILE_SIZE_LIMIT` = `209715200` (200 MB per file, for plan sets; instances made before October 2026 have `52428800`) |
+| `storage` | `public.ecr.aws/supabase/storage-api:v1.82.1` | Volume mounted at `/var/lib/storage`; `PORT` = `5000` (Railway otherwise sets `PORT` and Storage listens there); `FILE_SIZE_LIMIT` = `209715200` (200 MB per file, for plan sets; instances made before October 2026 have `52428800`); `TUS_URL_EXPIRY_MS` = `86400000` (a resumable upload can carry on for a day rather than Storage's default hour; instances made before October 2026 don't have it, and uploads work there too) |
 
 Keep these versions in step with `docker-compose.yml`, and test a version change there first.
+
+### Files in a bucket (opt-in)
+
+The template keeps photos and files on `storage`'s volume (`STORAGE_BACKEND` = `file`). Don't put
+a Railway bucket in it: Railway's Limited Trial has no buckets, and Railway backs up volumes (on
+Pro) but never buckets, so that's each owner's choice. An owner moves an instance's files into a
+bucket from **Settings → Hosting → Files storage** ([docs/deploy.md](../docs/deploy.md#moving-files-to-a-bucket)):
+Crewtavo makes a bucket named `files`, copies every file to the key Storage's S3 backend reads
+(`crewtavo/<bucket>/<name>/<version>`), then sets these on `storage` and redeploys it, keeping the
+volume, `FILE_STORAGE_BACKEND_PATH` and `GLOBAL_S3_BUCKET` for moving back:
+
+| Name | Value |
+| --- | --- |
+| `STORAGE_BACKEND` | `s3` |
+| `STORAGE_S3_BUCKET` | `${{files.BUCKET}}` (the bucket's own S3 name) |
+| `STORAGE_S3_ENDPOINT` | `${{files.ENDPOINT}}` |
+| `STORAGE_S3_REGION` | `${{files.REGION}}` (leave `REGION` at `local`) |
+| `STORAGE_S3_FORCE_PATH_STYLE` | `false` (`true` only for a bucket whose credentials say path style) |
+| `AWS_ACCESS_KEY_ID` | `${{files.ACCESS_KEY_ID}}` |
+| `AWS_SECRET_ACCESS_KEY` | `${{files.SECRET_ACCESS_KEY}}` |
+| `TUS_ALLOW_S3_TAGS` | `false` |
+| `STORAGE_S3_REQUEST_CHECKSUM_CALCULATION`, `STORAGE_S3_RESPONSE_CHECKSUM_VALIDATION` | `WHEN_REQUIRED` |
+
+Moving back sets `STORAGE_BACKEND` to `file` and `STORAGE_S3_BUCKET` to `crewtavo`: the file backend
+keeps files under a folder named after `STORAGE_S3_BUCKET` (or `GLOBAL_S3_BUCKET` when that's unset),
+so left on the bucket's name it would look for every file in the wrong place. `.railway/railway.ts`
+has the same setup, commented out, for standing up an instance that starts on a bucket.
 
 `docker-compose.yml` takes the same images from Docker Hub (`supabase/gotrue`,
 `postgrest/postgrest`, `supabase/storage-api`; the digests match), because anonymous pulls from

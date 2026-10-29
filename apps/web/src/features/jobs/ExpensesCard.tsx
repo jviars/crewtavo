@@ -1,6 +1,8 @@
 /** Materials, dump fees and other costs on a job, with receipt photos. Feeds job costing. */
+import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -13,6 +15,8 @@ import { supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
 import { formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
+import { TRASH_PATH } from "../drive/trash";
 
 export const EXPENSE_CATEGORIES = ["Materials", "Equipment rental", "Equipment upkeep", "Fuel", "Dump fees", "Subcontractor", "Permits", "Supplies", "Other"];
 
@@ -30,6 +34,7 @@ interface Expense {
 
 export function ExpensesCard({ jobId, onChanged }: { jobId: string; onChanged: () => void }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [editing, setEditing] = useState<Expense | "new" | null>(null);
   const key = ["job", jobId, "expenses"];
   const expenses = useQuery({
@@ -44,13 +49,13 @@ export function ExpensesCard({ jobId, onChanged }: { jobId: string; onChanged: (
     queryClient.invalidateQueries({ queryKey: key });
     onChanged();
   };
+  // Its receipt photo goes to the Trash by itself (the database moves it).
   const remove = useMutation({
-    meta: { success: "Expense deleted" },
-    mutationFn: async (e: Expense) => {
-      unwrap(await supabase().from("expenses").delete().eq("id", e.id));
-      if (e.receipt_path) await supabase().storage.from("files").remove([e.receipt_path]);
+    mutationFn: async (e: Expense) => unwrap(await supabase().from("expenses").delete().eq("id", e.id)),
+    onSuccess: (_, e) => {
+      toast.success("Expense deleted", e.receipt_path ? { description: `Its receipt photo is in the Trash for ${TRASH_DAYS} days.`, action: { label: "Open the Trash", onClick: () => navigate(TRASH_PATH) } } : undefined);
+      refresh();
     },
-    onSuccess: refresh,
   });
   const reimburse = useMutation({
     meta: { success: "Marked reimbursed" },

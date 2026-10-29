@@ -195,15 +195,11 @@ function AddApplicantDialog({ onClose, onAdded }: { onClose: () => void; onAdded
     mutationFn: async () => {
       const id = crypto.randomUUID();
       const files = file ? [await uploadApplicantFile(session.company.id, id, file, "resume")] : [];
-      try {
-        unwrap(await supabase().from("job_applicants").insert({
-          id, company_id: session.company.id, name: name.trim(), email: email.trim().toLowerCase() || null, phone: phone.trim() || null,
-          position: position.trim() || null, heard_from: heardFrom.trim() || null, notes: notes.trim() || null, files: filesJson(files), created_by: session.userId,
-        }));
-      } catch (error) {
-        if (files.length) await supabase().storage.from("files").remove(files.map((f) => f.path));
-        throw error;
-      }
+      // If the database turns the applicant down, the résumé is left with no row and the server tidies it away after a day.
+      unwrap(await supabase().from("job_applicants").insert({
+        id, company_id: session.company.id, name: name.trim(), email: email.trim().toLowerCase() || null, phone: phone.trim() || null,
+        position: position.trim() || null, heard_from: heardFrom.trim() || null, notes: notes.trim() || null, files: filesJson(files), created_by: session.userId,
+      }));
       return id;
     },
     onSuccess: (id) => {

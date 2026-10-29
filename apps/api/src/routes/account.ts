@@ -2,7 +2,7 @@
 import { ADMINS, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, presetSummaries, ROLE_LABELS, ROLES, signInPhone, subSettings, TERMS_VERSION, WITH_SUBS, type Role, type TradePreset } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../env";
+import type { AppEnv, Env } from "../env";
 import { platformOf } from "../lib/address";
 import { emailAuthLink, requireCompany, requireUser } from "../lib/auth";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
@@ -24,6 +24,17 @@ export const account = new Hono<AppEnv>();
 /** The person's client and company, for the team service (services/team.ts). */
 const teamScope = (c: Context<AppEnv>): TeamScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, userId: c.var.userId, role: c.var.role, baseUrl: appUrl(c) });
 
+/**
+ * What the web app's Google Drive picker needs, all of it public: the OAuth client it signs in with,
+ * the browser key, and the Google Cloud project's number (a client ID starts with it), which lets
+ * Crewtavo read the files people pick. Null until GOOGLE_CLIENT_ID and GOOGLE_PICKER_API_KEY are set.
+ */
+function googlePicker(env: Env): { clientId: string; apiKey: string; appId: string } | null {
+  const appId = env.GOOGLE_CLIENT_ID?.match(/^\d+/)?.[0];
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_PICKER_API_KEY || !appId) return null;
+  return { clientId: env.GOOGLE_CLIENT_ID, apiKey: env.GOOGLE_PICKER_API_KEY, appId };
+}
+
 /** Everything the SPA needs at startup, so it has no build-time environment variables. */
 account.get("/config", async (c) =>
   c.json(
@@ -37,6 +48,9 @@ account.get("/config", async (c) =>
       // The Crewtavo Terms version that setting up a business agrees to (packages/core/src/terms.ts).
       termsVersion: TERMS_VERSION,
       mapsBrowserKey: c.env.GOOGLE_MAPS_BROWSER_KEY ?? null,
+      // Import from Google Drive (routes/drive.ts): Google's file picker, with the deployment's
+      // Google sign-in app. Null when it isn't set up.
+      googlePicker: googlePicker(c.env),
       turnstileSiteKey: c.env.TURNSTILE_SITE_KEY ?? null,
       // Error reporting for the web app (DSNs are meant to be public).
       sentry:

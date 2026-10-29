@@ -1,9 +1,12 @@
 /**
  * The Plans and files card on a quote, a job and a client: add files (drop them on the card or pick
- * them), open or save them, put a plan sheet on the Measure map, upload a new version, and choose
- * whether the crew sees each one. Files on the property from earlier work show under "At this
- * property", so next year's restripe has last year's striping plan.
+ * them), open them in the viewer or save them, mark up a PDF or edit a Word document (saved as a
+ * new version), put a plan sheet on the Measure map, upload a new version, choose whether the crew
+ * sees each one, and move a file or its newest version to the Trash (Undo puts it back). Files on
+ * the property from earlier work show under "At this property", so next year's restripe has last
+ * year's striping plan.
  */
+import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -14,12 +17,15 @@ import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { editKind, FileViewer } from "@/features/files/FileViewer";
+import { addEach, useStorageFull } from "@/features/settings/storage";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { trashFile, trashVersion, undoToast } from "../drive/trash";
 import {
-  canMap, fileSize, isAbort, isImage, isPdf, PLAN_FIELDS, planEntries, planMeta, titleFromFileName, TooLargeError, uploadPlanFile, usePlanLinks,
+  canMap, fileSize, isImage, isPdf, PLAN_FIELDS, planEntries, planMeta, titleFromFileName, TooLargeError, uploadPlanFile, usePlanLinks,
   type PlanEntry, type PlanFile, type Upload,
 } from "./plans";
 import styles from "./plans.module.css";
@@ -41,6 +47,14 @@ interface Sending {
   size: number;
   progress: number;
   abort: () => void;
+}
+
+/** A file open in the viewer: an older version only to look at. */
+interface Viewing {
+  file: PlanFile;
+  canEdit: boolean;
+  /** Opened with Edit: straight into marking it up. */
+  edit: boolean;
 }
 
 const scopeKey = (scope: PlansScope) => (scope.kind === "client" ? ["client", scope.properties.map((p) => p.id).join(",")] : [scope.kind, scope.id, scope.propertyId ?? ""]);
@@ -75,53 +89,59 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
   const [showArchived, setShowArchived] = useState(false);
   const [sending, setSending] = useState<Sending[]>([]);
   const [editing, setEditing] = useState<PlanFile | null>(null);
+  const [viewing, setViewing] = useState<Viewing | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const pickFor = useRef<{ target: Target; replaces: PlanFile | null } | null>(null);
   const tooLarge = useTooLarge();
+  const storageFull = useStorageFull();
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["plans"] });
+  // Files show here, on crews' visits and in Drive, and count toward storage.
+  const refresh = () => {
+    for (const key of ["plans", "field-visit", "drive", "storage"]) void queryClient.invalidateQueries({ queryKey: [key] });
+  };
 
   // ----- Adding files -------------------------------------------------------------------------
   async function send(list: File[], target: Target, replaces: PlanFile | null = null) {
-    let added = 0;
     let lastId: string | null = null;
-    for (const file of list) {
-      const key = crypto.randomUUID();
-      const upload: Upload = uploadPlanFile(session.company.id, file, (progress) => setSending((s) => s.map((u) => (u.key === key ? { ...u, progress } : u))));
-      setSending((s) => [...s, { key, name: file.name, size: file.size, progress: 0, abort: upload.abort }]);
-      try {
-        const path = await upload.promise;
-        const { data, error } = await supabase()
-          .from("plan_files")
-          .insert({
-            company_id: session.company.id,
-            ...target,
-            replaces_id: replaces?.id ?? null,
-            title: replaces?.title ?? titleFromFileName(file.name),
-            path,
-            file_name: file.name.slice(0, 255),
-            content_type: (file.type || null)?.slice(0, 150) ?? null,
-            size_bytes: file.size,
-            crew_visible: replaces?.crew_visible ?? true,
-          })
-          .select("id")
-          .single();
-        if (error) {
-          void supabase().storage.from("files").remove([path]);
-          throw new Error(error.message);
+    const { added, refused } = await addEach(
+      list,
+      async (file) => {
+        const key = crypto.randomUUID();
+        const upload: Upload = uploadPlanFile(session.company.id, file, (progress) => setSending((s) => s.map((u) => (u.key === key ? { ...u, progress } : u))));
+        setSending((s) => [...s, { key, name: file.name, size: file.size, progress: 0, abort: upload.abort }]);
+        try {
+          const path = await upload.promise;
+          const { data, error } = await supabase()
+            .from("plan_files")
+            .insert({
+              company_id: session.company.id,
+              ...target,
+              replaces_id: replaces?.id ?? null,
+              title: replaces?.title ?? titleFromFileName(file.name),
+              path,
+              file_name: file.name.slice(0, 255),
+              content_type: (file.type || null)?.slice(0, 150) ?? null,
+              size_bytes: file.size,
+              crew_visible: replaces?.crew_visible ?? true,
+            })
+            .select("id")
+            .single();
+          // A stored file with no row is tidied away by the server after a day.
+          if (error) throw new Error(error.message);
+          lastId = data.id;
+        } finally {
+          setSending((s) => s.filter((u) => u.key !== key));
         }
-        added++;
-        lastId = data.id;
-      } catch (error) {
-        if (isAbort(error)) continue;
+      },
+      (file, error) => {
         if (error instanceof TooLargeError) tooLarge.report(error);
         else toast.error(`${file.name}: ${error instanceof Error ? error.message : "Couldn't add it."}`);
-      } finally {
-        setSending((s) => s.filter((u) => u.key !== key));
-      }
-    }
+      },
+    );
     refresh();
+    // Those refused for space, in one toast: the server's sentence for the first, with the way to more room.
+    if (refused.first) storageFull(refused.first, refused.title());
     if (!added) return;
     if (replaces) {
       const id = lastId;
@@ -176,21 +196,36 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
     },
     onSuccess: refresh,
   });
-  const remove = useMutation({
-    meta: { success: "File deleted" },
-    mutationFn: async (file: PlanFile) => {
-      const gone = unwrap(await supabase().from("plan_files").delete().eq("id", file.id).select("id"));
-      if (!gone.length) throw new Error("You can only delete files you added. Ask the office to remove this one.");
-      await supabase().storage.from("files").remove([file.path]);
+  // ----- The Trash: the database moves the rows (who may is its call) and keeps the stored files.
+  const toTrash = useMutation({
+    mutationFn: async ({ entry, only }: { entry: PlanEntry; only: "file" | "version" }) => {
+      if (only === "version") await trashVersion(entry.file.id);
+      else await trashFile(entry.file.id);
     },
-    onSuccess: refresh,
+    onSuccess: (_, { entry, only }) => {
+      refresh();
+      if (only === "file") undoToast(`${entry.file.title} moved to the Trash`, "file", entry.file.id, refresh);
+      else undoToast(entry.older.length ? `Version ${entry.version} moved to the Trash` : "That version moved to the Trash", "version", entry.file.id, refresh);
+    },
   });
-  const askDelete = async (entry: PlanEntry) => {
+  const askTrash = async (entry: PlanEntry, only: "file" | "version") => {
     const f = entry.file;
-    const body = entry.older.length
-      ? `This deletes version ${entry.version}. Version ${entry.version - 1} becomes the current one again.`
-      : "It's deleted for everyone. This can't be undone.";
-    if (await confirm({ title: `Delete ${f.title}?`, body, confirmLabel: "Delete", danger: true })) remove.mutate(f);
+    const known = entry.older.length > 0;
+    const ok =
+      only === "file"
+        ? await confirm({
+            title: `Move ${f.title} to the Trash?`,
+            body: `${known ? `All ${entry.version} versions go with it. ` : ""}It stays in the Trash for ${TRASH_DAYS} days, and you can restore it from there.${f.crew_visible ? " The crew stops seeing it now." : ""}`,
+            confirmLabel: "Move to Trash",
+            danger: true,
+          })
+        : await confirm({
+            title: known ? `Move version ${entry.version} to the Trash?` : "Move this version to the Trash?",
+            body: `${known ? `Version ${entry.version - 1}` : "The version before it"} becomes the current one again. This one stays in the Trash for ${TRASH_DAYS} days.`,
+            confirmLabel: "Move to Trash",
+            danger: true,
+          });
+    if (ok) toTrash.mutate({ entry, only });
   };
 
   const mapUrl = (f: PlanFile) => {
@@ -204,11 +239,16 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
   // ----- Rows ---------------------------------------------------------------------------------
   const row = (entry: PlanEntry) => {
     const f = entry.file;
-    const open = links.data?.open[f.path];
     const save = links.data?.save[f.path];
     const mine = f.created_by === session.userId;
+    // Saving an edit adds a version, so whoever can upload one can edit (the database has the last word).
+    const canEdit = canAdd && !f.archived;
+    // A crew lead's own file, all of whose versions they can see (a crew sees only the current one).
+    const trashesFile = isOffice || (mine && !entry.older.length && !entry.hiddenHistory);
+    const trashesVersion = (isOffice || mine) && (entry.older.length > 0 || entry.hiddenHistory);
     const items: MenuEntry[] = [
-      { label: "Open", icon: "eye", disabled: !open, onSelect: () => open && window.open(open, "_blank", "noopener") },
+      { label: "Open", icon: "eye", onSelect: () => setViewing({ file: f, canEdit, edit: false }) },
+      { label: "Edit", icon: "pen", hidden: !canEdit || !editKind(f), onSelect: () => setViewing({ file: f, canEdit, edit: true }) },
       { label: "Download", icon: "download", disabled: !save, onSelect: () => save && (window.location.href = save) },
       { label: "Put on the map", icon: "map", hidden: !canAdd || !canMap(f) || f.archived, onSelect: () => navigate(mapUrl(f)) },
       { separator: true, hidden: !canAdd },
@@ -216,10 +256,20 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
       { label: "Edit details", icon: "edit", hidden: !canAdd, onSelect: () => setEditing(f) },
       { label: f.crew_visible ? "Make it office only" : "Show it to the crew", icon: f.crew_visible ? "lock" : "users", hidden: !isOffice, onSelect: () => update.mutate({ id: f.id, patch: { crew_visible: !f.crew_visible } }) },
       { label: f.archived ? "Restore" : "Archive", icon: f.archived ? "undo" : "archive", hidden: !isOffice, onSelect: () => update.mutate({ id: f.id, patch: { archived: !f.archived } }) },
-      { separator: true, hidden: !(isOffice || mine) },
-      { label: "Delete", icon: "trash", danger: true, hidden: !(isOffice || mine), onSelect: () => void askDelete(entry) },
+      { separator: true, hidden: !(trashesFile || trashesVersion) },
+      { label: "Move this version to Trash", icon: "history", danger: true, hidden: !trashesVersion, onSelect: () => void askTrash(entry, "version") },
+      { label: "Move to Trash", icon: "trash", danger: true, hidden: !trashesFile, onSelect: () => void askTrash(entry, "file") },
     ];
-    return <PlanRow key={f.id} entry={entry} open={open} save={save} links={links.data} menu={items} />;
+    return (
+      <PlanRow
+        key={f.id}
+        entry={entry}
+        save={save}
+        links={links.data}
+        menu={items}
+        onOpen={(file) => setViewing({ file, canEdit: file.id === f.id && canEdit, edit: false })}
+      />
+    );
   };
 
   const visible = entries.filter((e) => showArchived || !e.file.archived);
@@ -321,6 +371,19 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
         )}
       </div>
       {editing && <PlanDetailsDialog file={editing} canChangeCrew={isOffice} onClose={() => setEditing(null)} onSaved={refresh} />}
+      {viewing && (
+        <FileViewer
+          file={viewing.file}
+          canEdit={viewing.canEdit}
+          startEditing={viewing.edit}
+          onClose={() => setViewing(null)}
+          onSaved={(next) => {
+            // The new version is the one open now, so another edit builds on it.
+            setViewing((v) => v && { ...v, file: next, edit: false });
+            refresh();
+          }}
+        />
+      )}
       {tooLarge.dialog}
     </section>
   );
@@ -339,14 +402,21 @@ export function PlanIcon({ file }: { file: Pick<PlanFile, "content_type" | "file
   );
 }
 
-function PlanRow({ entry, open, save, links, menu }: { entry: PlanEntry; open?: string; save?: string; links?: { open: Record<string, string>; save: Record<string, string> }; menu: MenuEntry[] }) {
+function PlanRow({ entry, save, links, menu, onOpen }: {
+  entry: PlanEntry;
+  save?: string;
+  links?: { open: Record<string, string>; save: Record<string, string> };
+  menu: MenuEntry[];
+  /** Opens a version (the current one, or an older one) in the viewer. */
+  onOpen: (file: PlanFile) => void;
+}) {
   const [history, setHistory] = useState(false);
   const f = entry.file;
   return (
     <div className={styles.row}>
       <PlanIcon file={f} />
       <div className={styles.body}>
-        {open ? <a className={styles.title} href={open} target="_blank" rel="noreferrer">{f.title}</a> : <span className={styles.title}>{f.title}</span>}
+        <button type="button" className={styles.title} onClick={() => onOpen(f)}>{f.title}</button>
         <span className={styles.meta}>{planMeta(entry)}</span>
         {(!f.crew_visible || f.archived) && (
           <div className={styles.chips}>
@@ -367,7 +437,7 @@ function PlanRow({ entry, open, save, links, menu }: { entry: PlanEntry; open?: 
                     <span>
                       Version {entry.version - 1 - i}{o.revision ? ` · ${o.revision}` : ""} · added {formatDate(o.created_at)}{o.superseded_at ? `, replaced ${formatDate(o.superseded_at)}` : ""}
                     </span>
-                    {links?.open[o.path] && <a href={links.open[o.path]} target="_blank" rel="noreferrer">Open</a>}
+                    <button type="button" className="link-btn" onClick={() => onOpen(o)}>Open</button>
                     {links?.save[o.path] && <a href={links.save[o.path]}>Download</a>}
                   </div>
                 ))}

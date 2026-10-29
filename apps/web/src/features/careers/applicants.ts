@@ -8,7 +8,7 @@ import type { Json } from "@crewtavo/core/database";
 import type { QueryClient } from "@tanstack/react-query";
 import type { Tone } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
-import { signedUrls } from "@/lib/files";
+import { signedUrls, uploadRefused } from "@/lib/files";
 import { can, hasRole, type Session } from "@/lib/session";
 import type { WebVisit } from "../marketing/website";
 
@@ -75,12 +75,11 @@ export function refreshApplicants(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["job_applicants"] });
 }
 
-/** Delete an applicant and their files: their files first, so none are left without anyone to see them. */
-export async function deleteApplicant(a: Pick<Applicant, "id" | "files">) {
-  if (a.files.length) {
-    const { error } = await supabase().storage.from("files").remove(a.files.map((f) => f.path));
-    if (error) throw new Error(`Couldn't delete their files: ${error.message}`);
-  }
+/**
+ * Delete an applicant. Their files go to the Trash (the database moves them), where only people who
+ * see applicants find them, and the server deletes them for good 30 days later.
+ */
+export async function deleteApplicant(a: Pick<Applicant, "id">) {
   unwrap(await supabase().from("job_applicants").delete().eq("id", a.id));
 }
 
@@ -91,6 +90,6 @@ export async function uploadApplicantFile(companyId: string, applicantId: string
   if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} is too large. Files can be up to 10 MB.`);
   const path = `${companyId}/applicants/${applicantId}/${crypto.randomUUID()}.${kind.ext}`;
   const { error } = await supabase().storage.from("files").upload(path, file, { contentType: kind.type, upsert: false });
-  if (error) throw new Error(/row-level security/i.test(error.message) ? "You don't have permission to add files for applicants." : `Upload failed: ${error.message}`);
+  if (error) throw uploadRefused(error, "You don't have permission to add files for applicants.");
   return { path, name: fileName(file.name, kind.ext), type: kind.type, size: file.size, field };
 }

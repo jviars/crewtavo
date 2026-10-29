@@ -57,10 +57,13 @@ const refused = () => Response.json({ errors: [{ message: "Not Authorized" }] })
  * 0.3 GB and the app at 0.1 GB and 0.01 vCPU, sending 0.1 GB a day ($0.145 a day). There's no usage
  * from before the project was made. `over` changes any of them.
  */
-function railway(call: Call, over: Partial<Record<"project" | "usage" | "metrics" | "volumes", unknown>> = {}) {
+function railway(call: Call, over: Partial<Record<"project" | "usage" | "metrics" | "volumes" | "buckets" | "bucket", unknown>> = {}) {
   const query: string = call.body?.query ?? "";
   const pick = (name: keyof typeof over, fallback: unknown) => (name in over ? over[name] : fallback);
   const data = (value: unknown) => (value instanceof Response ? value : { data: value });
+  // The project's buckets: none unless a test adds them.
+  if (query.includes("buckets(first")) return data(pick("buckets", { project: { buckets: { edges: [] } } }));
+  if (query.includes("bucketInstanceDetails(")) return data(pick("bucket", { bucketInstanceDetails: null }));
   if (query.includes("project(id")) {
     return data(pick("project", { project: { name: "Crewtavo", subscriptionType: "hobby", createdAt: "2026-09-01T00:00:00Z", services: { edges: [{ node: { id: "svc-db", name: "db" } }, { node: { id: "svc-crewtavo", name: "crewtavo" } }] } } }));
   }
@@ -130,7 +133,7 @@ describe("reading Railway", () => {
     expect(o.plan).toBe("hobby");
     expect(o.trial).toBeNull();
     expect(o.period).toEqual({ start: "2026-10-01T00:00:00.000Z", end: "2026-11-01T00:00:00.000Z" });
-    expect(o.disks).toEqual([{ service: "db", usedGb: 1.2, sizeGb: 5 }]);
+    expect(o.disks).toEqual([{ service: "db", kind: "volume", usedGb: 1.2, sizeGb: 5 }]);
     // Samples a moment apart land in the same three-hour point, summed across services.
     expect(o.week).toEqual([
       { at: new Date(10_800_000).toISOString(), memory: 0.19, cpu: 0.02 },
@@ -163,6 +166,26 @@ describe("reading Railway", () => {
     serve((call) => railway(call, { project: { project: { name: "Crewtavo", subscriptionType: "trial", createdAt: new Date(NOW.getTime() - 20 * 60_000).toISOString(), services: { edges: [] } } } }));
     const o = await readHosting(env, oauth, NOW);
     expect(o.project).toMatchObject({ perDay: null, forecast: null });
+  });
+
+  it("shows a bucket with what it holds, and adds keeping it to the month at $0.015 a GB", async () => {
+    serve((call) =>
+      railway(call, {
+        buckets: { project: { buckets: { edges: [{ node: { id: "bkt-1", name: "files" } }, { node: { id: "bkt-2", name: "elsewhere" } }] } } },
+        // 20 GB in this environment's files bucket (Railway sends BigInts as strings); the other isn't here.
+        bucket: call.body.variables.bucketId === "bkt-1" ? { bucketInstanceDetails: { sizeBytes: "20000000000", objectCount: "1234" } } : { bucketInstanceDetails: null },
+      }),
+    );
+    const o = await readHosting(env, oauth, NOW);
+    expect(o.disks).toEqual([
+      { service: "db", kind: "volume", usedGb: 1.2, sizeGb: 5 },
+      { service: "files", kind: "bucket", usedGb: 20, sizeGb: null, objects: 1234, monthly: 0.3 },
+    ]);
+    // $0.30 a month is about $0.19 by the 20th of October, and a cent a day.
+    expect(o.project?.services).toContainEqual({ id: "bkt-1", name: "files", cost: 0.19 });
+    expect(o.project?.cost).toBe(3.02);
+    expect(o.project?.forecast).toBeCloseTo(4.8, 1);
+    expect(o.warnings).toEqual([]);
   });
 
   it("carries on without the parts Railway refuses, but not without the project", async () => {
@@ -221,11 +244,14 @@ describe("warnings", () => {
 
   it("warns about the Free plan and full volumes", () => {
     expect(hostingWarnings(calm({ plan: "free" }))[0]).toMatchObject({ key: "free", action: "upgrade" });
-    const disks = hostingWarnings(calm({ disks: [{ service: "db", usedGb: 4.3, sizeGb: 5 }, { service: "storage", usedGb: 4.9, sizeGb: 5 }] }));
+    const disks = hostingWarnings(calm({ disks: [{ service: "db", kind: "volume", usedGb: 4.3, sizeGb: 5 }, { service: "storage", kind: "volume", usedGb: 4.9, sizeGb: 5 }] }));
     expect(disks.map((w) => [w.key, w.level, w.title])).toEqual([
       ["disk:storage:95", "urgent", "Photos and files storage is 98% full"],
       ["disk:db:85", "warning", "Database storage is 86% full"],
     ]);
+    expect(disks[0]?.body).toContain("move photos and files to a Railway bucket");
+    // A bucket has no size to fill.
+    expect(hostingWarnings(calm({ disks: [{ service: "files", kind: "bucket", usedGb: 900, sizeGb: null, objects: 10, monthly: 13.5 }] }))).toEqual([]);
   });
 });
 

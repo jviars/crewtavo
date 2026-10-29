@@ -1,7 +1,11 @@
-/** Roles: name a role, pick its access level, and choose which areas it includes. */
+/**
+ * Roles: name a role, pick its access level, and choose which areas it includes. Owners also give a
+ * role, or a built-in level, a storage limit for everyone with it (Settings → Storage has the rest).
+ */
 import { LEVEL_PERMISSIONS, LEVEL_SUMMARY, PERMISSIONS, ROLE_LABELS, STAFF, type Permission, type Role } from "@crewtavo/core/roles";
+import { formatBytes } from "@crewtavo/core/storage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -12,6 +16,8 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useCompanyRoles, type CompanyRole } from "./roles";
+import { gbField, parseGb, refreshStorage, setAllowance, setsAllowances, useStorageOverview } from "./storage";
+import { AllowanceDialog, GbInput } from "./StorageSettings";
 
 // The team's levels. A custom role is never a sub's (the database refuses it).
 const LEVELS = STAFF.filter((r) => r !== "owner");
@@ -23,6 +29,11 @@ export function RolesSettings() {
   const roles = useCompanyRoles();
   const team = useQuery({ queryKey: ["team", session.company.id], queryFn: () => api.get<Array<{ role_id: string | null; active: boolean }>>("/team") });
   const [editing, setEditing] = useState<CompanyRole | "new" | null>(null);
+  // Storage limits for everyone with a role: owners only.
+  const owner = setsAllowances(session);
+  const storage = useStorageOverview(owner);
+  const [limitFor, setLimitFor] = useState<{ key: string; name: string } | null>(null);
+  const storageLimit = (key: string) => storage.data?.roles?.find((r) => r.role_key === key)?.limit_bytes ?? null;
   const remove = useMutation({
     meta: { success: "Role deleted" },
     mutationFn: async (id: string) => unwrap(await supabase().from("company_roles").delete().eq("id", id)),
@@ -72,6 +83,7 @@ export function RolesSettings() {
               <div className="row wrap" style={{ gap: 6 }}>
                 {r.permissions.length ? r.permissions.map((p) => <span key={p} className="chip">{label(p)}</span>) : <span className="muted small">Their own work only</span>}
               </div>
+              {owner && storageLimit(r.id) && <span className="muted small">Storage: {formatBytes(storageLimit(r.id)!)} each</span>}
             </div>
           ))}
         </div>
@@ -81,21 +93,45 @@ export function RolesSettings() {
         {STAFF.map((r) => (
           <div key={r} className="card-row" style={{ alignItems: "flex-start" }}>
             <strong style={{ width: 110, flex: "none" }}>{ROLE_LABELS[r]}</strong>
-            <span className="muted small">{LEVEL_SUMMARY[r]}</span>
+            <span className="stack-sm" style={{ gap: 4 }}>
+              <span className="muted small">{LEVEL_SUMMARY[r]}</span>
+              {owner && storage.data && r !== "owner" && (
+                <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => setLimitFor({ key: r, name: ROLE_LABELS[r] })} aria-label={`Storage limit for ${ROLE_LABELS[r]}`}>
+                  {storageLimit(r) ? `Storage: ${formatBytes(storageLimit(r)!)} each` : "Storage limit"}
+                </button>
+              )}
+            </span>
           </div>
         ))}
       </div>
-      {editing && <RoleDialog role={editing === "new" ? null : editing} existing={roles.data ?? []} onClose={() => setEditing(null)} />}
+      {editing && (
+        <RoleDialog
+          role={editing === "new" ? null : editing}
+          existing={roles.data ?? []}
+          storage={owner && storage.data ? { limit: editing === "new" ? null : storageLimit(editing.id) } : null}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {limitFor && <AllowanceDialog target={{ role: limitFor.key }} name={limitFor.name} current={storageLimit(limitFor.key)} onClose={() => setLimitFor(null)} />}
     </div>
   );
 }
 
-function RoleDialog({ role, existing, onClose }: { role: CompanyRole | null; existing: CompanyRole[]; onClose: () => void }) {
+/**
+ * A role's name, level and areas. `storage` (owners only) adds its storage limit: the role's limit
+ * now, saved with the role (null: none).
+ */
+function RoleDialog({ role, existing, storage, onClose }: { role: CompanyRole | null; existing: CompanyRole[]; storage: { limit: number | null } | null; onClose: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const [name, setName] = useState(role?.name ?? "");
   const [level, setLevel] = useState<Role>(role?.base_role ?? "office");
   const [perms, setPerms] = useState<Permission[]>(role?.permissions ?? [...LEVEL_PERMISSIONS.office]);
+  // What's typed, or the role's limit as it stands (which may arrive after the dialog opens).
+  const [typed, setTyped] = useState<string | null>(null);
+  const size = typed ?? gbField(storage?.limit);
+  // A new role saved before its storage limit failed: trying again saves that role, not another.
+  const created = useRef<string | null>(null);
   const allowed = LEVEL_PERMISSIONS[level];
 
   const save = useMutation({
@@ -103,14 +139,25 @@ function RoleDialog({ role, existing, onClose }: { role: CompanyRole | null; exi
     mutationFn: async () => {
       const clean = name.trim();
       if (!clean) throw new Error("Give the role a name.");
-      if (existing.some((r) => r.id !== role?.id && r.name.trim().toLowerCase() === clean.toLowerCase())) throw new Error("There's already a role with that name.");
+      const id = role?.id ?? created.current;
+      if (existing.some((r) => r.id !== id && r.name.trim().toLowerCase() === clean.toLowerCase())) throw new Error("There's already a role with that name.");
+      // Checked before anything's saved, so a size that isn't one saves nothing.
+      let limit: number | null | undefined;
+      if (storage) {
+        const parsed = size.trim() ? parseGb(size) : null;
+        if (parsed && "problem" in parsed) throw new Error(`Storage limit: ${parsed.problem}`);
+        limit = parsed ? parsed.bytes : null;
+      }
       const row = { name: clean, base_role: level, permissions: perms.filter((p) => allowed.includes(p)) };
-      if (role) unwrap(await supabase().from("company_roles").update(row).eq("id", role.id));
-      else unwrap(await supabase().from("company_roles").insert({ ...row, company_id: session.company.id }));
+      let saved = id;
+      if (saved) unwrap(await supabase().from("company_roles").update(row).eq("id", saved));
+      else saved = created.current = unwrap(await supabase().from("company_roles").insert({ ...row, company_id: session.company.id }).select("id").single()).id;
+      if (storage && limit !== undefined && gbField(limit) !== gbField(storage.limit)) await setAllowance(session.company.id, { role: saved! }, limit);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["company-roles", session.company.id] });
       queryClient.invalidateQueries({ queryKey: ["team", session.company.id] });
+      if (storage) refreshStorage(queryClient);
       onClose();
     },
   });
@@ -144,6 +191,11 @@ function RoleDialog({ role, existing, onClose }: { role: CompanyRole | null; exi
           </fieldset>
         ) : (
           <p className="muted small" style={{ margin: 0 }}>This level sees only their own visits and time.</p>
+        )}
+        {storage && (
+          <Field label="Storage limit for everyone with this role" optional hint="For each person with this role who has no limit of their own: it stops what they add to Drive, plans and guides. Leave it empty for no limit.">
+            <GbInput value={size} placeholder="No limit" onChange={(v) => { setTyped(v); save.reset(); }} />
+          </Field>
         )}
         <FormError error={save.error} />
         <div className="form-actions">

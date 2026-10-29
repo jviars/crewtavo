@@ -60,6 +60,12 @@ push (the `hosting` notification topic): the trial ending in about 7, 3 or 1 day
 nearly gone, usage on track to go over what the plan includes, a volume over 85% full, or a
 Railway sign-in that stopped working. These usage queries are the ones Railway's dashboard uses
 but aren't in Railway's API docs, so each is optional: what Railway doesn't share is left out.
+A storage bucket isn't in Railway's usage figures, so it's priced from what it holds now ($0.015 per
+GB a month) and added to the month, and it's shown without a size, since it never fills up.
+
+**Files storage:** photos and files are kept on the `storage` service's volume. **Settings →
+Hosting → Files storage** can move them into a Railway bucket instead, with one press (see
+[Moving files to a bucket](#moving-files-to-a-bucket)).
 
 **Your own domain:** after connecting Railway, the owner sees **Your web address**: four steps on a
 timeline, ticked off as they're done, with what to do now opened under the current one.
@@ -96,7 +102,10 @@ in with Railway?** in step 1), the steps are:
 The screen lists these steps with links, and notices when they're done.
 
 **Backups:** Railway's volume backups (open the `db` or `storage` volume, then **Backups**) need
-Railway's Pro plan.
+Railway's Pro plan. Railway doesn't back up storage buckets at all, so once files are in a bucket,
+the volume's backups stop covering anything added since (see
+[Moving files to a bucket](#moving-files-to-a-bucket)). Whatever someone deletes in Crewtavo waits
+30 days in the Trash first (see [Crewtavo - Drive](#crewtavo---drive)).
 
 **Updates:** Crewtavo keeps itself up to date. When a new version comes out, Railway installs it
 within several hours, with no downtime: the new version starts next to the old one, updates the
@@ -156,7 +165,8 @@ answer on every address; now it only answers on the server itself. If your web s
 another machine, see [Visitors' addresses](#visitors-addresses).
 
 **Backups:** back up the `crewtavo-instance_db-data` and `crewtavo-instance_storage-data` Docker
-volumes, and `.env.instance`.
+volumes, and `.env.instance`. Files stay on the `storage-data` volume: moving them to a bucket is
+for instances on Railway.
 
 For working on Crewtavo's code, the faster loop is in the README's **Develop** section.
 
@@ -177,6 +187,7 @@ lists them all).
 | `GOOGLE_MAPS_SERVER_KEY` | Roof pitch suggestions (Solar API). Restrict it to the Solar API. |
 | `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_ENVIRONMENT` | Not needed for most businesses: each one makes its own Intuit app and pastes its keys under **Apps → QuickBooks Online**, which walks them through it (and wins over these when both are there). These set up one Intuit app on the server instead: create it at developer.intuit.com; the redirect URI is shown on the Apps page. |
 | `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_ACCOUNTS_URL` | Not needed for most businesses: each one makes its own Zoho app and pastes its keys under **Apps → Zoho Books** (which wins over these when both are there). These set up one Zoho app on the server instead: create a server-based client at api-console.zoho.com. |
+| `GOOGLE_PICKER_API_KEY` | Import from Google Drive in **Drive**, with `GOOGLE_CLIENT_ID` (no secret needed). A browser API key restricted to the Google Picker API, your domain and `https://docs.google.com/*`; see [Importing from Google Drive](#importing-from-google-drive). |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Calendar: show a company's Google calendars on the schedule and put visits on a Google calendar Crewtavo makes. In Google Cloud, turn on the Google Calendar API, set up the OAuth consent screen with the scopes `calendar.calendarlist.readonly`, `calendar.events.readonly` and `calendar.app.created`, and create a Web application client whose redirect URI is the one shown on the Google Calendar app page (`https://your-domain/api/apps/google_calendar/callback`). Then, under **Audience**, publish the app (or choose **Internal** on Google Workspace): while it's in **Testing**, Google ends sign-ins after 7 days and Google Calendar disconnects. Optional: without these, Google Calendar works by secret address both ways (the Apps page walks people through it), and calendar files can be uploaded under **Settings → Calendars**. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Not needed for most businesses: connect Stripe on the **Apps** page instead (see [Connecting Stripe](#connecting-stripe)). These share one Stripe account with every company on the server that hasn't connected its own (so **Bring in your Stripe history** works with it only on a one-company server). Point a webhook at `/api/webhooks/stripe` with API version `2024-06-20` and the events in `STRIPE_EVENTS` (`apps/api/src/integrations/stripe.ts`): `invoice.*` (finalized, paid, payment_failed, voided, marked_uncollectible), `payment_intent.processing`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`, `payout.*` (created, updated, paid, failed, canceled) and `checkout.session.*` (completed, async_payment_succeeded, async_payment_failed). |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional default sender through [Resend](https://resend.com), used until the business connects its own email under **Settings → Email**. That screen recommends Resend (the business's own free account, which works on every Railway plan); a mailbox over SMTP only works on Railway Pro or when self-hosting, since Railway's trial and Hobby plans block outgoing mail servers. Subs on a new phone can also sign in with a 6-digit code emailed this way (the business's own mailbox first): it's how they get back in when texting isn't set up, and when it is, for a sub with no phone on file. |
@@ -331,6 +342,147 @@ a note on the client reminds you to record it once it clears there.
 Stripe only sends webhooks to a public `https` address, so on a local copy the key is saved
 without one. Run `stripe listen --forward-to localhost:8787/api/webhooks/stripe` and use the
 deployment settings above to try webhooks there.
+
+## Crewtavo - Drive
+
+**Apps → Crewtavo - Drive → Install** (owners, and admins who connect apps) puts **Drive** in the
+menu for owners, admins, office staff and estimators: every file in Crewtavo in one place. **Company
+files** is a folder tree for documents that belong to no client (forms, price sheets, insurance
+papers); **Clients** shows every file on clients' properties, requests, quotes and jobs, grouped by
+client; then **Recent**, **Search** and **Trash**. PDFs open in Crewtavo to read, mark up and fill in,
+Word documents to read and edit, and photos to zoom; saving an edit always makes a new version, so
+nothing is written over. A file can be attached to a client's property, request, quote or job (the
+crew sees it there when it's shown to crew), or kept office-only.
+
+Uploads go up in 6 MB pieces and carry on where they left off, so a big plan set gets past a proxy
+that caps a request at 100 MB (Cloudflare's free plan does) and survives patchy signal. Storage keeps
+an unfinished upload for a day (`TUS_URL_EXPIRY_MS` on the `storage` service; instances made before
+October 2026 don't have it and keep one for an hour, after which it starts over).
+
+**The Trash:** whatever someone deletes in Crewtavo, in Drive or anywhere else (visit and quote
+photos, receipts, sub paperwork, résumés, guide covers, equipment and ticket photos), goes to the
+Trash for 30 days, where it can be restored. Nobody signed in can delete a stored file any more: the
+server's nightly `trash` task (04:35 UTC) deletes what has been there 30 days, and an owner can
+**Delete forever** sooner. Drive's Trash works whether or not Drive is installed (`/drive/trash`).
+
+### Importing from Google Drive
+
+With `GOOGLE_CLIENT_ID` and `GOOGLE_PICKER_API_KEY` set, Drive's **Import from Google Drive** opens
+Google's own file picker. People sign in to Google there and pick files; Crewtavo can read only the
+files they pick (the `drive.file` permission), downloads them on the server, and forgets the sign-in
+straight away (it's never stored or logged). Google Docs, Sheets, Slides and Drawings come in as
+Word, Excel, PDF and PNG files (Google converts up to 10 MB each). In Google Cloud, in the same
+project as `GOOGLE_CLIENT_ID` (Google Calendar's, if you've set that up):
+
+1. **APIs & Services → Library:** enable the **Google Picker API** and the **Google Drive API**.
+2. **Google Auth Platform → Clients:** in the Web application client, add every address people open
+   Crewtavo at under **Authorized JavaScript origins** (`https://crm.example.com`, and the
+   `*.up.railway.app` one if it's used). Import needs no redirect URI.
+3. **Data Access:** add the scope `https://www.googleapis.com/auth/drive.file`. Google lists it as
+   non-sensitive, so it needs no security review. Publish the app under **Audience** (or choose
+   **Internal** on Google Workspace): while it's in **Testing**, only its test users can sign in.
+4. **APIs & Services → Credentials → Create credentials → API key.** Under **Application
+   restrictions**, choose **Websites** and add `https://your-domain/*` and `https://docs.google.com/*`
+   (without the second, the picker says the developer key is invalid). Under **API restrictions**,
+   choose the Google Picker API. Set it as `GOOGLE_PICKER_API_KEY`.
+
+The picker also needs the project's number, which Crewtavo reads from the start of the client ID.
+The server checks each import's Google sign-in was made for `GOOGLE_CLIENT_ID` and refuses any other.
+
+## Moving files to a bucket
+
+On Railway, photos and files live on the `storage` service's volume. A Railway storage bucket keeps
+them for a tenth of the price ($0.015 per GB a month instead of $0.15) and has no size to outgrow,
+but Railway's Limited Trial has no buckets, and Railway backs up volumes (on Pro) but never buckets.
+So the template keeps the volume, and an owner or admin can move files from **Settings → Hosting →
+Files storage** (`apps/api/src/services/storageBucket.ts`):
+
+1. Crewtavo makes a bucket named `files` in the project, in the region the services run in.
+2. It copies every file into it, a few at a time, skipping any already there, then copies whatever
+   was uploaded meanwhile, and checks the bucket has every file, each at its size.
+3. It switches `storage` to the bucket (`STORAGE_BACKEND=s3`, and the bucket's address and keys as
+   references to the bucket's own variables) and restarts it, which takes about a minute. Uploads
+   are turned away for that minute ("Try again in a minute"), opening files carries on, and
+   anything that still lands on the volume is copied across.
+4. It checks files open from the bucket.
+
+The page shows each step and how many files are copied; it's fine to leave it. If Crewtavo restarts
+partway (a new version, say), the move carries on from where it was the next time an owner or admin
+opens Settings → Hosting. **The volume isn't touched**: it keeps every file from
+before the move (and Railway keeps charging for what it holds), so **Move back to the volume** can
+switch storage back and copy back what was added since. That includes files deleted for good after
+the move, which go from the bucket but stay on the volume: once you're sure you won't move back,
+delete the volume in Railway (open `storage`, then the volume, then **Settings**) to stop paying for
+it and to be rid of them. The same goes the other way: the bucket keeps its copy after a move back,
+so delete it in Railway once you're sure.
+
+What it costs besides: Railway counts files sent into a bucket as the `storage` service's outbound
+traffic ($0.05 per GB), so the copy costs that once for what you have, and new uploads count the same
+way. **Settings → Hosting** adds the bucket to the month.
+
+If Railway doesn't let Crewtavo do a step (a project token, or a Railway sign-in that can't change
+the project), the page lists what to do in Railway instead, with the variables to paste, and carries
+on when it's done. By hand, without Crewtavo, a move back is: on the `storage` service, set
+`STORAGE_BACKEND` to `file` and `STORAGE_S3_BUCKET` to `crewtavo` (the volume's folder: left on the
+bucket's name, storage looks for every file in the wrong place), then deploy. Files uploaded while
+storage was on the bucket stay in the bucket that way.
+
+## Storage limits
+
+**Settings → Storage** (owners, and admins who manage settings) shows how much the company's photos
+and files take up, how much of that is in the Trash (it takes up room until it's deleted for good),
+who uploaded what and which parts of Crewtavo it's in, and the company's limit. Everyone with Drive
+sees the company's total on the Drive page.
+
+**The company limit** stops uploads before Crewtavo runs out of room or runs up the bill. Unless an
+owner or admin sets one of their own (a number of GB, or **No limit**), it's a bit under what Railway
+allows, read from Railway whenever Crewtavo checks it (Settings → Hosting, Settings → Storage, the
+server's tasks, and after files move to or from a bucket):
+
+| Where files are | Default limit |
+|---|---|
+| On the `storage` service's volume | 90% of the volume's size (4.5 GB of Hobby's 5 GB volume). Make the volume bigger in Railway and the default follows. |
+| In a bucket, on Railway's Hobby plan | 900 GB. Hobby's buckets hold 1 TB across the whole Railway workspace, not just this project. |
+| In a bucket, on Railway's Pro plan | 1 TB. Pro has no cap, so this is a safety net: 1 TB costs about $15 a month in a bucket. |
+| Not on Railway, or Railway not connected | No default limit. Set one in Settings → Storage if you want one. |
+
+A default Railway gave earlier goes when Crewtavo leaves Railway or Railway is disconnected (or
+Railway's answer gives no default, such as a plan Crewtavo doesn't know). While Railway just can't
+be reached for a moment, the last default stays.
+
+The page shows what the limit would cost a month if it filled ($0.015 per GB in a bucket, $0.15 per
+GB on a volume).
+
+**Limits for people:** an owner can also give a person, or everyone with a role, a limit of their own
+for what they upload (a person's own wins over their role's). It counts what they uploaded that isn't
+in the Trash, so moving old files there frees it up. Owners are never limited.
+
+**What's refused:** the server checks each upload's size before it's stored, and refuses one that
+would go over with "This 240 MB file doesn't fit: 44.9 GB of the 45 GB storage limit is used…" (the
+company's limit) or "This 240 MB file doesn't fit in your storage: you've used 9.9 GB of your
+10 GB…" (a person's), which the app shows as it is. Before it refuses, it reads the numbers again,
+so raising a limit or emptying the Trash counts straight away.
+- Only uploads by someone signed in on the team are checked: the server checks their sign-in the
+  way the storage service does, and only someone on the company's team is ever told its numbers.
+  An upload link a team member made counts as theirs; one the server made (a booking form's, a
+  sub's) is nobody's.
+- The company limit refuses Drive and plan files, guide covers, résumés, chat files and equipment
+  photos, and files from Google Drive.
+- A person's limit refuses only Drive and plan files (Google Drive imports too) and guide covers.
+- Nothing a crew needs to finish a job is ever refused: visit and quote photos, receipts, sub
+  paperwork, ticket photos and Measure pictures always go in (they still count). Neither is anything
+  the server stores itself (profile photos, the logo, letterheads, package and price-list pictures),
+  a booking form's or a sub's upload link, or a move to a bucket.
+- A few uploads at the same moment can go a little over; the limit catches up within half a minute.
+- An upload has to say its size where a limit could refuse it (Crewtavo's own uploads always do),
+  and Storage's S3 address takes no uploads: files go in through Crewtavo.
+
+**Warnings:** the `storage` task (every 6 hours, on Railway or not) tells owners and admins, by the
+bell, when the company's files reach 80% and then 95% of the limit (or that storage is full, when
+it's already at the limit), and by email and push unless they've turned it off in Settings →
+Profile, where it's the **Railway** topic on Railway and the **Storage** topic elsewhere. Each is sent once;
+when use drops back under (the Trash was emptied, or the limit raised), it's sent again the next
+time it's reached.
 
 ## Getting back in
 

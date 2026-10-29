@@ -13,8 +13,9 @@ import { adminClient, type Db } from "./lib/supabase";
 import { runAddressTask } from "./services/address";
 import { rollUpVisits } from "./services/analytics";
 import { checkHosting } from "./services/hosting";
-import { tidyApplicantFiles, tidyPlanFiles, tidySubFiles } from "./services/planFiles";
+import { purgeTrash, tidyApplicantFiles, tidyPlanFiles, tidySubFiles, tidyUnrecordedFiles } from "./services/planFiles";
 import { keepRailwayAlive } from "./services/railway";
+import { checkStorage } from "./services/storageUsage";
 import { processAutomations } from "./services/automations";
 import { processCampaigns } from "./services/campaigns";
 import { deliverNotifications } from "./services/delivery";
@@ -22,7 +23,7 @@ import { remindSubs } from "./services/subs";
 import { dailyOutlook } from "./services/external";
 import { autoRoutes } from "./services/routes";
 
-export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "hosting", "plans", "routes", "website"] as const;
+export const TASKS = ["automations", "campaigns", "notify", "outbox", "calendars", "recurrence", "followups", "weather", "address", "railway", "hosting", "plans", "trash", "storage", "routes", "website"] as const;
 export type TaskName = (typeof TASKS)[number];
 
 /** Cron expressions -> tasks, run by server.ts's scheduler. */
@@ -39,6 +40,10 @@ export const CRON_TASKS: Record<string, TaskName[]> = {
   "40 5 * * *": ["railway"],
   "45 2,14 * * *": ["hosting"],
   "20 4 * * *": ["plans"],
+  // Deletes for good what has been in the Trash for 30 days (services/planFiles.ts).
+  "35 4 * * *": ["trash"],
+  // Warns owners and admins as files near the storage limit, on Railway or not (services/storageUsage.ts).
+  "50 */6 * * *": ["storage"],
 };
 
 export async function runTask(name: TaskName, env: Env): Promise<Record<string, unknown>> {
@@ -67,8 +72,18 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return checkHosting(env, adminClient(env));
     case "plans": {
       const admin = adminClient(env);
-      return { ...(await tidyPlanFiles(admin)), subs: await tidySubFiles(admin), applicants: await tidyApplicantFiles(admin) };
+      return {
+        ...(await tidyPlanFiles(admin)),
+        subs: await tidySubFiles(admin),
+        applicants: await tidyApplicantFiles(admin),
+        // Guide covers, and quote and visit photos, uploaded for a save that failed.
+        photos: await tidyUnrecordedFiles(admin),
+      };
     }
+    case "trash":
+      return purgeTrash(adminClient(env));
+    case "storage":
+      return checkStorage(env, adminClient(env));
     case "routes":
       return autoRoutes(env);
     case "website":

@@ -85,20 +85,15 @@ function Editor({ pageId, initial, loadedAt, categories }: { pageId: string | nu
         body_text: text.current,
         cover_path,
       };
-      try {
-        if (pageId) {
-          // Don't overwrite someone else's save made while this was open.
-          const rows = unwrap(await supabase().from("sop_pages").update(row).eq("id", pageId).eq("updated_at", loadedAt!).select("id, updated_at"));
-          if (!rows.length) throw new Error("Someone else saved this guide while you were editing. Copy your changes, reload the page, and apply them again.");
-        }
-        const id = pageId ?? unwrap(await supabase().from("sop_pages").insert({ ...row, company_id: company.id }).select("id").single()).id;
-        // The cover it had isn't kept in its revisions, so it can go.
-        if (initial.cover_path && initial.cover_path !== cover_path) void supabase().storage.from("files").remove([initial.cover_path]);
-        return { id };
-      } catch (error) {
-        if (uploaded) void supabase().storage.from("files").remove([uploaded]);
-        throw error;
+      // A cover it no longer has (it isn't kept in its revisions) goes to the Trash by itself. A new
+      // one uploaded for a save that fails is left behind: only the server deletes stored files.
+      if (pageId) {
+        // Don't overwrite someone else's save made while this was open.
+        const rows = unwrap(await supabase().from("sop_pages").update(row).eq("id", pageId).eq("updated_at", loadedAt!).select("id, updated_at"));
+        if (!rows.length) throw new Error("Someone else saved this guide while you were editing. Copy your changes, reload the page, and apply them again.");
       }
+      const id = pageId ?? unwrap(await supabase().from("sop_pages").insert({ ...row, company_id: company.id }).select("id").single()).id;
+      return { id };
     },
     onSuccess: (r) => {
       setSaved(JSON.stringify(draft));

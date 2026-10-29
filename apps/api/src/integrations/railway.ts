@@ -1,7 +1,8 @@
 /**
  * Railway's API, for Settings → Web address (adding the owner's domain to this instance's crewtavo
  * service, watching Railway verify it, and switching APP_URL over) and Settings → Hosting (what
- * Railway charges, for the twice-daily warnings). Crewtavo gets access one of two ways: Login with
+ * Railway charges, for the twice-daily warnings, and moving files to a storage bucket and back).
+ * Crewtavo gets access one of two ways: Login with
  * Railway (OAuth; each instance registers its own client with Railway, so nobody runs a shared app)
  * or a project token the owner pastes.
  *
@@ -299,6 +300,14 @@ export async function setServiceVariable(env: Env, access: RailwayAccess, servic
   });
 }
 
+/** Sets several of a service's variables in one change, without deploying it (redeploy() starts it with them). Others stay as they are. */
+export async function setServiceVariables(env: Env, access: RailwayAccess, serviceId: string, variables: Record<string, string>): Promise<void> {
+  const { projectId, environmentId } = ids(env);
+  await gql(access, "mutation ($input: VariableCollectionUpsertInput!) { variableCollectionUpsert(input: $input) }", {
+    input: { projectId, environmentId, serviceId, variables, skipDeploys: true },
+  });
+}
+
 /** Another service in this instance's project, by the name the template gives it ("storage"). */
 export async function serviceIdByName(env: Env, access: RailwayAccess, name: string): Promise<string | null> {
   const { project } = await gql<{ project: { services: { edges: { node: { id: string; name: string } }[] } } }>(
@@ -400,6 +409,124 @@ export async function volumeSizes(env: Env, access: RailwayAccess): Promise<Arra
     .map((e) => e.node)
     .filter((v) => v.sizeMB)
     .map((v) => ({ serviceId: v.serviceId, usedMb: v.currentSizeMB ?? 0, sizeMb: v.sizeMB ?? 0 }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Storage buckets (Settings → Hosting: what they hold, and moving files into one; see
+// services/storageBucket.ts). A bucket is made in the project, then put in this environment, the
+// way Railway's own CLI does it (`railway bucket create`). These come from Railway's schema and
+// CLI rather than its API docs, and whether a project's sign-in may make one isn't documented, so
+// callers turn a refusal into steps for the owner to do in Railway.
+// ---------------------------------------------------------------------------------------------
+
+export interface RailwayBucket {
+  id: string;
+  name: string;
+}
+
+/** The project's buckets, in any environment. */
+export async function projectBuckets(env: Env, access: RailwayAccess): Promise<RailwayBucket[]> {
+  const { project } = await gql<{ project: { buckets?: { edges: { node: RailwayBucket }[] } | null } }>(
+    access,
+    "query ($id: String!) { project(id: $id) { buckets(first: 50) { edges { node { id name } } } } }",
+    { id: ids(env).projectId },
+  );
+  return project.buckets?.edges.map((e) => e.node) ?? [];
+}
+
+/** What a bucket holds in this environment; null when it isn't in this environment. */
+export async function bucketUsage(env: Env, access: RailwayAccess, bucketId: string): Promise<{ sizeBytes: number; objects: number } | null> {
+  // Both are BigInts, which come as strings once they're large.
+  const { bucketInstanceDetails: details } = await gql<{ bucketInstanceDetails: { sizeBytes: number | string; objectCount: number | string } | null }>(
+    access,
+    "query ($bucketId: String!, $environmentId: String!) { bucketInstanceDetails(bucketId: $bucketId, environmentId: $environmentId) { sizeBytes objectCount } }",
+    { bucketId, environmentId: ids(env).environmentId },
+  );
+  return details ? { sizeBytes: Number(details.sizeBytes) || 0, objects: Number(details.objectCount) || 0 } : null;
+}
+
+/** Makes a bucket in the project. It isn't in any environment until deployBucket puts it in this one. */
+export async function createBucket(env: Env, access: RailwayAccess, name: string): Promise<RailwayBucket> {
+  const { bucketCreate } = await gql<{ bucketCreate: RailwayBucket }>(access, "mutation ($input: BucketCreateInput!) { bucketCreate(input: $input) { id name } }", {
+    input: { projectId: ids(env).projectId, name },
+  });
+  return bucketCreate;
+}
+
+/**
+ * Puts a bucket in this environment, in a region ("sjc", "iad", "ams" or "sin"; Railway picks when
+ * it's null). Railway applies it straight away, unless someone has changes waiting in the
+ * environment: then it's added to those ("staged"), the way Railway's CLI does, so nobody's pending
+ * edits go live with it, and the owner deploys them all in Railway.
+ */
+export async function deployBucket(env: Env, access: RailwayAccess, bucketId: string, region: string | null): Promise<"deployed" | "staged"> {
+  const { projectId, environmentId } = ids(env);
+  const waiting = await gql<{ environment: { unmergedChangesCount: number | null } }>(
+    access,
+    "query ($id: String!, $projectId: String!) { environment(id: $id, projectId: $projectId) { unmergedChangesCount } }",
+    { id: environmentId, projectId },
+  ).then(
+    (data) => data.environment.unmergedChangesCount ?? 0,
+    // Not knowing whether someone has changes waiting: add to them rather than deploy them.
+    (error) => {
+      if (error instanceof RailwayError && error.denied) throw error;
+      return 1;
+    },
+  );
+  const patch = { buckets: { [bucketId]: { ...(region ? { region } : {}), isCreated: true } } };
+  if (waiting > 0) {
+    await gql(access, "mutation ($environmentId: String!, $input: EnvironmentConfig!) { environmentStageChanges(environmentId: $environmentId, input: $input, merge: true) { id } }", {
+      environmentId,
+      input: patch,
+    });
+    return "staged";
+  }
+  await gql(access, "mutation ($environmentId: String!, $patch: EnvironmentConfig, $message: String) { environmentPatchCommit(environmentId: $environmentId, patch: $patch, commitMessage: $message) }", {
+    environmentId,
+    patch,
+    message: "Crewtavo: a bucket for photos and files",
+  });
+  return "deployed";
+}
+
+/** A bucket's S3 address and keys in this environment. `urlStyle` says whether its address takes the bucket in the path. */
+export interface BucketCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  endpoint: string;
+  /** The bucket's name at S3 (globally unique, like "files-a1b2c3"), not the name it has in the project. */
+  bucketName: string;
+  region: string;
+  urlStyle: string;
+}
+
+/** Null until the bucket is in this environment. */
+export async function bucketCredentials(env: Env, access: RailwayAccess, bucketId: string): Promise<BucketCredentials | null> {
+  const { projectId, environmentId } = ids(env);
+  const { bucketS3Credentials } = await gql<{ bucketS3Credentials: BucketCredentials[] | null }>(
+    access,
+    "query ($projectId: String!, $environmentId: String!, $bucketId: String!) { bucketS3Credentials(projectId: $projectId, environmentId: $environmentId, bucketId: $bucketId) { accessKeyId secretAccessKey endpoint bucketName region urlStyle } }",
+    { projectId, environmentId, bucketId },
+  );
+  return bucketS3Credentials?.[0] ?? null;
+}
+
+/** Where a service runs in this environment, like "us-east4-eqdc4a"; null when Railway doesn't say. */
+export async function serviceRegion(env: Env, access: RailwayAccess, serviceId: string): Promise<string | null> {
+  const { serviceInstance } = await gql<{ serviceInstance: { region: string | null } | null }>(
+    access,
+    "query ($environmentId: String!, $serviceId: String!) { serviceInstance(environmentId: $environmentId, serviceId: $serviceId) { region } }",
+    { environmentId: ids(env).environmentId, serviceId },
+  );
+  return serviceInstance?.region ?? null;
+}
+
+/** This project's page on Railway, in this environment, or one of a service's tabs there. */
+export function railwayPage(env: Env, service?: { id: string; tab: "variables" | "settings" | "deployments" }): string | null {
+  const found = railwayIds(env);
+  if (!found) return null;
+  const base = `https://railway.com/project/${found.projectId}`;
+  return service ? `${base}/service/${service.id}/${service.tab}?environmentId=${found.environmentId}` : `${base}?environmentId=${found.environmentId}`;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -3,13 +3,18 @@
  * pick a plan (and a page of a PDF), line it up with the aerial by tapping the same two spots on
  * the plan and on the map, fade it or show just its lines, and draw over it with the usual tools.
  * Sizes always come from the map, so a plan lined up a little off shows up in the scale check: the
- * plan's printed scale ("1 in = 30 ft") should match what it lined up at.
+ * plan's printed scale ("1 in = 30 ft") should match what it lined up at. The plan opens full
+ * screen in the viewer too, to read it; the office can mark it up there (a new version, which then
+ * goes on the map in its place).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { FileViewer } from "@/features/files/FileViewer";
+import { refreshStorage, useStorageFull } from "@/features/settings/storage";
 import { supabase, unwrap } from "@/lib/api";
+import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { forgetPlanPdf, releasePlanImage, renderPlan, type PlanImage } from "../plans/planImage";
 import { canMap, fileSize, isAbort, PLAN_FIELDS, planLink, titleFromFileName, TooLargeError, uploadPlanFile, type PlanFile } from "../plans/plans";
@@ -78,10 +83,13 @@ export function usePlanOnMap({
   onTooLarge: (error: TooLargeError) => void;
 }) {
   const queryClient = useQueryClient();
+  const storageFull = useStorageFull();
   const [shown, setShown] = useState<Shown | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
   const [step, setStep] = useState<Step | null>(null);
   const [sending, setSending] = useState<{ name: string; progress: number; abort: () => void } | null>(null);
+  // Unsaved changes to the plan in the viewer (PlanCard's "Open it"), for Measure's check before leaving.
+  const [viewerDirty, setViewerDirty] = useState(false);
   const shownRef = useRef(shown);
   shownRef.current = shown;
 
@@ -153,7 +161,7 @@ export function usePlanOnMap({
     void (async () => {
       const id = saved?.id ?? open!;
       const file = unwrap(await supabase().from("plan_files").select(PLAN_FIELDS).eq("id", id).maybeSingle()) as PlanFile | null;
-      if (!file) return toast.error(saved ? "The plan saved with this drawing was deleted, so it's not on the map." : "That plan wasn't found. It may have been deleted.");
+      if (!file) return toast.error(saved ? "The plan saved with this drawing was deleted or moved to the Trash, so it's not on the map." : "That plan wasn't found. It may have been moved to the Trash.");
       if (saved) await load(file, saved.page, { corners: saved.corners, size: saved.size, opacity: saved.opacity, paper: saved.paper, hidden: saved.hidden });
       else if (await load(file, 1)) setStep({ stage: "plan1", pixels: [], spots: [] });
     })();
@@ -236,15 +244,14 @@ export function usePlanOnMap({
         .insert({ company_id: companyId, ...target, title: titleFromFileName(file.name), path, file_name: file.name.slice(0, 255), content_type: file.type || null, size_bytes: file.size })
         .select(PLAN_FIELDS)
         .single();
-      if (row.error) {
-        void supabase().storage.from("files").remove([path]);
-        throw new Error(row.error.message);
-      }
+      // A stored file with no row is tidied away by the server after a day.
+      if (row.error) throw new Error(row.error.message);
       queryClient.invalidateQueries({ queryKey: ["plans"] });
+      void refreshStorage(queryClient);
       if (await load(row.data as PlanFile, 1)) setStep({ stage: "plan1", pixels: [], spots: [] });
     } catch (error) {
       if (error instanceof TooLargeError) onTooLarge(error);
-      else if (!isAbort(error)) toast.error(`${file.name}: ${error instanceof Error ? error.message : "Couldn't add it."}`);
+      else if (!isAbort(error) && !storageFull(error, `${file.name} wasn't added`)) toast.error(`${file.name}: ${error instanceof Error ? error.message : "Couldn't add it."}`);
     } finally {
       setSending(null);
     }
@@ -256,18 +263,24 @@ export function usePlanOnMap({
     setShown(null);
   };
   const patch = (next: Partial<Shown>) => setShown((s) => (s ? { ...s, ...next } : s));
+  /** A new version saved in the viewer: it goes on the map where this one was. */
+  const replace = (next: PlanFile) => {
+    queryClient.invalidateQueries({ queryKey: ["plans"] });
+    const s = shownRef.current;
+    if (s && canMap(next)) void load(next, s.page, { keepPlacement: true });
+  };
 
   const savedPlan: SavedPlan | null = shown
     ? { id: shown.file.id, page: shown.page, corners: cornersOf(shown.placement, shown.image.width, shown.image.height), size: [shown.image.width, shown.image.height], opacity: shown.opacity, paper: shown.paper, hidden: shown.hidden || undefined }
     : null;
 
   return {
-    shown, loading, step, plans, sending, savedPlan,
+    shown, loading, step, plans, sending, savedPlan, viewerDirty, setViewerDirty,
     choose: (file: PlanFile) => load(file, 1).then((fresh) => fresh && setStep({ stage: "plan1", pixels: [], spots: [] })),
     page: (page: number) => shown && load(shown.file, page, { keepPlacement: true }),
     startLineUp: () => setStep({ stage: "plan1", pixels: [], spots: [] }),
     cancelLineUp: () => setStep(null),
-    add, remove, patch,
+    add, remove, patch, replace,
   };
 }
 
@@ -294,7 +307,9 @@ export function LineUpBanner({ plan }: { plan: PlanOnMap }) {
 // ---------------------------------------------------------------------------------------------
 
 export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: boolean; hasPlace: boolean }) {
+  const session = useSession();
   const input = useRef<HTMLInputElement>(null);
+  const [viewing, setViewing] = useState(false);
   const { shown, plans, sending } = plan;
   const list = plans.data ?? [];
   const scale = shown?.linedUp && shown.image.pxPerInch ? scaleLabel(feetPerInch(shown.placement, pointAt(shown.placement, [shown.image.width / 2, shown.image.height / 2])[1], shown.image.pxPerInch)) : null;
@@ -343,7 +358,10 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
         <>
           <div className="stack-sm" style={{ gap: 2 }}>
             <span className="strong text-sm">{shown.file.title}{shown.file.revision ? ` · ${shown.file.revision}` : ""}</span>
-            <span className="muted small">{fileSize(shown.file.size_bytes)}{shown.image.pages > 1 ? ` · ${shown.image.pages} pages` : ""}</span>
+            <span className="muted small">
+              {fileSize(shown.file.size_bytes)}{shown.image.pages > 1 ? ` · ${shown.image.pages} pages` : ""} ·{" "}
+              <button type="button" className="link-btn" onClick={() => setViewing(true)}>Open it</button>
+            </span>
           </div>
           {shown.image.pages > 1 && (
             <label className="field">
@@ -375,6 +393,21 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
           </label>
           <span className="muted small">Draw over it with Area, Line and Count. Sizes come from the map, so they're right once the plan is lined up.</span>
         </>
+      )}
+      {viewing && shown && (
+        <FileViewer
+          file={shown.file}
+          // Crews only look; a marked-up plan is a new version, for the office.
+          canEdit={hasRole(session, "admin", "office", "estimator")}
+          // Measure's own check before leaving covers changes here too: the router heeds only one.
+          blockNavigation={false}
+          onDirtyChange={plan.setViewerDirty}
+          onClose={() => setViewing(false)}
+          onSaved={(next) => {
+            setViewing(false);
+            plan.replace(next);
+          }}
+        />
       )}
     </div>
   );

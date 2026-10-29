@@ -31,11 +31,15 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
+    // The Word editor (features/files/DocxEdit.tsx) loads its text shaper with a top-level await.
+    // The app already needs Safari 17+ for its popover menus, so this costs no one.
+    target: ["es2022", "chrome89", "edge89", "firefox89", "safari15"],
     rollupOptions: { output: { manualChunks: vendorChunk } },
   },
   // laz-perf (Measure's lidar pitch) is CommonJS and only loaded on demand: bundle it up front so the
-  // dev server doesn't stop to do it the first time someone asks.
-  optimizeDeps: { include: ["laz-perf"] },
+  // dev server doesn't stop to do it the first time someone asks. The Word editor's fonts are files it
+  // finds next to itself, so the dev server serves that package as it is.
+  optimizeDeps: { include: ["laz-perf"], exclude: ["@docx-editor.dev/fonts"], esbuildOptions: { target: "es2022" } },
   server: {
     port: 5173,
     proxy: {

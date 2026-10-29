@@ -1,4 +1,5 @@
 /** One SOP: read it, confirm you've read it, see who has, and (for the office) edit, restore or delete. */
+import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -15,6 +16,7 @@ import { ApiError, api, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { hasContent, htmlToText, sanitizeHtml, withSections } from "@/lib/html";
 import { useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
 import { GuideContents, goToSection, useCurrentSection } from "./GuideContents";
 import { GuideCover } from "./GuideCover";
 import { ROLE_LABELS, useIsEditor } from "./kbData";
@@ -54,11 +56,10 @@ export function SopPage() {
     onSettled: refresh,
   });
   const remove = useMutation({
-    meta: { success: "Guide deleted" },
     mutationFn: async () => unwrap(await supabase().from("sop_pages").delete().eq("id", pageId)),
     onSuccess: () => {
-      const cover = page.data?.cover_path;
-      if (cover) void supabase().storage.from("files").remove([cover]);
+      // Its cover photo goes to the Trash by itself (the database moves it).
+      toast.success("Guide deleted", page.data?.cover_path ? { description: `Its cover photo is in the Trash for ${TRASH_DAYS} days.` } : undefined);
       refresh();
       navigate("/kb", { replace: true });
     },

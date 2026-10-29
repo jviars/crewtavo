@@ -106,6 +106,32 @@ export default defineRailway(() => {
     },
   });
 
+  // Photos and files live on the storage-data volume. A Railway bucket is the opt-in alternative: a
+  // tenth of the price per GB and no size to outgrow, but Railway's Limited Trial has no buckets and
+  // Railway backs up volumes (on Pro), not buckets, so the template keeps the volume. An owner moves
+  // an instance's files into a bucket from Settings → Hosting → Files storage
+  // (apps/api/src/services/storageBucket.ts), which copies them and switches storage over, keeping
+  // the volume for moving back. For a new instance that should start on a bucket (a paid plan, with
+  // nothing on the volume yet), add `bucket` and `ref` to the import above, then:
+  //
+  //   const files = bucket("files", { region: "iad" }); // sjc, iad, ams or sin: near the services
+  //
+  // in storage's env below:
+  //
+  //   STORAGE_BACKEND: "s3",
+  //   STORAGE_S3_BUCKET: ref(files, "BUCKET"), // the bucket's own S3 name, not "files"
+  //   STORAGE_S3_ENDPOINT: ref(files, "ENDPOINT"),
+  //   STORAGE_S3_REGION: ref(files, "REGION"),
+  //   AWS_ACCESS_KEY_ID: ref(files, "ACCESS_KEY_ID"),
+  //   AWS_SECRET_ACCESS_KEY: ref(files, "SECRET_ACCESS_KEY"),
+  //   TUS_ALLOW_S3_TAGS: "false",
+  //   STORAGE_S3_REQUEST_CHECKSUM_CALCULATION: "WHEN_REQUIRED",
+  //   STORAGE_S3_RESPONSE_CHECKSUM_VALIDATION: "WHEN_REQUIRED",
+  //
+  // and `files` in the "Supabase services" group at the end. Keep the volume mount,
+  // FILE_STORAGE_BACKEND_PATH and GLOBAL_S3_BUCKET: going back to the volume needs them, with
+  // STORAGE_BACKEND set to "file" and STORAGE_S3_BUCKET to "crewtavo" (the volume's folder; left
+  // on the bucket's name, storage looks for every file in the wrong place).
   const storage = service("storage", {
     source: image("public.ecr.aws/supabase/storage-api:v1.82.1"),
     volumeMounts: { "/var/lib/storage": storageData },
@@ -119,6 +145,9 @@ export default defineRailway(() => {
       FILE_STORAGE_BACKEND_PATH: "/var/lib/storage",
       // 200 MB per file: plan sets run big (apps/web/src/features/plans/plans.ts).
       FILE_SIZE_LIMIT: "209715200",
+      // A resumable upload (apps/web/src/lib/resumable.ts) can carry on for a day rather than
+      // Storage's default hour, for crews on patchy signal.
+      TUS_URL_EXPIRY_MS: "86400000",
       TENANT_ID: "crewtavo",
       REGION: "local",
       GLOBAL_S3_BUCKET: "crewtavo",

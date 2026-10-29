@@ -213,6 +213,30 @@ export const APP_INFO: Record<string, AppInfo> = {
     website: "https://crewtavo.com/docs/connections/careers/",
     open: "/applicants",
   },
+  drive: {
+    developer: "Crewtavo",
+    tagline: "All your files in one place",
+    about:
+      "Every file your business keeps, in one place in the sidebar. Company files holds the ones that belong to no client, like your forms, price sheets and insurance papers, in folders you make. Clients lists every file on each client's properties, requests, quotes and jobs, so the plans from last year's job are one tap away. Drop in as many files as you like, big plan sets included, open PDFs, Word documents and pictures right in Crewtavo, fill in a form or mark up a plan, and each save keeps the one before it as an older version. Attach a file to a job and the crew on it gets it on their visit. Pick files in your Google Drive to copy them in. Files deleted in Crewtavo, from a plan to a visit photo or a receipt, wait in the Trash for 30 days. Most go straight back where they were; a sub's paperwork, an applicant's file or a receipt whose record is gone is downloaded from the Trash instead.",
+    highlights: [
+      { icon: "folder", title: "Company folders", text: "Forms, price sheets and insurance papers in folders of your own, with no client needed." },
+      { icon: "edit", title: "Open and edit", text: "Fill in a PDF form, mark up a plan or change a Word document without leaving Crewtavo." },
+      { icon: "history", title: "Every version kept", text: "Saving or uploading a new version keeps the older ones, so you can always go back." },
+      { icon: "trash", title: "A 30-day Trash", text: "Deleted files, from plans to visit photos and receipts, wait 30 days in the Trash, to put back or download." },
+      { icon: "cloud", title: "From Google Drive", text: "Pick files in your Google Drive and they're copied into Crewtavo." },
+      { icon: "link", title: "On the right job", text: "Attach a file to a client's property, a request, a quote or a job, and the crew on it gets it." },
+    ],
+    access: [
+      "Show Drive in the menu to owners, admins, office staff and estimators",
+      "Keep your files in your own Crewtavo, like everything else",
+      "Copy the files you pick in Google Drive into Crewtavo, with a Google sign-in that lasts an hour and is never kept",
+      "Keep deleted files in the Trash for 30 days, then delete them for good",
+      "Uninstalling hides Drive and keeps every file and folder",
+    ],
+    connectsWith: "Google Drive (import)",
+    website: "https://crewtavo.com/docs/connections/drive/",
+    open: "/drive",
+  },
   google_calendar: {
     developer: "Google",
     tagline: "Your Google calendars on the schedule, and visits on Google",

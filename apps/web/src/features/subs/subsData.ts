@@ -7,7 +7,7 @@
 import type { SubAccessState } from "@crewtavo/core/subs";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { api, supabase, unwrap } from "@/lib/api";
-import { signedUrls, uploadBody } from "@/lib/files";
+import { signedUrls, uploadBody, uploadRefused } from "@/lib/files";
 import { can, hasRole, type Session } from "@/lib/session";
 import type { PaperworkRow } from "./paperwork";
 
@@ -153,7 +153,8 @@ export const blankToNull = (value: string) => value.trim() || null;
 
 /**
  * Files a document for a sub: the file goes to <company>/subs/<sub>/ first, then the row. If the
- * row can't be saved, the file is taken back out. Photos are shrunk first, like receipts.
+ * row can't be saved, the file is left with no row, and the server tidies it away after a day.
+ * Photos are shrunk first, like receipts.
  */
 export async function addSubDocument(
   companyId: string,
@@ -167,23 +168,20 @@ export async function addSubDocument(
   const path = `${companyId}/subs/${subId}/${crypto.randomUUID()}.${ext}`;
   const contentType = body.type || file.type || "application/octet-stream";
   const uploaded = await supabase().storage.from("files").upload(path, body, { contentType, upsert: false });
-  if (uploaded.error) throw new Error(/row-level security/i.test(uploaded.error.message) ? "You don't have permission to add paperwork." : `Upload failed: ${uploaded.error.message}`);
+  if (uploaded.error) throw uploadRefused(uploaded.error, "You don't have permission to add paperwork.");
   const fileName = shrunk ? file.name.replace(/\.[a-z0-9]{1,8}$/i, "") + ".jpg" : file.name;
   const inserted = await supabase()
     .from("sub_documents")
     .insert({ company_id: companyId, subcontractor_id: subId, path, file_name: fileName.slice(0, 255), content_type: contentType.slice(0, 150), size_bytes: body.size, ...row })
     .select("id")
     .single();
-  if (inserted.error) {
-    await supabase().storage.from("files").remove([path]);
-    unwrap(inserted);
-  }
-  return inserted.data!.id;
+  return unwrap(inserted).id;
 }
 
-/** Deletes a document and its file. The one it replaced, if any, counts again (the database puts it back). */
+/**
+ * Deletes a document; its file goes to the Trash (the database moves it), from where it can be put
+ * back. The one it replaced, if any, counts again (the database puts it back).
+ */
 export async function deleteSubDocument(doc: Pick<SubDocument, "id" | "path">) {
   unwrap(await supabase().from("sub_documents").delete().eq("id", doc.id));
-  // The row is what counts; a file left behind is only tidiness.
-  await supabase().storage.from("files").remove([doc.path]).catch(() => undefined);
 }

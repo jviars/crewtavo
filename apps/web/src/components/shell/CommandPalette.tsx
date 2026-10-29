@@ -1,7 +1,7 @@
 /**
  * ⌘K / Ctrl+K: search every client, address, request, quote, job, invoice, measurement, guide, campaign,
- * automation, price list service, piece of equipment and subcontractor, jump to any screen or section of Settings, or
- * start something new. "/" also opens it when you're not typing in a field.
+ * automation, price list service, file, piece of equipment and subcontractor, jump to any screen or section of
+ * Settings, or start something new. "/" also opens it when you're not typing in a field.
  */
 import { kindLabel } from "@crewtavo/core/equipment";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -31,7 +31,7 @@ interface Item {
 
 const KIND_ICON: Record<string, IconName> = {
   client: "clients", property: "pin", request: "requests", quote: "quote", job: "job", invoice: "invoice", equipment: "truck",
-  measurement: "area", kb: "book", campaign: "marketing", rule: "bolt", service: "list", sub: "users",
+  measurement: "area", kb: "book", campaign: "marketing", rule: "bolt", service: "list", sub: "users", file: "file",
 };
 const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; title: string }) => string> = {
   client: (r) => `/clients/${r.id}`,
@@ -47,10 +47,12 @@ const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; titl
   rule: (r) => `/automations/${r.id}`,
   service: (r) => `/settings?tab=prices&q=${encodeURIComponent(r.title)}`,
   sub: (r) => `/subs/${r.id}`,
+  // Opens in Drive's viewer.
+  file: (r) => `/drive?file=${r.id}`,
 };
 const KIND_LABEL: Record<string, string> = {
   client: "Client", property: "Property", request: "Request", quote: "Quote", job: "Job", invoice: "Invoice", equipment: "Equipment",
-  measurement: "Measurement", kb: "Guide", campaign: "Campaign", rule: "Automation", service: "Price list", sub: "Subcontractor",
+  measurement: "Measurement", kb: "Guide", campaign: "Campaign", rule: "Automation", service: "Price list", sub: "Subcontractor", file: "File",
 };
 
 export function CommandPalette() {
@@ -117,7 +119,9 @@ export function CommandPalette() {
         kind: "equipment", id: g.id, title: g.name, subtitle: [kindLabel(g.kind), g.make, g.model].filter(Boolean).join(" "), status: "", number: null, client_id: null,
       }));
       const subcontractors: typeof equipment = unwrap(subs).map((s) => ({ kind: "sub", id: s.id, title: s.name, subtitle: s.trade ?? "", status: "", number: null, client_id: null }));
-      return [...records.filter((r) => KIND_PATH[r.kind]), ...equipment, ...subcontractors];
+      // Files open in Drive, which is the office's: crews find theirs on their visits.
+      const opensFiles = hasRole(session, "admin", "office", "estimator");
+      return [...records.filter((r) => KIND_PATH[r.kind] && (r.kind !== "file" || opensFiles)), ...equipment, ...subcontractors];
     },
   });
 

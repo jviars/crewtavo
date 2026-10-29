@@ -47,6 +47,8 @@
     "./website": "./src/website.ts",
     "./websiteForms": "./src/websiteForms.ts",
     "./careers": "./src/careers.ts",
+    "./drive": "./src/drive.ts",
+    "./storage": "./src/storage.ts",
     "./subs": "./src/subs.ts",
     "./jobPay": "./src/jobPay.ts",
     "./subOffers": "./src/subOffers.ts",

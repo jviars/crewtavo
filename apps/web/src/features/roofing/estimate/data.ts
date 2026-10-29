@@ -12,6 +12,7 @@ import { api, ApiError, supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { storedUndoToast } from "../../drive/trash";
 import { TAKEOFF_FIELDS, type TakeoffRow } from "../../paving/data";
 import { sortOptions } from "../../quotes/options";
 import { layersFormula, layersName, layersOf } from "../data";
@@ -608,10 +609,7 @@ export function useNoteActions(quoteId: string) {
           const { error } = await supabase()
             .from("attachments")
             .insert({ company_id: company.id, owner_type: "quote", owner_id: quoteId, path, file_name: file.name.slice(0, 200) || "photo.jpg", content_type: file.type || "image/jpeg", size_bytes: file.size });
-          if (error) {
-            await supabase().storage.from("files").remove([path]);
-            throw new Error(error.message);
-          }
+          if (error) throw new Error(error.message);
           saved++;
         } catch (error) {
           toast.error(`${file.name || "That photo"} didn't upload. ${(error as Error).message}`);
@@ -629,12 +627,13 @@ export function useNoteActions(quoteId: string) {
     mutationFn: async (id: string) => unwrap(await supabase().from("messages").delete().eq("id", id)),
     onSettled: refresh,
   });
+  // The photo goes to the Trash with its row (the database moves it), so Undo can put it back.
   const removePhoto = useMutation({
-    meta: { success: "Photo removed" },
     mutationFn: async (photo: Pick<QuotePhoto, "id" | "path">) => {
-      unwrap(await supabase().from("attachments").delete().eq("id", photo.id));
-      await supabase().storage.from("files").remove([photo.path]);
+      const gone = unwrap(await supabase().from("attachments").delete().eq("id", photo.id).select("id"));
+      if (!gone.length) throw new Error("You can only remove photos you took. Ask the office to remove this one.");
     },
+    onSuccess: (_, photo) => storedUndoToast("Photo removed", company.id, photo.path, () => void refresh()),
     onSettled: refresh,
   });
   return { addNote, addPhotos, removeNote, removePhoto, uploading };

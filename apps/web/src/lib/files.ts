@@ -1,5 +1,6 @@
 /** Photo and receipt uploads to the private "files" bucket, under the company's folder. */
 import { supabase } from "./api";
+import { StorageFullError } from "./errors";
 
 /** The largest file an upload sends (a photo once it's shrunk). */
 export const MAX_BYTES = 15 * 1024 * 1024;
@@ -170,8 +171,19 @@ export async function uploadFile(companyId: string, folder: string, file: File):
   const ext = body === file ? (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") : "jpg";
   const path = `${companyId}/${folder}/${crypto.randomUUID()}.${ext}`;
   const { error } = await supabase().storage.from("files").upload(path, body, { contentType: body.type || file.type || "application/octet-stream", upsert: false });
-  if (error) throw new Error(/row-level security/i.test(error.message) ? "You don't have permission to upload here." : `Upload failed: ${error.message}`);
+  if (error) throw uploadRefused(error, "You don't have permission to upload here.");
   return path;
+}
+
+/**
+ * Why Storage turned an upload away (supabase-js's error), as a sentence: full (the server's own
+ * sentence, as a StorageFullError, so screens can offer the way to more room), not allowed
+ * (`notAllowed`), or what went wrong.
+ */
+export function uploadRefused(error: { message: string; status?: unknown; statusCode?: unknown }, notAllowed: string): Error {
+  if (Number(error.status) === 507 || String(error.statusCode ?? "") === "507") return new StorageFullError(error.message);
+  if (/row-level security/i.test(error.message)) return new Error(notAllowed);
+  return new Error(`Upload failed: ${error.message}`);
 }
 
 export async function signedUrls(paths: string[], seconds = 3600): Promise<Record<string, string>> {

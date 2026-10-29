@@ -1,7 +1,8 @@
 /**
  * A sub sending paperwork from My paperwork (features/subs/subsData.ts addSubDocument): the file goes
  * into their own folder, <company>/subs/<their sub>/, never over another one (upsert off), and the
- * row the database then checks against it; a row the database turns down takes its file back out.
+ * row the database then checks against it; a row the database turns down leaves its file for the
+ * server to tidy away (the browser never deletes stored files).
  * And whose sign-ins can't connect an AI assistant (the consent page).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -56,10 +57,11 @@ describe("sending paperwork", () => {
     expect(calls.removed).toEqual([]);
   });
 
-  it("takes the file back out when the database turns the document down, and says why", async () => {
+  it("says why when the database turns the document down, and leaves the file to the server (the browser deletes no stored file)", async () => {
     calls.refuse = { message: "That date has already passed. Check it, or send the newer one.", code: "22023" };
     await expect(addSubDocument("co-1", "sub-1", pdf(), row)).rejects.toThrow(/already passed/);
-    expect(calls.removed).toEqual([["files", [calls.uploads[0]![1]]]]);
+    expect(calls.uploads).toHaveLength(1);
+    expect(calls.removed).toEqual([]);
   });
 });
 

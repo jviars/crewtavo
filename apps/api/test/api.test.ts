@@ -95,6 +95,17 @@ describe("routes", () => {
     expect(body.termsVersion).toBe(TERMS_VERSION);
   });
 
+  it("gives the web app Google Drive's file picker only when it's set up", async () => {
+    expect((await (await request("/api/config")).json()).googlePicker).toBeNull();
+    const google: Env = { ...env, GOOGLE_CLIENT_ID: "123456789012-abc123.apps.googleusercontent.com", GOOGLE_CLIENT_SECRET: "google-secret-value", GOOGLE_PICKER_API_KEY: "picker-browser-key" };
+    const body = await (await app.request("/api/config", {}, google)).json();
+    // The Cloud project's number is how the picker lets Crewtavo read the files picked: the client ID starts with it.
+    expect(body.googlePicker).toEqual({ clientId: google.GOOGLE_CLIENT_ID, apiKey: "picker-browser-key", appId: "123456789012" });
+    expect(JSON.stringify(body)).not.toContain("google-secret-value");
+    expect((await (await app.request("/api/config", {}, { ...google, GOOGLE_PICKER_API_KEY: undefined })).json()).googlePicker).toBeNull();
+    expect((await (await app.request("/api/config", {}, { ...google, GOOGLE_CLIENT_ID: "not-a-google-client" })).json()).googlePicker).toBeNull();
+  });
+
   it("gives the web app its error reporting DSN only when one is set", async () => {
     const dsn = "https://public@errors.example.com/2";
     const both = await (await app.request("/api/config", {}, { ...env, CREWTAVO_SENTRY_DSN: dsn })).json();

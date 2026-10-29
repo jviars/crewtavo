@@ -11,6 +11,23 @@ export class ApiError extends Error {
   }
 }
 
+/** Said when Storage refused an upload for space but its own sentence didn't come through. */
+export const STORAGE_FULL = "Crewtavo's storage is full. An owner or admin can raise the limit in Settings → Storage, or empty the Trash.";
+
+/**
+ * An upload turned away for space: the company's storage limit, or the person's own, is used up
+ * (507 from the storage gateway). The message is the server's own sentence, which says who can raise
+ * it, so it's shown as it is and never retried.
+ */
+export class StorageFullError extends ApiError {
+  constructor(message = STORAGE_FULL) {
+    super(message || STORAGE_FULL, 507, "storage_full");
+  }
+}
+
+/** Refused for space: an upload's StorageFullError, or any 507 from the API (a Google Drive import). */
+export const isStorageFull = (error: unknown): error is ApiError => error instanceof ApiError && error.status === 507;
+
 interface DbErrorLike {
   message: string;
   code?: string;
