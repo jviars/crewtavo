@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
-import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
+import { AnimatedNumber, moneyCompact } from "@/components/ui/AnimatedNumber";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { statusText } from "@/components/ui/StatusPill";
-import { formatMoney } from "@/lib/format";
+import { formatMoneyCompact } from "@/lib/format";
 import type { Dashboard } from "./types";
 import styles from "./WorkflowStrip.module.css";
 
@@ -19,7 +19,7 @@ interface Column {
   rows: Array<{ label: string; value: string; danger?: boolean }>;
 }
 
-/** Money in full ("$54,058"), as Invoices writes it; each column's figures wrap under its count when they need to. */
+/** Money in short ("$54.1K") for a glance at Home; Invoices and Finance write it in full. Each column's figures wrap under its count when they need to. */
 export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Dashboard["workflow"]; showInvoices?: boolean }) {
   const { requests, quotes, jobs, invoices } = workflow;
   const columns: Column[] = [
@@ -36,8 +36,8 @@ export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Das
       key: "quotes", label: "Quotes", icon: "quote", to: "/quotes", color: "var(--quote)", textColor: "var(--quote-text)",
       count: quotes.awaiting, value: quotes.awaiting_value, caption: statusText("quote", "sent"),
       rows: [
-        { label: `${statusText("quote", "approved")} (${quotes.approved ?? 0})`, value: formatMoney(quotes.approved_value ?? 0) },
-        { label: `${statusText("quote", "draft")} (${quotes.draft})`, value: formatMoney(quotes.draft_value) },
+        { label: `${statusText("quote", "approved")} (${quotes.approved ?? 0})`, value: formatMoneyCompact(quotes.approved_value ?? 0) },
+        { label: `${statusText("quote", "draft")} (${quotes.draft})`, value: formatMoneyCompact(quotes.draft_value) },
       ],
     },
     {
@@ -50,7 +50,7 @@ export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Das
       count: invoices.awaiting, value: invoices.awaiting_value, caption: statusText("invoice", "sent"),
       rows: [
         { label: `${statusText("invoice", "draft")} (${invoices.draft})`, value: "" },
-        { label: `${statusText("invoice", "overdue")} (${invoices.past_due})`, value: formatMoney(invoices.past_due_value), danger: invoices.past_due > 0 },
+        { label: `${statusText("invoice", "overdue")} (${invoices.past_due})`, value: formatMoneyCompact(invoices.past_due_value), danger: invoices.past_due > 0 },
       ],
     },
   ];
@@ -69,7 +69,7 @@ export function WorkflowStrip({ workflow, showInvoices = true }: { workflow: Das
             <span>
               <span className={styles.countRow}>
                 <AnimatedNumber className={styles.count} value={col.count} />
-                {col.value !== undefined && <AnimatedNumber className={styles.value} value={col.value} format={MONEY} />}
+                {col.value !== undefined && <AnimatedNumber className={styles.value} value={col.value} format={moneyCompact(col.value)} />}
               </span>
               <span className={styles.caption}>{col.caption}</span>
             </span>

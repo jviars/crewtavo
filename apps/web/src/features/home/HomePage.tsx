@@ -10,7 +10,7 @@ import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { formatMoney, todayIn } from "@/lib/format";
+import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { monthToDate } from "@/lib/trends";
@@ -170,7 +170,7 @@ export function HomePage() {
                   {data.receivables.top.map((row) => (
                     <Link key={row.client_id} to={`/clients/${row.client_id}`} className="card-row" style={{ padding: "10px 20px", fontSize: 13 }}>
                       <span className="grow ellipsis">{row.client}</span>
-                      <span className="tabular strong">{formatMoney(row.owed)}</span>
+                      <span className="tabular strong">{formatMoneyCompact(row.owed)}</span>
                     </Link>
                   ))}
                 </div>
@@ -260,7 +260,7 @@ function WeekBars({ weeks }: { weeks: Week[] }) {
       {weeks.map((w, i) => (
         <div key={w.from} className={styles.week} data-latest={i === weeks.length - 1 || undefined} aria-hidden="true">
           <span className={styles.track}>
-            <span className={styles.amount}>{formatMoney(w.total)}</span>
+            <span className={styles.amount}>{formatMoneyCompact(w.total)}</span>
             <span className={styles.bar} style={{ ["--h" as string]: max > 0 ? Math.max(0, w.total) / max : 0 }} />
           </span>
           <span className={styles.label}>{w.label}</span>
