@@ -37,7 +37,10 @@ function storeHidden(key: string) {
 }
 
 // Price list units a measurement fills in (areas, lengths, and tons worked out from an area).
-const MEASURED_UNIT = /^(sq ?ft|sf|sq ?yd|sy|squares?|ft|feet|lf|linear ft|tons?)$/i;
+const MEASURED_UNITS = "sq ?ft|sf|sq ?yd|sy|squares?|ft|feet|lf|linear ft|tons?";
+const MEASURED_UNIT = new RegExp(`^(${MEASURED_UNITS})$`, "i");
+// The same items, found by the database: a formula, or one of those units in any case with spaces around it.
+const MEASURED_FILTER = `formula.neq."",unit.imatch."^[[:space:]]*(${MEASURED_UNITS})[[:space:]]*$"`;
 
 /** One price list item: what's needed to tell whether the business made the list its own. */
 type PriceRow = { unit: string; formula: string | null; created_at: string; updated_at: string };
@@ -55,7 +58,13 @@ export function priceListState(companyCreatedAt: string, services: PriceRow[]) {
   };
 }
 
-/** Whether each step has been done, from one small read: the price list, the team, and any client, quote with options or measurement. */
+/**
+ * Whether each step has been done, from one small read: the team, any client, quote with options or
+ * measurement, and of the price list only the items the rules need: the one changed last, the one
+ * added last, and one priced by measuring.
+ * shortcut: an item changed and then another added, both in the business's first hour and nothing
+ * since, reads as the starter list; fetch every item's dates if that ever matters.
+ */
 export function useSetupSteps(enabled: boolean) {
   const { company } = useSession();
   return useQuery({
@@ -63,20 +72,27 @@ export function useSetupSteps(enabled: boolean) {
     enabled,
     meta: { silent: true },
     queryFn: async () => {
-      // One request: the company with at most one or two of each, by id, and its price list's few columns.
+      // One request: the company with at most one or two of each, by id, and three price list items.
+      const item = "unit, formula, created_at, updated_at";
       const row = unwrap(
         await supabase()
           .from("companies")
-          .select("id, created_at, clients(id), memberships(user_id), quote_options(id), measurements(id), services(unit, formula, created_at, updated_at)")
+          .select(`id, created_at, clients!clients_company_id_fkey(id), memberships(user_id), quote_options(id), measurements(id), changed:services(${item}), added:services(${item}), measured:services(${item})`)
           .eq("id", company.id)
           .limit(1, { referencedTable: "clients" })
           .limit(2, { referencedTable: "memberships" })
           .limit(1, { referencedTable: "quote_options" })
           .limit(1, { referencedTable: "measurements" })
+          .order("updated_at", { referencedTable: "changed", ascending: false })
+          .limit(1, { referencedTable: "changed" })
+          .order("created_at", { referencedTable: "added", ascending: false })
+          .limit(1, { referencedTable: "added" })
+          .or(MEASURED_FILTER, { referencedTable: "measured" })
+          .limit(1, { referencedTable: "measured" })
           .single(),
       );
       return {
-        ...priceListState(row.created_at, row.services),
+        ...priceListState(row.created_at, [...row.changed, ...row.added, ...row.measured]),
         client: row.clients.length > 0,
         team: row.memberships.length > 1,
         options: row.quote_options.length > 0,

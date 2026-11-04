@@ -1,8 +1,10 @@
+import { daysOff } from "@crewtavo/core/slots";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { monthLabel, type CalendarEvent } from "../src/features/schedule/CalendarEventDialog";
 import { fitBlock, place, TimeRange, type GridVisit } from "../src/features/schedule/TimeGrid";
+import { workDays } from "../src/features/schedule/VisitDialog";
 import { entrySpan } from "../src/features/timesheets/entrySpan";
 
 const tz = "America/New_York";
@@ -24,6 +26,24 @@ describe("double bookings on the schedule", () => {
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("x", "cancelled", "09:00", "11:00")])).toEqual({ a: false });
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00"), visit("b", "scheduled", "09:00", "11:00", "crew-2")])).toEqual({ a: false, b: false });
     expect(conflicts([visit("a", "scheduled", "09:00", "11:00", null), visit("b", "scheduled", "09:00", "11:00", null)])).toEqual({ a: false, b: false });
+  });
+});
+
+describe("the days multi-day work lands on", () => {
+  // Thu Nov 5, 2026 onward.
+  it("skips the days the business doesn't work", () => {
+    const off = daysOff({ working_hours: { days: [1, 2, 3, 4] } });
+    expect(workDays("2026-11-05", 3, off)).toEqual(["2026-11-05", "2026-11-09", "2026-11-10"]);
+  });
+
+  it("skips weekends for a business that never picked its days, and nothing for one that works every day", () => {
+    expect(workDays("2026-11-05", 3, daysOff({}))).toEqual(["2026-11-05", "2026-11-06", "2026-11-09"]);
+    expect(workDays("2026-11-05", 3, daysOff({ working_hours: { days: [0, 1, 2, 3, 4, 5, 6] } }))).toEqual(["2026-11-05", "2026-11-06", "2026-11-07"]);
+  });
+
+  it("starts on the day picked, even a day off, and skips nothing when asked not to", () => {
+    expect(workDays("2026-11-07", 2, daysOff({}))).toEqual(["2026-11-07", "2026-11-09"]);
+    expect(workDays("2026-11-06", 3, [])).toEqual(["2026-11-06", "2026-11-07", "2026-11-08"]);
   });
 });
 

@@ -23,7 +23,8 @@ const scope = (c: Context<AppEnv>): Scope => ({ db: c.var.db, companyId: c.var.c
 
 /**
  * New visit, task or event. With days > 1 it's multi-day work: one linked visit per work day
- * (weekends skipped unless asked), each at the same local time, with the same people and equipment.
+ * (the days the business doesn't work skipped unless asked), each at the same local time, with the
+ * same people and equipment.
  */
 schedule.post("/visits", requireUser, requireCompany(DISPATCH), async (c) => {
   return c.json(await createVisits(scope(c), await readJson(c, newVisitInput)), 201);

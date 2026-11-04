@@ -5,7 +5,7 @@
  * both with the person's own client, so the database decides which crews and people they may
  * schedule (private.schedules_crew).
  */
-import { addDays, DISPATCH, localDate, localTime, scheduleSettings, weekday, workdays, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
+import { addDays, daysOff, DISPATCH, localDate, localTime, scheduleSettings, weekday, workdays, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
 import { z } from "zod";
 import type { Env } from "../env";
 import { dbError, HttpError, isoDate, must, uuid } from "../lib/http";
@@ -31,7 +31,8 @@ export async function companyZone(s: Scope): Promise<{ tz: string; settings: Rec
 export const VISIT_FIELDS =
   "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, hold_reason, crew_id, notes, series_id, series_day, series_total, job:jobs(id, number, title, client:clients(id, display_name)), property:properties(id, line1, line2, city, region, postal_code, lat, lng), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment_id)";
 
-export const isWeekend = (date: string) => [0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay());
+/** Whether a date is one of the days in `off` (daysOff()). */
+const isOff = (off: readonly number[], date: string) => off.includes(weekday(date));
 
 /** Change a visit's people or equipment to `wanted`, touching only what was added or removed. */
 async function syncLinks(s: Scope, table: "visit_assignees" | "visit_equipment", column: "user_id" | "equipment_id", visitId: string, wanted: string[], notYours: string) {
@@ -74,7 +75,8 @@ export const newVisitInput = z.object({
 
 /**
  * New visit, task or event. With days > 1 it's multi-day work: one linked visit per work day
- * (weekends skipped unless asked), each at the same local time, with the same people and equipment.
+ * (the days the business doesn't work skipped unless asked), each at the same local time, with the
+ * same people and equipment.
  */
 export async function createVisits(s: Scope, body: z.infer<typeof newVisitInput>): Promise<{ ids: string[]; series_id: string | null }> {
   if (!DISPATCH.includes(s.role)) throw new HttpError(403, "Your role can't schedule visits.");
@@ -83,13 +85,14 @@ export async function createVisits(s: Scope, body: z.infer<typeof newVisitInput>
   const { tz } = company;
   const first = body.starts_at ? localDate(new Date(body.starts_at), tz) : body.scheduled_on ?? null;
   const days = first && body.status !== "unscheduled" ? body.days : 1;
+  const off = body.skip_weekends ? daysOff(company.settings) : [];
   const dates: Array<string | null> = [];
   for (let d = first; dates.length < days; d = addDays(d!, 1)) {
     if (!d) {
       dates.push(null);
       break;
     }
-    if (days > 1 && body.skip_weekends && isWeekend(d) && dates.length > 0) continue;
+    if (days > 1 && isOff(off, d) && dates.length > 0) continue;
     dates.push(d);
   }
   const seriesId = days > 1 ? crypto.randomUUID() : null;
@@ -233,16 +236,17 @@ export async function updateVisit(s: Scope, id: string, body: z.infer<typeof vis
     const now = data[0]!;
     if (moved && now.status === "scheduled" && now.scheduled_on && !now.starts_at) await fitQuietly(s, [id], now.crew_id, now.scheduled_on);
     // Later days of the same multi-day job follow on the work days after it, keeping their own times
-    // (and skipping weekends if the job didn't use them).
+    // (and skipping the days the business doesn't work if the job didn't use them).
     const seriesMoved = shift_series && before?.series_id && before.scheduled_on && now.scheduled_on && before.scheduled_on !== now.scheduled_on;
     if (seriesMoved && before?.series_id) {
-      const { tz } = await companyZone(s);
+      const { tz, settings } = await companyZone(s);
       const all = must(await s.db.from("visits").select("id, series_day, scheduled_on, starts_at, ends_at, status").eq("series_id", before.series_id).order("series_day"));
-      const skipWeekends = !all.some((v) => v.id !== id && v.scheduled_on && isWeekend(v.scheduled_on));
+      const off = daysOff(settings);
+      const skipDaysOff = !all.some((v) => v.id !== id && v.scheduled_on && isOff(off, v.scheduled_on));
       let prev = now.scheduled_on!;
       for (const v of all.filter((x) => (x.series_day ?? 0) > (before.series_day ?? 0))) {
         let date = addDays(prev, 1);
-        while (skipWeekends && isWeekend(date)) date = addDays(date, 1);
+        while (skipDaysOff && isOff(off, date)) date = addDays(date, 1);
         prev = date;
         if (["completed", "cancelled"].includes(v.status) || v.scheduled_on === date) continue;
         const start = v.starts_at ? zonedTimeToUtc(date, localTime(new Date(v.starts_at), tz), tz) : null;

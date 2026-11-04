@@ -93,9 +93,24 @@ export const weekday = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay
  * Hand-edited days that aren't one are skipped.
  */
 export function workdays(settings: unknown): number[] {
+  return pickedWorkdays(settings) ?? [0, 1, 2, 3, 4, 5, 6];
+}
+
+/** The days the business picked to work, or null when it never did. */
+function pickedWorkdays(settings: unknown): number[] | null {
   const days = (settings as { working_hours?: { days?: unknown } } | null)?.working_hours?.days;
   const valid = Array.isArray(days) ? days.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6) : [];
-  return valid.length ? [...new Set(valid)].sort() : [0, 1, 2, 3, 4, 5, 6];
+  return valid.length ? [...new Set(valid)].sort() : null;
+}
+
+/**
+ * The days multi-day work skips ("Skip days you don't work"), 0 (Sunday) to 6: the ones the business
+ * doesn't work. Never all seven, so there's always a day to book.
+ */
+export function daysOff(settings: unknown): number[] {
+  const picked = pickedWorkdays(settings);
+  // Never picked means every day (workdays()), but this skipped weekends before there was a choice, so it still does.
+  return picked ? [0, 1, 2, 3, 4, 5, 6].filter((d) => !picked.includes(d)) : [0, 6];
 }
 
 /**

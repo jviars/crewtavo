@@ -192,21 +192,20 @@ describe("recurring visits", () => {
 
   it("give the visits already made the job's new title, crew and time only when asked, keeping a moved visit's day", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
-    // Monday's visit was moved to Tuesday by hand; it's still waiting, so it takes the job's crew and time on its own day.
-    const { db, queries } = fakeDb((q) =>
-      q.table === "visits" && verb(q) === "select" ? { data: [{ id: "v-1", recurrence_key: "2026-10-19", scheduled_on: "2026-10-20" }] } : { data: [] },
+    // The database changes the waiting ones in one update (refresh_upcoming_visits, whose test checks
+    // which visits and their times, a moved one's on its own day): here, Monday's moved to Tuesday.
+    const { db, queries, rpcs } = fakeDb(
+      () => ({ data: [] }),
+      (fn) => (fn === "refresh_upcoming_visits" ? { data: 1 } : {}),
     );
     const job = { ...recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO", "2026-10-19"), title: "Mowing", default_crew_id: "crew-2", visit_start_time: "09:00" };
 
     expect(await materializeJob(db, job, true)).toMatchObject({ updated: 0 });
-    expect(queries.some((q) => q.table === "visits" && verb(q) === "update")).toBe(false);
+    expect(rpcs).toEqual([]);
 
     expect(await materializeJob(db, job, true, true)).toMatchObject({ updated: 1 });
-    const waiting = queries.find((q) => q.table === "visits" && call(q, "select")?.[1] === "id, scheduled_on")!;
-    expect(waiting.calls).toContainEqual(["eq", "status", "scheduled"]);
-    const update = queries.find((q) => q.table === "visits" && verb(q) === "update")!;
-    expect(call(update, "update")![1]).toEqual({ title: "Mowing", crew_id: "crew-2", starts_at: "2026-10-20T09:00:00.000Z", ends_at: "2026-10-20T10:00:00.000Z", time_fixed: false });
-    expect(update.calls).toContainEqual(["eq", "id", "v-1"]);
+    expect(rpcs).toEqual([{ fn: "refresh_upcoming_visits", args: { p_job: "job-1" } }]);
+    expect(queries.some((q) => q.table === "visits" && verb(q) === "update")).toBe(false);
   });
 
   it("say so when removing stale visits fails, instead of counting them removed", async () => {

@@ -601,6 +601,10 @@ select t1070.check(not has_function_privilege('authenticated', 'public.emit_invo
 select t1070.check(not has_function_privilege('authenticated', 'public.visit_busy_times(uuid, uuid, timestamptz, timestamptz)', 'execute')
   and not has_function_privilege('anon', 'public.visit_busy_times(uuid, uuid, timestamptz, timestamptz)', 'execute'),
   'a visit''s busy times are the server''s alone');
+-- So is changing a recurring job's upcoming visits to match it (20261107000400_refresh_upcoming_visits.sql).
+select t1070.check(not has_function_privilege('authenticated', 'public.refresh_upcoming_visits(uuid)', 'execute')
+  and not has_function_privilege('anon', 'public.refresh_upcoming_visits(uuid)', 'execute'),
+  'changing a recurring job''s upcoming visits is the server''s alone');
 
 -- The owner sees where Cy clocked in, so the check on a sub below is about a real entry with a place.
 begin;

@@ -266,21 +266,10 @@ export async function materializeJob(admin: Db, job: RecurringJobRow, prune = fa
   let updated = 0;
   if (refresh) {
     // Only visits still waiting: done or started ones stay as they were, and one moved to another
-    // day keeps that day (its time comes from the job).
-    const { data: upcoming, error: upcomingError } = await admin
-      .from("visits")
-      .select("id, scheduled_on")
-      .eq("job_id", job.id)
-      .eq("status", "scheduled")
-      .not("recurrence_key", "is", null)
-      .gte("scheduled_on", today);
-    if (upcomingError) throw new Error(upcomingError.message);
-    const results = await Promise.all(
-      (upcoming ?? []).map((v) => admin.from("visits").update({ title: job.title, crew_id: job.default_crew_id, ...times(v.scheduled_on!) }).eq("id", v.id)),
-    );
-    const failed = results.find((r) => r.error);
-    if (failed?.error) throw new Error(failed.error.message);
-    updated = results.length;
+    // day keeps that day (its time comes from the job, worked out as times() does). One update.
+    const { data, error } = await admin.rpc("refresh_upcoming_visits", { p_job: job.id });
+    if (error) throw new Error(error.message);
+    updated = data ?? 0;
   }
   if (!dates.length) return { created: 0, removed, updated };
   // A date whose visit someone deleted stays deleted (the database remembers it in recurrence_skips).

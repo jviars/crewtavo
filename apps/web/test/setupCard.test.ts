@@ -26,4 +26,12 @@ describe("the setup checklist's price list step", () => {
     for (const unit of ["sq ft", "SqFt", "ft", "square", "ton", "sq yd"]) expect(priceListState(made, [item(unit)]).measures).toBe(true);
     expect(priceListState(made, [item("ea", { formula: "area_sqft * 0.05" })]).measures).toBe(true);
   });
+
+  it("works from the few items Home reads: the one changed last, the one added last, and one priced by measuring", () => {
+    const changed = item("hr", { updated_at: "2026-11-02T09:00:00.000+00:00" });
+    const added = item("visit");
+    expect(priceListState(made, [changed, added, item("sq ft")])).toEqual({ prices: true, measures: true });
+    // Nothing priced by measuring: the database finds none, so there's no third.
+    expect(priceListState(made, [item("hr"), item("visit")])).toEqual({ prices: false, measures: false });
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeableOnline, openSlots, slotLabel, slotStep, slotTime, workdays, type SlotRules } from "../src/slots";
+import { changeableOnline, daysOff, openSlots, slotLabel, slotStep, slotTime, workdays, type SlotRules } from "../src/slots";
 import { zonedTimeToUtc } from "../src/time";
 
 const NY = "America/New_York";
@@ -76,6 +76,13 @@ describe("the days the business works", () => {
     expect(workdays({ working_hours: { start: "08:00", end: "17:00", days: [6, 2, 2] } })).toEqual([2, 6]);
     expect(workdays({ working_hours: { days: [] } })).toEqual(everyDay);
     expect(workdays({ working_hours: { days: ["mon", 9, 1.5] } })).toEqual(everyDay);
+  });
+
+  it("leave the rest as days off for multi-day work, and weekends until it picks", () => {
+    expect(daysOff({ working_hours: { days: [1, 2, 3, 4] } })).toEqual([0, 5, 6]);
+    expect(daysOff({ working_hours: { days: [0, 1, 2, 3, 4, 5, 6] } })).toEqual([]);
+    expect(daysOff({})).toEqual([0, 6]);
+    expect(daysOff({ working_hours: { days: ["mon"] } })).toEqual([0, 6]);
   });
 
   it("are the only ones offered, as times or whole days", () => {

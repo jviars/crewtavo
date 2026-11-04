@@ -3,6 +3,7 @@
  * Google Calendar) or anytime, crew, people, status and notes, with "Find a time" for open slots.
  * Used by Schedule, Job, Request and Home.
  */
+import { daysOff, weekday } from "@crewtavo/core/slots";
 import { isIsoDate, localDate, localTime, parseZonedTime } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -110,7 +111,8 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const [slots, setSlots] = useState<Array<{ starts_at: string; ends_at: string }> | null>(null);
   // Multi-day work: a new booking can span days (one linked visit per work day).
   const [days, setDays] = useState(1);
-  const [skipWeekends, setSkipWeekends] = useState(true);
+  const [skipDaysOff, setSkipDaysOff] = useState(true);
+  const skipped = skipDaysOff ? daysOff(session.company.settings) : [];
   const [moveLater, setMoveLater] = useState(true);
   const [equipment, setEquipment] = useState<string[] | null>(isNew ? [] : null);
   const options = useDispatchOptions();
@@ -165,7 +167,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const toggle = (id: string) => setAssignees(assignees.includes(id) ? assignees.filter((x) => x !== id) : [...assignees, id]);
   // Someone already on another visit at this time, as the schedule marks their row, on each day of
   // a multi-day booking. For one day the key is the schedule's Day view's, so the board's copy is used.
-  const bookingDays = isNew && days > 1 && validDate ? workDays(date, days, skipWeekends) : [date];
+  const bookingDays = isNew && days > 1 && validDate ? workDays(date, days, skipped) : [date];
   const lastDay = bookingDays[bookingDays.length - 1]!;
   const sameDay = useQuery({
     queryKey: ["schedule", session.company.id, date, lastDay, ""],
@@ -245,7 +247,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
         property_id: visit.property_id ?? (kind === "job" ? job?.property_id ?? null : null),
         kind: kind === "job" && !visit.job_id && !job ? "task" : kind,
         days: unscheduled ? 1 : days,
-        skip_weekends: skipWeekends,
+        skip_weekends: skipDaysOff,
         assignee_ids: assignees,
         equipment_ids: picked,
       });
@@ -338,15 +340,15 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
             )}
             {isNew && canDispatch && (
               <div className="row wrap" style={{ gap: 12, alignItems: "flex-end" }}>
-                <Field label="How many days" hint={days > 1 && validDate ? `${days} linked visits: ${workDays(date, days, skipWeekends).map(shortDay).join(", ")}` : "Multi-day work becomes one visit per day."}>
+                <Field label="How many days" hint={days > 1 && validDate ? `${days} linked visits: ${workDays(date, days, skipped).map(shortDay).join(", ")}` : "Multi-day work becomes one visit per day."}>
                   <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ width: 120 }}>
                     {Array.from({ length: 14 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n === 1 ? "1 day" : `${n} days`}</option>)}
                   </select>
                 </Field>
                 {days > 1 && (
                   <label className="switch-row" style={{ fontWeight: 400, paddingBottom: 26 }}>
-                    <input type="checkbox" className="switch" checked={skipWeekends} onChange={(e) => setSkipWeekends(e.target.checked)} />
-                    Skip weekends
+                    <input type="checkbox" className="switch" checked={skipDaysOff} onChange={(e) => setSkipDaysOff(e.target.checked)} />
+                    Skip days you don't work
                   </label>
                 )}
               </div>
@@ -578,12 +580,11 @@ function useEquipmentChoices() {
   });
 }
 
-/** The dates a multi-day booking lands on, the same way the API picks them. */
-function workDays(first: string, count: number, skipWeekends: boolean): string[] {
+/** The dates a multi-day booking lands on, past the days in `skip` (daysOff()), the same way the API picks them. */
+export function workDays(first: string, count: number, skip: readonly number[]): string[] {
   const out: string[] = [];
   for (let d = first; out.length < count; d = addDaysIso(d, 1)) {
-    const weekend = [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay());
-    if (count > 1 && skipWeekends && weekend && out.length > 0) continue;
+    if (count > 1 && out.length > 0 && skip.includes(weekday(d))) continue;
     out.push(d);
   }
   return out;

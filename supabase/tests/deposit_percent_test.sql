@@ -1,7 +1,7 @@
 -- Database tests for deposits as a percent (20261104000500_deposit_percent): a percent sets the
 -- deposit amount from the total and follows it as lines and the client's choices change, an amount
 -- stays as typed, and copies and templates keep the percent. As the client approves in the Client
--- Hub, the server makes the deposit's invoice once (sent, due today, untaxed), it joins the job made
+-- Hub, the server makes the deposit's invoice once (sent, due on the payment terms, untaxed), it joins the job made
 -- from the quote, and the job's last invoice takes it off. Only the server makes that invoice.
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
@@ -83,8 +83,8 @@ reset role;
 select tdp.check((select total = 1466.66 and deposit_amount = 366.67 and deposit_invoice_id = :'deposit' from public.quotes where id = :'deck'),
   'the deposit is 25% of the total she approved, and the quote has its invoice');
 select tdp.check((select kind = 'deposit' and status = 'sent' and client_id = :'rae' and job_id is null and tax_rate = 0 and total = 366.67 and balance_due = 366.67
-                    and due_on = (now() at time zone 'America/Denver')::date and number is not null and subject = 'Deposit: Back deck'
-                    from public.invoices where id = :'deposit'), 'an untaxed deposit invoice for it, sent and due today');
+                    and due_on = (now() at time zone 'America/Denver')::date + 30 and number is not null and subject = 'Deposit: Back deck'
+                    from public.invoices where id = :'deposit'), 'an untaxed deposit invoice for it, sent and due in the business''s 30 days');
 select tdp.check(exists (select 1 from public.activity where subject_id = :'deposit' and verb = 'invoice.sent' and (data ->> 'total')::numeric = 366.67),
   'sent with its amount, as any invoice');
 set role service_role;

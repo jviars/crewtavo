@@ -3975,6 +3975,9 @@ isOneToOne: false
 "referral_stats":
 { Args: { "p_company": string,"p_from"?: string,"p_to"?: string }; Returns: Json
                            },
+"refresh_upcoming_visits":
+{ Args: { "p_job": string }; Returns: number
+                           },
 "release_automation_runs":
 { Args: { "p_ids": (number)[],"p_token": string }; Returns: number
                            },

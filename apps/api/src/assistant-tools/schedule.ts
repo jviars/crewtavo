@@ -45,7 +45,7 @@ export const scheduleTools = {
       duration_min: z.number().int().min(1).max(1440).default(60).describe("Any whole number of minutes."),
       time_fixed: z.boolean().default(false).describe("Keep this start time when the route is organized."),
       days: z.number().int().min(1).max(30).default(1),
-      skip_weekends: z.boolean().default(true),
+      skip_weekends: z.boolean().default(true).describe("Skip the days the business doesn't work (Saturday and Sunday until it picks its workdays)."),
       crew_id: z.uuid().optional(),
       assignee_ids: z.array(z.uuid()).max(20).default([]),
       equipment_ids: z.array(z.uuid()).max(30).default([]),
