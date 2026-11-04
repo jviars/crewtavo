@@ -278,6 +278,16 @@ describe("autopay on the client's home", () => {
     expect(html).not.toMatch(/Change card|Update your card|Paid automatically/);
   });
 
+  it("asks them to agree to today's terms when their monthly plan waits for them", () => {
+    const html = text(page(clientView({ autopay: { ...active, reagree: true } })));
+    expect(html).toContain("Our autopay terms changed");
+    expect(html).toContain("Agree to them to keep paying for your monthly plan automatically.");
+    expect(html).toContain("Review and agree");
+    expect(html).not.toContain("Paid automatically ·");
+    // On hold, only what that means.
+    expect(text(page(clientView({ autopay: { ...active, reagree: true, available: false } })))).not.toContain("Our autopay terms changed");
+  });
+
   it("says what's left to do, or what to know", () => {
     expect(text(page(clientView({ autopay: { ...active, status: "agree", imported: true, since: null } })))).toContain("We have your Visa ending 4242 on file");
     expect(text(page(clientView({ autopay: { ...active, status: "agree", since: null } })))).toContain("Finish setting up");
@@ -351,6 +361,18 @@ describe("the autopay page", () => {
     expect(paused).toContain("Turn off autopay");
   });
 
+  it("asks them to agree to today's terms with their card, keeping Change card and Turn off autopay", () => {
+    const html = view({ ...active, reagree: true });
+    const words = text(html);
+    expect(words).toContain("Our autopay terms changed");
+    expect(words).toContain("They now cover your monthly plan. Agree to them to keep paying for it automatically with Visa ending 4242.");
+    expect(words).toContain(active.terms);
+    expect(words).toContain("I agree to these terms");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*Agree<\/button>/);
+    for (const label of ["Since Oct 31", "Change card", "Turn off autopay"]) expect(words).toContain(label);
+    expect(text(view(active))).not.toContain("Our autopay terms changed");
+  });
+
   it("says it isn't available when the business doesn't take autopay", () => {
     expect(text(view(null))).toContain("Autopay isn't available right now. Contact Radford Lawn Care to set it up.");
   });
@@ -400,6 +422,19 @@ describe("a quote charged by the visit", () => {
     expect(html).toContain("Approve quote");
     expect(html).toContain("Approve and set up autopay");
     expect(text(page(quoteView({ autopay_offer: false })))).not.toContain("autopay");
+  });
+
+  it("says Approve goes on to the deposit when there's one to pay, beside \"Approve and set up autopay\"", () => {
+    const deposit = { deposit_amount: 20 };
+    for (const autopay_offer of [true, false]) {
+      const html = text(page(quoteView({ autopay_offer, deposit_online: true }, deposit)));
+      expect(html, String(autopay_offer)).toContain("Approve and pay deposit");
+      expect(html, String(autopay_offer)).toContain("The $20.00 deposit is paid next, by card or bank, on Stripe's secure page.");
+      expect(html, String(autopay_offer)).not.toContain("Approve quote");
+    }
+    expect(text(page(quoteView({ deposit_online: true }, deposit)))).toContain("Approve and set up autopay");
+    // Paid later from its invoice when the business doesn't take payments online.
+    expect(text(page(quoteView({ deposit_online: false }, deposit)))).toContain("Approve quote");
   });
 
   it("asks for a card before they sign, with one button, when the business needs a card on file", () => {

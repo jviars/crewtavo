@@ -1,6 +1,8 @@
 import { autopayDueText, autopaySettings, methodLabel } from "@crewtavo/core/autopay";
+import { lateFeeAmount, lateFeeOn, lateFeeSettings } from "@crewtavo/core/billing";
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import type { TablesUpdate } from "@crewtavo/core/database";
-import { paymentProblem, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { givenBackWords, goneInvoiceWords } from "@crewtavo/core/promos";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState, type FormEvent } from "react";
@@ -34,12 +36,15 @@ import { InvoiceDrawings } from "../measure/drawings";
 import { LineItems } from "../quotes/LineItems";
 import { DiscountRows } from "../quotes/PromoRow";
 import { paidWords } from "./creditRules";
+import { AddWorkDialog } from "./AddWorkDialog";
+import { recordPayment, type PaymentMethod } from "./recordPayment";
 import { ReferralCredits } from "./ReferralCredits";
 import { SendDialog } from "../quotes/SendDialog";
 import { refundable, stripeCharge, stripeRefundable, stripeRefundToasts, type StripeRefundResult } from "./refunds";
 import { settle } from "./settle";
 import { autopayBankNote, bankPayment, bankPaymentNote, paidInStripe, paymentAmount, RECORD_IN_STRIPE } from "./stripeInvoices";
 import { chargeOutcomeText, type ChargeResult } from "./charges";
+import { CustomFieldsCard, useCustomFields } from "../customFields/CustomFields";
 
 const METHODS: Record<string, string> = { check: "Check", cash: "Cash", card: "Card", ach: "Bank transfer", other: "Other" };
 /** A charge still going, or waiting on someone: the database lets an invoice have one at a time. */
@@ -56,7 +61,7 @@ function InvoicePageScreen() {
   const session = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [dialog, setDialog] = useState<null | "send" | "payment">(null);
+  const [dialog, setDialog] = useState<null | "send" | "payment" | "work">(null);
   const [refunding, setRefunding] = useState<null | { id: string; amount: number; method: string }>(null);
   const [stripeRefund, setStripeRefund] = useState<null | { id: string; amount: number; tip_amount: number; method: string; processor_ref: string | null }>(null);
   const today = todayIn(session.company.timezone);
@@ -69,7 +74,7 @@ function InvoicePageScreen() {
       const [row, autopay, credits] = await Promise.all([
         supabase()
           .from("invoices")
-          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone, billing_address, sms_opt_out_at), job:jobs(id, number, title, po_number, kind, billing_mode, property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, option:quote_options!quotes_option_fkey(name, warranty), package:roof_packages!quotes_roof_package_fkey(name, warranty))), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id, discount_quote_id), payments(id, amount, tip_amount, method, received_at, processor, processor_ref, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at, detached_at, processing_at, collection, purpose)")
+          .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone, billing_address, sms_opt_out_at, tax_exempt, tax_exempt_note), job:jobs(id, number, title, po_number, kind, billing_mode, property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, option:quote_options!quotes_option_fkey(name, warranty), package:roof_packages!quotes_roof_package_fkey(name, warranty))), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id, discount_quote_id, time_entry_ids, material_ids), payments(id, amount, tip_amount, method, received_at, processor, processor_ref, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at, detached_at, processing_at, collection, purpose)")
           .eq("id", id)
           .order("sort", { referencedTable: "invoice_line_items" })
           .order("received_at", { referencedTable: "payments" })
@@ -223,6 +228,12 @@ function InvoicePageScreen() {
   const balance = Number(inv.balance_due);
   const paid = Number(inv.amount_paid);
   const daysLate = inv.due_on && balance > 0 && !draft && !isVoid && !writtenOff ? Math.floor((Date.parse(today) - Date.parse(inv.due_on)) / 86_400_000) : 0;
+  // Late fees (Settings → Company): the day this one's goes on, once, if it's still owed then.
+  const lateFee = lateFeeSettings(session.company.settings);
+  const feeDay = lateFeeOn(inv, lateFee);
+  const lateFeeDay = feeDay && feeDay > today ? feeDay : null;
+  // Charged no tax for being exempt (one sent before they were keeps the tax it was sent with).
+  const taxExempt = Boolean(inv.client?.tax_exempt) && Number(inv.tax_rate) === 0;
   const lastPayment = inv.payments.at(-1);
   // The Stripe invoice that matters now: the live one, else the latest. A tip added after an
   // automatic charge is its own small Stripe invoice, and isn't the one for this invoice's bill.
@@ -422,7 +433,7 @@ function InvoicePageScreen() {
       {daysLate > 0 && !bank && !clearing && (
         <div className="callout callout-danger">
           <Icon name="alert" size={20} />
-          <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.</div>
+          <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.{lateFeeDay ? ` A ${formatMoneyCents(lateFeeAmount(balance, lateFee!))} late fee goes on ${formatDate(lateFeeDay)}.` : ""}</div>
           {/* A failed charge's callout above has the reminder already. */}
           {!chargeFailed && <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>}
         </div>
@@ -443,6 +454,9 @@ function InvoicePageScreen() {
             // Work that repeats has a next invoice for a once-per-job code to go on, which the toast can say.
             promoJob={inv.job ? { id: inv.job.id, repeats: inv.job.kind === "recurring" || inv.job.billing_mode === "per_visit" } : null}
           />
+          {editable && inv.job && ["standard", "visits"].includes(inv.kind) && (
+            <div><Button size="sm" icon="clock" onClick={() => setDialog("work")}>Add logged hours and materials</Button></div>
+          )}
           <NotesCard value={inv.notes} editable={!isVoid} onEdit={save.edited} onUnchanged={unchanged} onSave={(notes) => saveField({ notes })} />
           <section className="stack">
             <h2 className="section-title">Payments</h2>
@@ -519,10 +533,11 @@ function InvoicePageScreen() {
             />
             <ReferralCredits invoice={inv} onChanged={refresh} />
             <div className="line">
-              <span>Tax {editable ? "" : `(${formatTaxRate(inv.tax_rate)})`}</span>
-              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
+              <span>{taxExempt ? `Tax exempt${inv.client?.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}` : `Tax ${editable ? "" : `(${formatTaxRate(inv.tax_rate)})`}`}</span>
+              {/* A tax-exempt client is never charged tax: the database keeps the rate at 0. */}
+              {editable && !taxExempt ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
             </div>
-            {editable && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
+            {editable && !taxExempt && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
             <div className="line grand"><span>Total</span><AnimatedNumber value={Number(inv.total)} format={MONEY_CENTS} /></div>
             {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−<AnimatedNumber value={Number(inv.retainage_amount)} format={MONEY_CENTS} /></span></div>}
             {paid !== 0 && <div className="line"><span>Paid</span><span>−<AnimatedNumber value={paid} format={MONEY_CENTS} /></span></div>}
@@ -550,12 +565,14 @@ function InvoicePageScreen() {
             {inv.sent_at && <span className="muted small">Sent {formatDate(inv.sent_at)}</span>}
             {inv.job?.po_number && <span className="muted small">PO {inv.job.po_number}</span>}
           </div>
+          <CustomFieldsCard record="invoice" values={inv.custom_fields} editable={!isVoid} onSave={async (values) => { unwrap(await supabase().from("invoices").update({ custom_fields: values }).eq("id", inv.id)); refresh(); }} />
           {stripe?.stripe_id && <StripeCard stripe={stripe} />}
           <InvoiceDrawings invoiceId={inv.id} clientId={inv.client_id} jobId={inv.job?.id ?? null} editable={!isVoid} />
         </aside>
       </div>
 
       {dialog === "send" && <SendDialog kind="invoice" id={inv.id} number={inv.number} email={inv.client?.email ?? null} phone={inv.client?.phone ?? null} textsOffSince={inv.client?.sms_opt_out_at} onClose={() => setDialog(null)} onSent={refresh} />}
+      {dialog === "work" && inv.job && <AddWorkDialog invoiceId={inv.id} jobId={inv.job.id} onClose={() => { setDialog(null); refresh(); }} />}
       {dialog === "payment" && <PaymentDialog invoice={{ id: inv.id, client_id: inv.client_id, balance, draft }} bank={bankNote} onClose={() => setDialog(null)} onSaved={refresh} />}
       {refunding && <RefundDialog invoice={{ id: inv.id, client_id: inv.client_id }} payment={refunding} left={refundable(refunding, inv.payments)} onClose={() => setRefunding(null)} onSaved={refresh} />}
       {stripeRefund && <StripeRefundDialog payment={stripeRefund} left={stripeRefundable(stripeRefund, inv.payments)} onClose={() => setStripeRefund(null)} onSaved={refreshSoon} />}
@@ -604,11 +621,12 @@ function needsClientReason(charge: { source: string; failures: number; last_erro
  * template (its default, as the link uses), with the template's terms and its invoice sections filled
  * in for this invoice. It follows the edits above as they're saved.
  */
-function InvoicePaper({ invoice }: { invoice: DocumentInvoice & { client: { display_name: string; billing_address: unknown } | null; job: { property: unknown; quote?: InvoiceQuote | null } | null } }) {
+function InvoicePaper({ invoice }: { invoice: DocumentInvoice & { custom_fields: unknown } & { client: { display_name: string; billing_address: unknown } | null; job: { property: unknown; quote?: InvoiceQuote | null } | null } }) {
   const session = useSession();
   const id = useId();
   const { template, isPending } = useDocumentTemplate(null);
   const letterhead = useLetterhead();
+  const fields = useCustomFields("invoice");
   const terms = useInvoiceContract(
     isPending
       ? null
@@ -632,7 +650,7 @@ function InvoicePaper({ invoice }: { invoice: DocumentInvoice & { client: { disp
           <DocumentSheet
             template={contractTemplate(template, contract)}
             company={letterhead.data ?? documentCompany(session.company)}
-            data={invoiceDocument(invoice, { timeZone: session.company.timezone, contract })}
+            data={invoiceDocument({ ...invoice, pdf_fields: shownCustomFields(fields, invoice.custom_fields, "pdf") }, { timeZone: session.company.timezone, contract })}
           />
         </>
       ) : (
@@ -704,31 +722,24 @@ function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: str
   const session = useSession();
   const [amount, setAmount] = useState(invoice.balance > 0 ? invoice.balance.toFixed(2) : "");
   const [tip, setTip] = useState("");
-  const [method, setMethod] = useState<"check" | "cash" | "card" | "ach" | "other">("check");
+  const [method, setMethod] = useState<PaymentMethod>("check");
   const [date, setDate] = useState(todayIn(session.company.timezone));
   const [notes, setNotes] = useState("");
   const value = Number(amount);
   const tooMuch = value > invoice.balance + 0.005;
   const save = useMutation({
     meta: { inline: true, success: "Payment recorded", tone: "invoice" },
-    mutationFn: async () => {
-      // The same check AI assistants' record_payment makes (packages/core/src/money.ts).
-      const problem = paymentProblem(value, invoice.balance);
-      if (problem) throw new Error(problem);
-      if (invoice.draft) unwrap(await supabase().from("invoices").update({ status: "sent" }).eq("id", invoice.id));
-      unwrap(
-        await supabase().from("payments").insert({
-          company_id: session.company.id,
-          invoice_id: invoice.id,
-          client_id: invoice.client_id,
-          amount: Math.round(value * 100) / 100,
-          tip_amount: Number(tip) > 0 ? Math.round(Number(tip) * 100) / 100 : 0,
-          method,
-          received_at: new Date(`${date}T12:00:00`).toISOString(),
-          notes: notes.trim() || null,
-        }),
-      );
-    },
+    mutationFn: () =>
+      recordPayment({
+        companyId: session.company.id,
+        currency: session.company.currency,
+        invoice,
+        amount: value,
+        tip: Number(tip),
+        method,
+        receivedAt: new Date(`${date}T12:00:00`).toISOString(),
+        notes: notes.trim() || null,
+      }),
     onSuccess: () => {
       onSaved();
       onClose();

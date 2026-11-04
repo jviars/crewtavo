@@ -755,6 +755,12 @@ function Totals({ data }: { data: DocumentData }) {
           <dd>{formatMoneyCents(data.tax)}</dd>
         </>
       )}
+      {data.taxExempt !== undefined && (
+        <>
+          <dt>{data.taxExempt ? `Tax exempt · ${data.taxExempt}` : "Tax exempt"}</dt>
+          <dd>{formatMoneyCents(0)}</dd>
+        </>
+      )}
       <dt className={styles.grand}>{estimate && data.repeats ? "Total per visit" : "Total"}</dt>
       <dd className={styles.grand}>{formatMoneyCents(data.total)}</dd>
       {estimate && data.repeats && (

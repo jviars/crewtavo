@@ -256,7 +256,7 @@ async function googleEvents(env: Env, admin: Db, companyId: string, calendarId: 
 // Keeping a calendar's events
 // ---------------------------------------------------------------------------------------------
 
-export const SOURCE_FIELDS = "id, kind, app, name, color, crew_id, show_details, blocks_time, enabled, host, event_count, last_synced_at, last_error, created_at";
+export const SOURCE_FIELDS = "id, kind, app, name, color, crew_id, user_id, show_details, blocks_time, enabled, host, event_count, last_synced_at, last_error, created_at";
 
 interface SourceRow {
   id: string;

@@ -11,7 +11,7 @@ import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { kickAutomations } from "../lib/background";
-import { appUrl, HttpError, param, readJson, uuid } from "../lib/http";
+import { appUrl, dbError, HttpError, param, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { postedId } from "../services/contracts";
 import { addMissingServices } from "../services/presetServices";
@@ -21,6 +21,14 @@ import { sendSchema, type SalesScope } from "../services/sales";
 export const roofing = new Hono<AppEnv>();
 
 const scope = (c: Context<AppEnv>): SalesScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, baseUrl: appUrl(c) });
+
+/** Roofing on its Apps page: Install and Uninstall (public.trade_app_set_enabled). */
+roofing.post("/roofing/enabled", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const body = await readJson(c, z.object({ enabled: z.boolean() }));
+  const { error } = await c.var.db.rpc("trade_app_set_enabled", { p_company: c.var.companyId, p_app: "roofing", p_enabled: body.enabled });
+  if (error) throw dbError(error);
+  return c.json({ enabled: body.enabled });
+});
 
 /** The roofing services a price list is missing (matched by name), added from the roofing preset. */
 roofing.post("/roofing/services", requireUser, requireCompany(ADMINS, "settings"), async (c) => {

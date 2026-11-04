@@ -6,15 +6,16 @@ export async function dailyOutlook(lat: number, lng: number, days = 7): Promise<
   const params = new URLSearchParams({
     latitude: lat.toFixed(4),
     longitude: lng.toFixed(4),
-    daily: "temperature_2m_min,temperature_2m_max,precipitation_probability_max",
+    daily: "temperature_2m_min,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max",
     temperature_unit: "fahrenheit",
+    wind_speed_unit: "mph",
     timezone: "auto",
     forecast_days: String(days),
   });
   const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, { signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`);
   const { daily } = (await response.json()) as {
-    daily?: { time: string[]; temperature_2m_min: number[]; temperature_2m_max: number[]; precipitation_probability_max: number[] };
+    daily?: { time: string[]; temperature_2m_min: number[]; temperature_2m_max: number[]; precipitation_probability_max: number[]; wind_speed_10m_max?: number[] };
   };
   // No forecast isn't good weather: callers treat this like a failed request.
   if (!daily?.time) throw new Error("Open-Meteo returned no forecast");
@@ -23,6 +24,7 @@ export async function dailyOutlook(lat: number, lng: number, days = 7): Promise<
     temp_min_f: daily.temperature_2m_min[i] ?? null,
     temp_max_f: daily.temperature_2m_max[i] ?? null,
     rain_chance_pct: daily.precipitation_probability_max[i] ?? null,
+    wind_max_mph: daily.wind_speed_10m_max?.[i] ?? null,
   }));
 }
 

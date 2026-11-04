@@ -5,6 +5,7 @@
  * shown; hours are decimal hours.
  */
 import { isUnpaidBreak, type BreakPay } from "./breaks";
+import { lineTotal } from "./money";
 import { addDays, zonedTimeToUtc } from "./time";
 
 export const REPORT_PRESETS = [
@@ -301,6 +302,142 @@ export function jobProfit(
     margin_percent: percent(profit, revenue),
     margin_target: marginTarget,
     below_target: marginTarget ? costed.filter((j) => j.margin_percent !== null && j.margin_percent < marginTarget).map((j) => j.id) : [],
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Revenue and profit by service
+// ---------------------------------------------------------------------------------------------
+
+/** An invoice line, with the invoice fields revenue by service reads. */
+export interface ServiceLineRow {
+  service_id: string | null;
+  name: string;
+  quantity: number | string;
+  unit_price: number | string;
+  invoice: { id: string; job_id: string | null; kind: string; status: string; issued_on: string; discount_amount: number | string | null; credit_amount: number | string | null } | null;
+}
+export interface ServiceItem { id: string; name: string; category: string | null; unit_cost: number | string | null; labor_cost: number | string | null }
+export interface ServiceLine { key: string; item: ServiceItem | null; job_id: string | null; issued_on: string; quantity: number; revenue: number }
+
+/** Deposit, progress and retainage invoices bill work the job's other invoices list in full. */
+const PART_BILLINGS = ["deposit", "progress", "retainage"];
+// shortcut: found by the name create_invoice_for_job gives them, so a renamed one counts as a discount; upgrade if these lines get a kind.
+const PRIOR_BILLING = /^Less (deposit|progress billing) \(invoice #/;
+
+/**
+ * Each sold line's revenue: its amount before tax, less its share (by amount) of the invoice's
+ * discounts and credits: negative lines, the promo discount and referral credits. The line that
+ * takes earlier deposits off a final invoice isn't a discount. A line bills the price list item it
+ * links to, or else the one with its exact name (visit invoices made before
+ * 20261106000530_visit_lines_keep_service.sql, lines typed in, Jobber's); the rest are
+ * "other". Drafts, voided invoices and part billings (PART_BILLINGS) don't count.
+ */
+export function serviceLines(rows: readonly ServiceLineRow[], items: readonly ServiceItem[]): ServiceLine[] {
+  const byId = new Map(items.map((s) => [s.id, s]));
+  const byName = new Map<string, ServiceItem>();
+  for (const s of items) if (!byName.has(s.name.trim().toLowerCase())) byName.set(s.name.trim().toLowerCase(), s);
+  const invoices = new Map<string, ServiceLineRow[]>();
+  for (const r of rows) {
+    if (!r.invoice || r.invoice.status === "draft" || r.invoice.status === "void" || PART_BILLINGS.includes(r.invoice.kind)) continue;
+    const lines = invoices.get(r.invoice.id) ?? [];
+    lines.push(r);
+    invoices.set(r.invoice.id, lines);
+  }
+  const out: ServiceLine[] = [];
+  for (const lines of invoices.values()) {
+    const invoice = lines[0]!.invoice!;
+    const amounts = lines.map((l) => lineTotal(l.quantity, l.unit_price));
+    const sold = sum(amounts, (a) => Math.max(a, 0));
+    // As invoice_totals caps them: the promo discount at the subtotal, credits are already capped.
+    let off = Math.min(Number(invoice.discount_amount ?? 0), Math.max(sum(amounts, (a) => a), 0)) + Number(invoice.credit_amount ?? 0);
+    lines.forEach((l, n) => { if (amounts[n]! < 0 && !PRIOR_BILLING.test(l.name)) off -= amounts[n]!; });
+    const kept = sold > 0 ? Math.max(0, sold - off) / sold : 0;
+    lines.forEach((l, n) => {
+      if (amounts[n]! <= 0) return;
+      const item = (l.service_id && byId.get(l.service_id)) || byName.get(l.name.trim().toLowerCase()) || null;
+      out.push({ key: item?.id ?? "other", item, job_id: invoice.job_id, issued_on: invoice.issued_on, quantity: Number(l.quantity), revenue: amounts[n]! * kept });
+    });
+  }
+  return out;
+}
+
+/**
+ * Revenue by price list item for the invoice lines in `rows` (serviceLines' rules), and with `costs`,
+ * what each cost and made. A line costs its item's unit cost (without the labor in it once the job
+ * has labor of its own, as jobProfit counts lines) and a share of its job's labor (time at its
+ * rates, and sub and crew pay) and expenses. Time and expenses aren't logged against a line, so the
+ * job's are split by each line's share of everything the job's been invoiced (`costs.jobLines`:
+ * every line on the job's invoices, whenever they were issued).
+ */
+export function serviceFigures(
+  rows: readonly ServiceLineRow[],
+  items: readonly ServiceItem[],
+  costs?: {
+    jobLines: readonly ServiceLineRow[];
+    time: readonly CostedTime[];
+    expenses: ReadonlyArray<{ job_id: string | null; amount: number | string }>;
+    rateOf: (entry: CostedTime) => number;
+    crewPay?: ReadonlyArray<{ job_id: string; amount: number | string | null }>;
+  },
+) {
+  const lines = serviceLines(rows, items);
+  const jobs = new Map<string, { invoiced: number; inRange: number; labor: number; spent: number; actual: boolean }>();
+  const job = (id: string) => jobs.get(id) ?? jobs.set(id, { invoiced: 0, inRange: 0, labor: 0, spent: 0, actual: false }).get(id)!;
+  if (costs) {
+    for (const l of lines) if (l.job_id) job(l.job_id).inRange += l.revenue;
+    for (const l of serviceLines(costs.jobLines, items)) if (l.job_id && jobs.has(l.job_id)) job(l.job_id).invoiced += l.revenue;
+    for (const t of costs.time) if (t.job_id && jobs.has(t.job_id)) job(t.job_id).labor += hoursBetween(t.started_at, t.ended_at) * costs.rateOf(t);
+    for (const j of jobs.values()) j.actual = j.labor > 0;
+    for (const p of costs.crewPay ?? []) {
+      if (!jobs.has(p.job_id)) continue;
+      job(p.job_id).labor += Number(p.amount ?? 0);
+      job(p.job_id).actual = true;
+    }
+    for (const e of costs.expenses) if (e.job_id && jobs.has(e.job_id)) job(e.job_id).spent += Number(e.amount);
+  }
+  const services = new Map<string, { service_id: string | null; name: string; category: string | null; count: number; quantity: number; revenue: number; item_costs: number; labor: number; expenses: number }>();
+  for (const l of lines) {
+    const row = services.get(l.key) ?? { service_id: l.item?.id ?? null, name: l.item?.name ?? "Other", category: l.item?.category ?? null, count: 0, quantity: 0, revenue: 0, item_costs: 0, labor: 0, expenses: 0 };
+    row.count++;
+    row.quantity += l.quantity;
+    row.revenue += l.revenue;
+    if (costs) {
+      const j = l.job_id ? jobs.get(l.job_id) : undefined;
+      // The job's whole invoiced amount, at least what's in this period (in case jobLines missed some).
+      const whole = j ? Math.max(j.invoiced, j.inRange) : 0;
+      const share = whole > 0 ? l.revenue / whole : 0;
+      row.item_costs += lineCosts([{ quantity: l.quantity, unit_cost: l.item?.unit_cost ?? null, unit_labor_cost: l.item?.labor_cost ?? null }], j?.actual ?? false).materials;
+      row.labor += j ? j.labor * share : 0;
+      row.expenses += j ? j.spent * share : 0;
+    }
+    services.set(l.key, row);
+  }
+  // Without `costs` they're unknown (null), not zero.
+  const known = (n: number) => (costs ? cents(n) : null);
+  const out = [...services.values()].map((s) => {
+    const cost = s.item_costs + s.labor + s.expenses;
+    return {
+      ...s,
+      quantity: Math.round(s.quantity * 1000) / 1000,
+      revenue: cents(s.revenue),
+      item_costs: known(s.item_costs),
+      labor: known(s.labor),
+      expenses: known(s.expenses),
+      cost: known(cost),
+      profit: known(s.revenue - cost),
+      margin_percent: costs && s.revenue > 0 ? Math.round(((s.revenue - cost) / s.revenue) * 1000) / 10 : null,
+    };
+  });
+  const revenue = sum(out, (s) => s.revenue);
+  const profit = sum(out, (s) => s.profit ?? 0);
+  return {
+    revenue: cents(revenue),
+    profit: known(profit),
+    margin_percent: costs ? percent(profit, revenue) : null,
+    services: out.sort((a, b) => b.revenue - a.revenue),
+    /** Each line's revenue on its issue date, for charting a service over time. */
+    lines,
   };
 }
 

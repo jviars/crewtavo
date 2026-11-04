@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 
 export interface DiscountLine {
@@ -70,6 +71,7 @@ export function JobDiscountNote({ jobId, lines, seesInvoices, canSwitch, onChang
   canSwitch: boolean;
   onChanged: () => void;
 }) {
+  const { currency } = useSession().company;
   const own = lineDiscounts(lines);
   const placed = useQuery({
     queryKey: ["job", jobId, "promo-discounts"],
@@ -111,7 +113,7 @@ export function JobDiscountNote({ jobId, lines, seesInvoices, canSwitch, onChang
   return (
     <div className="card card-pad stack-sm" role="group" aria-label="Promo code discounts">
       {shown.map((d) => {
-        const { rule, where } = jobDiscountWords(d);
+        const { rule, where } = jobDiscountWords(d, currency);
         return (
           <div key={d.key} className="row wrap" style={{ gap: 8, alignItems: "flex-start" }}>
             <span className="muted" style={{ display: "inline-flex", marginTop: 2 }}><Icon name="tag" size={16} /></span>

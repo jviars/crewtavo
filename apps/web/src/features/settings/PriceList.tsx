@@ -40,7 +40,7 @@ export function PriceList() {
   const key = ["services", session.company.id, "all"];
   const services = useQuery({
     queryKey: key,
-    queryFn: async () => unwrap(await supabase().from("services").select("id, name, category, description, unit, unit_price, unit_cost, taxable, formula, formula_target, active, sort, picture").eq("company_id", session.company.id).order("sort").order("name")),
+    queryFn: async () => unwrap(await supabase().from("services").select("id, name, category, description, unit, unit_price, unit_cost, taxable, formula, formula_target, active, add_to_every_job, sort, picture").eq("company_id", session.company.id).order("sort").order("name")),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["services", session.company.id] });
   const add = useMutation({
@@ -162,6 +162,8 @@ export function PriceList() {
                       <div className="stack-sm" style={{ justifyItems: "start" }}>
                         <label className="checkbox small"><input type="checkbox" checked={s.taxable} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { taxable: e.target.checked } })} />Taxable</label>
                         <label className="checkbox small"><input type="checkbox" checked={s.active} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { active: e.target.checked } })} />Show on quotes</label>
+                        {/* A trip charge, say: new jobs and quotes get it as a line (20261104000100_trip_fee_minimum.sql). */}
+                        <label className="checkbox small" title="New jobs and quotes get it as a line, once. Take it off one like any other line."><input type="checkbox" checked={s.add_to_every_job} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { add_to_every_job: e.target.checked } })} />Add to every job</label>
                         {canEdit && <button type="button" className="link-btn small" style={{ color: "var(--danger)" }} onClick={() => deleteService(s)}>Delete</button>}
                       </div>
                     </td>

@@ -5,7 +5,7 @@
  * both use these, with the person's own client. Also how a quote that offers options is priced before
  * the client chooses, and the most its deposit can be.
  */
-import { localDate } from "@crewtavo/core";
+import { laborRates, localDate, workLines, workToBill } from "@crewtavo/core";
 import { hidesExactPrice, inRangeMode, optionsIntroText, rangeIntroText } from "@crewtavo/core/estimates";
 import { optionBaseTotal, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { z } from "zod";
@@ -37,7 +37,9 @@ export const sendSchema = z.object({
 });
 export type SendBody = z.infer<typeof sendSchema>;
 
-type Deliverable = { id: string; number: number | null; client_id: string; total?: number; balance_due?: number; recurrence_rule?: string | null; client: { display_name: string; email: string | null; phone: string | null } | null };
+type Deliverable = { id: string; number: number | null; client_id: string | null; total?: number; balance_due?: number; recurrence_rule?: string | null; client: { display_name: string; email: string | null; phone: string | null } | null };
+
+export const TEMPLATE_NOT_SENT = "A quote template can't be sent. Make a quote from it first.";
 
 /**
  * What a send says when the person didn't write their own message or subject: a roof estimate's
@@ -125,12 +127,14 @@ export async function keepDepositInCap(db: Db, companyId: string, quoteId: strin
   const quote = must(
     await db
       .from("quotes")
-      .select("deposit_amount, total, tax_rate, discount_amount, promo:promo_codes(kind, value), lines:quote_line_items(option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)")
+      .select("deposit_amount, deposit_percent, total, tax_rate, discount_amount, promo:promo_codes(kind, value), lines:quote_line_items(option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)")
       .eq("id", quoteId)
       .eq("company_id", companyId)
       .maybeSingle(),
     "Quote not found.",
   );
+  // A percent is of the price they choose, so it's never more than it (the database works it out).
+  if (quote.deposit_percent != null) return null;
   const cap = depositCap(quote);
   if (cap === null || toCents(quote.deposit_amount) <= Math.max(toCents(cap), 0)) return null;
   const lowered = Math.max(toCents(cap), 0) / 100;
@@ -149,6 +153,8 @@ export async function keepDepositInCap(db: Db, companyId: string, quoteId: strin
  * it to themselves, to say yes to autopay or tip on the client's saved card for them.
  */
 export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: Deliverable, body: SendBody, defaults: DeliverDefaults = {}) {
+  // Only a quote template has no client, and it's never sent: a quote is made from it first.
+  if (!record.client_id) throw new HttpError(400, TEMPLATE_NOT_SENT);
   const company = must(await s.db.from("companies").select("name, email, phone, address, currency, settings").eq("id", s.companyId).maybeSingle());
   const links = await clientLinks(s.env, s.baseUrl, { c: s.companyId, t: kind, id: record.id });
   const label = `${kind === "quote" ? "Quote" : "Invoice"} #${record.number}`;
@@ -263,7 +269,8 @@ const UNSIGNED = ["draft", "sent", "changes_requested"];
  * becomes a recurring job, and its next visits are made now. Returns the job's id.
  */
 export async function convertQuote(s: Pick<SalesScope, "db" | "companyId" | "env">, quoteId: string, by: string): Promise<string> {
-  const quote = must(await s.db.from("quotes").select("id, status, approval, recurrence_rule, change_order_for").eq("id", quoteId).eq("company_id", s.companyId).maybeSingle(), "Quote not found.");
+  const quote = must(await s.db.from("quotes").select("id, status, approval, recurrence_rule, change_order_for, is_template").eq("id", quoteId).eq("company_id", s.companyId).maybeSingle(), "Quote not found.");
+  if (quote.is_template) throw new HttpError(400, "A quote template can't be made a job. Make a quote from it first.");
   const before = quote.approval;
   const kept = UNSIGNED.includes(quote.status) && !(await loadOptions(s.db, s.companyId, quoteId)).length;
   if (kept) {
@@ -311,44 +318,93 @@ export async function sendInvoice(s: SalesScope, id: string, body: SendBody) {
 }
 
 /**
- * One invoice per finished job (completed visits for per-visit jobs), and optionally email each. Each
- * job succeeds or fails on its own. A job whose autopay charge is waiting is left to it: autopay
- * bills and charges those visits itself (services/autopay.ts), and billing them here first would
- * leave it nothing to charge.
+ * One invoice per finished job (completed visits for per-visit jobs), and optionally email each. A
+ * monthly job gets one for each month that's due (due_invoices: the month's visits, or a fixed
+ * price's lines once), and a fixed price invoiced as needed its lines. Each invoice succeeds or fails
+ * on its own. A job whose autopay charge is waiting is left to it: autopay bills and charges those
+ * visits (or that month) itself (services/autopay.ts), and billing them here first would leave it
+ * nothing to charge. With `work`, each invoice also gets its job's logged work (addLoggedWork)
+ * before it's sent.
  */
-export async function invoiceJobs(s: SalesScope, jobIds: readonly string[], send: boolean) {
-  const jobs = must(await s.db.from("jobs").select("id, number, title, kind, billing_mode").eq("company_id", s.companyId).in("id", [...jobIds]));
-  const { data: waiting } = await s.db.from("autopay_charges").select("job_id").eq("company_id", s.companyId).eq("status", "waiting").in("job_id", jobs.map((j) => j.id));
+export async function invoiceJobs(s: SalesScope, jobIds: readonly string[], send: boolean, work?: { rateId?: string }) {
+  const jobs = must(await s.db.from("jobs").select("id, number, title, kind, billing_mode, pricing").eq("company_id", s.companyId).in("id", [...jobIds]));
+  const ids = jobs.map((j) => j.id);
+  const timeZone = work ? must(await s.db.from("companies").select("timezone").eq("id", s.companyId).maybeSingle()).timezone || "UTC" : "UTC";
+  const [{ data: waiting }, { data: due }] = await Promise.all([
+    s.db.from("autopay_charges").select("job_id").eq("company_id", s.companyId).eq("status", "waiting").in("job_id", ids),
+    s.db.from("due_invoices").select("job_id, month").eq("company_id", s.companyId).in("job_id", ids).order("month"),
+  ]);
   const autopay = new Set((waiting ?? []).map((row) => row.job_id));
-  const results: Array<{ job_id: string; number: number | null; ok: boolean; invoice_id?: string; sent?: boolean; error?: string }> = [];
+  const results: Array<{ job_id: string; number: number | null; month?: string; ok: boolean; invoice_id?: string; sent?: boolean; error?: string }> = [];
   for (const job of jobs) {
     if (autopay.has(job.id)) {
       results.push({ job_id: job.id, number: job.number, ok: false, error: "This job is charged automatically tonight." });
       continue;
     }
-    const kind = job.billing_mode === "per_visit" || job.kind === "recurring" ? "visits" : "standard";
-    const created = await s.db.rpc("create_invoice_for_job", { p_job: job.id, p_kind: kind });
-    if (created.error) {
-      results.push({ job_id: job.id, number: job.number, ok: false, error: dbError(created.error).message });
-      continue;
-    }
-    const invoiceId = created.data as string;
-    let sent = false;
-    let error: string | undefined;
-    if (send) {
-      const invoice = must(await s.db.from("invoices").select("id, number, status, total, balance_due, client_id, client:clients(display_name, email, phone)").eq("id", invoiceId).maybeSingle());
-      try {
-        const result = await deliver(s, "invoice", invoice, { channel: "email" });
-        sent = result.sent;
-        if (sent) await s.db.from("invoices").update({ status: "sent" }).eq("id", invoiceId);
-        else error = result.reason ?? "Not sent";
-      } catch (e) {
-        error = e instanceof HttpError ? e.message : "Couldn't send it";
+    const kind = job.kind === "recurring" && job.pricing === "fixed" ? "standard" : job.billing_mode === "per_visit" || job.kind === "recurring" ? "visits" : "standard";
+    const months = (due ?? []).filter((d) => d.job_id === job.id).map((d) => d.month as string);
+    for (const month of months.length ? months : [undefined]) {
+      const created = await s.db.rpc("create_invoice_for_job", { p_job: job.id, p_kind: kind, ...(month && { p_month: month }) });
+      if (created.error) {
+        results.push({ job_id: job.id, number: job.number, ...(month && { month }), ok: false, error: dbError(created.error).message });
+        continue;
       }
+      const invoiceId = created.data as string;
+      if (work) {
+        try {
+          await addLoggedWork(s, invoiceId, job.id, work.rateId, timeZone);
+        } catch (e) {
+          // Not sent without it: the draft is there to finish by hand.
+          results.push({ job_id: job.id, number: job.number, ...(month && { month }), ok: false, invoice_id: invoiceId, error: `Its logged work couldn't be added (${e instanceof Error ? e.message : "try again"}). The invoice is in Drafts.` });
+          continue;
+        }
+      }
+      let sent = false;
+      let error: string | undefined;
+      if (send) {
+        const invoice = must(await s.db.from("invoices").select("id, number, status, total, balance_due, client_id, client:clients(display_name, email, phone)").eq("id", invoiceId).maybeSingle());
+        try {
+          const result = await deliver(s, "invoice", invoice, { channel: "email" });
+          sent = result.sent;
+          if (sent) await s.db.from("invoices").update({ status: "sent" }).eq("id", invoiceId);
+          else error = result.reason ?? "Not sent";
+        } catch (e) {
+          error = e instanceof HttpError ? e.message : "Couldn't send it";
+        }
+      }
+      results.push({ job_id: job.id, number: job.number, ...(month && { month }), ok: true, invoice_id: invoiceId, sent, error });
     }
-    results.push({ job_id: job.id, number: job.number, ok: true, invoice_id: invoiceId, sent, error });
   }
   return { results };
+}
+
+/**
+ * A job's logged hours and materials no invoice bills yet (core workToBill, as the invoice's Add
+ * logged work step reads them), with the price list items hours can be billed at.
+ */
+export async function loggedWork(db: Db, companyId: string, jobId: string) {
+  const [time, materials, invoices, services] = await Promise.all([
+    db.from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("company_id", companyId).eq("job_id", jobId).not("ended_at", "is", null).order("started_at").limit(2000),
+    db.from("job_materials").select("id, name, quantity, unit, service_id, logged_at").eq("company_id", companyId).eq("job_id", jobId).order("logged_at").limit(2000),
+    db.from("invoices").select("lines:invoice_line_items(time_entry_ids, material_ids)").eq("company_id", companyId).eq("job_id", jobId).neq("status", "void").limit(500),
+    db.from("services").select("id, name, unit, unit_price, taxable, active").eq("company_id", companyId),
+  ]);
+  const prices = must(services);
+  return { ...workToBill({ time: must(time), materials: must(materials), billed: must(invoices).flatMap((i) => i.lines), services: prices }), rates: laborRates(prices) };
+}
+
+/**
+ * Batch invoicing's "Add logged hours and materials": a job's logged work on its new invoice, as Add
+ * logged work starts out ticked (core workLines): the hours at `rateId` (else the first item sold by
+ * the hour; none without one), and the materials that have a price.
+ */
+async function addLoggedWork(s: SalesScope, invoiceId: string, jobId: string, rateId: string | undefined, timeZone: string) {
+  const work = await loggedWork(s.db, s.companyId, jobId);
+  const rate = work.rates.find((r) => r.id === rateId) ?? work.rates[0] ?? null;
+  const lines = workLines({ hours: rate ? work.hours : [], rate, materials: work.materials.filter((m) => m.unit_price !== null), timeZone });
+  if (!lines.length) return;
+  const sort = Math.max(0, ...must(await s.db.from("invoice_line_items").select("sort").eq("invoice_id", invoiceId)).map((l) => l.sort));
+  must(await s.db.from("invoice_line_items").insert(lines.map((l, i) => ({ ...l, company_id: s.companyId, invoice_id: invoiceId, sort: sort + i + 1 }))).select("id"));
 }
 
 /**

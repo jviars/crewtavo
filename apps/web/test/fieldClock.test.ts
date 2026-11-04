@@ -128,7 +128,7 @@ it("doesn't promise a running clock to someone who has none", () => {
   expect(statusSaved({ skipped: true, visitStatus: "cancelled" }, { ...change, clock: false })).toBe("The office cancelled this visit");
 });
 
-it("decides at the tap whether it clocks, and only then asks the phone where it is", () => {
+it("decides at the tap whether it clocks, and asks the phone where it is for a clock or On my way", () => {
   const at = "2026-10-17T13:00:00Z";
   const visit = { id: "v1", jobId: "j1" };
   const person = (role: string, extra: object = {}, settings: Record<string, unknown> = {}) => ({ role, userId: "u1", subcontractor: null, company: { id: "c1", settings }, ...extra }) as never;
@@ -141,8 +141,30 @@ it("decides at the tap whether it clocks, and only then asks the phone where it 
   const crew = statusChange(person("field_crew"), visit, "in_progress", at);
   expect(crew).toMatchObject({ change: { clock: true }, locate: true });
   expect(crew.change).not.toHaveProperty("sub");
-  expect(statusChange(person("field_crew"), visit, "en_route", at).locate).toBe(false);
+  // On my way asks too, to tell the client when the crew should get there, even for a sub without a clock.
+  expect(statusChange(person("field_crew"), visit, "en_route", at).locate).toBe(true);
+  expect(statusChange(sub(false), visit, "en_route", at).locate).toBe(true);
+  expect(statusChange(person("field_crew"), visit, "scheduled", at).locate).toBe(false);
+  // Not where the business doesn't keep where people are.
   expect(statusChange(person("field_crew", {}, { clock: { record_location: false } }), visit, "in_progress", at).locate).toBe(false);
+  expect(statusChange(person("field_crew", {}, { clock: { record_location: false } }), visit, "en_route", at).locate).toBe(false);
+});
+
+it("sends where the phone was with On my way, for the arrival time, and keeps it off the clock", async () => {
+  server.sent = [];
+  const place = { lat: 37.131, lng: -80.408, accuracy: 12 };
+  await tap("alice", "en_route", "2026-10-17T12:50:00Z", place);
+  expect(server.sent).toEqual([{ status: "en_route", forward_only: true, from: { lat: 37.131, lng: -80.408 } }]);
+  expect(server.entries).toEqual([]);
+  // A phone that couldn't say sends none, and the server works it out another way or leaves it out.
+  server.sent = [];
+  server.status = "scheduled";
+  await setVisitStatus({ companyId: "c1", userId: "alice", visitId: "v1", jobId: null, status: "en_route", at: "2026-10-17T12:50:00Z", place: { missing: "denied" } });
+  expect(server.sent).toEqual([{ status: "en_route", forward_only: true }]);
+  // A clock tap's place stays the clock's.
+  server.sent = [];
+  await tap("alice", "in_progress", "2026-10-17T13:00:00Z", place);
+  expect(server.sent).toEqual([{ status: "in_progress", forward_only: true }]);
 });
 
 it("moves a sub's visit along when the office turned their clock off after the phone last heard, without clocking", async () => {

@@ -296,6 +296,15 @@ insert into public.web_hits (company_id, day, visitor, path, entry, device) valu
 insert into public.drive_folders (company_id, name) values (:'co', 'Company files');
 insert into public.trashed_files (company_id, path, source, label) values (:'co', :'co' || '/receipts/d1070000-0000-0000-0000-0000000000d8.jpg', 'receipt', 'Receipt');
 insert into public.storage_allowances (company_id, role_key, limit_bytes) values (:'co', 'field_crew', 1000000000);
+-- Ann asked to cancel the roof visit Al is on (20261105000600_visit_change_requests.sql): the office's, never a sub's.
+insert into public.visit_change_requests (company_id, visit_id, client_id, kind, reason) values (:'co', :'v1', :'c1', 'cancel', 'Rain all week');
+-- Ann and Bob marked not the same client (20261106000100_client_merge.sql): the office's, never a sub's.
+insert into public.client_duplicate_dismissals (company_id, client_a, client_b) values (:'co', least(:'c1'::uuid, :'c2'::uuid), greatest(:'c1'::uuid, :'c2'::uuid));
+-- A custom field on the business's jobs (20261103000700_custom_fields.sql): the team's, never a sub's.
+insert into public.custom_field_definitions (company_id, record_type, key, label, type) values (:'co', 'job', 'permit', 'Permit number', 'text');
+-- Ann's attic fan at the house Al roofs, serviced on his visit (20261106000200_property_equipment.sql): the team's, never a sub's.
+insert into public.property_assets (company_id, property_id, name, location) values (:'co', :'p1', 'Attic fan', 'Attic') returning id as attic_fan \gset
+insert into public.visit_assets (company_id, visit_id, asset_id) values (:'co', :'v1', :'attic_fan');
 -- Ann's card on file, her agreement to autopay and a charge on the roof invoice that was declined
 -- (20261101000100_autopay.sql): the office's, never a sub's.
 insert into public.client_payment_methods (company_id, client_id, stripe_payment_method_id, stripe_customer_id, livemode, type, brand, last4, exp_month, exp_year, is_default)
@@ -481,6 +490,7 @@ select t1070.expect_error(format('insert into public.job_pay (company_id, job_id
 select t1070.expect_error(format('insert into public.job_pay_lines (company_id, job_pay_id, description, quantity, rate) values (%L, %L, %L, 1, 500)', :'co', :'al_pay', 'Bonus'), 'or add to their own price');
 select t1070.expect_error(format('insert into public.job_pay_visits (company_id, job_pay_id, visit_id) values (%L, %L, %L)', :'co', :'al_pay', :'v2'), 'or put it on another visit');
 select t1070.expect_error(format('insert into public.pay_rates (company_id, subcontractor_id, basis, rate) values (%L, %L, %L, 999)', :'co', 'd1070000-0000-0000-0000-0000000000c1', 'per_job'), 'or set their own rate');
+select t1070.expect_error(format('insert into public.property_assets (company_id, property_id, name) values (%L, %L, %L)', :'co', :'p1', 'Skylight'), 'or add equipment at their visit''s property');
 select t1070.check(t1070.changed(format('update public.jobs set title = %L where id = %L', 'Mine', :'j1')) = 0
   and t1070.changed(format('update public.properties set line1 = %L where id = %L', 'Mine', :'p1')) = 0
   and t1070.changed(format('update public.property_access set gate_code = %L where property_id = %L', '0000', :'p1')) = 0
@@ -508,30 +518,52 @@ rollback;
 select t1070.check(array(
   select p.proname || '(' || oidvectortypes(p.proargtypes) || ')' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'execute') order by 1) = array[
-  'accept_terms(uuid, text)', 'answer_sub_offer(uuid, boolean, text, integer, uuid)', 'apply_promo_code(text, uuid, text, uuid, uuid[])',
+  'accept_terms(uuid, text)',
+  -- Adding work on site: the team on the visit only, never a sub (the job's prices are the client's).
+  'add_field_line(uuid, uuid, numeric, uuid)',
+  'answer_sub_offer(uuid, boolean, text, integer, uuid)', 'apply_promo_code(text, uuid, text, uuid, uuid[])',
   'apply_quote_options(uuid, jsonb, text, uuid[], jsonb)', 'apply_referral_credit(uuid, uuid)', 'approve_autopay_charge(uuid)', 'automated_campaign_states(uuid)',
   'autopay_pause(uuid, boolean)', 'autopay_set_settings(uuid, jsonb)', 'autopay_vouch(uuid, uuid[], text)', 'call_off_autopay_charge(uuid)',
   'campaign_audience(uuid, jsonb)', 'campaign_audience_choices(uuid)', 'campaign_recipient_results(uuid, integer, integer, text)', 'campaign_results(uuid, uuid)',
-  'careers_set_enabled(uuid, boolean)', 'change_sub_offer(uuid, jsonb, timestamp with time zone)', 'chargeable_invoices(uuid, uuid)',
+  'careers_set_enabled(uuid, boolean)',
+  -- Tagging many clients at once: runs as the caller, and no rule lets a sub change a client.
+  'change_client_tags(uuid[], text, text)',
+  'change_sub_offer(uuid, jsonb, timestamp with time zone)', 'chargeable_invoices(uuid, uuid)',
   'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
-  'chat_save_roles(uuid, jsonb, jsonb)', 'chat_set_enabled(uuid, boolean)', 'company_basics(uuid)', 'convert_quote_to_job(uuid)',
-  'create_company(text, text, text)', 'create_invoice_for_job(uuid, text, numeric)', 'dashboard(uuid)',
+  'chat_save_roles(uuid, jsonb, jsonb)', 'chat_set_enabled(uuid, boolean)',
+  -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.
+  'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)', 'company_basics(uuid)', 'convert_quote_to_job(uuid)',
+  'create_company(text, text, text)', 'create_invoice_for_job(uuid, text, numeric, date)', 'dashboard(uuid)', 'dismiss_client_duplicate(uuid, uuid, uuid)',
   'drive_clients(uuid, text, integer)', 'drive_list(uuid, text, uuid, text, integer)', 'drive_restore(text, uuid)', 'drive_root(uuid)',
   'drive_set_enabled(uuid, boolean)', 'drive_trash(uuid)', 'drive_trash_file(uuid)', 'drive_trash_folder(uuid)', 'drive_trash_version(uuid)',
-  'drive_versions(uuid)', 'duplicate_quote(uuid)',
-  'equipment_conflicts(uuid, uuid[], date, timestamp with time zone, timestamp with time zone, uuid)', 'global_search(uuid, text, integer)', 'inactive_client_count(uuid, integer)',
+  'drive_versions(uuid)', 'duplicate_quote(uuid, text, uuid, uuid, text, jsonb)',
+  'equipment_conflicts(uuid, uuid[], date, timestamp with time zone, timestamp with time zone, uuid)', 'global_search(uuid, text, integer)',
+  -- Bringing work over from Jobber: an owner's or admin's, never a sub's.
+  'import_jobber(uuid, text, jsonb)', 'inactive_client_count(uuid, integer)',
+  -- The checklists a job's items bring up: a sub's, for the jobs of their own visits (as job_scope).
+  'job_checklists(uuid)',
   'job_material_costs(uuid)', 'job_pay_accept(uuid, uuid[])', 'job_pay_cancel(uuid)', 'job_pay_costs(uuid[])', 'job_pay_covers(uuid, uuid, uuid)', 'job_pay_mark_done(uuid, date)',
   'job_pay_mark_paid(uuid[], text, date, text, numeric)', 'job_pay_start(uuid, uuid, uuid, uuid[])', 'job_pay_suggest(uuid, uuid, uuid, uuid[])',
-  'job_pay_unmark_paid(uuid[])', 'job_promo_discounts(uuid)', 'job_scope(uuid)', 'last_referral_ask(uuid, uuid)', 'last_review_ask(uuid, uuid)',
-  'marketing_set_enabled(uuid, boolean)', 'marketing_summary(uuid)', 'material_choices(uuid)', 'my_crew_ids(uuid)', 'my_sub_offers(boolean, uuid)',
+  'job_pay_unmark_paid(uuid[])', 'job_promo_discounts(uuid)', 'job_scope(uuid)',
+  -- Runs with the caller's access: a sub sees the state of their own jobs, from their own visits.
+  'job_state(jobs)', 'last_referral_ask(uuid, uuid)', 'last_review_ask(uuid, uuid)',
+  'marketing_set_enabled(uuid, boolean)', 'marketing_summary(uuid)', 'material_choices(uuid)', 'merge_clients(uuid, uuid, uuid)',
+  -- Saving a screen's own settings: runs as the caller, so owners and admins only, never a sub.
+  'merge_company_settings(uuid, jsonb)', 'my_crew_ids(uuid)', 'my_sub_offers(boolean, uuid)',
   'my_sub_pay_totals(uuid)', 'promo_code_jobs(uuid, boolean)', 'promo_code_usage(uuid)', 'put_quote_package(uuid, uuid, jsonb, boolean)',
   'record_photos(uuid, uuid, uuid)', 'referral_auto_apply(uuid, boolean)', 'referral_credits_for(uuid, uuid)', 'referral_give_credit(uuid)', 'referral_no_reward(uuid)',
   'referral_set_given(uuid)', 'referral_stats(uuid, timestamp with time zone, timestamp with time zone)', 'remove_promo_code(text, uuid)',
   'remove_quote_option(uuid, uuid)', 'remove_referral_credit(uuid)', 'request_manual_charges(uuid, uuid[], numeric[])', 'review_stats(uuid)',
-  'search_sops(uuid, text, integer, boolean)', 'send_sub_offer(uuid, timestamp with time zone)', 'set_job_discount_billing(uuid, uuid, boolean)',
+  'search_sops(uuid, text, integer, boolean)', 'send_sub_offer(uuid, timestamp with time zone)',
+  -- Runs as the caller: no rule lets a sub link a checklist to an item.
+  'set_checklist_services(uuid, uuid[])', 'set_job_discount_billing(uuid, uuid, boolean)',
   'set_photo_shareable(uuid, boolean)', 'set_promo_code_jobs(uuid, boolean)', 'set_sub_reminders(uuid, boolean)', 'set_sub_sign_in_countries(uuid, text[])',
+  -- Weather rules: the owner and the office with Settings only, never a sub.
+  'set_weather_rules(uuid, jsonb)',
   'sign_quote(uuid, jsonb, uuid, numeric)', 'social_photos(uuid, timestamp with time zone, uuid, integer, uuid)',
   'storage_overview(uuid)', 'storage_set_allowance(uuid, uuid, text, bigint)', 'storage_set_limit(uuid, text, bigint)', 'sub_1099_totals(uuid, integer)', 'sub_wc_audit(uuid, date, date)', 'time_entry_places(uuid, uuid[])',
+  -- Installs Paving or Roofing: owners and admins who connect apps only, never a sub.
+  'trade_app_set_enabled(uuid, text, boolean)',
   'trash_delete_forever(uuid, jsonb)', 'visit_autopay(uuid)', 'visit_contact(uuid)', 'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',
   'website_forms_set_enabled(uuid, boolean)', 'withdraw_sub_offer(uuid)']::text[],
   'the functions a signed-in person can call are the known list (a new one needs a decision about subs, here)');
@@ -561,6 +593,14 @@ select t1070.check(not exists (select 1 from unnest(array['public.claim_autopay_
     'public.autopay_account_left(uuid, boolean, text)', 'public.emit_card_expiry_alerts()']) as f
   where has_function_privilege('authenticated', f, 'execute') or has_function_privilege('anon', f, 'execute')),
   'autopay''s charging, saving cards, agreements and card alerts are the server''s alone');
+-- So are monthly jobs' invoice reminders (20261104000800_recurring_billing.sql).
+select t1070.check(not has_function_privilege('authenticated', 'public.emit_invoice_reminders(timestamptz)', 'execute')
+  and not has_function_privilege('anon', 'public.emit_invoice_reminders(timestamptz)', 'execute'),
+  'monthly jobs'' invoice reminders are the server''s alone');
+-- So are a visit's busy times, for the Client Hub's open slots (20261105000600_visit_change_requests.sql).
+select t1070.check(not has_function_privilege('authenticated', 'public.visit_busy_times(uuid, uuid, timestamptz, timestamptz)', 'execute')
+  and not has_function_privilege('anon', 'public.visit_busy_times(uuid, uuid, timestamptz, timestamptz)', 'execute'),
+  'a visit''s busy times are the server''s alone');
 
 -- The owner sees where Cy clocked in, so the check on a sub below is about a real entry with a place.
 begin;
@@ -586,6 +626,7 @@ select t1070.check(public.my_crew_ids(:'co') = '{}' and not exists (select 1 fro
   and not exists (select 1 from public.time_entry_places(:'co', array[:'cy_entry']::uuid[])) and not exists (select 1 from public.chat_overview(:'co'))
   and not exists (select 1 from public.chat_members(:'general')),
   'no crews, price list, material costs, clock places or chat');
+select t1070.expect_error(format('select public.add_field_line(%L, %L, 1)', :'v1', :'shingles_service'), 'add_field_line refuses, even on their own visit');
 select t1070.expect_error(format('select public.chat_mark_read(%L)', :'general'), 'chat_mark_read refuses');
 select t1070.expect_error(format('select public.chat_set_enabled(%L, false)', :'co'), 'chat_set_enabled refuses');
 select t1070.expect_error(format('select public.chat_create_channel(%L, %L, %L)', :'co', 'subs', 'everyone'), 'chat_create_channel refuses');
@@ -602,6 +643,8 @@ select t1070.expect_error(format('select public.apply_promo_code(%L, %L, %L)', '
 -- A job's promo discounts (20261031000600_promo_once_per_job.sql) are the office's and sales'.
 select t1070.expect_error(format('select public.job_promo_discounts(%L)', :'j1'), 'job_promo_discounts refuses, though they see the job');
 select t1070.expect_error(format('select public.set_job_discount_billing(%L, gen_random_uuid(), true)', :'j1'), 'set_job_discount_billing refuses');
+-- Bringing work over from Jobber (20261105000300_jobber_import.sql) is an owner's or admin's.
+select t1070.expect_error(format('select public.import_jobber(%L, %L, %L)', :'co', 'jobs', '[]'), 'import_jobber refuses');
 select t1070.expect_error(format('select public.promo_code_jobs(%L, true)', :'spring'), 'promo_code_jobs finds no code');
 select t1070.expect_error(format('select public.set_promo_code_jobs(%L, true)', :'spring'), 'set_promo_code_jobs finds no code');
 -- The estimate's options, its package and signing it on the iPad (20261025000100_contracts_and_options.sql)
@@ -721,7 +764,9 @@ rollback;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "d1070000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
-update public.visits set status = 'en_route' where id = :'v1';
+-- On my way says when they should get there, for the client's text (20261105000210_on_my_way_eta.sql).
+update public.visits set status = 'en_route', eta_at = now() + interval '20 minutes' where id = :'v1';
+select t1070.check((select status = 'en_route' and eta_at > now() from public.visits where id = :'v1'), 'a sub says they''re on the way, and when they should arrive');
 update public.visits set status = 'in_progress', notes = 'Found soft decking by the chimney' where id = :'v1';
 select t1070.check((select status = 'in_progress' and notes like 'Found soft%' from public.visits where id = :'v1'), 'a sub moves their visit along and leaves notes for the office');
 select t1070.expect_error(format('update public.visits set title = %L where id = %L', 'Easy job', :'v1'), 'but doesn''t rename it');

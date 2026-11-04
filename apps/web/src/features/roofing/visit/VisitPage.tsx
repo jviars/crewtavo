@@ -16,6 +16,7 @@
  * option looked at is the one they chose.
  */
 import { isSiteAdjustment, marginPct } from "@crewtavo/core/estimates";
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import { optionTotals, toCents } from "@crewtavo/core/money";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -27,6 +28,7 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { ErrorState } from "@/components/ui/States";
 import { useSession } from "@/lib/session";
+import { useCustomFields } from "../../customFields/CustomFields";
 import { contractTemplate, documentCompany, NO_CONTRACT, quoteDate, quoteDocument, useLetterhead, useMySignature, useQuoteContract, useQuoteTemplate } from "../../documents/data";
 import { DocumentSheet } from "../../documents/EstimateDocument";
 import type { TakeoffRow } from "../../paving/data";
@@ -185,6 +187,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
   // Costs follow the quantities, so the margin is at today's ABC Supply prices.
   useMaterialReprice(quote, true);
   const details = useVisitDetails(quote.id);
+  const fields = useCustomFields("quote");
   const notes = useQuoteNotes(quote.id);
   const sitePrice = useSetSitePrice(quote.id);
   const baseId = useId();
@@ -293,6 +296,8 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
           sent_at: details.data?.sent_at ?? null,
           created_at: details.data?.created_at ?? null,
           approval: null,
+          // The business's fields marked to print, as the quote's own PDF prints them.
+          pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),
         },
         paperLines,
         {
@@ -303,7 +308,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
           contract,
         },
       ),
-    [quote, shownTotals, paperOptionId, details.data, paperLines, tz, choice, contract],
+    [quote, shownTotals, paperOptionId, details.data, fields, paperLines, tz, choice, contract],
   );
   const paperReady = !templatePending && Boolean(details.data);
   const paperRef = useRef<HTMLDivElement>(null);

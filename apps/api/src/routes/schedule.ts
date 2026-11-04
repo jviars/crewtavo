@@ -8,10 +8,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
-import { dbError, HttpError, isoDate, must, param, readJson, uuid } from "../lib/http";
+import { appUrl, dbError, HttpError, isoDate, must, param, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { geocodeAddress, suggestPlaces } from "../services/external";
 import { geocodeLater, geocodeProperty } from "../services/properties";
+import { answerVisitChange } from "../services/visitChanges";
 import { bulkVisits, createVisits, findTime, generateVisits, MAX_ROUTE_STOPS, newVisitInput, previewRoute, saveRoute, scheduleRange, shiftDay, undoRoute, updateVisit, visitChangeInput, type Scope } from "../services/schedule";
 
 export { MAX_ROUTE_STOPS } from "../services/schedule";
@@ -35,9 +36,13 @@ schedule.get("/dashboard", requireUser, requireCompany(), async (c) => {
   return c.json(data as Record<string, unknown>);
 });
 
-/** After a recurring job's schedule changes: create its upcoming visits now, and drop ones it no longer has. */
+/**
+ * After a recurring job's schedule changes: create its upcoming visits now, and drop ones it no longer
+ * has. `upcoming` also gives the visits already made its new title, crew and time.
+ */
 schedule.post("/jobs/:id/generate-visits", requireUser, requireCompany(DISPATCH, "schedule"), async (c) => {
-  return c.json(await generateVisits(scope(c), c.env, param(c, "id")));
+  const body = await readJson(c, z.object({ upcoming: z.boolean().optional() }));
+  return c.json(await generateVisits(scope(c), c.env, param(c, "id"), body.upcoming ?? false));
 });
 
 /**
@@ -179,4 +184,16 @@ schedule.post("/schedule/find-time", requireUser, requireCompany(), async (c) =>
 schedule.post("/schedule/bulk-visits", requireUser, requireCompany(DISPATCH, "schedule"), async (c) => {
   const body = await readJson(c, z.object({ job_ids: z.array(uuid).min(1).max(500), date: isoDate, crew_id: uuid.optional() }));
   return c.json(await bulkVisits(scope(c), body), 201);
+});
+
+/**
+ * A client's request to move or cancel a visit, from the Client Hub: approving moves or cancels the
+ * visit, declining (with a note for them, if any) leaves it. The client is emailed either way.
+ */
+schedule.post("/visit-changes/:id/approve", requireUser, requireCompany(DISPATCH), async (c) => {
+  return c.json(await answerVisitChange(scope(c), c.env, param(c, "id"), { approve: true }, appUrl(c)));
+});
+schedule.post("/visit-changes/:id/decline", requireUser, requireCompany(DISPATCH), async (c) => {
+  const body = await readJson(c, z.object({ note: z.string().trim().max(2000).optional() }));
+  return c.json(await answerVisitChange(scope(c), c.env, param(c, "id"), { approve: false, note: body.note }, appUrl(c)));
 });

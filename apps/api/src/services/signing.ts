@@ -290,7 +290,8 @@ async function deliverCopy(s: SigningScope, quote: Quote, company: Company, link
       const to = body.to || client?.phone;
       if (!to) return { sent: false, reason: `Add a phone number for ${who} first.` };
       // Not to their own phone after they texted STOP; another number is the office's to text.
-      const { data: texted } = await s.db.from("clients").select("id, phone, sms_opt_out_at").eq("id", quote.client_id).maybeSingle();
+      // A signed estimate always has its client: a quote template is never signed.
+      const { data: texted } = await s.db.from("clients").select("id, phone, sms_opt_out_at").eq("id", quote.client_id!).maybeSingle();
       if (texted && textsOffTo(texted, to)) return { sent: false, reason: textsOffRefusal(who) };
       result = await sendSms(s.env, { to, body: sms(linkFor("sms", to)) });
       if (texted) await noteRefusedText(adminClient(s.env), texted, to, result);

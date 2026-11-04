@@ -9,8 +9,9 @@
  * contracts.ts) with their fill-ins filled; a signed quote prints the copy kept with its approval.
  * data.ts loads the library for the staff app; the Client Hub gets it with its link.
  */
-import { addressLines, contractValues, fillIn, resolveSections, sectionsHash, type ContractInput, type ContractOption, type LibrarySection } from "@crewtavo/core/contracts";
+import { addressLines, contractValues, depositFor, fillIn, resolveSections, sectionsHash, type ContractInput, type ContractOption, type LibrarySection } from "@crewtavo/core/contracts";
 import { pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
+import type { ClientChecklist } from "@crewtavo/core/forms";
 import { promoRuleWords } from "@crewtavo/core/promos";
 import { countsOn, lineTotal, optionBaseTotal, optionTierLabels, optionTotals, quoteTotals, toCents, type Amount, type OptionLine } from "@crewtavo/core/money";
 import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
@@ -18,6 +19,7 @@ import { isPackagePicturePath, packagePictureSrc } from "@crewtavo/core/presets"
 import { isIsoDate } from "@crewtavo/core/time";
 import { logoUrl } from "@/lib/files";
 import { dateIn, formatDate, todayIn } from "@/lib/format";
+import { escapeHtml } from "@/lib/html";
 import { scheduleText } from "../jobs/repeatText";
 import type { DocumentCompany, DocumentContract, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "./types";
 
@@ -290,6 +292,8 @@ export interface DocumentQuote {
   tax_amount: Amount;
   total: Amount;
   deposit_amount?: Amount;
+  /** The deposit as a percent of the total (quotes.deposit_percent); null for an amount. */
+  deposit_percent?: Amount;
   valid_until?: string | null;
   /** How often, for recurring work; null for one time. */
   recurrence_rule?: string | null;
@@ -302,9 +306,18 @@ export interface DocumentQuote {
   option_id?: string | null;
   /** `every_visit`: whether it comes off every visit of recurring work or once (left out by older callers). */
   promo?: { code?: string | null; every_visit?: boolean | null } | null;
-  client?: { display_name: string } | null;
+  /** tax_exempt prints "Tax exempt" in the totals, with tax_exempt_note. */
+  client?: { display_name: string; tax_exempt?: boolean | null; tax_exempt_note?: string | null } | null;
   property?: Address;
+  /** The quote's custom fields marked to print (core shownCustomFields, "pdf"), in the strip under the address. */
+  pdf_fields?: ReadonlyArray<{ label: string; text: string }>;
 }
+
+/** "Tax exempt" in the totals, for a tax-exempt client charged no tax (with their certificate number or note). */
+const exemption = (client: DocumentQuote["client"], tax: Amount) => (client?.tax_exempt && Number(tax ?? 0) === 0 ? { taxExempt: client.tax_exempt_note?.trim() || "" } : {});
+
+/** Custom fields as the strip prints them: "Permit number: P-1042". */
+const fieldFacts = (fields: ReadonlyArray<{ label: string; text: string }> | undefined) => (fields ?? []).map((f) => `${f.label}: ${f.text}`);
 
 export interface DocumentQuoteLine {
   name: string;
@@ -419,8 +432,8 @@ export const choiceFact = (choice: { name: string; tier?: string | null }) => `Y
  */
 export function quoteDocument(quote: DocumentQuote, lines: readonly DocumentQuoteLine[], extras: DocumentExtras = {}): DocumentData {
   const discount = Number(quote.discount_amount ?? 0);
-  // Never more than the total being signed: a cheaper option or a price set on site can come to less (as {Deposit} says).
-  const deposit = Math.min(Number(quote.deposit_amount ?? 0), Math.max(Number(quote.total ?? 0), 0));
+  // A percent of the total being signed, else never more than it: a cheaper option or a price set on site can come to less (as {Deposit} says).
+  const deposit = Number(depositFor(quote.deposit_amount ?? 0, quote.total ?? 0, quote.deposit_percent));
   const approval = quote.status === undefined || isSignedQuote(quote.status) ? readApproval(quote.approval) : null;
   const shown = approval?.option?.id ?? (extras.optionId !== undefined ? extras.optionId : quote.option_id ?? null);
   const choice = approval?.option ?? extras.choice ?? null;
@@ -432,14 +445,15 @@ export function quoteDocument(quote: DocumentQuote, lines: readonly DocumentQuot
     number: quote.number,
     date: extras.date ?? quote.sent_at ?? quote.created_at ?? null,
     validUntil: quote.valid_until ?? null,
-    // No project name, package or roof size under the address: only, signing for an option, which one.
-    facts: choice ? [choiceFact(choice)] : [],
+    // No project name, package or roof size under the address: only, signing for an option, which one, and the business's fields marked to print.
+    facts: [...(choice ? [choiceFact(choice)] : []), ...fieldFacts(quote.pdf_fields)],
     client: extras.client ?? { name: quote.client?.display_name ?? "", lines: addressLines(quote.property) },
     lines: documentLines(lines, shown),
     subtotal: Number(quote.subtotal ?? 0),
     discount,
     discountLabel: discount > 0 && quote.promo?.code ? `Promo code ${quote.promo.code}${quote.promo.every_visit != null ? ` · ${promoRuleWords(quote.promo.every_visit)}` : ""}` : undefined,
     tax: Number(quote.tax_amount ?? 0),
+    ...exemption(quote.client, quote.tax_amount),
     total: Number(quote.total ?? 0),
     deposit: deposit > 0 ? deposit : null,
     repeats: quote.recurrence_rule ? scheduleText(quote.recurrence_rule, quote.active_months) : null,
@@ -647,11 +661,26 @@ export interface DocumentInvoice {
   retainage_amount: Amount;
   balance_due: Amount;
   promo?: { code?: string | null } | null;
-  client?: { display_name: string } | null;
+  /** tax_exempt prints "Tax exempt" in the totals, with tax_exempt_note. */
+  client?: { display_name: string; tax_exempt?: boolean | null; tax_exempt_note?: string | null } | null;
   /** An invoice offers no options: every line is on it. */
   lines: ReadonlyArray<Omit<DocumentQuoteLine, "option_id">>;
   payments: ReadonlyArray<{ amount: Amount; received_at: string }>;
+  /** The invoice's custom fields marked to print, in the strip with its subject. */
+  pdf_fields?: ReadonlyArray<{ label: string; text: string }>;
+  /** The checklists shown to the client on the visits it bills, printed after its contract (the Client Hub sends them). */
+  checklists?: readonly ClientChecklist[];
 }
+
+/** Each checklist as a section of its own: its name and visit day, then a row for each answer. */
+export const checklistSections = (checklists: readonly ClientChecklist[] = []): DocumentSection[] =>
+  checklists.map((c, i) => ({
+    id: `checklist-${i}`,
+    title: c.visit_on ? `${c.name} · ${formatDate(c.visit_on)}` : c.name,
+    html: `<table><tbody>${c.answers.map((a) => `<tr><td>${escapeHtml(a.label)}</td><td>${escapeHtml(a.text).replace(/\n/g, "<br>")}</td></tr>`).join("")}</tbody></table>`,
+    place: "terms",
+    initials: false,
+  }));
 
 /**
  * Each credit as much of it as the invoice takes, in the order they went on, so they add up to
@@ -690,17 +719,19 @@ export function invoiceDocument(inv: DocumentInvoice, extras: { timeZone: string
     date: inv.issued_on,
     dueOn: inv.due_on,
     title: inv.subject,
+    ...(inv.pdf_fields?.length ? { facts: fieldFacts(inv.pdf_fields) } : {}),
     client: { name: inv.client?.display_name ?? "", lines: [] },
     lines: documentLines(inv.lines.map((l) => ({ ...l, option_id: null }))),
     subtotal: Number(inv.subtotal),
     discount,
     discountLabel: discount > 0 && inv.promo?.code ? `Promo code ${inv.promo.code}` : undefined,
     tax: Number(inv.tax_amount),
+    ...exemption(inv.client, inv.tax_amount),
     total: Number(inv.total),
     payments,
     balanceDue: Number(inv.balance_due),
     notes: inv.notes?.trim() || null,
-    ...(extras.contract ? { contract: { sections: extras.contract.sections } } : {}),
+    ...(extras.contract || inv.checklists?.length ? { contract: { sections: [...(extras.contract?.sections ?? []), ...checklistSections(inv.checklists)] } } : {}),
   };
 }
 
@@ -744,8 +775,66 @@ export const SAMPLE_GENERAL_DOCUMENT: DocumentData = sample(
   { client: { name: "Alex Morgan", lines: ["1482 Maple Ave", "Springfield, IL 62704"] }, deposit: null },
 );
 
+const SAMPLE_CLIENT = { client: { name: "Alex Morgan", lines: ["1482 Maple Ave", "Springfield, IL 62704"] }, deposit: null };
+
+/** An estimate from each trade's price list (its preset), for the trades that have their own. */
+export const TRADE_SAMPLES: Record<string, DocumentData> = {
+  roofing_exteriors: SAMPLE_DOCUMENT,
+  plumbing: sample([
+    ["Water heater install, 50 gal gas", 1, "ea", 1850, "Remove and haul away the old tank"],
+    ["Shut-off valve replacement", 1, "ea", 185],
+    ["Labor", 1.5, "hr", 125, "Bring the gas line and venting up to code"],
+    ["Plumbing permit", 1, "ea", 125],
+  ], SAMPLE_CLIENT),
+  hvac: sample([
+    ["Central AC install, 3 ton", 1, "ea", 6500, "Matched coil, new pad and disconnect"],
+    ["Smart thermostat install", 1, "ea", 325],
+    ["New duct run", 2, "ea", 425],
+    ["Comfort maintenance plan", 12, "month", 19, "Two tune-ups a year"],
+  ], SAMPLE_CLIENT),
+  electrical: sample([
+    ["Panel upgrade, 200 amp", 1, "ea", 2850, "New panel, breakers and grounding"],
+    ["Whole-home surge protector", 1, "ea", 395],
+    ["EV charger install, Level 2", 1, "ea", 1150, "On its own 60-amp circuit"],
+    ["Electrical permit", 1, "ea", 150],
+  ], SAMPLE_CLIENT),
+  cleaning: sample([
+    ["Deep clean", 1, "visit", 325, "First visit, top to bottom"],
+    ["Bi-weekly clean", 2, "visit", 145, "Kitchen, bathrooms, dusting and floors"],
+    ["Inside oven", 1, "ea", 45],
+    ["Inside fridge", 1, "ea", 40],
+  ], SAMPLE_CLIENT),
+  pool_service: sample([
+    ["Pool opening", 1, "visit", 325, "Cover off, equipment started, water balanced"],
+    ["Weekly pool service plan", 3, "month", 165, "Chemicals included"],
+    ["Filter cleaning", 1, "ea", 125],
+    ["Salt cell cleaning", 1, "ea", 95],
+  ], SAMPLE_CLIENT),
+  pest_control: sample([
+    ["Initial treatment", 1, "visit", 199, "Inside and out"],
+    ["Quarterly pest plan", 12, "month", 45, "A visit every three months"],
+    ["Termite inspection", 1, "visit", 95],
+    ["Rodent bait station", 4, "ea", 45],
+  ], SAMPLE_CLIENT),
+  handyman: sample([
+    ["TV wall mount", 1, "ea", 149, "Wires hidden in a paintable cover"],
+    ["Drywall patch, up to 1 ft", 2, "ea", 150],
+    ["Interior door install", 1, "ea", 275],
+    ["Labor", 2, "hr", 85, "The rest of your list"],
+    ["Materials at cost", 1, "lump sum", 120],
+  ], SAMPLE_CLIENT),
+  landscaping: sample([
+    ["Landscape design plan", 1, "ea", 750],
+    ["Bed edging", 120, "ft", 8],
+    ["Shrub, 3 gal, planted", 12, "ea", 65],
+    ["Perennial, 1 gal, planted", 24, "ea", 22],
+    ["Mulch, installed", 6, "cu yd", 95, "Shredded hardwood, 3 inches deep"],
+    ["Paver patio", 240, "sq ft", 22, "Base, pavers and polymeric sand"],
+  ], SAMPLE_CLIENT),
+};
+
 /** The sample that looks like the business's own work. */
-export const sampleDocument = (trade: string | null | undefined) => (trade === "roofing_exteriors" ? SAMPLE_DOCUMENT : SAMPLE_GENERAL_DOCUMENT);
+export const sampleDocument = (trade: string | null | undefined) => (trade && TRADE_SAMPLES[trade]) || SAMPLE_GENERAL_DOCUMENT;
 
 /** A business as printed, from what the app already knows (session company, or a companies row). */
 export function documentCompany(row: { name: string; phone?: string | null; email?: string | null; website?: string | null; address?: unknown; settings?: unknown }): DocumentCompany {

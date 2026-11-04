@@ -4,30 +4,44 @@
  * and a recurring job's upcoming visits made right away (services/schedule.ts generateVisits).
  * Also importing a whole schedule from another system: repeating series, one-time jobs and tasks.
  */
-import { buildSimpleRule, describeRule, localDate, normalizeKey, occurrenceDates, parseRule, ruleDay, sameStreet, zonedTimeToUtc } from "@crewtavo/core";
+import { billingText, buildSimpleRule, describeRule, localDate, normalizeKey, occurrenceDates, parseRule, ruleDay, sameStreet, zonedTimeToUtc } from "@crewtavo/core";
 import { z } from "zod";
 import { createVisits, generateVisits } from "../services/schedule";
+import { customFieldsArg, customFieldsPatch } from "./customFields";
 import { areaAllows, changed, companyArg, friendly, one, requireArea, rows, scopeOf, tool, type ToolContext } from "./tool";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.");
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use 24-hour HH:MM.");
 const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 
+const WEEKS = { first: 1, second: 2, third: 3, fourth: 4, last: -1 } as const;
+
 export const repeatInput = z
   .object({
+    every_days: z.number().int().min(1).max(52).optional().describe("Every N days instead."),
     every_weeks: z.number().int().min(1).max(52).optional().describe("Weekly every N weeks (2 = every other week)."),
     on_days: z.array(z.enum(WEEKDAYS)).max(7).optional().describe("For weekly: the days, default the first date's weekday."),
     every_months: z.number().int().min(1).max(12).optional().describe("Monthly every N months instead."),
     on_day_of_month: z.number().int().min(1).max(28).optional().describe("For monthly: the day, default the first date's (up to 28)."),
+    on_weekday: z
+      .object({ week: z.enum(["first", "second", "third", "fourth", "last"]), day: z.enum(WEEKDAYS) })
+      .optional()
+      .describe("For monthly: a weekday in the month instead of a date, e.g. {week: \"last\", day: \"FR\"} for the last Friday."),
+    times: z.number().int().min(1).max(500).optional().describe("Ends after this many visits, counted from the first date (ones already done count too), instead of ends_on. Not with rule."),
     rule: z.string().max(300).optional().describe("Or an RRULE without DTSTART, e.g. FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;UNTIL=20261031."),
   })
-  .describe("How often it repeats. Give every_weeks (with on_days), every_months (with on_day_of_month), or a rule.");
+  .describe("How often it repeats. Give every_days, every_weeks (with on_days), every_months (with on_day_of_month or on_weekday), or a rule.");
 
 /** The job's RRULE from the repeat given and its first date. */
 export function repeatRule(r: z.infer<typeof repeatInput>, firstDate: string): string {
   if (r.rule) return parseRule(r.rule);
-  if (r.every_months) return buildSimpleRule({ freq: "MONTHLY", interval: r.every_months, days: [], monthDay: r.on_day_of_month ?? Math.min(28, Number(firstDate.slice(8, 10))) });
-  return buildSimpleRule({ freq: "WEEKLY", interval: r.every_weeks ?? 1, days: r.on_days?.length ? [...r.on_days] : [ruleDay(firstDate)], monthDay: 1 });
+  const count = r.times ?? null;
+  if (r.every_days) return buildSimpleRule({ freq: "DAILY", interval: r.every_days, days: [], monthDay: 1, count });
+  if (r.every_months) {
+    const weekday = r.on_weekday ? { week: WEEKS[r.on_weekday.week], day: r.on_weekday.day } : null;
+    return buildSimpleRule({ freq: "MONTHLY", interval: r.every_months, days: [], monthDay: r.on_day_of_month ?? Math.min(28, Number(firstDate.slice(8, 10))), weekday, count });
+  }
+  return buildSimpleRule({ freq: "WEEKLY", interval: r.every_weeks ?? 1, days: r.on_days?.length ? [...r.on_days] : [ruleDay(firstDate)], monthDay: 1, count });
 }
 
 const lineInput = z.object({
@@ -72,10 +86,11 @@ async function propertyFor(ctx: ToolContext, clientId: string, propertyId?: stri
 }
 
 /** After a recurring job is saved: its upcoming visits, when this assistant may change the schedule and the person's role schedules the whole team. */
-async function scheduleJob(ctx: ToolContext, jobId: string): Promise<{ visits_created: number; note?: string }> {
+async function scheduleJob(ctx: ToolContext, jobId: string, upcoming = false): Promise<{ visits_created: number; visits_changed?: number; note?: string }> {
   if (!areaAllows(ctx, "schedule")) return { visits_created: 0, note: "Its visits weren't scheduled: this assistant can't change the schedule. Allow Schedule in Settings → AI assistants, then save the job again." };
   try {
-    return { visits_created: (await generateVisits(scopeOf(ctx), ctx.env, jobId)).created };
+    const result = await generateVisits(scopeOf(ctx), ctx.env, jobId, upcoming);
+    return { visits_created: result.created, ...(upcoming && { visits_changed: result.updated }) };
   } catch (error) {
     return { visits_created: 0, note: `Its visits weren't scheduled: ${error instanceof Error ? error.message : "it didn't work"}` };
   }
@@ -91,17 +106,25 @@ const jobFields = {
   start_time: time.nullable().optional().describe("Each visit's start time, in the company's time zone; leave out for anytime visits."),
   duration_min: z.number().int().min(1).max(1440).optional().describe("How long each visit takes (default 60)."),
   crew_id: z.uuid().nullable().optional().describe("The crew it's usually done by (list_crews)."),
-  billing_mode: z.enum(["per_visit", "on_completion", "fixed_schedule", "progress"]).optional().describe("Default per_visit for recurring jobs, on_completion for one-off ones."),
+  billing_mode: z.enum(["per_visit", "on_completion", "progress"]).optional().describe("A one-off job: on_completion (the default) or progress. A recurring job is per_visit unless pricing and invoice_schedule say otherwise."),
+  pricing: z.enum(["per_visit", "fixed"]).optional().describe("A recurring job: how it's priced. per_visit, or fixed: its lines are the price of each invoice, however many visits."),
+  invoice_schedule: z
+    .enum(["after_visit", "monthly", "as_needed"])
+    .optional()
+    .describe("A recurring job: when it's invoiced. after_visit; monthly (on invoice_day the office is reminded to invoice the month, and a fixed-price plan on autopay is charged); as_needed (no reminders). A fixed price is monthly or as_needed."),
+  invoice_day: z.number().int().min(1).max(28).nullable().optional().describe("For monthly: the day of the month it's invoiced, 1 to 28; null for the last day of the month (the default)."),
   lines: z.array(lineInput).max(50).optional().describe("What it includes, with prices: price list items or custom lines."),
+  ...customFieldsArg,
 };
 
 const VISIT_DATES_AHEAD = 60;
 
 export const jobTools = {
   list_jobs: tool({
-    description: "Jobs, newest first, with client, property, how they repeat and their usual crew. Filter by status (default active), kind and client.",
+    description:
+      "Jobs, newest first, with client, property, how they repeat, their usual crew and job_state (an active job's late, today, upcoming or unscheduled, from its visits, paused while a recurring job is paused, or requires_invoicing while a monthly job's month waits for its invoice; another job's status), and how it's billed. Filter by status (default active, which includes paused jobs) or one of those states, kind and client.",
     input: z.object({
-      status: z.enum(["all", "active", "requires_invoicing", "completed", "archived"]).default("active"),
+      status: z.enum(["all", "active", "late", "today", "upcoming", "unscheduled", "paused", "requires_invoicing", "completed", "archived"]).default("active"),
       kind: z.enum(["all", "one_off", "recurring"]).default("all"),
       client_id: z.uuid().optional(),
       limit: z.number().int().min(1).max(200).default(50),
@@ -111,36 +134,44 @@ export const jobTools = {
     run: async (ctx, a) => {
       let q = ctx.db
         .from("jobs")
-        .select("id, number, title, kind, status, recurrence_rule, starts_on, ends_on, active_months, visit_start_time, visit_duration_min, billing_mode, client:clients(id, display_name), property:properties(id, line1, city), crew:crews(id, name)", { count: "exact" })
+        .select("id, number, title, kind, status, job_state, recurrence_rule, starts_on, ends_on, active_months, paused_at, resume_on, visit_start_time, visit_duration_min, billing_mode, pricing, invoice_schedule, invoice_day, client:clients(id, display_name), property:properties(id, line1, city), crew:crews(id, name)", { count: "exact" })
         .eq("company_id", ctx.companyId);
-      if (a.status !== "all") q = q.eq("status", a.status);
+      // job_state is the status for any job that isn't active, so every filter but active can use it.
+      if (a.status === "active") q = q.eq("status", "active");
+      else if (a.status !== "all") q = q.eq("job_state", a.status);
       if (a.kind !== "all") q = q.eq("kind", a.kind);
       if (a.client_id) q = q.eq("client_id", a.client_id);
       const { data, error, count } = await q.order("created_at", { ascending: false }).range(a.offset, a.offset + a.limit - 1);
       if (error) throw new Error(friendly(error.message));
-      const jobs = (data ?? []).map((j) => ({ ...j, repeats: j.recurrence_rule ? describeRule(j.recurrence_rule) : null }));
+      const jobs = (data ?? []).map((j) => ({ ...j, repeats: j.recurrence_rule ? describeRule(j.recurrence_rule) : null, billing: billingText(j) }));
       const next = a.offset + jobs.length;
       return { total: count ?? jobs.length, jobs, next_offset: count !== null && next < count ? next : null };
     },
   }),
   get_job: tool({
-    description: "A job in full: client, property, how it repeats, its lines and prices (if your role sees them), and its next visits.",
+    description: "A job in full: client, property, how it repeats, job_state (as in list_jobs) and when a paused one resumes (resume_on), its custom_fields (by key, list_custom_fields), its lines and prices (if your role sees them), and its next visits.",
     input: z.object({ job_id: z.uuid(), ...companyArg }),
     run: async (ctx, a) => {
       const job = await one(
         ctx.db
           .from("jobs")
-          .select("id, number, title, kind, status, instructions, recurrence_rule, starts_on, ends_on, active_months, visit_start_time, visit_duration_min, billing_mode, default_crew_id, client:clients(id, display_name), property:properties(id, line1, city, region, postal_code)")
+          .select("id, number, title, kind, status, job_state, instructions, recurrence_rule, starts_on, ends_on, active_months, paused_at, resume_on, visit_start_time, visit_duration_min, billing_mode, pricing, invoice_schedule, invoice_day, default_crew_id, custom_fields, client:clients(id, display_name), property:properties(id, line1, city, region, postal_code)")
           .eq("id", a.job_id)
           .eq("company_id", ctx.companyId)
           .maybeSingle(),
         "That job",
       );
-      const [lines, visits] = await Promise.all([
+      const [lines, visits, due] = await Promise.all([
         ctx.db.from("job_line_items").select("id, service_id, name, description, quantity, unit, unit_price, taxable").eq("job_id", a.job_id).order("sort"),
         rows(ctx.db.from("visits").select("id, title, status, scheduled_on, starts_at, ends_at, crew_id").eq("job_id", a.job_id).gte("scheduled_on", localDate(new Date(), ctx.timezone)).order("scheduled_on").limit(10)),
+        // The months a monthly job still has to invoice (only for a role that sees invoices).
+        ctx.db.from("due_invoices").select("month, period_start, period_end").eq("job_id", a.job_id).order("month"),
       ]);
-      return { job: { ...job, repeats: job.recurrence_rule ? describeRule(job.recurrence_rule) : null }, lines: lines.error ? "Your role doesn't see prices." : lines.data, next_visits: visits };
+      return {
+        job: { ...job, repeats: job.recurrence_rule ? describeRule(job.recurrence_rule) : null, billing: billingText(job), months_to_invoice: due.data ?? [] },
+        lines: lines.error ? "Your role doesn't see prices." : lines.data,
+        next_visits: visits,
+      };
     },
   }),
   create_job: tool({
@@ -161,18 +192,22 @@ export const jobTools = {
   }),
   update_job: tool({
     description:
-      "Change a job: its title, instructions, crew, visit time and length, billing, how it repeats, first or last date, season, or its lines (lines replaces them all, apart from a promo code's discount, which stays). Set ends_on to stop a recurring job, status archived to put it away. Work you mark done (requires_invoicing) on a job charged automatically (autopay) waits for the office to approve its charge. A recurring job's upcoming visits follow the change.",
+      "Change a job: its title, instructions, crew, visit time and length, billing (a recurring job's pricing and invoice_schedule), how it repeats, first or last date, season, custom fields, or its lines (lines replaces them all, apart from a promo code's discount, which stays). Set ends_on (or repeat.times) to stop a recurring job, status archived to put it away. paused pauses a recurring job (a vacation, the off season) until resume_on, or until paused is set false: its upcoming visits that haven't started come off, and no new visits, monthly invoices or plan charges are made while it's paused; resuming makes its visits again from today. Work you mark done (requires_invoicing) on a job charged automatically (autopay) waits for the office to approve its charge. A recurring job's new visits follow the change; the ones already on the schedule change too (title, crew, time) only with upcoming_visits, so ask the person whether they want that.",
     input: z.object({
       job_id: z.uuid(),
       ...jobFields,
       title: z.string().trim().min(1).max(200).optional(),
       status: z.enum(["active", "requires_invoicing", "completed", "archived"]).optional(),
+      upcoming_visits: z.boolean().optional().describe("A recurring job: also give the visits already on the schedule the new title, crew and time. Done or started visits stay as they were."),
+      paused: z.boolean().optional().describe("A recurring job: true pauses it, false resumes it."),
+      resume_on: date.nullable().optional().describe("With paused true (or for a job already paused): the day it resumes by itself; null until it's resumed."),
       ...companyArg,
     }),
     area: "jobs",
     run: async (ctx, a) => {
       const job = await one(ctx.db.from("jobs").select("id, kind, starts_on, recurrence_rule").eq("id", a.job_id).eq("company_id", ctx.companyId).maybeSingle(), "That job");
       const recurring = a.repeat ? true : job.kind === "recurring";
+      if ((a.paused || a.resume_on) && !recurring) throw new Error("Only a recurring job can be paused.");
       const first = a.first_date ?? job.starts_on ?? localDate(new Date(), ctx.timezone);
       const patch = {
         ...(a.title !== undefined && { title: a.title }),
@@ -185,7 +220,15 @@ export const jobTools = {
         ...(a.duration_min !== undefined && { visit_duration_min: a.duration_min }),
         ...(a.crew_id !== undefined && { default_crew_id: a.crew_id }),
         ...(a.billing_mode !== undefined && { billing_mode: a.billing_mode }),
+        // The database keeps billing_mode in step with these (20261104000800_recurring_billing.sql).
+        ...(a.pricing !== undefined && { pricing: a.pricing }),
+        ...(a.invoice_schedule !== undefined && { invoice_schedule: a.invoice_schedule }),
+        ...(a.invoice_day !== undefined && { invoice_day: a.invoice_day }),
         ...(a.status !== undefined && { status: a.status }),
+        // When it was paused is the database's own time (20261105000500_job_pause.sql).
+        ...(a.paused !== undefined && { paused_at: a.paused ? new Date().toISOString() : null }),
+        ...(a.resume_on !== undefined && { resume_on: a.resume_on }),
+        ...(await customFieldsPatch(ctx, "job", { id: a.job_id }, a.custom_fields)),
       };
       if (Object.keys(patch).length) await changed(ctx.db.from("jobs").update(patch).eq("id", a.job_id).eq("company_id", ctx.companyId).select("id"), "That job");
       if (a.lines) {
@@ -198,8 +241,8 @@ export const jobTools = {
           if (insertError) throw new Error(friendly(insertError.message));
         }
       }
-      const reschedules = recurring && ["recurrence_rule", "starts_on", "ends_on", "active_months", "visit_start_time", "visit_duration_min", "default_crew_id", "status"].some((k) => k in patch);
-      return { saved: true, ...(reschedules ? await scheduleJob(ctx, a.job_id) : {}) };
+      const reschedules = recurring && ["recurrence_rule", "starts_on", "ends_on", "active_months", "visit_start_time", "visit_duration_min", "default_crew_id", "status", "paused_at", "resume_on"].some((k) => k in patch);
+      return { saved: true, ...(reschedules || (recurring && a.upcoming_visits) ? await scheduleJob(ctx, a.job_id, a.upcoming_visits) : {}) };
     },
   }),
   delete_job: tool({
@@ -391,7 +434,12 @@ async function createJob(ctx: ToolContext, a: JobInput) {
         visit_start_time: a.start_time ?? null,
         ...(a.duration_min && { visit_duration_min: a.duration_min }),
         billing_mode: a.billing_mode ?? (recurring ? "per_visit" : "on_completion"),
+        // Given, these win and the database sets billing_mode from them.
+        ...(recurring && a.pricing && { pricing: a.pricing }),
+        ...(recurring && a.invoice_schedule && { invoice_schedule: a.invoice_schedule }),
+        ...(recurring && a.invoice_day !== undefined && { invoice_day: a.invoice_day }),
         ...(recurring && { recurrence_rule: rule, starts_on: first, ends_on: a.ends_on ?? null, active_months: a.season_months?.length ? a.season_months : null }),
+        ...(await customFieldsPatch(ctx, "job", { values: {} }, a.custom_fields)),
       })
       .select("id, number")
       .single(),

@@ -466,7 +466,7 @@ function ReferralList() {
         ? unwrap(await supabase().rpc("referral_auto_apply", { p_referral: v.id, p_on: v.on ?? true }))
         : unwrap(await supabase().rpc(v.fn, { p_referral: v.id })),
     onSuccess: (result, v) => {
-      if (v.fn === "referral_auto_apply") toast.success(v.on === false ? "Kept off invoices" : Number(result) > 0 ? `${creditMoney(Number(result))} went on an invoice` : "It goes on their next invoice");
+      if (v.fn === "referral_auto_apply") toast.success(v.on === false ? "Kept off invoices" : Number(result) > 0 ? `${creditMoney(Number(result), session.company.currency)} went on an invoice` : "It goes on their next invoice");
       // Nothing is given yet: the credit is earned once the friend pays, or now if they have.
       if (v.fn === "referral_give_credit") {
         const status = String(result);
@@ -522,7 +522,7 @@ function ReferralList() {
                 <Link to={r.referred ? `/clients/${r.referred.id}` : "#"} className="strong" style={{ color: "var(--ink)" }}>{r.referred?.display_name ?? r.referred_name}</Link>{" "}
                 <span className="muted">referred by</span> {r.referrer ? <Link to={`/clients/${r.referrer.id}`}>{r.referrer.display_name}</Link> : "a client"}
               </span>
-              <span className="muted small" style={{ display: "block" }}>{timeAgo(r.created_at)} · <CreditWords parts={creditLine(r, r.credits)} /></span>
+              <span className="muted small" style={{ display: "block" }}>{timeAgo(r.created_at)} · <CreditWords parts={creditLine(r, r.credits, session.company.currency)} /></span>
             </span>
             <EntityStatus kind={pill.kind} status={pill.status} />
             <RowMenu
@@ -583,7 +583,7 @@ function ApplyDialog({ referral: r, open: isOpen, onClose, onExited, onApplied }
     },
   });
   const apply = useMutation({
-    meta: { success: (put: number) => `${creditMoney(put)} referral credit applied` },
+    meta: { success: (put: number) => `${creditMoney(put, session.company.currency)} referral credit applied` },
     mutationFn: async (invoice: string) => Number(unwrap(await supabase().rpc("apply_referral_credit", { p_referral: r!.id, p_invoice: invoice }))),
     onSuccess: () => {
       onApplied();
@@ -611,7 +611,7 @@ function ApplyDialog({ referral: r, open: isOpen, onClose, onExited, onApplied }
                 <span className="muted small" style={{ display: "block" }}>
                   {creditRoom(i) >= left ? `Takes all ${formatMoneyCents(left)}` : `Takes ${formatMoneyCents(creditRoom(i))} of ${formatMoneyCents(left)}`} · Invoice total {formatMoneyCents(Number(i.total))}
                 </span>
-                {i.books && <span className="muted small" style={{ display: "block" }}>{BOOKS[i.books]} already has this invoice. Change it there too.</span>}
+                {i.books && <span className="muted small" style={{ display: "block" }}>{BOOKS[i.books]} has this invoice: the credit goes there too.</span>}
               </span>
               <Button size="sm" loading={apply.isPending && apply.variables === i.id} onClick={() => apply.mutate(i.id)}>Apply</Button>
             </div>

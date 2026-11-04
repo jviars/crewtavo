@@ -3,12 +3,14 @@
  * the same pages the homeowner's link shows once it's signed. Its first page, small, to look at; Open
  * for all of them; and Print or save PDF from right here.
  */
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import { useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { dateIn, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { useCustomFields } from "../../customFields/CustomFields";
 import { DocumentSheet } from "../../documents/EstimateDocument";
 import { documentCompany, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
 import { firstName, type EstimateQuote } from "../estimate";
@@ -24,16 +26,18 @@ export function useEstimateDocument(quote: EstimateQuote, extras: RoofProjectExt
   const { company } = useSession();
   const { template } = useQuoteTemplate(quote);
   const letterhead = useLetterhead();
+  const fields = useCustomFields("quote");
   const tz = company.timezone;
   const data = useMemo(
     () =>
       quoteDocument(
-        { ...quote, sent_at: extras.sent_at, valid_until: extras.valid_until, deposit_amount: extras.deposit_amount, message: extras.message, created_at: extras.created_at, promo: extras.promo },
+        // The business's fields marked to print, as the quote's own PDF prints them.
+        { ...quote, sent_at: extras.sent_at, valid_until: extras.valid_until, deposit_amount: extras.deposit_amount, message: extras.message, created_at: extras.created_at, promo: extras.promo, pdf_fields: shownCustomFields(fields, extras.custom_fields, "pdf") },
         quote.lines,
         // Dated the day it went out where the business is, like the homeowner's copy.
         { date: extras.sent_at ? dateIn(extras.sent_at, tz) : todayIn(tz) },
       ),
-    [quote, extras, tz],
+    [quote, extras, fields, tz],
   );
   return { template, company: letterhead.data ?? documentCompany(company), data };
 }

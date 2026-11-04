@@ -202,12 +202,12 @@ const line = (id: string, name: string, quantity: number, unit_price: number, ex
   id, company_id: CO, quote_id: QUOTE, option_id: null, service_id: null, name, quantity, unit_price, taxable: true, optional: false, selected: true, sort: 0, ...extra,
 });
 
-function roofer({ role = "estimator", trade = "roofing_exteriors", measured = true, status = "draft", lines = [] as Row[], options = [] as Row[] } = {}) {
+function roofer({ role = "estimator", roofing = true, measured = true, status = "draft", lines = [] as Row[], options = [] as Row[] } = {}) {
   state.rpcs = [];
   state.writes = [];
   state.tables = {
     memberships: [{ company_id: CO, user_id: "viewer", active: true, role, role_id: null }],
-    companies: [{ id: CO, name: "Peak Roofing", trade_preset: trade }],
+    companies: [{ id: CO, name: "Peak Roofing", settings: roofing ? { roofing_app: { enabled: true } } : {} }],
     quotes: [{ id: QUOTE, company_id: CO, number: 1042, status, roof_package_id: null, option_id: options[0]?.id ?? null, promo_code_id: null, tax_rate: 0, discount_amount: 0, priced_on_site_at: null }],
     quote_line_items: lines,
     quote_options: options.map((o) => ({ company_id: CO, quote_id: QUOTE, package_id: null, tier: null, ...o })),
@@ -488,13 +488,13 @@ describe("offering packages as options", () => {
   });
 
   it("needs the job measured first outside roofing, and lets a package go without a main service", async () => {
-    roofer({ trade: "paving", measured: false });
+    roofer({ roofing: false, measured: false });
     const res = await offer({ package_ids: [SHINGLE, METAL] });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("Measure the job first.");
     expect(applied()).toEqual([]);
 
-    roofer({ trade: "paving", measured: false });
+    roofer({ roofing: false, measured: false });
     state.tables.roof_packages = [pkg(SHINGLE, "Crack fill", null), pkg(METAL, "Crack fill and sealcoat", null)];
     state.tables.roof_package_items = [
       { company_id: CO, package_id: SHINGLE, service_id: BOOT, kind: "included", quantity: 2, sort: 0 },
@@ -502,6 +502,35 @@ describe("offering packages as options", () => {
     ];
     expect((await offer({ package_ids: [SHINGLE, METAL] })).status).toBe(200);
     expect(applied()[0]!.args.p_options.map((o: Row) => [o.name, o.tier, o.lines.map((l: Row) => l.quantity)])).toEqual([["Crack fill", "Good", [2]], ["Crack fill and sealcoat", "Better", [5]]]);
+  });
+
+  it("prices an estimate by its own kind of work when the business has both Roofing and Paving", async () => {
+    // Paving packages have no roof service.
+    const paving = (made: string | null, apps: Row = { roofing_app: { enabled: true }, paving_app: { enabled: true } }) => {
+      roofer({ measured: false });
+      state.tables.companies![0]!.settings = apps;
+      quote().work_kind = made;
+      state.tables.roof_packages = [pkg(SHINGLE, "Crack fill", null), pkg(METAL, "Crack fill and sealcoat", null)];
+      state.tables.roof_package_items = [{ company_id: CO, package_id: SHINGLE, service_id: BOOT, kind: "included", quantity: 2, sort: 0 }];
+    };
+    const refused = "Pick the roof for the Crack fill package first, in Roofing → Packages.";
+
+    // Made in Paving, or on the Quotes page with paving packages: paving, priced without a roof.
+    paving("paving");
+    expect((await offer({ package_ids: [SHINGLE, METAL] })).status).toBe(200);
+    paving(null);
+    expect((await offer({ package_ids: [SHINGLE] })).status).toBe(200);
+    expect(rows("quote_line_items").map((l) => [l.name, l.quantity])).toEqual([["Pipe boot", 2]]);
+
+    // Made in Roofing, it's roof work, so its packages need their roof.
+    paving("roofing");
+    const roof = await offer({ package_ids: [SHINGLE] });
+    expect(roof.status).toBe(409);
+    expect((await roof.json()).error).toBe(refused);
+
+    // With Roofing alone, every package estimate is roof work, as before.
+    paving("paving", { roofing_app: { enabled: true } });
+    expect((await (await offer({ package_ids: [SHINGLE] })).json()).error).toBe(refused);
   });
 
   it("says what each package left off this roof", async () => {

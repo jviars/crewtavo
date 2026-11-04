@@ -83,6 +83,9 @@ function supabase(company: { settings?: object } = {}) {
       case "/rest/v1/intake_forms":
         if (method === "POST") return Response.json({ id: "form-1" }, { status: 201 });
         return Response.json([{ id: "form-0", slug: "quote" }]);
+      // As the database tidies them (20261105000200_weather_rules.sql).
+      case "/rest/v1/rpc/set_weather_rules":
+        return Response.json(body.p_rules);
       case "/rest/v1/assistant_calls":
         return new Response(null, { status: 201 });
       case "/rest/v1/profiles":
@@ -199,9 +202,9 @@ describe("MCP tools", () => {
     expect(hints.list_services).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect(hints.add_services).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(hints.delete_service).toMatchObject({ readOnlyHint: false, destructiveHint: true });
-    // Every delete is marked, so the assistant asks first; so are voiding and writing off an invoice, and taking down a public reply.
+    // Every delete is marked, so the assistant asks first; so are merging clients (one is deleted), voiding and writing off an invoice, and taking down a public reply.
     const destructive = tools.filter((t) => t.annotations.destructiveHint).map((t) => t.name);
-    expect(destructive.filter((n) => !n.startsWith("delete_"))).toEqual(["void_invoice", "write_off_invoice", "remove_review_reply"]);
+    expect(destructive.filter((n) => !n.startsWith("delete_"))).toEqual(["merge_clients", "void_invoice", "write_off_invoice", "remove_review_reply"]);
     expect(tools.filter((t) => t.name.startsWith("delete_")).every((t) => t.annotations.destructiveHint)).toBe(true);
   });
 
@@ -216,22 +219,53 @@ describe("MCP tools", () => {
     expect(wrote(calls, "/rest/v1/services")).toBe(false);
   });
 
+  it("read and set weather rules through the function that checks them, as a change to the price list", async () => {
+    supabase({ settings: { weather_rules: [{ applies_to: "Paver patio", max_rain_pct: 50, requires_dry_hours: 24 }, "not a rule"] } });
+    expect((await call(full, "list_weather_rules", {})).structuredContent.result).toEqual([
+      { applies_to: "Paver patio", max_rain_pct: 50, requires_dry_hours: 24, summary: "Paver patio: at most 50% rain, 24 dry hours after" },
+    ]);
+    const rules = [{ applies_to: "Sealcoat", min_temp_f: 50, requires_dry_hours: 24 }, { max_wind_mph: 15 }];
+    for (const bearer of [full, prices]) {
+      const calls = supabase();
+      expect((await call(bearer, "set_weather_rules", { rules })).structuredContent.result).toEqual({ saved: ["Sealcoat: at least 50°F, 24 dry hours after", "Every job: wind at most 15 mph"] });
+      expect(calls.find((c) => c.path === "/rest/v1/rpc/set_weather_rules")?.body).toEqual({ p_company: "company-1", p_rules: rules });
+      expect(wrote(calls, "/rest/v1/companies")).toBe(false);
+    }
+    const calls = supabase();
+    expect((await call(records, "set_weather_rules", { rules })).content[0].text).toBe(assistantRefusal("prices"));
+    expect(wrote(calls, "/rest/v1/rpc/set_weather_rules")).toBe(false);
+  });
+
   it("change company settings without touching the owner's limits on assistants", async () => {
     const calls = supabase();
     const res = await call(full, "update_company_settings", { sales_tax_percent: 8.875, brand_color: "#3b7d23", website: "kilogardens.com" });
     expect(res.isError).toBeUndefined();
-    const patch = calls.find((c) => c.method === "PATCH" && c.path === "/rest/v1/companies")!.body;
-    expect(patch).toMatchObject({ website: "https://kilogardens.com", settings: { default_tax_rate: 0.08875, branding: { color: "#3b7d23", logo: "logo.png" }, assistants: { enabled: true, read_only: false } } });
-    expect(patch.name).toBeUndefined();
+    expect(calls.find((c) => c.method === "PATCH" && c.path === "/rest/v1/companies")!.body).toEqual({ website: "https://kilogardens.com" });
+    // Only what changes, merged into the settings as they are when saved: the logo, the limits on
+    // assistants and anything changed meanwhile stay as the database has them.
+    expect(calls.find((c) => c.path === "/rest/v1/rpc/merge_company_settings")?.body).toEqual({ p_company: "company-1", p_settings: { default_tax_rate: 0.08875, branding: { color: "#3b7d23" } } });
+  });
+
+  it("read and set the days the business works, by name", async () => {
+    let calls = supabase();
+    // Every day until the business picks (core slots.ts workdays()).
+    expect((await call(full, "get_company_settings", {})).structuredContent.result.workdays).toEqual(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]);
+    expect((await call(full, "update_company_settings", { workdays: ["saturday", "monday", "monday"] })).isError).toBeUndefined();
+    expect(calls.find((c) => c.path === "/rest/v1/rpc/merge_company_settings")?.body.p_settings).toEqual({ working_hours: { days: [1, 6] } });
+    expect(wrote(calls, "/rest/v1/companies")).toBe(false);
+
+    calls = supabase({ settings: { working_hours: { start: "08:00", end: "16:00", days: [2, 4] } } });
+    expect((await call(full, "get_company_settings", {})).structuredContent.result).toMatchObject({ working_hours: { start: "08:00", end: "16:00" }, workdays: ["tuesday", "thursday"] });
+    await call(full, "update_company_settings", { working_hours: { start: "07:00", end: "15:00" }, workdays: ["friday"] });
+    expect(calls.find((c) => c.path === "/rest/v1/rpc/merge_company_settings")?.body.p_settings).toEqual({ working_hours: { start: "07:00", end: "15:00", days: [5] } });
   });
 
   it("turn clients' tips for the crew on and off by a name that says so, the switch Settings → Company has", async () => {
     let calls = supabase({ settings: { hub_tips: true } });
     expect((await call(full, "get_company_settings", {})).structuredContent.result).toMatchObject({ client_tips: true });
     expect((await call(full, "update_company_settings", { client_tips: false })).isError).toBeUndefined();
-    const patch = calls.find((c) => c.method === "PATCH" && c.path === "/rest/v1/companies")!.body;
-    // The setting keeps its name in the database, and the rest of the settings stay as they were.
-    expect(patch.settings).toMatchObject({ hub_tips: false, default_tax_rate: 0.05, assistants: { enabled: true, read_only: false } });
+    // The setting keeps its name in the database, and the rest of the settings aren't sent.
+    expect(calls.find((c) => c.path === "/rest/v1/rpc/merge_company_settings")?.body.p_settings).toEqual({ hub_tips: false });
 
     calls = supabase({ settings: { hub_tips: false } });
     const read = (await call(full, "get_company_settings", {})).structuredContent.result;

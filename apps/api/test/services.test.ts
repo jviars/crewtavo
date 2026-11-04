@@ -410,24 +410,25 @@ describe("sign-in links", () => {
 
 describe("public submissions", () => {
   /** The database for one company's forms; rate limits whose key matches `full` are used up. */
-  function database(options: { full?: RegExp; questions?: unknown[] } = {}) {
+  function database(options: { full?: RegExp; questions?: unknown[]; known?: boolean; zips?: string[] } = {}) {
     const calls = serve((call) => {
       if (call.path === "rpc/rate_limit_hit") return !options.full?.test(call.body.p_key);
       if (call.path === "companies") return [{ id: "co-1", name: "Acme Lawn Care", phone: null, timezone: "America/New_York", settings: {} }];
-      if (call.path === "intake_forms") return [{ id: "form-1", name: "Request a quote", kind: "request", questions: options.questions ?? [], service_area_zips: [], lead_time_days: 0, slot_minutes: null }];
+      if (call.path === "intake_forms") return [{ id: "form-1", name: "Request a quote", kind: "request", questions: options.questions ?? [], service_area_zips: options.zips ?? [], lead_time_days: 0, slot_minutes: null }];
       // Storage: a link to upload each file, and what arrived (only the first file did).
       if (call.url.pathname.startsWith("/storage/v1/object/upload/sign/")) return { url: `${call.url.pathname.replace("/storage/v1", "")}?token=tok-${call.url.pathname.slice(-8)}` };
       if (call.url.pathname.startsWith("/storage/v1/object/info/")) {
         return arrived.has(call.url.pathname.replace("/storage/v1/object/info/files/", "")) ? { size: 48_000_000, content_type: "application/pdf" } : Response.json({ statusCode: "404", error: "not_found", message: "Object not found" }, { status: 400 });
       }
       if (call.method === "GET" && call.path === "clients") return [{ id: "client-1", display_name: "Ana Smith" }];
+      if (call.path === "rpc/booking_form_client") return options.known ? { client_id: "client-1", property_id: "property-1", matched: true, new_property: false } : { client_id: "client-2", property_id: "property-2", matched: false, new_property: true };
       if (call.method === "POST" && call.path === "clients") return Response.json({ id: "client-2" }, { status: 201 });
       if (call.method === "POST" && call.path === "properties") return Response.json({ id: "property-2" }, { status: 201 });
       if (call.method === "POST" && call.path === "requests") return Response.json({ id: "request-2", number: 1042 }, { status: 201 });
       if (call.path === "rpc/record_referral") return { client_id: "client-2", property_id: "property-2", new_property: true, request_id: "request-2", number: 1043 };
       return [];
     });
-    const made = () => calls.filter((c) => c.method === "POST" && ["clients", "properties", "requests", "referrals", "rpc/record_referral"].includes(c.path)).map((c) => c.path);
+    const made = () => calls.filter((c) => c.method === "POST" && ["clients", "properties", "requests", "referrals", "rpc/record_referral", "rpc/booking_form_client"].includes(c.path)).map((c) => c.path);
     const limits = () => calls.filter((c) => c.path === "rpc/rate_limit_hit").map((c) => [c.body.p_key, c.body.p_max, c.body.p_window_seconds]);
     return { calls, made, limits };
   }
@@ -437,11 +438,39 @@ describe("public submissions", () => {
   const lead = { name: "Bob Jones", email: "bob@example.com", address: { line1: "12 Main St", city: "Radford", postal_code: "24141" } };
   const token = async (t: "refer" | "client" | "quote", id: string) => (await clientLink(env, "https://ops.example.com", { c: "co-1", t, id })).split(/\/(?:refer|hub)\//)[1]!;
 
+  it("puts a booking from a client already here on their record, keeping what they typed for the office", async () => {
+    const db = database({ known: true });
+    expect((await post("/public/forms/acme/quote", { ...lead, phone: "540-555-0100", answers: { notes: "Gate code 1234" } })).status).toBe(201);
+    expect(db.calls.find((c) => c.path === "rpc/booking_form_client")?.body).toEqual({
+      p_company: "co-1", p_name: "Bob Jones", p_email: "bob@example.com", p_phone: "540-555-0100", p_address: lead.address,
+    });
+    const request = db.calls.find((c) => c.method === "POST" && c.path === "requests")!.body;
+    expect(request).toMatchObject({ client_id: "client-1", property_id: "property-1" });
+    expect(request.answers).toEqual({ name: "Bob Jones", email: "bob@example.com", phone: "540-555-0100", notes: "Gate code 1234" });
+    expect(db.made()).toEqual(["rpc/booking_form_client", "requests"]);
+  });
+
+  it("takes a booking from a service area when its postal code starts with the area's code", async () => {
+    const cases: Array<[string[], string | undefined, number]> = [
+      [["24141"], "24141", 201], [["24073", "24141"], "24141-1234", 201], [["M5V"], "m5v 2t6", 201], [["SW1A 1"], "SW1A1AA", 201],
+      [["24141"], "24142", 400], [["M5V"], "M4V 2T6", 400], [["24141"], undefined, 400],
+    ];
+    for (const [zips, postal, status] of cases) {
+      const db = database({ zips });
+      const res = await post("/public/forms/acme/quote", { ...lead, address: { ...lead.address, postal_code: postal } });
+      expect([zips, postal, res.status]).toEqual([zips, postal, status]);
+      if (status === 400) {
+        expect(await res.json()).toEqual({ error: "Sorry, Acme Lawn Care doesn't serve that area yet." });
+        expect(db.made()).toEqual([]);
+      }
+    }
+  });
+
   it("limits booking forms per visitor and per company, before anything is made", async () => {
     const ok = database();
     expect((await post("/public/forms/acme/quote", lead)).status).toBe(201);
     expect(ok.limits()).toEqual([["form:ip:203.0.113.9", 10, 3600], ["form:company:co-1", 100, 3600]]);
-    expect(ok.made()).toEqual(["clients", "properties", "requests"]);
+    expect(ok.made()).toEqual(["rpc/booking_form_client", "requests"]);
 
     for (const full of [/^form:ip:/, /^form:company:/]) {
       const limited = database({ full });

@@ -6,6 +6,7 @@
  * now and kept for next time. Each signature and initial lands on the page as it's drawn. Signing
  * approves the estimate, only while it's still the option and the price on the paper.
  */
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useBlocker, useNavigate, useParams } from "react-router-dom";
@@ -17,6 +18,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { useCustomFields } from "../../customFields/CustomFields";
 import {
   awaitingInitials,
   choiceLabel,
@@ -83,6 +85,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
   const queryClient = useQueryClient();
   const tz = session.company.timezone;
   const details = useVisitDetails(quote.id);
+  const fields = useCustomFields("quote");
   // The template it's signed on; once signed (before this screen moves on), the one saved with it.
   const { template, isPending: templatePending } = useQuoteTemplate(quote);
   const letterhead = useLetterhead();
@@ -181,6 +184,8 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
           sent_at: details.data?.sent_at ?? null,
           created_at: details.data?.created_at ?? null,
           approval: null,
+          // The business's fields marked to print, as the quote's own PDF prints them.
+          pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),
         },
         lines,
         {
@@ -196,7 +201,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
           contract: paper,
         },
       ),
-    [quote, totals, option, details.data, lines, tz, offers, takeoff, signature, name, signedAt, companyImage, myName, choice, paper],
+    [quote, totals, option, details.data, fields, lines, tz, offers, takeoff, signature, name, signedAt, companyImage, myName, choice, paper],
   );
   const docReady = !templatePending && Boolean(details.data) && paper !== null;
 

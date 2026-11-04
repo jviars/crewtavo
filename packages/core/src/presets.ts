@@ -2,9 +2,17 @@
  * Trade presets: the starting catalog, formulas, checklists, intake forms and SOP categories for a
  * kind of business. Adding a trade means adding a JSON file here and to PRESETS.
  */
+import cleaning from "./presets/cleaning.json";
+import electrical from "./presets/electrical.json";
 import general from "./presets/general.json";
+import handyman from "./presets/handyman.json";
+import hvac from "./presets/hvac.json";
+import landscaping from "./presets/landscaping.json";
 import lawnExterior from "./presets/lawn_exterior.json";
 import paving from "./presets/paving.json";
+import pestControl from "./presets/pest_control.json";
+import plumbing from "./presets/plumbing.json";
+import poolService from "./presets/pool_service.json";
 import roofingExteriors from "./presets/roofing_exteriors.json";
 import type { WeatherRule } from "./weather";
 
@@ -30,6 +38,28 @@ export interface PresetChecklistItem {
   type: "check" | "number" | "text" | "choice" | "photo" | "signature";
   required: boolean;
   options?: string[];
+}
+
+/**
+ * A checklist crews fill in on a visit (checklist_templates). `services` names the price list items
+ * it goes with, exactly as this preset's `services` name them: a visit whose job has one of them
+ * brings the checklist up, ready to fill in. Leave it out for a checklist for any job. Item keys are
+ * unique within the checklist (lowercase words joined by _).
+ *
+ *   {
+ *     "name": "Snow and salt route stop",
+ *     "services": ["Snow plowing", "Salt application"],
+ *     "items": [
+ *       { "key": "lot_cleared", "label": "Lot or drive cleared", "type": "check", "required": true },
+ *       { "key": "salt_lbs", "label": "Salt applied (lbs)", "type": "number", "required": false },
+ *       { "key": "photo", "label": "Photo on completion", "type": "photo", "required": true }
+ *     ]
+ *   }
+ */
+export interface PresetChecklist {
+  name: string;
+  services?: string[];
+  items: PresetChecklistItem[];
 }
 
 export interface PresetQuestion {
@@ -103,19 +133,27 @@ export interface TradePreset {
   name: string;
   description: string;
   services: PresetService[];
-  job_types: string[];
   formulas: PresetFormula[];
   packages?: PresetPackage[];
-  checklists: Array<{ name: string; job_type?: string; items: PresetChecklistItem[] }>;
+  checklists: PresetChecklist[];
   intake_forms: PresetIntakeForm[];
   weather_rules: WeatherRule[];
   sop_categories: string[];
 }
 
+/** General first (sign-up's default), then the trades by name, as sign-up and Settings list them. */
 export const PRESETS: Record<string, TradePreset> = {
   general: general as TradePreset,
+  cleaning: cleaning as TradePreset,
+  electrical: electrical as TradePreset,
+  handyman: handyman as TradePreset,
+  hvac: hvac as TradePreset,
+  landscaping: landscaping as TradePreset,
   lawn_exterior: lawnExterior as TradePreset,
   paving: paving as TradePreset,
+  pest_control: pestControl as TradePreset,
+  plumbing: plumbing as TradePreset,
+  pool_service: poolService as TradePreset,
   roofing_exteriors: roofingExteriors as TradePreset,
 };
 

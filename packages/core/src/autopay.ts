@@ -49,9 +49,13 @@ export const AUTOPAY_TIMINGS: Array<{ value: AutopayTiming; label: string }> = [
   { value: "days", label: "Days after" },
 ];
 
-/** The two job types autopay charges (autopay_job_guard holds to the same). */
-export const autopayAllowed = (kind: string | null | undefined, billingMode: string | null | undefined) =>
-  (kind === "recurring" && billingMode === "per_visit") || (kind === "one_off" && billingMode === "on_completion");
+/**
+ * The jobs autopay charges (autopay_job_guard holds to the same): recurring jobs billed per visit,
+ * monthly plans (recurring, a fixed price, invoiced monthly: pricing and schedule from
+ * core/jobBilling), and one-off jobs billed when the work is done.
+ */
+export const autopayAllowed = (kind: string | null | undefined, billingMode: string | null | undefined, pricing?: string | null, schedule?: string | null) =>
+  (kind === "recurring" && billingMode === "per_visit") || (kind === "recurring" && pricing === "fixed" && schedule === "monthly") || (kind === "one_off" && billingMode === "on_completion");
 
 // ---------------------------------------------------------------------------------------------
 // Settings
@@ -60,22 +64,38 @@ export const autopayAllowed = (kind: string | null | undefined, billingMode: str
 const TURN_OFF = "Turn it off anytime from your client page or by calling us.";
 /** The office can charge the card for any invoice too (Charge card), so every trade's terms say so. */
 const OTHER_INVOICES = "and for other invoices we send you";
+/** A monthly plan is charged once a month, not after each visit, so the terms that sell plans say so. */
+const MONTHLY = "or once a month for a monthly plan";
 
 /**
  * The starter terms for each trade (private.autopay_starter_terms has the same words). Paving and
- * roofing charge for big jobs, so theirs talk about the agreed amount.
+ * roofing charge for big jobs, so theirs talk about the agreed amount; lawn care, cleaning, pool
+ * service and pest control sell plans billed by the visit or by the month, so theirs talk about
+ * each visit and a monthly plan, as the general words do.
  */
 const STARTER_TERMS: Record<string, string> = {
-  lawn_exterior: `We charge the card on file after each visit is done, ${OTHER_INVOICES}. You'll get a receipt each time. ${TURN_OFF}`,
-  general: `We charge the card on file when each visit or job is done, ${OTHER_INVOICES}. You'll get a receipt each time. ${TURN_OFF}`,
+  lawn_exterior: `We charge the card on file after each visit is done, ${MONTHLY}, ${OTHER_INVOICES}. You'll get a receipt each time. ${TURN_OFF}`,
+  cleaning: `We charge the card on file after each cleaning, ${MONTHLY}, ${OTHER_INVOICES}. You'll get a receipt each time. ${TURN_OFF}`,
+  pool_service: `We charge the card on file after each pool service visit, ${MONTHLY}, ${OTHER_INVOICES}. You'll get a receipt each time. ${TURN_OFF}`,
+  pest_control: `We charge the card on file after each treatment, ${MONTHLY}, ${OTHER_INVOICES}. You'll get a receipt each time. ${TURN_OFF}`,
+  general: `We charge the card on file when each visit or job is done, ${MONTHLY}, ${OTHER_INVOICES}. You'll get a receipt each time. ${TURN_OFF}`,
   paving: `We charge the card on file when the work on your job is done, ${OTHER_INVOICES}. Charges over the amount we agreed wait until we've talked with you. You'll get a receipt each time. ${TURN_OFF}`,
   roofing_exteriors: `We charge the card on file when the work on your job is done, ${OTHER_INVOICES}. Charges over the amount we agreed wait until we've talked with you. You'll get a receipt each time. ${TURN_OFF}`,
 };
+
+/** The trades whose new recurring jobs start on autopay unless Settings → Payments says otherwise. */
+const PLAN_TRADES = new Set(["lawn_exterior", "cleaning", "pool_service", "pest_control"]);
 
 /** The starter terms for a trade (docs/autopay-plan.md). A trade we don't know gets the general one. */
 export function starterAutopayTerms(trade?: string | null): string {
   return (trade && STARTER_TERMS[trade]) || STARTER_TERMS.general!;
 }
+
+/**
+ * Whether the words a client agrees to cover a monthly plan's charge (private.autopay_covers_monthly):
+ * they mention a monthly plan. A plan's month is charged without the office's OK only then.
+ */
+export const autopayCoversMonthly = (terms: string | null | undefined) => /monthly plan/i.test(terms ?? "");
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -108,7 +128,7 @@ export function autopaySettings(settings: unknown, trade?: string | null): Autop
     max_amount: "max_amount" in a && cap === null ? null
       : typeof cap === "number" && Number.isFinite(cap) && cap > 0 && cap <= AUTOPAY_MAX_AMOUNT ? cap : AUTOPAY_DEFAULT_MAX,
     receipts: typeof a.receipts === "boolean" ? a.receipts : true,
-    jobs_default: typeof a.jobs_default === "boolean" ? a.jobs_default : trade === "lawn_exterior",
+    jobs_default: typeof a.jobs_default === "boolean" ? a.jobs_default : PLAN_TRADES.has(trade ?? ""),
     card_required: a.card_required === true,
     changed_at: typeof a.changed_at === "string" ? a.changed_at : null,
     changed_by: typeof a.changed_by === "string" ? a.changed_by : null,

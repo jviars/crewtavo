@@ -1,5 +1,5 @@
 /**
- * The business's own letterhead, for an estimate template (Settings → Estimate template). The first
+ * The business's own letterhead, for an estimate template (Settings → Document style). The first
  * page of a PDF of its stationery, or a picture of it, is drawn on white, and the paper of a photo
  * or scan is made white too (whitenPaper), so it doesn't print as a gray box; Crewtavo suggests where
  * the printed top ends and the printed bottom starts; the person moves those lines if they like;

@@ -630,28 +630,28 @@ export const referralsReady = (settings: Settings) => {
   return Boolean(offer) || reward.value > 0;
 };
 
-/** "$50", "$12.50". */
-export function creditMoney(amount: Amount): string {
+/** "$50", "$12.50", in the business's currency (companies.currency). */
+export function creditMoney(amount: Amount, currency = "USD"): string {
   const value = cents(amount);
   const digits = Number.isInteger(value) ? 0 : 2;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 }
 
 /** "10%", "12.5%". */
 const percentWords = (value: number) => `${Number(value.toFixed(2))}%`;
 
 /** The credit as words: "a $50 credit", "10% of their first job back as a credit", or "" when none is set. */
-export function referralRewardWords(reward: ReferralReward): string {
+export function referralRewardWords(reward: ReferralReward, currency = "USD"): string {
   if (reward.value <= 0) return "";
-  return reward.kind === "percent" ? `${percentWords(reward.value)} of their first job back as a credit` : `a ${creditMoney(reward.value)} credit`;
+  return reward.kind === "percent" ? `${percentWords(reward.value)} of their first job back as a credit` : `a ${creditMoney(reward.value, currency)} credit`;
 }
 
 /** What the client who shares their link gets, said to them, or "" when no credit is set. */
-export function referrerLine(reward: ReferralReward): string {
+export function referrerLine(reward: ReferralReward, currency = "USD"): string {
   if (reward.value <= 0) return "";
   return reward.kind === "percent"
     ? `You'll get ${percentWords(reward.value)} of their first job back as a credit on your next invoice.`
-    : `You'll get a ${creditMoney(reward.value)} credit on your next invoice once they pay their first one.`;
+    : `You'll get a ${creditMoney(reward.value, currency)} credit on your next invoice once they pay their first one.`;
 }
 
 /**
@@ -664,9 +664,9 @@ export const friendOfferLine = (offer: string) => `For your friends: “${offer}
  * {{rewards}} in the referral ask: what the friend gets (the offer, quoted) and what the client
  * gets, each on its own line, or "" when neither is set.
  */
-export function referralRewards(settings: Settings): string {
+export function referralRewards(settings: Settings, currency = "USD"): string {
   const { reward, offer } = referralSettings(settings);
-  return [offer ? friendOfferLine(offer) : "", referrerLine(reward)].filter(Boolean).join("\n");
+  return [offer ? friendOfferLine(offer) : "", referrerLine(reward, currency)].filter(Boolean).join("\n");
 }
 
 /** A credit as the database works it out: the amount, or the percent of `base` rounded to cents, half away from zero. */
@@ -747,28 +747,29 @@ function onInvoices(credits: readonly CreditOnInvoice[]): CreditPart[] {
  * outside Crewtavo, $30 to go", "No credit: they referred themselves". The pill beside it says the
  * state, in StatusPill's words.
  */
-export function creditLine(referral: CreditReferral, credits: readonly CreditOnInvoice[]): CreditPart[] {
+export function creditLine(referral: CreditReferral, credits: readonly CreditOnInvoice[], currency = "USD"): CreditPart[] {
+  const money = (value: Amount) => creditMoney(value, currency);
   const amount = cents(referral.reward_amount);
   const given = cents(referral.given_amount);
   const applied = credits.reduce((sum, c) => sum + cents(c.amount), 0);
   const left = Math.max(Math.round((amount - given - applied) * 100) / 100, 0);
-  const givenPart = given > 0 ? [`, ${creditMoney(given)} given outside Crewtavo`] : [];
+  const givenPart = given > 0 ? [`, ${money(given)} given outside Crewtavo`] : [];
   switch (referral.reward_status) {
     case "pending":
       if (referral.reward_kind === "percent") return [`${percentWords(cents(referral.reward_value))} of their first job, worked out when they pay their first invoice`];
-      return [`${creditMoney(referral.reward_value)} credit once they pay their first invoice`];
+      return [`${money(referral.reward_value)} credit once they pay their first invoice`];
     case "earned": {
-      const rest = `${creditMoney(left)} ${referral.auto_apply ? "to go" : "kept off invoices"}`;
-      if (applied) return [`${creditMoney(applied)} of ${creditMoney(amount)} `, ...onInvoices(credits), ...givenPart, `, ${rest}`];
-      if (given) return [`${creditMoney(given)} of ${creditMoney(amount)} given outside Crewtavo, ${rest}`];
-      return [`${creditMoney(amount)} credit, ${referral.auto_apply ? "goes on their next invoice" : "kept off invoices"}`];
+      const rest = `${money(left)} ${referral.auto_apply ? "to go" : "kept off invoices"}`;
+      if (applied) return [`${money(applied)} of ${money(amount)} `, ...onInvoices(credits), ...givenPart, `, ${rest}`];
+      if (given) return [`${money(given)} of ${money(amount)} given outside Crewtavo, ${rest}`];
+      return [`${money(amount)} credit, ${referral.auto_apply ? "goes on their next invoice" : "kept off invoices"}`];
     }
     case "applied":
-      if (given) return [`${creditMoney(applied)} `, ...onInvoices(credits), ...givenPart];
-      return [`${creditMoney(amount)} credit `, ...onInvoices(credits)];
+      if (given) return [`${money(applied)} `, ...onInvoices(credits), ...givenPart];
+      return [`${money(amount)} credit `, ...onInvoices(credits)];
     case "issued":
-      if (!applied) return [`${creditMoney(given || amount)} credit, given outside Crewtavo`];
-      return [`${creditMoney(applied)} `, ...onInvoices(credits), `, ${creditMoney(given)} given outside Crewtavo`];
+      if (!applied) return [`${money(given || amount)} credit, given outside Crewtavo`];
+      return [`${money(applied)} `, ...onInvoices(credits), `, ${money(given)} given outside Crewtavo`];
     default:
       return [`No credit: ${NO_CREDIT[referral.no_reward_reason ?? ""] ?? "none was set"}`];
   }

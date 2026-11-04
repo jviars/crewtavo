@@ -398,7 +398,7 @@ describe("booking requests", () => {
           return { id: "00000000-0000-4000-8000-0000000000d1", number: 1001 };
         },
       },
-      rpc: { web_visit_for: () => visit },
+      rpc: { web_visit_for: () => visit, booking_form_client: () => ({ client_id: "00000000-0000-4000-8000-0000000000c1", property_id: "00000000-0000-4000-8000-0000000000b1", matched: false, new_property: true }) },
     });
     const res = await app.request("/api/public/forms/green-lawn/quote", {
       method: "POST",
@@ -426,7 +426,10 @@ describe("booking requests", () => {
           return { id: "00000000-0000-4000-8000-0000000000d1", number: 1001 };
         },
       },
-      rpc: { web_visit_for: () => ({ data: null, error: { message: "function web_visit_for does not exist" } }) },
+      rpc: {
+        web_visit_for: () => ({ data: null, error: { message: "function web_visit_for does not exist" } }),
+        booking_form_client: () => ({ client_id: "00000000-0000-4000-8000-0000000000c1", property_id: "00000000-0000-4000-8000-0000000000b1", matched: false, new_property: true }),
+      },
     });
     const res = await app.request("/api/public/forms/green-lawn/quote", {
       method: "POST",

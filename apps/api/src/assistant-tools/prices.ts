@@ -3,7 +3,7 @@ import { FORMULA_VARIABLES, validateFormula } from "@crewtavo/core";
 import { z } from "zod";
 import { changed, companyArg, rows, tool } from "./tool";
 
-const COLUMNS = "id, name, category, description, unit, unit_price, unit_cost, taxable, formula, formula_target, active";
+const COLUMNS = "id, name, category, description, unit, unit_price, unit_cost, taxable, formula, formula_target, active, add_to_every_job";
 
 const fields = {
   name: z.string().trim().min(1).max(200),
@@ -22,6 +22,9 @@ const fields = {
     .describe(`Works out the quantity (or price) from a measurement, e.g. "area_sqyd * depth_in * 110 / 2000". It can use ${FORMULA_VARIABLES.join(", ")}.`),
   formula_target: z.enum(["quantity", "unit_price"]).describe("What the formula sets."),
   active: z.boolean().describe("Turned off, it's kept but not offered on new quotes."),
+  add_to_every_job: z
+    .boolean()
+    .describe("Goes on every new job (made without a quote) and every new quote, with its first lines, as a line: a trip charge, say. Once each; the office can take it off one like any other line."),
 };
 
 /** A formula that won't work, said plainly; empty means none. */
@@ -36,7 +39,7 @@ function checkFormula(name: string, formula: string | null | undefined) {
 
 export const priceTools = {
   list_services: tool({
-    description: "The price list: services and products with unit, price, cost, tax and formula. Turned-off ones only with include_inactive.",
+    description: "The price list: services and products with unit, price, cost, tax, formula and whether each is added to every job (a trip charge). Turned-off ones only with include_inactive.",
     input: z.object({ include_inactive: z.boolean().default(false), ...companyArg }),
     run: (ctx, a) => {
       let q = ctx.db.from("services").select(COLUMNS).eq("company_id", ctx.companyId);
@@ -56,6 +59,7 @@ export const priceTools = {
             taxable: fields.taxable.default(true),
             formula_target: fields.formula_target.default("quantity"),
             active: fields.active.default(true),
+            add_to_every_job: fields.add_to_every_job.default(false),
           }),
         )
         .min(1)
@@ -76,7 +80,7 @@ export const priceTools = {
     },
   }),
   update_service: tool({
-    description: "Change a price list item: its name, price, cost, unit, tax, formula, category or description, or turn it off. Send only what changes.",
+    description: "Change a price list item: its name, price, cost, unit, tax, formula, category or description, whether it's added to every job, or turn it off. Send only what changes.",
     input: z.object({
       service_id: z.uuid(),
       name: fields.name.optional(),
@@ -89,6 +93,7 @@ export const priceTools = {
       formula: fields.formula,
       formula_target: fields.formula_target.optional(),
       active: fields.active.optional(),
+      add_to_every_job: fields.add_to_every_job.optional(),
       ...companyArg,
     }),
     area: "prices",

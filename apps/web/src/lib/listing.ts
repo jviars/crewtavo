@@ -4,23 +4,27 @@ import { supabase } from "./api";
 
 type CountTable = "requests" | "quotes" | "jobs" | "invoices" | "campaigns" | "job_applicants";
 
-/** Number of records in each status group, for the filter tabs. */
-export function useStatusCounts(table: CountTable, companyId: string, groups: Record<string, readonly string[] | null>) {
+/** Number of records in each status group, for the filter tabs. Jobs group by job_state, which splits active jobs into late, today, upcoming and unscheduled. */
+export function useStatusCounts(table: CountTable, companyId: string, groups: Record<string, readonly string[] | null>, column: "status" | "job_state" = "status") {
   return useQuery({
-    queryKey: [table, companyId, "counts", Object.keys(groups).join(",")],
+    queryKey: [table, companyId, "counts", column, Object.keys(groups).join(",")],
     meta: { silent: true },
     queryFn: async () => {
-      const entries = await Promise.all(
-        Object.entries(groups).map(async ([key, statuses]) => {
-          let q = supabase().from(table).select("id", { count: "exact", head: true }).eq("company_id", companyId);
-          if (statuses) q = q.in("status", [...statuses]);
-          const { count } = await q;
-          return [key, count ?? 0] as const;
-        }),
-      );
+      const entries = await Promise.all(Object.entries(groups).map(async ([key, statuses]) => [key, await statusCount(table, companyId, key, statuses, column)] as const));
       return Object.fromEntries(entries) as Record<string, number>;
     },
   });
+}
+
+/** How many records one tab (`key`) has: those in its statuses, or all of them for null. */
+export async function statusCount(table: CountTable, companyId: string, key: string, statuses: readonly string[] | null, column: "status" | "job_state" = "status") {
+  let q = supabase().from(table).select("id", { count: "exact", head: true }).eq("company_id", companyId);
+  // Typed as status, which every table here has; job_state is on jobs alone.
+  if (statuses) q = q.in(column as "status", [...statuses]);
+  // Quote templates have a tab of their own ("templates"), and no other tab counts them.
+  if (table === "quotes") q = q.filter("is_template", "eq", key === "templates");
+  const { count } = await q;
+  return count ?? 0;
 }
 
 /**

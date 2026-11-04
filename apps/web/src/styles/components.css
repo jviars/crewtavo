@@ -276,6 +276,25 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
   .table-scroll > .table-stack { min-width: 0; }
 }
 
+/* ---------- Picking rows to act on at once (components/ui/Selection.tsx) ---------- */
+/* Stays under the top bar while the list scrolls, so the count and actions are always in reach. */
+.select-bar { position: sticky; top: var(--topbar-height); z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--divider); border-radius: var(--radius-card) var(--radius-card) 0 0; background: var(--surface); }
+.select-bar-all { display: inline-flex; align-items: center; gap: 10px; min-height: 36px; margin-right: auto; font-weight: 600; cursor: pointer; }
+.select-bar-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.table .select-cell { width: 48px; padding-right: 0; }
+/* The label is the box's target: bigger than the box, without making the row taller. */
+.select-cell > label { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -6px; cursor: pointer; }
+.select-cell input, .select-bar-all input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.table tr[data-selected] > td { background: var(--green-tint); }
+@media (pointer: coarse) { .select-cell > label { width: 44px; height: 44px; margin: -12px; } }
+/* Stacked on a phone: the box sits at the row's top right, clear of its text. */
+@media (max-width: 900px) {
+  .table-stack tr:has(> .select-cell) { position: relative; padding-right: 60px; }
+  .table-stack tr[data-selected] { background: var(--green-tint); }
+  .table-stack .select-cell { position: absolute; top: 4px; right: 8px; width: auto; }
+  .table-stack .select-cell > label { width: 44px; height: 44px; margin: 0; }
+}
+
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 12px; }
 /* Compact top to bottom, but the same 20px sides as .card-pad, so a stat's text lines up with the cards around it. */
 .stat { padding: 14px 20px; }

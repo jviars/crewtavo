@@ -4,6 +4,7 @@ import {
   contractInput,
   contractStarters,
   contractValues,
+  depositFor,
   FILL_INS,
   fillIn,
   resolveSections,
@@ -140,6 +141,23 @@ describe("contractValues", () => {
     const empty = contractValues({});
     expect(Object.keys(empty)).toEqual(FILL_INS.map((f) => f.label));
     expect(Object.values(empty).every((v) => v === "")).toBe(true);
+  });
+
+  it("works out a deposit asked for as a percent from the total being signed, as the database does", () => {
+    // 25% of a $1,466.66 total is $366.665, half a cent up as Postgres rounds it.
+    expect(depositFor(275, 1466.66, 25)).toBe(366.67);
+    expect(depositFor(0, 1320, 33.33)).toBe(439.96);
+    // 1.15% of $10.00 is $0.115 exactly: whole cents and hundredths keep it from reading as $0.11.
+    expect(depositFor(0, 10, 1.15)).toBe(0.12);
+    expect(depositFor(0, "18304.50", "10.00")).toBe(1830.45);
+    expect(depositFor(99, 500, 0)).toBe(0);
+    expect(depositFor(0, 500, 100)).toBe(500);
+    // Without a percent, the amount, never more than the total.
+    expect(depositFor(5000, 4200, null)).toBe(4200);
+    expect(depositFor(5000, null, 25)).toBe(5000);
+    // {Deposit} follows the option picked: a cheaper one asks for less.
+    expect(contractValues({ total: 800, deposit: 275, depositPercent: 25 }).Deposit).toBe("$200.00");
+    expect(contractInput({ number: 7, sent_at: null, created_at: "2026-11-03", total: 1100, deposit_amount: 275, deposit_percent: 25 }, null, null, { name: "Pine", phone: null, timezone: null }, { license: "" }).depositPercent).toBe(25);
   });
 
   it("fills a section the same way from the same facts", () => {

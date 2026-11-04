@@ -162,7 +162,7 @@ export function BookingFormPage() {
             <Field label="Service address" requiredMessage={ADDRESS_NEEDED} error={touched && contact.line1.trim().length < 3 ? ADDRESS_NEEDED : null}><input className="input" value={contact.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="street-address" /></Field>
             <div className="form-grid">
               <Field label="City"><input className="input" value={contact.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
-              <Field label="ZIP"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" inputMode="numeric" /></Field>
+              <Field label="ZIP / Postal code"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
             </div>
             {questions.map((q) => (
               isFileQuestion(q) ? (

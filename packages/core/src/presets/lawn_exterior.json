@@ -57,13 +57,6 @@
       "unit_price": 1800
     }
   ],
-  "job_types": [
-    "Recurring maintenance",
-    "Seasonal",
-    "One-off",
-    "Commercial plan",
-    "On-demand (snow)"
-  ],
   "formulas": [
     {
       "name": "Mowing price per visit",
@@ -78,7 +71,11 @@
   "checklists": [
     {
       "name": "Weekly mow standard",
-      "job_type": "Recurring maintenance",
+      "services": [
+        "Weekly mow",
+        "Bi-weekly mow",
+        "Commercial grounds plan"
+      ],
       "items": [
         {
           "key": "mow_and_stripe_front",
@@ -124,7 +121,10 @@
     },
     {
       "name": "Snow and salt route stop",
-      "job_type": "On-demand (snow)",
+      "services": [
+        "Snow plowing",
+        "Salt application"
+      ],
       "items": [
         {
           "key": "lot_or_drive_cleared",

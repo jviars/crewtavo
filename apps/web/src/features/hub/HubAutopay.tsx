@@ -95,8 +95,8 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
     finish.mutate(sessionId);
   }, [sessionId, preview, finish.mutate]);
 
-  // The card they agree to: the one just saved, else the one waiting for their tick.
-  const waiting = autopay?.status === "agree" && autopay.method && !blocked.includes(autopay.method.id) ? autopay.method : null;
+  // The card they agree to: the one just saved, else the one waiting for their tick (or for them to agree to today's terms).
+  const waiting = (autopay?.status === "agree" || autopay?.reagree) && autopay.method && !blocked.includes(autopay.method.id) ? autopay.method : null;
   const method = saved ?? waiting;
   const confirm = useMutation({
     meta: { inline: true },
@@ -194,6 +194,18 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
 
   // The business can't take autopay right now: their agreement shows, and they can turn it off.
   const onHold = autopay.available === false;
+  const terms = (
+    <blockquote className="hub-terms">
+      <p className="pre-wrap">{autopay.terms}</p>
+      <p>We charge {autopay.timing}.</p>
+    </blockquote>
+  );
+  const agreeBox = (
+    <label className="checkbox">
+      <input type="checkbox" checked={agree} disabled={preview} onChange={(e) => setAgree(e.target.checked)} />
+      <span>I agree to these terms</span>
+    </label>
+  );
 
   // On autopay (or paused, or waiting on the bank): the card, since when, and what they can do.
   if (on && !changing && !saved && !refused) {
@@ -212,6 +224,20 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
     return (
       <>
         {top}
+        {autopay.reagree && method && (
+          // Agreed before the terms covered monthly plans: their plan's charges wait for us until they agree to today's.
+          <section className="card card-pad stack" aria-labelledby="autopay-reagree">
+            <h2 id="autopay-reagree" className="hub-step-title">Our autopay terms changed</h2>
+            <p className="muted" style={{ margin: 0 }}>They now cover your monthly plan. Agree to them to keep paying for it automatically with {method.label}.</p>
+            {terms}
+            <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (agree) confirm.mutate(); }}>
+              {agreeBox}
+              <div className="hub-step-actions">
+                <Button type="submit" variant="primary" size="lg" icon="check" disabled={!agree || preview} loading={confirm.isPending}>Agree</Button>
+              </div>
+            </form>
+          </section>
+        )}
         <section className="hub-card hub-autopay" aria-label="Your autopay">
           <div className="hub-autopay-body">
             <span className={`hub-icon-tile ${onHold ? "amber" : autopay.status === "active" ? "good" : autopay.status === "needs_update" ? "red" : "amber"}`}><Icon name="card" size={20} /></span>
@@ -255,12 +281,6 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
   // Nothing to agree to (the card was refused, or is gone): the card step.
   const current: Step = wanted === "agree" && !method ? "card" : wanted;
   const at = STEPS.findIndex((s) => s.step === current);
-  const terms = (
-    <blockquote className="hub-terms">
-      <p className="pre-wrap">{autopay.terms}</p>
-      <p>We charge {autopay.timing}.</p>
-    </blockquote>
-  );
 
   return (
     <>
@@ -330,10 +350,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
           </div>
           {terms}
           <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (agree) confirm.mutate(); }}>
-            <label className="checkbox">
-              <input type="checkbox" checked={agree} disabled={preview} onChange={(e) => setAgree(e.target.checked)} />
-              <span>I agree to these terms</span>
-            </label>
+            {agreeBox}
             <div className="hub-step-actions">
               <Button type="submit" variant="primary" size="lg" icon="check" disabled={!agree || preview} loading={confirm.isPending}>Finish</Button>
             </div>

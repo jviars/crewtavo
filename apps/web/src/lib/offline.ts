@@ -1,7 +1,7 @@
 /**
  * The crew's day on the phone, for job sites with no signal. What My day and a visit show is kept
- * in this browser's storage, and field actions (on my way, start, complete, checklist, notes) made
- * offline wait in order and go out when the connection is back, even if the app was closed in
+ * in this browser's storage, and field actions (on my way, start, complete, checklist, notes, work
+ * added from the price list) made offline wait in order and go out when the connection is back, even if the app was closed in
  * between. Those screens are kept for crews and subs (OFFLINE_LEVELS), and a sub's My jobs too (only
  * to read: answering an offer needs signal). Office screens aren't kept:
  * they hold prices and client details that don't belong on a crew phone. Cleared when the person signs
@@ -27,10 +27,10 @@ const VERSION = 1;
 /** Whose My day is kept on the phone: the people out on job sites, subs included. */
 export const OFFLINE_LEVELS: readonly Role[] = ["crew_lead", "field_crew", "subcontractor"];
 export const keepsDayOffline = (role: string) => (OFFLINE_LEVELS as readonly string[]).includes(role);
-/** Queries worth having with no signal. */
-const KEEP = new Set(["field", "field-visit", "field-jobs", "checklist", "running-timer", "material-choices", "my-crews", "dispatch-options", "crew-clock", "job"]);
+/** Queries worth having with no signal (custom-fields: the labels a visit's job and property fields read with). */
+const KEEP = new Set(["field", "field-visit", "field-jobs", "checklist", "running-timer", "material-choices", "my-crews", "dispatch-options", "crew-clock", "job", "custom-fields"]);
 /** Mutations that can wait for a connection (their functions are registered with setMutationDefaults). */
-export const OFFLINE_MUTATIONS = new Set(["visit-status", "checklist-save", "visit-notes", "photo-share"]);
+export const OFFLINE_MUTATIONS = new Set(["visit-status", "checklist-save", "visit-notes", "photo-share", "job-line-add"]);
 /** Field actions run one at a time, in the order they were made. */
 export const FIELD_SCOPE = { id: "field-sync" };
 /** Room for everything saved, cached screens included. Unsent actions are saved even past it. */

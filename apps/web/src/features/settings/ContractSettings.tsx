@@ -2,7 +2,7 @@
  * Settings → Contract terms: the business's contract wording, a section at a time (contract_sections),
  * like payment, changes to the work, the warranty and the right to cancel. Each section prints above
  * the signatures or on the terms pages after the estimate, and can ask the customer to initial it.
- * The estimate template picks the sections every estimate and invoice prints, in the order listed
+ * The document style picks the sections every estimate and invoice prints, in the order listed
  * here (TemplateSettings); a package brings its own and a quote can add more for one job (quotes/
  * QuoteSections), after the template's. Core contracts.ts puts them together and fills in
  * {Customer name} and the rest; the paper is features/documents.
@@ -230,7 +230,7 @@ export function contractSummary(terms: string, estimates: number, invoices: numb
 // The screen
 // ---------------------------------------------------------------------------------------------
 
-/** A move that was saved, with the estimate templates or packages still printing the old order. */
+/** A move that was saved, with the document styles or packages still printing the old order. */
 class TemplatesBehind extends ApiError {}
 
 type Move = { id: string; by: -1 | 1 };
@@ -280,7 +280,7 @@ export function ContractSettings() {
         const packages = unwrap(await supabase().from("roof_packages").select("id, section_ids").eq("company_id", company.id));
         await Promise.all(packagesInOrder(packages, next).map(async (p) => unwrap(await supabase().from("roof_packages").update({ section_ids: p.section_ids }).eq("id", p.id))));
       } catch (error) {
-        throw new TemplatesBehind("The section moved, but your estimate templates or packages still print the old order. Moving any section again puts them in order.", error instanceof ApiError ? error.status : 500);
+        throw new TemplatesBehind("The section moved, but your document styles or packages still print the old order. Moving any section again puts them in order.", error instanceof ApiError ? error.status : 500);
       }
     },
     // The list moves straight away, and back if its new order can't be saved.
@@ -348,11 +348,11 @@ export function ContractSettings() {
           <p>Your contract's wording, a section at a time: payment, changes to the work, your warranty, the right to cancel. Each one prints above the signatures or on the terms pages after the estimate.</p>
           <p>
             {canEdit ? (
-              <>Pick the ones every estimate and invoice prints in <Link to="/settings?tab=templates">Settings → Estimate template</Link>, which prints them in this order. </>
+              <>Pick the ones every estimate and invoice prints in <Link to="/settings?tab=templates">Settings → Document style</Link>, which prints them in this order. </>
             ) : (
-              "Your estimate template picks the ones every estimate and invoice prints, and prints them in this order. "
+              "Your document style picks the ones every estimate and invoice prints, and prints them in this order. "
             )}
-            A package can bring its own and a quote can add more for one job; those come after the template's.
+            A package can bring its own and a quote can add more for one job; those come after the style's.
           </p>
         </div>
         {canEdit && rows.length > 0 && <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Add a section</Button>}

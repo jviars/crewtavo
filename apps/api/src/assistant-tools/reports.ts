@@ -4,7 +4,7 @@
  * roles without it; who sees reports at all (owners, admins and office staff with "Finance and
  * metrics") and job costs is checked here, as the Finance page checks it.
  */
-import { breakPay, jobProfit, localDate, moneyFigures, previousRange, REPORT_PRESETS, resolveRange, salesFigures, teamHours, type ReportPreset } from "@crewtavo/core";
+import { breakPay, jobProfit, localDate, moneyFigures, previousRange, REPORT_PRESETS, resolveRange, salesFigures, serviceFigures, teamHours, type ReportPreset, type ReportRange } from "@crewtavo/core";
 import { z } from "zod";
 import { adminClient } from "../lib/supabase";
 import { timeRates } from "../services/payRates";
@@ -40,6 +40,35 @@ async function teamNames(ctx: ToolContext) {
   return (id: string | null) => (id ? (names.get(id) ?? "Former team member") : "Unassigned");
 }
 
+const SERVICE_LINES = "service_id, name, quantity, unit_price, invoice:invoices!inner(id, job_id, kind, status, issued_on, discount_amount, credit_amount)";
+
+/** Revenue by price list item, and with job costs each one's costs and profit, as Finance → Services works them out. */
+async function serviceReport(ctx: ToolContext, range: ReportRange) {
+  // serviceFigures leaves out drafts, voids and part billings too; this just reads fewer rows.
+  const lines = () => ctx.db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", ctx.companyId).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)");
+  const [sold, items] = await Promise.all([
+    all((f, t) => lines().gte("invoice.issued_on", range.from).lte("invoice.issued_on", range.to).order("id").range(f, t)),
+    all((f, t) => ctx.db.from("services").select("id, name, category, unit_cost, labor_cost").eq("company_id", ctx.companyId).order("id").range(f, t)),
+  ]);
+  if (!roleAllows(ctx, OFFICE, "job_costs")) {
+    const figures = serviceFigures(sold, items);
+    return { revenue: figures.revenue, services: figures.services.map(({ service_id, name, category, count, quantity, revenue }) => ({ service_id, name, category, count, quantity, revenue })) };
+  }
+  // 200 jobs a request keeps the address short enough.
+  const ids = [...new Set(sold.flatMap((l) => (l.invoice?.job_id ? [l.invoice.job_id] : [])))];
+  const byJobs = async <T>(read: (jobs: string[]) => PromiseLike<T[]>) => (await Promise.all(Array.from({ length: Math.ceil(ids.length / 200) }, (_, i) => read(ids.slice(i * 200, i * 200 + 200))))).flat();
+  const [jobLines, time, expenses, rates, crewPay] = await Promise.all([
+    // Everything the jobs have been invoiced, whenever: their labor is split across all of it.
+    byJobs((jobs) => all((f, t) => lines().in("invoice.job_id", jobs).order("id").range(f, t))),
+    byJobs((jobs) => all((f, t) => ctx.db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", jobs).order("id").range(f, t))),
+    byJobs((jobs) => all((f, t) => ctx.db.from("expenses").select("job_id, amount").in("job_id", jobs).order("id").range(f, t))),
+    byJobs((jobs) => timeRates(adminClient(ctx.env), ctx.companyId, { job_ids: jobs }).then((r) => [r])).then((r): Record<string, number> => Object.assign({}, ...r)),
+    byJobs((jobs) => rows(ctx.db.rpc("job_pay_costs", { p_jobs: jobs }))),
+  ]);
+  const { lines: _, ...figures } = serviceFigures(sold, items, { jobLines, time, expenses, rateOf: (e) => rates[e.id] ?? 0, crewPay });
+  return { ...figures, costs: "Each item's price list cost (without the labor in it once the job has labor of its own), plus a share of the job's labor (time at its rates, sub and crew pay) and expenses, split by the line's share of everything the job has been invoiced." };
+}
+
 export const reportTools = {
   business_summary: tool({
     description: "Today at a glance, as the home screen shows it: requests, quotes and jobs waiting, today's visits, what's owed (and by whom), this month's collected, invoiced and quotes won, and what needs attention. Money only if your role sees it.",
@@ -51,8 +80,9 @@ export const reportTools = {
     },
   }),
   money_report: tool({
-    description: "Money for a period (default this month): invoiced, collected (and vs the period before), tips, card fees, sales tax billed, what's owed and past due now, unpaid invoices by age, payments by method, and each client's balance.",
-    input: z.object({ ...rangeInput, ...companyArg }),
+    description:
+      "Money for a period (default this month): invoiced, collected (and vs the period before), tips, card fees, sales tax billed, what's owed and past due now, unpaid invoices by age, payments by method, and each client's balance. With by_service, also revenue by price list item: invoices issued in the period, paid or not (not drafts or voided), before tax and after discounts and credits; deposits and progress billing count when the final invoice lists the work; lines not from the price list are Other. With job costs, each item's costs, profit and margin too.",
+    input: z.object({ ...rangeInput, by_service: z.boolean().default(false).describe("Also revenue (and, if your role sees job costs, profit) by service."), ...companyArg }),
     run: async (ctx, a) => {
       requireRole(ctx, OFFICE, "reports");
       requireRole(ctx, undefined, "invoices");
@@ -68,7 +98,14 @@ export const reportTools = {
       ]);
       const figures = moneyFigures({ invoices, payments, open: open as never }, today);
       const total = (r: Array<{ amount?: unknown; total?: unknown }>) => Math.round(r.reduce((s, x) => s + Number(x.amount ?? x.total ?? 0), 0) * 100) / 100;
-      return { period: range, ...figures, collected_previous_period: total(paidBefore), invoiced_previous_period: total(invoicedBefore), client_balances: figures.client_balances.slice(0, 50) };
+      return {
+        period: range,
+        ...figures,
+        collected_previous_period: total(paidBefore),
+        invoiced_previous_period: total(invoicedBefore),
+        client_balances: figures.client_balances.slice(0, 50),
+        ...(a.by_service ? { by_service: await serviceReport(ctx, range) } : {}),
+      };
     },
   }),
   sales_report: tool({

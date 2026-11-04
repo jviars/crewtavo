@@ -22,12 +22,14 @@ export interface RoofProjectExtras {
   promo: { code: string } | null;
   package: { name: string } | null;
   jobs: Array<{ id: string; number: number | null; status: string }>;
+  /** The business's own fields on it: the ones marked to print go on the document. */
+  custom_fields: unknown;
 }
 
 export const projectKey = (quoteId: string) => ["roofing-project", quoteId];
 
 const EXTRA_FIELDS =
-  "id, sent_at, valid_until, deposit_amount, message, created_at, promo:promo_codes(code), package:roof_packages!quotes_roof_package_fkey(name), jobs!jobs_company_id_quote_id_fkey(id, number, status)";
+  "id, sent_at, valid_until, deposit_amount, message, created_at, custom_fields, promo:promo_codes(code), package:roof_packages!quotes_roof_package_fkey(name), jobs!jobs_company_id_quote_id_fkey(id, number, status)";
 
 /** What the project page shows beyond the estimate itself. Loaded fresh each time the page opens. */
 export function useRoofProject(quoteId: string) {

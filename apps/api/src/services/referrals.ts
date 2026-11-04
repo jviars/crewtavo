@@ -65,7 +65,7 @@ export async function sendReferralAsk(env: Env, admin: Db, args: ReferralAskArgs
   const automatic = args.automatic === true;
   const { client } = args;
   const skipped = (detail: string): ReferralAskResult => ({ sent: false, detail, id: "", skipped: true });
-  const { data: company } = await admin.from("companies").select("name, phone, email, address, settings").eq("id", args.companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("name, phone, email, address, currency, settings").eq("id", args.companyId).maybeSingle();
   if (!company) throw new Error("Company not found.");
   const settings = (company.settings ?? {}) as Record<string, unknown>;
 
@@ -125,7 +125,7 @@ export async function sendReferralAsk(env: Env, admin: Db, args: ReferralAskArgs
     client: { first_name: firstName(client.display_name), name: client.display_name },
     company: { name: company.name, phone: company.phone ?? "" },
     link,
-    rewards: referralRewards(settings),
+    rewards: referralRewards(settings, company.currency),
   }).replace(/\n{3,}/g, "\n\n").trim();
   // Their own link to pass on: a button named for them (not "Request a quote", which is the
   // friend's), and the link written out under it so they can copy it.

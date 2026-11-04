@@ -24,6 +24,8 @@ const LOGOS: Record<string, string> = {
   careers: crewtavoLogo,
   drive: crewtavoLogo,
   marketing: crewtavoLogo,
+  paving: crewtavoLogo,
+  roofing: crewtavoLogo,
   google_business: googleBusinessLogo,
   meta: metaLogo,
   google_calendar: googleCalendarLogo,

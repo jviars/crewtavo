@@ -18,6 +18,7 @@ import { managesEquipment, useEquipmentDue } from "../equipment/equipmentData";
 import { Change } from "../finance/change";
 import { seesWebsite } from "../marketing/website";
 import { InstallAppCard } from "../field/InstallAppCard";
+import { askedFor, changeLink, usePendingChanges } from "../schedule/changeRequests";
 import styles from "./Home.module.css";
 import { SetupCard } from "./SetupCard";
 import type { Dashboard } from "./types";
@@ -30,7 +31,7 @@ function greeting(timeZone: string) {
   return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
-const ATTENTION_ICON: Record<string, IconName> = { quote: "quote", visit: "cloud", invoice: "invoice", equipment: "truck", autopay_failed: "card", autopay_approval: "card" };
+const ATTENTION_ICON: Record<string, IconName> = { quote: "quote", visit: "cloud", invoice: "invoice", equipment: "truck", autopay_failed: "card", autopay_approval: "card", visit_change: "calendar" };
 
 /**
  * Each kind's tint in Needs attention: money that didn't come in (a late invoice, an automatic charge
@@ -67,6 +68,8 @@ export function HomePage() {
   const attentionRows = useListAnimation<HTMLDivElement>();
   // Equipment overdue or coming due joins the list for the people who look after it.
   const gear = useEquipmentDue(session.company.id, { enabled: managesEquipment(session) });
+  // Clients asking to move or cancel a visit, for whoever schedules (the database shows only those).
+  const changes = usePendingChanges(hasRole(session, "admin", "office", "estimator", "crew_lead"));
   const attention = useMemo(() => {
     const worst = new Map<string, NonNullable<typeof gear.data>[number]>();
     for (const row of gear.data ?? []) if (row.equipment_status === "active" && row.state !== "ok" && !worst.has(row.equipment_id)) worst.set(row.equipment_id, row);
@@ -78,8 +81,14 @@ export function HomePage() {
       link: `/equipment/${r.equipment_id}`,
     }));
     if (rows.length > 3) items.push({ kind: "equipment", title: `${rows.length - 3} more machines need maintenance`, detail: null, link: "/equipment?show=due" });
-    return [...(data?.attention ?? []), ...items];
-  }, [data?.attention, gear.data]);
+    const asks: Dashboard["attention"] = (changes.data ?? []).slice(0, 5).map((r) => ({
+      kind: "visit_change",
+      title: `${r.client?.display_name ?? "A client"} asked ${askedFor(r, tz, session.company.settings)}`,
+      detail: r.visit?.title ?? null,
+      link: changeLink(r),
+    }));
+    return [...asks, ...(data?.attention ?? []), ...items];
+  }, [data?.attention, gear.data, changes.data, tz, session.company.settings]);
   const firstName = session.profile.full_name.split(" ")[0] || "there";
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: tz });
   const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });

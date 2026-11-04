@@ -1028,6 +1028,8 @@ button.material-result:focus-visible { outline: none; box-shadow: var(--ring); }
 .tg-event[data-status="in_progress"], .tg-event[data-status="en_route"] { box-shadow: 0 0 0 2px var(--info-tint); }
 .tg-event[data-kind="task"], .tg-event[data-kind="event"] { border-left-style: dashed; }
 .tg-event[data-conflict] { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+/* The border alone on a chip, so its focus ring still shows. */
+.tg-chip[data-conflict] { border-color: var(--danger); }
 .tg-event[data-dragging], .tg-chip[data-dragging] { opacity: 0.35; }
 .tg-event .tg-t { font-size: var(--fs-11); font-weight: 600; line-height: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tg-event .tg-n { font-weight: 700; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
@@ -1072,6 +1074,35 @@ body.is-dragging-visit, body.is-dragging-visit * { cursor: grabbing !important; 
 .unscheduled-panel .tg-chip { white-space: normal; padding: 8px 10px; font-weight: 400; }
 .unscheduled-panel .tg-chip .tg-m { display: block; margin-top: 2px; }
 @media (max-width: 1180px) { .unscheduled-panel { position: static; max-height: none; } }
+
+/* People view of a week: a row per person, a column per day. It scrolls sideways when narrow, the names staying put. */
+.people-week { overflow-x: auto; }
+.people-week table { width: 100%; min-width: 812px; border-collapse: collapse; table-layout: fixed; }
+.people-week th, .people-week td { border-left: 1px solid var(--row-divider); border-top: 1px solid var(--row-divider); vertical-align: top; text-align: left; }
+.people-week th:first-child { position: sticky; left: 0; z-index: 1; width: 140px; border-left: 0; background: var(--surface); }
+.people-week thead th { border-top: 0; padding: 9px 8px 8px; font-size: var(--fs-13); font-weight: 700; color: var(--text-2); }
+.people-week thead .link-btn { color: inherit; font-weight: 700; }
+.people-week thead th[data-today] .link-btn { color: var(--green-dark); }
+.people-week tbody th { padding: 8px 10px; font-size: var(--fs-13); font-weight: 700; overflow-wrap: anywhere; box-shadow: inset 3px 0 0 var(--lane, transparent); }
+.people-week td { height: 52px; padding: 4px; transition: background var(--dur-fast); }
+.people-week td > .tg-chip + .tg-chip { margin-top: 3px; }
+.people-week td[data-today] { background-color: color-mix(in srgb, var(--green-tint) 20%, var(--surface)); }
+.people-week td[data-over] { background: var(--green-tint); box-shadow: inset 0 0 0 2px var(--green); }
+
+/* List view: a week's visits under each day, tinted down the left in their crew's color. */
+.schedule-list-day { display: flex; align-items: baseline; gap: 8px; margin: 0 2px 6px; font-size: var(--fs-13); font-weight: 700; color: var(--text-2); }
+.schedule-list-row { align-items: flex-start; box-shadow: inset 3px 0 0 var(--crew, transparent); }
+.schedule-list-row[data-selected] { background: var(--fill); }
+.schedule-list-time { flex: 0 0 120px; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) { .schedule-list-row { flex-wrap: wrap; gap: 2px 12px; padding: 12px 16px; } .schedule-list-time { flex-basis: 100%; } }
+
+/* Map view: the day's visits as numbered pins, ringed in their crew's color (ScheduleMap). */
+.schedule-map { height: min(70vh, 640px); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--fill-2); }
+@media (max-width: 700px) { .schedule-map { height: max(360px, calc(100dvh - var(--mobile-nav-height) - 220px)); } }
+.schedule-map .maplibregl-ctrl-group { border-radius: var(--radius-control); box-shadow: var(--shadow-sm); }
+.schedule-pin { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 3px solid var(--crew, var(--green)); border-radius: 50%; background: var(--surface); color: var(--ink); font-size: var(--fs-13); font-weight: 700; box-shadow: var(--shadow-md); cursor: pointer; }
+.schedule-pin:hover { background: var(--fill); }
+.schedule-pin:focus-visible { outline: none; box-shadow: var(--ring); }
 
 /* ---- Addresses, visit details and routes --------------------------------------------------- */
 /*
@@ -1213,6 +1244,9 @@ a.hub-list-row:hover { background: var(--fill); color: var(--ink); }
    page (HubAutopay). A button can be a .hub-btn too ("Pay automatically"). */
 button.hub-btn { width: 100%; border: 0; font: inherit; font-size: var(--fs-16); font-weight: 700; cursor: pointer; }
 .hub-card-actions[data-count="1"] { grid-template-columns: minmax(0, 1fr); }
+/* A visit's Reschedule, Cancel, Add to calendar and Message us: two rows of two. */
+.hub-card-actions[data-count="4"] > :nth-child(odd) { border-left: 0; }
+.hub-card-actions[data-count="4"] > :nth-child(n + 3) { border-top: 1px solid var(--divider); }
 .hub-card-actions > button:disabled { color: var(--text-4); cursor: not-allowed; background: none; }
 .hub-autopay { overflow: hidden; }
 .hub-autopay-body { display: flex; align-items: center; gap: 12px; padding: 16px; }

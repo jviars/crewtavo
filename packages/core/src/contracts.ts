@@ -121,6 +121,8 @@ export interface ContractInput {
   /** The price of the option being signed, with tax. */
   total?: Amount;
   deposit?: Amount;
+  /** The deposit as a percent of `total` (quotes.deposit_percent), when it's asked for that way. */
+  depositPercent?: Amount;
   /** The option's name as it's offered (quote_options.name). */
   optionName?: string | null;
   warranty?: string | null;
@@ -168,6 +170,17 @@ function depositWithin(deposit: Amount, total: Amount): Amount {
 }
 
 /**
+ * The deposit asked for on the total being signed: a percent of it (quotes.deposit_percent), to the
+ * cent as the database rounds it (half a cent up), else the amount, never more than the total. So a
+ * percent follows whichever option and add-ons the client picks.
+ */
+export function depositFor(deposit: Amount, total: Amount, percent?: Amount): Amount {
+  if (blank(percent) || blank(total)) return depositWithin(deposit, total);
+  // In whole cents and hundredths of a percent, so no fraction of a cent rounds the wrong way.
+  return Math.round((Math.max(toCents(total), 0) * Math.round(Number(percent) * 100)) / 10_000) / 100;
+}
+
+/**
  * What each fill-in says, from plain facts. Pure: no clock, no locale and no time zone but the one
  * given, so the preview a customer reads and the copy frozen when they sign say the same thing.
  */
@@ -182,7 +195,7 @@ export function contractValues(input: ContractInput): ContractValues {
     "Estimate number": input.estimateNumber === null || input.estimateNumber === undefined ? "" : clean(String(input.estimateNumber)),
     Date: dateWords(input.date, input.timeZone),
     Total: dollars(input.total),
-    Deposit: dollars(depositWithin(input.deposit, input.total)),
+    Deposit: dollars(depositFor(input.deposit, input.total, input.depositPercent)),
     Option: clean(input.optionName),
     Warranty: clean(input.warranty),
   };
@@ -340,6 +353,79 @@ const TRADE_STARTERS: Record<string, ContractStarter[]> = {
       "<p>Rain, storms, heat and drought can move a visit by a day or more. We'll come back as soon as it's safe to work, and we won't mow or treat when it would hurt your lawn.</p>",
     ),
   ],
+  landscaping: [
+    terms(
+      "Underground lines",
+      "<p>We call 811 to have public utility lines marked before we dig. Private lines, like sprinkler pipes, pet fences, lighting wires and septic lines, aren't marked, so please show us where yours are.</p>",
+    ),
+    terms(
+      "New plants",
+      "<p>New plants, trees and sod need regular watering to take root, most of all in their first season. We'll leave you watering directions when we finish.</p>",
+    ),
+  ],
+  plumbing: [
+    terms(
+      "What we find",
+      "<p>We can't see inside walls, floors or underground lines until we open them up. If we find more damage, or old pipe that needs replacing, we'll show you and get your OK before we do more.</p>",
+    ),
+    terms(
+      "Water shut-off",
+      "<p>We'll need to turn off your water for part of the job. We'll tell you before we do, and about how long it will be off.</p>",
+    ),
+  ],
+  hvac: [
+    terms(
+      "What we find",
+      "<p>Old ductwork, wiring or venting can hide problems we can't see until the old equipment is out. If something needs fixing to run your new system safely, we'll show you and get your OK first.</p>",
+    ),
+    terms(
+      "Access",
+      "<p>Please clear a path to your furnace, air handler and outdoor unit, and to the attic or crawl space if the equipment is there.</p>",
+    ),
+  ],
+  electrical: [
+    terms(
+      "Power shut-off",
+      "<p>We'll need to turn off power to some or all of the building while we work. We'll tell you before we do, and about how long it will be off. Please unplug computers and other sensitive electronics beforehand.</p>",
+    ),
+    terms(
+      "Existing wiring",
+      "<p>Older buildings can have wiring that isn't safe to leave in place or that an inspector asks us to fix. If we find any, we'll show you and write it up as a change for your OK.</p>",
+    ),
+  ],
+  handyman: [
+    terms(
+      "Hourly work",
+      "<p>Work by the hour is charged for our time on site, plus materials. If a task is going to take longer than we said, we'll tell you before we keep going.</p>",
+    ),
+  ],
+  cleaning: [
+    terms(
+      "Access and keys",
+      "<p>Let us know how to get in on cleaning days. We keep your keys and codes private and use them only for your cleanings. If we can't get in, we'll let you know.</p>",
+    ),
+    terms(
+      "Your things",
+      "<p>Please put away cash, jewelry and anything fragile you'd rather we didn't handle. If something gets broken while we clean, tell us within two days and we'll work it out with you.</p>",
+    ),
+  ],
+  pool_service: [
+    terms(
+      "Access and pets",
+      "<p>Please leave the gate unlocked on service days and keep pets inside. We'll close and latch the gate behind us.</p>",
+    ),
+    terms(
+      "Water between visits",
+      "<p>We test and balance your water on each visit. Storms, heavy use and equipment problems can change it between visits, so tell us if it turns cloudy or green.</p>",
+    ),
+  ],
+  pest_control: [
+    terms(
+      "Treatments",
+      "<p>We'll tell you what we apply and where, and how long to keep people and pets off treated areas. Please follow those directions.</p>" +
+        "<p>It can take a couple of weeks to see fewer pests after a treatment. If they're still a problem between visits, call us.</p>",
+    ),
+  ],
 };
 
 /**
@@ -421,7 +507,7 @@ export function addressLines(address: unknown): string[] {
  * pass the chosen option's (the total the homeowner saw) when it isn't the quote's own.
  */
 export function contractInput(
-  quote: { number: number | null; sent_at: string | null; created_at: string; total: Amount; deposit_amount: Amount },
+  quote: { number: number | null; sent_at: string | null; created_at: string; total: Amount; deposit_amount: Amount; deposit_percent?: Amount },
   client: { display_name?: string | null; billing_address?: unknown } | null,
   property: unknown,
   company: { name: string; phone: string | null; timezone: string | null },
@@ -442,6 +528,7 @@ export function contractInput(
     timeZone: company.timezone,
     total: quote.total,
     deposit: quote.deposit_amount,
+    ...(quote.deposit_percent === null || quote.deposit_percent === undefined ? {} : { depositPercent: quote.deposit_percent }),
     optionName: option?.name ?? null,
     warranty: option?.warranty ?? null,
   };

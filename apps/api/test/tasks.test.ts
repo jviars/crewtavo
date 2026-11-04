@@ -79,6 +79,20 @@ describe("weather holds", () => {
     ]);
   });
 
+  it("finds a rule's price list item by its id first, so renaming the item keeps the rule", async () => {
+    const byId = { weather_rules: [{ service_id: "svc-mow", applies_to: "Weekly mow", max_rain_pct: 70 }, { service_id: "svc-wash", applies_to: "House power wash", min_temp_f: 40 }] };
+    const visits = [
+      // Weekly mow is called Lawn mowing now; the rule follows it, by its new name.
+      { ...visit("mow", { weather_rules: [], lines: [{ name: "Mowing", service_id: "svc-mow", service: { name: "Lawn mowing" } }] }), company: byId },
+      // A line of the rule's old name, from another item, isn't that item.
+      { ...visit("other", { weather_rules: [], lines: [{ name: "House power wash", service_id: "svc-other", service: { name: "House power wash" } }] }), company: { weather_rules: [{ service_id: "svc-wash", min_temp_f: 40 }] } },
+    ];
+    const calls = serve((call) => (call.url.host === "api.open-meteo.com" ? forecast : call.method === "GET" && call.path === "visits" ? visits : []));
+    expect(await runTask("weather", env)).toEqual({ checked: 2, flagged: 1, unknown: 0 });
+    expect(calls.filter((c) => c.method === "PATCH" && c.path === "visits").map((c) => [c.url.searchParams.get("id"), c.body.hold_reason])).toEqual([["eq.mow", "Lawn mowing: 90% chance of rain"]]);
+    expect(calls.find((c) => c.method === "GET" && c.path === "visits")?.url.searchParams.get("select")).toContain("lines:job_line_items(name,service_id,");
+  });
+
   it("reads every visit a page at a time, in a fixed order", async () => {
     const page = (start: number, n: number) => Array.from({ length: n }, (_, i) => visit(`v${start + i}`, { weather_rules: [], lines: [] }));
     const calls = serve((call) => {
@@ -99,6 +113,8 @@ describe("hourly upkeep", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const calls = serve((call) => {
       if (call.path === "rpc/mark_overdue_invoices") return Response.json({ code: "22023", message: 'time zone "Not/AZone" not recognized', details: null, hint: null }, { status: 400 });
+      if (call.path === "rpc/add_late_fees") return 6;
+      if (call.path === "rpc/emit_invoice_reminders") return 7;
       if (call.path === "rpc/emit_visit_reminders") return 2;
       if (call.path === "rpc/emit_equipment_alerts") return 1;
       if (call.path === "rpc/expire_sub_offers") return 3;
@@ -112,6 +128,8 @@ describe("hourly upkeep", () => {
     autopay.reconcile.mockResolvedValueOnce(2);
     expect(await runTask("followups", env)).toEqual({
       overdue: 0,
+      late_fees: 6,
+      invoice_reminders: 7,
       reminders: 2,
       equipment: 1,
       offers: 3,
@@ -124,11 +142,21 @@ describe("hourly upkeep", () => {
     });
     // Cards expiring next month are flagged before the clocks.
     expect(calls.map((c) => c.path)).toEqual([
-      "rpc/mark_overdue_invoices", "rpc/emit_visit_reminders", "rpc/emit_equipment_alerts", "rpc/expire_sub_offers", "rpc/emit_sub_document_alerts",
+      "rpc/mark_overdue_invoices", "rpc/add_late_fees", "rpc/emit_invoice_reminders", "rpc/emit_visit_reminders", "rpc/emit_equipment_alerts", "rpc/expire_sub_offers", "rpc/emit_sub_document_alerts",
       "rpc/emit_card_expiry_alerts", "rpc/clock_upkeep", "rpc/tidy_sign_in_codes",
     ]);
     expect(autopay.reconcile).toHaveBeenCalledWith(env, expect.anything());
     expect(error).toHaveBeenCalled();
+  });
+
+  it("asks for monthly jobs' invoice reminders every hour, on the database's clock in each company's zone, and reports what each run made", async () => {
+    // The database keeps one reminder a job a month (emit_invoice_reminders), so the second run makes none.
+    const made = [2, 0];
+    const calls = serve((call) => (call.path === "rpc/emit_invoice_reminders" ? made.shift() : call.path === "rpc/emit_sub_document_alerts" ? [] : call.path === "rpc/clock_upkeep" ? { reminded: 0, stopped: 0 } : 0));
+    expect(CRON_TASKS["0 * * * *"]).toContain("followups");
+    expect(((await runTask("followups", env)) as { invoice_reminders: number }).invoice_reminders).toBe(2);
+    expect(((await runTask("followups", env)) as { invoice_reminders: number }).invoice_reminders).toBe(0);
+    expect(calls.filter((c) => c.path === "rpc/emit_invoice_reminders").map((c) => c.body ?? {})).toEqual([{}, {}]);
   });
 
   it("reads autopay's bank payments back from Stripe, and keeps going when Stripe can't be asked", async () => {

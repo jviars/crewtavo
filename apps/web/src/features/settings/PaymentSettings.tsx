@@ -7,7 +7,7 @@
  * Tips stay one switch, in Settings → Company; this page only says where it stands. Cards brought
  * in from Stripe are listed under it (StripeCards).
  */
-import { AUTOPAY_TERMS_MAX, autopayTimingText, starterAutopayTerms, type AutopaySettings, type AutopayTiming } from "@crewtavo/core/autopay";
+import { AUTOPAY_TERMS_MAX, autopayCoversMonthly, autopayTimingText, starterAutopayTerms, type AutopaySettings, type AutopayTiming } from "@crewtavo/core/autopay";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -184,7 +184,10 @@ export function PaymentSettings() {
             </span>
           </label>
 
-          <Field label="Terms clients agree to" hint="Shown on their client page with when you charge, above the box they tick. Clients who already agreed keep the words they agreed to.">
+          <Field
+            label="Terms clients agree to"
+            hint={`Shown on their client page with when you charge, above the box they tick. Clients who already agreed keep the words they agreed to.${autopayCoversMonthly(f.terms) ? "" : " Monthly plans are charged without asking you only when the terms mention a monthly plan."}`}
+          >
             <textarea className="textarea" rows={4} value={f.terms} maxLength={AUTOPAY_TERMS_MAX} required onChange={(e) => set("terms", e.target.value)} />
           </Field>
           {f.terms.trim() !== starter && (

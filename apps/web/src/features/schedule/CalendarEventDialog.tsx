@@ -23,7 +23,8 @@ export interface CalendarEvent {
   starts_on: string;
   ends_on: string;
   busy: boolean;
-  source: { id: string; name: string; color: string | null; crew_id: string | null; blocks_time: boolean } | null;
+  /** user_id: the person whose own calendar it is, if it's one person's. */
+  source: { id: string; name: string; color: string | null; crew_id: string | null; user_id?: string | null; blocks_time: boolean } | null;
 }
 
 const dayLabel = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
@@ -53,6 +54,7 @@ export function CalendarEventDialog({ event, tz, onClose, onAddVisit }: { event:
       ends_at: timed ? event.ends_at : null,
       anytime: !timed,
       crew_id: event.source?.crew_id ?? null,
+      ...(event.source?.user_id && { assignee_ids: [event.source.user_id] }),
       notes: [event.location, event.description].filter(Boolean).join("\n\n") || null,
     });
   const multiDay = event.ends_on > event.starts_on;

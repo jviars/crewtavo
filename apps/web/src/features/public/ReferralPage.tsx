@@ -73,7 +73,7 @@ export function ReferralPage() {
                 <Field label="Address where you need the work" requiredMessage="Enter the address where the work is."><input className="input" value={f.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="address-line1" /></Field>
                 <div className="form-grid">
                   <Field label="City"><input className="input" value={f.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
-                  <Field label="ZIP"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} inputMode="numeric" autoComplete="postal-code" /></Field>
+                  <Field label="ZIP / Postal code"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
                 </div>
                 <Field label="What do you need?" optional><textarea className="textarea" value={f.details} onChange={set("details")} maxLength={4000} /></Field>
                 {missingContact && !tried && (f.name || f.line1) && <p className="muted small" style={{ margin: 0 }}>Add an email or phone number so we can reach you.</p>}

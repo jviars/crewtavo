@@ -1,0 +1,366 @@
+{
+  "id": "cleaning",
+  "name": "Cleaning & Janitorial",
+  "description": "Maid service and house cleaning, deep cleans, move-outs, and office and commercial cleaning.",
+  "services": [
+    {
+      "name": "Trip charge",
+      "category": "House cleaning",
+      "unit": "visit",
+      "unit_price": 25
+    },
+    {
+      "name": "Hourly cleaning, per cleaner",
+      "category": "House cleaning",
+      "unit": "hr",
+      "unit_price": 50
+    },
+    {
+      "name": "Standard clean",
+      "category": "House cleaning",
+      "unit": "visit",
+      "unit_price": 150
+    },
+    {
+      "name": "Weekly clean",
+      "category": "House cleaning",
+      "unit": "visit",
+      "unit_price": 130
+    },
+    {
+      "name": "Bi-weekly clean",
+      "category": "House cleaning",
+      "unit": "visit",
+      "unit_price": 145
+    },
+    {
+      "name": "Monthly clean",
+      "category": "House cleaning",
+      "unit": "visit",
+      "unit_price": 170
+    },
+    {
+      "name": "Deep clean",
+      "category": "House cleaning",
+      "unit": "visit",
+      "unit_price": 325
+    },
+    {
+      "name": "Move-in or move-out clean",
+      "category": "House cleaning",
+      "unit": "visit",
+      "unit_price": 375
+    },
+    {
+      "name": "Inside oven",
+      "category": "Add-ons",
+      "unit": "ea",
+      "unit_price": 45
+    },
+    {
+      "name": "Inside fridge",
+      "category": "Add-ons",
+      "unit": "ea",
+      "unit_price": 40
+    },
+    {
+      "name": "Inside cabinets",
+      "category": "Add-ons",
+      "unit": "ea",
+      "unit_price": 50
+    },
+    {
+      "name": "Interior windows",
+      "category": "Add-ons",
+      "unit": "ea",
+      "unit_price": 8
+    },
+    {
+      "name": "Laundry, per load",
+      "category": "Add-ons",
+      "unit": "ea",
+      "unit_price": 20
+    },
+    {
+      "name": "Office cleaning plan",
+      "category": "Commercial",
+      "unit": "month",
+      "unit_price": 950
+    },
+    {
+      "name": "Commercial cleaning, per visit",
+      "category": "Commercial",
+      "unit": "sq ft",
+      "unit_price": 0.1
+    },
+    {
+      "name": "Post-construction clean",
+      "category": "Commercial",
+      "unit": "sq ft",
+      "unit_price": 0.3
+    },
+    {
+      "name": "Floor strip and wax",
+      "category": "Commercial",
+      "unit": "sq ft",
+      "unit_price": 0.45
+    }
+  ],
+  "formulas": [],
+  "checklists": [
+    {
+      "name": "House cleaning",
+      "services": [
+        "Standard clean",
+        "Weekly clean",
+        "Bi-weekly clean",
+        "Monthly clean",
+        "Deep clean",
+        "Hourly cleaning, per cleaner"
+      ],
+      "items": [
+        {
+          "key": "kitchen",
+          "label": "Kitchen: counters, sink, stovetop and appliance fronts",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "bathrooms",
+          "label": "Bathrooms: toilet, tub and shower, sink and mirrors",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "dusting",
+          "label": "Dusting: surfaces, ledges and baseboards in reach",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "floors",
+          "label": "Floors vacuumed and mopped",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "trash",
+          "label": "Trash taken out",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "beds_made",
+          "label": "Beds made",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "anything_broken",
+          "label": "Anything broken or out of place",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "after_photos",
+          "label": "After photos",
+          "type": "photo",
+          "required": false
+        },
+        {
+          "key": "locked_up",
+          "label": "Doors locked and alarm set",
+          "type": "check",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Move-out clean",
+      "services": [
+        "Move-in or move-out clean",
+        "Post-construction clean"
+      ],
+      "items": [
+        {
+          "key": "before_photos",
+          "label": "Before photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "inside_cabinets_and_drawers",
+          "label": "Inside cabinets and drawers",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "inside_appliances",
+          "label": "Inside oven, fridge and microwave",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "walls_and_doors_spot_cleaned",
+          "label": "Walls and doors spot-cleaned",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "window_sills_and_tracks",
+          "label": "Window sills and tracks",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "floors",
+          "label": "Floors vacuumed and mopped",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "after_photos",
+          "label": "After photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "walkthrough_signature",
+          "label": "Walkthrough signature",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Commercial cleaning",
+      "services": [
+        "Office cleaning plan",
+        "Commercial cleaning, per visit",
+        "Floor strip and wax"
+      ],
+      "items": [
+        {
+          "key": "restrooms",
+          "label": "Restrooms cleaned and restocked",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "trash_and_recycling",
+          "label": "Trash and recycling emptied",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "desks_and_surfaces",
+          "label": "Desks and shared surfaces wiped",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "break_room",
+          "label": "Break room cleaned",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "floors",
+          "label": "Floors vacuumed and mopped",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "supplies_running_low",
+          "label": "Supplies running low",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "locked_up",
+          "label": "Building locked and alarm set",
+          "type": "check",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Get a cleaning quote",
+      "slug": "get-a-cleaning-quote",
+      "kind": "request",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Service address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "cleaning_type",
+          "label": "What kind of cleaning?",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Regular cleaning",
+            "One-time deep clean",
+            "Move-in or move-out",
+            "Office or commercial"
+          ]
+        },
+        {
+          "key": "how_often",
+          "label": "How often?",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "Weekly",
+            "Every two weeks",
+            "Monthly",
+            "Just once"
+          ]
+        },
+        {
+          "key": "bedrooms",
+          "label": "Bedrooms",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "bathrooms",
+          "label": "Bathrooms",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "square_feet",
+          "label": "Square feet (about)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "pets",
+          "label": "Any pets?",
+          "type": "yes_no",
+          "required": false
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "type": "long_text",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [],
+  "sop_categories": [
+    "Safety and chemicals",
+    "House cleaning",
+    "Commercial cleaning",
+    "Keys and client homes"
+  ]
+}

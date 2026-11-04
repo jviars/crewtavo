@@ -5,13 +5,15 @@
  * A quote can offer two or three options made from packages (quote_options): assistants read them,
  * and say which one the client chose, but the options themselves are made and edited in Crewtavo.
  * A quote an assistant marks approved keeps the contract it was sent with, as the office's "Mark
- * approved" does (services/contracts.ts manualApproval).
+ * approved" does (services/contracts.ts manualApproval). Quote templates (quotes.is_template) are
+ * listed apart, and new quotes start from them as "New from template" does (duplicate_quote).
  */
 import { addDays, localDate, optionTotals, taxRateFromPercent } from "@crewtavo/core";
 import { z } from "zod";
 import { asJson } from "../lib/http";
 import { isPriced, manualApproval, OPTION_FIELDS, type ManualApproval, type OptionRow } from "../services/contracts";
 import { convertQuote, keepDepositInCap, quoteFromRequest, sendQuote, sendSchema } from "../services/sales";
+import { customFieldsArg, customFieldsPatch } from "./customFields";
 import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
 
 const quoteLine = z.object({
@@ -94,16 +96,18 @@ async function optionsOf(ctx: ToolContext, quoteId: string) {
 
 export const quoteTools = {
   list_quotes: tool({
-    description: "Quotes, newest first, with client, total and status. Filter by status (draft, sent, changes_requested, approved, converted, lost, archived, or open: sent and changes requested) and client.",
+    description:
+      "Quotes, newest first, with client, total and status. Filter by status (draft, sent, changes_requested, approved, converted, lost, archived, or open: sent and changes requested) and client. With templates, the business's quote templates instead: saved quotes without a client that new ones start from (create_quote with template_id), never sent.",
     input: z.object({
       status: z.enum(["all", "open", "draft", "sent", "changes_requested", "approved", "converted", "lost", "archived"]).default("all"),
+      templates: z.boolean().default(false).describe("List quote templates instead of quotes."),
       client_id: z.uuid().optional(),
       limit: z.number().int().min(1).max(200).default(50),
       offset: z.number().int().min(0).default(0),
       ...companyArg,
     }),
     run: async (ctx, a) => {
-      let q = ctx.db.from("quotes").select("id, number, title, status, total, sent_at, valid_until, client:clients(id, display_name)", { count: "exact" }).eq("company_id", ctx.companyId);
+      let q = ctx.db.from("quotes").select("id, number, title, status, total, sent_at, valid_until, client:clients(id, display_name)", { count: "exact" }).eq("company_id", ctx.companyId).eq("is_template", a.templates);
       if (a.status === "open") q = q.in("status", ["sent", "changes_requested"]);
       else if (a.status !== "all") q = q.eq("status", a.status);
       if (a.client_id) q = q.eq("client_id", a.client_id);
@@ -115,14 +119,14 @@ export const quoteTools = {
   }),
   get_quote: tool({
     description:
-      "A quote in full: client, property, its lines and add-ons, totals, tax, discount and deposit, and status. A quote can offer two or three options (Good, Better, Best), each with its own lines and total: option_id is the one shown (once approved, the one the client chose), its totals are the quote's, and a line with an option_id is only on that option (lines without one are on every option). With a recurrence_rule it's recurring work, and its totals are per visit.",
+      "A quote in full: client, property, its lines and add-ons, totals, tax, discount and deposit (deposit_percent when it's a percent of the total, which deposit_amount follows), and status. A quote can offer two or three options (Good, Better, Best), each with its own lines and total: option_id is the one shown (once approved, the one the client chose), its totals are the quote's, and a line with an option_id is only on that option (lines without one are on every option). With a recurrence_rule it's recurring work, and its totals are per visit. Its custom_fields are by key (list_custom_fields). A quote template (is_template) has no client or number.",
     input: z.object({ quote_id: z.uuid(), ...companyArg }),
     run: async (ctx, a) => {
       const { promo, ...quote } = await one(
         ctx.db
           .from("quotes")
           .select(
-            "id, number, title, message, status, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, approved_at, lost_reason, option_id, recurrence_rule, active_months, starts_on, ends_on, client:clients(id, display_name, email), property:properties(id, line1, city), promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, service_id, name, description, quantity, unit, unit_price, taxable, optional, selected, option_group, sort), options:quote_options!quote_options_quote_fkey(id, name, tier, highlights, warranty, sort)",
+            "id, number, title, message, status, is_template, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, deposit_percent, valid_until, sent_at, approved_at, lost_reason, option_id, recurrence_rule, active_months, starts_on, ends_on, custom_fields, client:clients(id, display_name, email), property:properties(id, line1, city), promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, service_id, name, description, quantity, unit, unit_price, taxable, optional, selected, option_group, sort), options:quote_options!quote_options_quote_fkey(id, name, tier, highlights, warranty, sort)",
           )
           .eq("id", a.quote_id)
           .eq("company_id", ctx.companyId)
@@ -138,22 +142,41 @@ export const quoteTools = {
   }),
   create_quote: tool({
     description:
-      "Start a quote: from a request (request_id: its client, property and measurement come along, and the request becomes quoted), or for a client (client_id, title). It's a draft with the company's sales tax and valid-for days until sent. Add lines from the price list or custom ones, with options the client chooses.",
+      "Start a quote: from a request (request_id: its client, property and measurement come along, and the request becomes quoted), for a client (client_id, title), or from a quote template for a client (template_id and client_id, from list_quotes with templates: its lines, options, contract sections, message, deposit and custom field values come along, and its name is the title unless one is given). It's a draft with the company's sales tax and valid-for days until sent. Add lines from the price list or custom ones, with options the client chooses.",
     input: z.object({
       request_id: z.uuid().optional(),
+      template_id: z.uuid().optional().describe("A quote template to start from (list_quotes with templates)."),
       client_id: z.uuid().optional(),
       property_id: z.uuid().optional(),
       title: z.string().trim().min(1).max(200).optional(),
       message: z.string().trim().max(4000).optional().describe("A note to the client on the quote."),
       lines: z.array(quoteLine).max(100).default([]),
+      ...customFieldsArg,
       ...companyArg,
     }),
     area: "quotes",
     run: async (ctx, a) => {
       let quote: { id: string; number: number | null };
-      if (a.request_id) {
+      if (a.template_id) {
+        if (!a.client_id || a.request_id) throw new Error("A quote from a template is for a client: give template_id and client_id, without request_id.");
+        if (a.lines.length) throw new Error("A template brings its lines. Make the quote first, then change its lines with update_quote.");
+        const template = await one(ctx.db.from("quotes").select("id, is_template").eq("id", a.template_id).eq("company_id", ctx.companyId).maybeSingle(), "That quote template");
+        if (!template.is_template) throw new Error("That's a quote, not a quote template. list_quotes with templates lists them.");
+        const fields = await customFieldsPatch(ctx, "quote", { id: template.id }, a.custom_fields);
+        const { data: id, error } = await ctx.db.rpc("duplicate_quote", {
+          p_quote: template.id,
+          p_client: a.client_id,
+          ...(a.property_id ? { p_property: a.property_id } : {}),
+          ...(a.title ? { p_title: a.title } : {}),
+          ...(fields.custom_fields ? { p_custom_fields: fields.custom_fields } : {}),
+        });
+        if (error) throw new Error(friendly(error.message));
+        quote = await one(ctx.db.from("quotes").select("id, number").eq("id", id).maybeSingle(), "The quote");
+        if (a.message) await changed(ctx.db.from("quotes").update({ message: a.message }).eq("id", quote.id).select("id"), "The quote");
+      } else if (a.request_id) {
         quote = await quoteFromRequest(salesScope(ctx), a.request_id);
-        if (a.title || a.message) await ctx.db.from("quotes").update({ ...(a.title && { title: a.title }), ...(a.message && { message: a.message }) }).eq("id", quote.id);
+        const fields = await customFieldsPatch(ctx, "quote", { id: quote.id }, a.custom_fields);
+        if (a.title || a.message || fields.custom_fields) await ctx.db.from("quotes").update({ ...(a.title && { title: a.title }), ...(a.message && { message: a.message }), ...fields }).eq("id", quote.id);
       } else {
         if (!a.client_id || !a.title) throw new Error("Give a request_id, or a client_id and a title.");
         const company = await one(ctx.db.from("companies").select("settings").eq("id", ctx.companyId).maybeSingle(), "The company");
@@ -169,6 +192,7 @@ export const quoteTools = {
               message: a.message ?? null,
               tax_rate: Number(settings.default_tax_rate ?? 0),
               valid_until: addDays(localDate(new Date(), ctx.timezone), Number(settings.quote_valid_days ?? 30)),
+              ...(await customFieldsPatch(ctx, "quote", { values: {} }, a.custom_fields)),
             })
             .select("id, number")
             .single(),
@@ -182,7 +206,7 @@ export const quoteTools = {
   }),
   update_quote: tool({
     description:
-      "Change a quote: title, message, how long it's valid, sales tax, discount, deposit asked for, or its lines (lines replaces them all; not on a quote that offers options, whose lines are edited in Crewtavo). Send only what changes. The deposit is never more than the quote's total (with options, its cheapest option's price): a larger one is lowered to it, and the answer says so.",
+      "Change a quote or a quote template: title, message, how long it's valid, sales tax, discount, the deposit asked for (an amount, or a percent of the total that follows it as the total changes, and as the client picks an option and add-ons), custom fields, or its lines (lines replaces them all; not on a quote that offers options, whose lines are edited in Crewtavo). Send only what changes. An amount for the deposit is never more than the quote's total (with options, its cheapest option's price): a larger one is lowered to it, and the answer says so.",
     input: z.object({
       quote_id: z.uuid(),
       title: z.string().trim().min(1).max(200).optional(),
@@ -190,26 +214,31 @@ export const quoteTools = {
       valid_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
       sales_tax_percent: z.number().min(0).lt(100).optional(),
       discount_amount: z.number().min(0).max(1e7).optional(),
-      deposit_amount: z.number().min(0).max(1e7).optional(),
+      deposit_amount: z.number().min(0).max(1e7).optional().describe("The deposit as an amount (it stops being a percent)."),
+      deposit_percent: z.number().min(0).max(100).optional().describe("The deposit as a percent of the total, like 25."),
       lines: z.array(quoteLine).max(100).optional(),
+      ...customFieldsArg,
       ...companyArg,
     }),
     area: "quotes",
     run: async (ctx, a) => {
+      if (a.deposit_amount !== undefined && a.deposit_percent !== undefined) throw new Error("Give the deposit as an amount or as a percent, not both.");
       if (a.lines && (await optionsOf(ctx, a.quote_id)).options.length) throw new Error(OFFERS_OPTIONS);
+      const fields = await customFieldsPatch(ctx, "quote", { id: a.quote_id }, a.custom_fields);
       const patch = {
         ...(a.title !== undefined && { title: a.title }),
         ...(a.message !== undefined && { message: a.message }),
         ...(a.valid_until !== undefined && { valid_until: a.valid_until }),
         ...(a.sales_tax_percent !== undefined && { tax_rate: taxRateFromPercent(a.sales_tax_percent) }),
         ...(a.discount_amount !== undefined && { discount_amount: a.discount_amount }),
-        ...(a.deposit_amount !== undefined && { deposit_amount: a.deposit_amount }),
+        ...(a.deposit_amount !== undefined && { deposit_amount: a.deposit_amount, deposit_percent: null }),
+        ...(a.deposit_percent !== undefined && { deposit_percent: a.deposit_percent }),
       };
-      if (Object.keys(patch).length) await changed(ctx.db.from("quotes").update(patch).eq("id", a.quote_id).eq("company_id", ctx.companyId).select("id"), "That quote");
+      if (Object.keys(patch).length || fields.custom_fields) await changed(ctx.db.from("quotes").update({ ...patch, ...fields }).eq("id", a.quote_id).eq("company_id", ctx.companyId).select("id"), "That quote");
       if (a.lines) await replaceLines(ctx, a.quote_id, a.lines);
       // The deposit, the discount, the tax or the lines can leave the deposit more than the price.
       const lowered = Object.keys(patch).length || a.lines ? await keepDepositInCap(ctx.db, ctx.companyId, a.quote_id) : null;
-      const quote = await one(ctx.db.from("quotes").select("id, number, status, subtotal, discount_amount, tax_amount, total, deposit_amount").eq("id", a.quote_id).maybeSingle(), "That quote");
+      const quote = await one(ctx.db.from("quotes").select("id, number, status, subtotal, discount_amount, tax_amount, total, deposit_amount, deposit_percent").eq("id", a.quote_id).maybeSingle(), "That quote");
       return lowered === null ? quote : { ...quote, deposit_amount: lowered, note: `The deposit was lowered to ${lowered}: it can't be more than the quote's total (with options, its cheapest option's price).` };
     },
   }),

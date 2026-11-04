@@ -13,6 +13,7 @@ import { fieldError } from "@/lib/errors";
 import { addressLine } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { formatPhoneTyping } from "@/lib/validate";
+import { CustomFieldInputs, customFieldsToSave, useCustomFields } from "../customFields/CustomFields";
 
 export interface ClientFields {
   display_name: string;
@@ -23,9 +24,11 @@ export interface ClientFields {
   status: "lead" | "active" | "archived";
   tags: string[];
   notes: string;
+  /** The custom fields typed into, by key (CustomFieldInputs). */
+  custom: Record<string, string>;
 }
 
-const blank: ClientFields = { display_name: "", company_name: "", email: "", phone: "", lead_source: "", status: "lead", tags: [], notes: "" };
+const blank: ClientFields = { display_name: "", company_name: "", email: "", phone: "", lead_source: "", status: "lead", tags: [], notes: "", custom: {} };
 const toRow = (f: ClientFields) => ({
   display_name: f.display_name.trim(),
   company_name: f.company_name.trim() || null,
@@ -69,10 +72,14 @@ function useDuplicateEmail(email: string, exceptId?: string) {
   });
 }
 
-/** The fields both client dialogs share. `error` is the save's, so a clash on email or phone shows under that field. */
-function ClientFieldset({ value, onChange, clientId, error }: { value: ClientFields; onChange: (v: ClientFields) => void; clientId?: string; error?: unknown }) {
+/**
+ * The fields both client dialogs share, the business's own last. `error` is the save's, so a clash
+ * on email or phone shows under that field. `current` is the client's saved custom field values.
+ */
+function ClientFieldset({ value, onChange, clientId, current, error }: { value: ClientFields; onChange: (v: ClientFields) => void; clientId?: string; current?: unknown; error?: unknown }) {
   const set = (key: keyof ClientFields) => (e: { target: { value: string } }) => onChange({ ...value, [key]: e.target.value });
   const tags = useClientTags();
+  const custom = useCustomFields("client");
   const duplicate = useDuplicateEmail(value.email, clientId);
   return (
     <>
@@ -102,6 +109,7 @@ function ClientFieldset({ value, onChange, clientId, error }: { value: ClientFie
       <Field label="Tags">
         <TagInput value={value.tags} onChange={(t) => onChange({ ...value, tags: t })} suggestions={tags.data} />
       </Field>
+      <CustomFieldInputs fields={custom} current={current} draft={value.custom} onChange={(draft) => onChange({ ...value, custom: draft })} />
     </>
   );
 }
@@ -115,8 +123,8 @@ function AddressFields({ value, onChange, required }: { value: typeof blankAddre
       <Field label="Street address" optional={!required}><input className="input" value={value.line1} onChange={set("line1")} placeholder="123 Main St" maxLength={200} required={required} autoComplete="off" /></Field>
       <div className="form-grid-3">
         <Field label="City"><input className="input" value={value.city} onChange={set("city")} maxLength={100} /></Field>
-        <Field label="State"><input className="input" value={value.region} onChange={set("region")} maxLength={20} /></Field>
-        <Field label="ZIP"><input className="input" value={value.postal_code} onChange={set("postal_code")} maxLength={12} inputMode="numeric" /></Field>
+        <Field label="State / Province"><input className="input" value={value.region} onChange={set("region")} maxLength={20} /></Field>
+        <Field label="ZIP / Postal code"><input className="input" value={value.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
       </div>
     </>
   );
@@ -128,6 +136,7 @@ export function NewClientDialog({ open, onClose, onCreated, initialName = "" }: 
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<ClientFields>({ ...blank, display_name: initialName });
   const [address, setAddress] = useState(blankAddress);
+  const custom = useCustomFields("client");
   // Opened while searching, the name starts as what was searched for. Set in the render that
   // opens it, so it never shows the old value first.
   const [wasOpen, setWasOpen] = useState(open);
@@ -138,7 +147,7 @@ export function NewClientDialog({ open, onClose, onCreated, initialName = "" }: 
   const create = useMutation({
     meta: { inline: true, success: "Client created" },
     mutationFn: async () => {
-      const client = unwrap(await supabase().from("clients").insert({ company_id: company.id, ...toRow(fields) }).select("id").single());
+      const client = unwrap(await supabase().from("clients").insert({ company_id: company.id, ...toRow(fields), custom_fields: customFieldsToSave(custom, {}, fields.custom) }).select("id").single());
       if (address.line1.trim()) {
         unwrap(await supabase().from("properties").insert({ company_id: company.id, client_id: client.id, ...address, line1: address.line1.trim() }));
       }
@@ -181,7 +190,15 @@ export function NewClientDialog({ open, onClose, onCreated, initialName = "" }: 
   );
 }
 
-export function EditClientDialog({ open, onClose, client }: { open: boolean; onClose: () => void; client: { id: string; billing_address?: unknown } & Partial<Record<keyof ClientFields, unknown>> }) {
+export function EditClientDialog({
+  open,
+  onClose,
+  client,
+}: {
+  open: boolean;
+  onClose: () => void;
+  client: { id: string; billing_address?: unknown; custom_fields?: unknown; tax_exempt?: boolean; tax_exempt_note?: string | null; payment_terms_days?: number | null } & Partial<Record<Exclude<keyof ClientFields, "custom">, unknown>>;
+}) {
   const { company } = useSession();
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<ClientFields>(() => ({
@@ -193,13 +210,33 @@ export function EditClientDialog({ open, onClose, client }: { open: boolean; onC
     status: (client.status as ClientFields["status"]) ?? "lead",
     tags: Array.isArray(client.tags) ? (client.tags as string[]) : [],
     notes: String(client.notes ?? ""),
+    custom: {},
   }));
+  const custom = useCustomFields("client");
   const billing = (client.billing_address ?? {}) as Partial<typeof blankAddress>;
   const [address, setAddress] = useState({ ...blankAddress, ...billing });
+  // Their own payment terms and tax, for their invoices (20261104000200_client_billing_late_fees.sql).
+  const [terms, setTerms] = useState(client.payment_terms_days == null ? "" : String(client.payment_terms_days));
+  const [exempt, setExempt] = useState(Boolean(client.tax_exempt));
+  const [exemptNote, setExemptNote] = useState(client.tax_exempt_note ?? "");
+  const businessTerms = Number((company.settings as { payment_terms_days?: number }).payment_terms_days ?? 30);
   const save = useMutation({
     meta: { inline: true, success: "Client saved" },
     mutationFn: async () =>
-      unwrap(await supabase().from("clients").update({ ...toRow(fields), billing_address: address.line1.trim() ? address : {} }).eq("id", client.id)),
+      unwrap(
+        await supabase()
+          .from("clients")
+          // Custom fields only when one was typed into, so their saved values (and source_id) are never written over unseen.
+          .update({
+            ...toRow(fields),
+            billing_address: address.line1.trim() ? address : {},
+            payment_terms_days: terms.trim() ? Math.min(365, Math.max(0, Math.round(Number(terms)))) : null,
+            tax_exempt: exempt,
+            tax_exempt_note: exempt ? exemptNote.trim() || null : null,
+            ...(Object.keys(fields.custom).length && { custom_fields: customFieldsToSave(custom, client.custom_fields, fields.custom) }),
+          })
+          .eq("id", client.id),
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients", company.id] });
       queryClient.invalidateQueries({ queryKey: ["client", client.id] });
@@ -210,7 +247,7 @@ export function EditClientDialog({ open, onClose, client }: { open: boolean; onC
   return (
     <Dialog open={open} onClose={onClose} title="Edit client" size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <ClientFieldset value={fields} onChange={setFields} clientId={client.id} error={save.error} />
+        <ClientFieldset value={fields} onChange={setFields} clientId={client.id} current={client.custom_fields} error={save.error} />
         <Field label="Internal notes" optional>
           <textarea className="textarea" value={fields.notes} onChange={(e) => setFields({ ...fields, notes: e.target.value })} maxLength={4000} />
         </Field>
@@ -218,6 +255,19 @@ export function EditClientDialog({ open, onClose, client }: { open: boolean; onC
           <h3>Billing address</h3>
           <p className="muted small" style={{ margin: "-8px 0 0" }}>Leave empty if it's the same as the service address.</p>
           <AddressFields value={address} onChange={setAddress} />
+        </div>
+        <div className="form-section">
+          <h3>Invoices</h3>
+          <div className="form-grid">
+            <Field label="Due after (days)" optional hint={`Empty: your usual ${businessTerms === 0 ? "due on receipt" : `${businessTerms} days`}. 0 means due on receipt.`}>
+              <input className="input" type="number" min={0} max={365} value={terms} onChange={(e) => setTerms(e.target.value)} />
+            </Field>
+            {exempt && <Field label="Exemption number or note" optional><input className="input" value={exemptNote} onChange={(e) => setExemptNote(e.target.value)} maxLength={200} placeholder="Certificate number" /></Field>}
+          </div>
+          <label className="switch-row" style={{ fontWeight: 400 }}>
+            <input type="checkbox" className="switch" checked={exempt} onChange={(e) => setExempt(e.target.checked)} />
+            Tax exempt: no tax on their quotes and invoices
+          </label>
         </div>
         <FormError error={save.error} fields={["email", "phone"]} />
         <div className="form-actions">

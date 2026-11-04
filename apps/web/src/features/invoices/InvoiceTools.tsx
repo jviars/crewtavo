@@ -2,6 +2,8 @@
  * The money at a glance on the Invoices screen, invoicing every finished job in one go, autopay
  * charges that need someone, charging many saved cards at once, and reminding everyone who's past due.
  */
+import { laborRates } from "@crewtavo/core/billing";
+import { monthText } from "@crewtavo/core/jobBilling";
 import { localDate } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState, type FormEvent, type ReactNode } from "react";
@@ -102,25 +104,33 @@ interface ReadyJob {
   title: string;
   kind: string;
   billing_mode: string;
+  pricing: string | null;
   client: { display_name: string; email: string | null } | null;
   financials: { contract_total: number } | null;
+  /** A monthly job's months due (their first days), each invoiced on its own. */
+  months?: string[];
 }
 
+/** Before tax: a finished job's contract, a fixed price for each month due, nothing yet for visits. */
+const amountOf = (j: ReadyJob) => (j.pricing === "per_visit" || j.billing_mode === "per_visit" ? 0 : Number(j.financials?.contract_total ?? 0) * (j.months?.length || 1));
+
 /**
- * Jobs waiting for their invoice: finished one-off jobs, and per-visit jobs with completed visits not
- * yet billed. Not ones autopay is about to bill and charge (a charge waiting for the job, or being
- * made): invoicing them by hand would only call the charge off.
+ * Jobs waiting for their invoice: finished one-off jobs, per-visit jobs invoiced after each visit
+ * with completed visits not yet billed, and monthly jobs whose month is due (due_invoices). Not ones
+ * autopay is about to bill and charge (a charge waiting for the job, or being made): invoicing them
+ * by hand would only call the charge off.
  */
 function useReadyJobs() {
   const { company } = useSession();
   return useQuery({
     queryKey: ["invoices", company.id, "ready-jobs"],
     queryFn: async () => {
-      const select = "id, number, title, kind, billing_mode, client:clients(display_name, email), financials:job_financials(contract_total)";
-      const [finished, visits, charges] = await Promise.all([
+      const select = "id, number, title, kind, billing_mode, pricing, client:clients(display_name, email), financials:job_financials(contract_total)";
+      const [finished, visits, charges, due] = await Promise.all([
         supabase().from("jobs").select(select).eq("company_id", company.id).eq("status", "requires_invoicing").order("number").limit(200),
         supabase().from("visits").select("job_id").eq("company_id", company.id).eq("status", "completed").eq("kind", "job").is("invoice_id", null).not("job_id", "is", null).limit(2000),
         supabase().from("autopay_charges").select("job_id").eq("company_id", company.id).in("status", ["waiting", "charging"]).is("invoice_id", null).not("job_id", "is", null).limit(2000),
+        supabase().from("due_invoices").select("job_id, month").eq("company_id", company.id).order("month").limit(1000),
       ]);
       // A server without autopay yet has nothing waiting: the list stays as it was rather than failing.
       const charged = new Set((charges.error ? [] : (charges.data ?? [])).map((c) => c.job_id));
@@ -129,6 +139,13 @@ function useReadyJobs() {
       if (visitJobs.length) {
         const perVisit = unwrap(await supabase().from("jobs").select(select).in("id", visitJobs).eq("billing_mode", "per_visit").eq("status", "active")) as unknown as ReadyJob[];
         ready.push(...perVisit);
+      }
+      // A server without monthly billing yet has none due: the list stays as it was.
+      const months = new Map<string, string[]>();
+      for (const d of due.error ? [] : (due.data ?? [])) if (!charged.has(d.job_id)) months.set(d.job_id!, [...(months.get(d.job_id!) ?? []), d.month!]);
+      if (months.size) {
+        const monthly = unwrap(await supabase().from("jobs").select(select).in("id", [...months.keys()]).eq("status", "active")) as unknown as ReadyJob[];
+        ready.push(...monthly.map((j) => ({ ...j, months: months.get(j.id) })));
       }
       return ready;
     },
@@ -220,11 +237,20 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
   const [picked, setPicked] = useState<string[]>(jobs.map((j) => j.id));
   const canEmail = session.config.features.email;
   const [send, setSend] = useState(false);
+  // Each job's logged hours (at an item sold by the hour) and priced materials, as Add logged work starts out ticked.
+  const [work, setWork] = useState(false);
+  const [rateId, setRateId] = useState("");
+  const rates = useQuery({
+    queryKey: ["services", session.company.id, "hourly"],
+    enabled: work,
+    queryFn: async () => laborRates(unwrap(await supabase().from("services").select("id, name, unit, unit_price, taxable, active").eq("company_id", session.company.id))),
+  });
+  const rate = rates.data?.find((r) => r.id === rateId) ?? rates.data?.[0];
   const run = useMutation({
     meta: { inline: true },
     mutationFn: async () => {
       if (!picked.length) throw new Error("Pick at least one job to invoice.");
-      return api.post<{ results: Array<{ number: number; ok: boolean; sent?: boolean; error?: string }> }>("/invoices/batch", { job_ids: picked, send });
+      return api.post<{ results: Array<{ number: number; ok: boolean; sent?: boolean; error?: string }> }>("/invoices/batch", { job_ids: picked, send, logged_work: work, rate_id: work ? rate?.id : undefined });
     },
     onSuccess: ({ results }) => {
       const made = results.filter((r) => r.ok);
@@ -242,9 +268,9 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
       onClose();
     },
   });
-  const total = jobs.filter((j) => picked.includes(j.id) && j.billing_mode !== "per_visit").reduce((s, j) => s + Number(j.financials?.contract_total ?? 0), 0);
+  const total = jobs.filter((j) => picked.includes(j.id)).reduce((s, j) => s + amountOf(j), 0);
   return (
-    <Dialog open onClose={onClose} title="Invoice finished jobs" description="Each job gets its invoice, less any deposits or progress payments already billed." size="lg">
+    <Dialog open onClose={onClose} title="Invoice finished jobs" description="Each job gets its invoice, less any deposits or progress payments already billed. A monthly job's covers its month." size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); run.mutate(); }}>
         <div className="card" style={{ boxShadow: "none", maxHeight: 340, overflowY: "auto" }}>
           {jobs.map((j) => (
@@ -252,19 +278,34 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
               <input type="checkbox" checked={picked.includes(j.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, j.id] : picked.filter((x) => x !== j.id))} />
               <span className="grow" style={{ minWidth: 0 }}>
                 <strong>{j.client?.display_name ?? j.title}</strong>
-                <span className="muted small" style={{ display: "block" }}>Job #{j.number} · {j.title}{j.billing_mode === "per_visit" ? " · completed visits" : ""}{send && !j.client?.email ? " · no email on file" : ""}</span>
+                <span className="muted small" style={{ display: "block" }}>
+                  Job #{j.number} · {j.title}
+                  {j.months ? ` · ${j.months.map((m) => monthText(m)).join(", ")}` : j.billing_mode === "per_visit" ? " · completed visits" : ""}
+                  {send && !j.client?.email ? " · no email on file" : ""}
+                </span>
               </span>
-              <span className="tabular">{j.billing_mode === "per_visit" ? <span className="muted small">per visit</span> : formatMoney(j.financials?.contract_total ?? 0)}</span>
+              <span className="tabular">{amountOf(j) ? formatMoney(amountOf(j)) : <span className="muted small">per visit</span>}</span>
             </label>
           ))}
         </div>
+        <label className="switch-row" style={{ fontWeight: 400 }}>
+          <input type="checkbox" className="switch" checked={work} onChange={(e) => setWork(e.target.checked)} />
+          Add logged hours and materials
+        </label>
+        {work && rates.data && (rates.data.length ? (
+          <select className="select input-sm" style={{ width: "auto" }} value={rate?.id ?? ""} onChange={(e) => setRateId(e.target.value)} aria-label="Bill hours at">
+            {rates.data.map((r) => <option key={r.id} value={r.id}>Hours at {r.name} · {formatMoneyCents(Number(r.unit_price))}/{r.unit}</option>)}
+          </select>
+        ) : (
+          <span className="muted small">To bill hours, add an item sold by the hour (unit hr), like Labor, to your price list.</span>
+        ))}
         {canEmail && (
           <label className="switch-row" style={{ fontWeight: 400 }}>
             <input type="checkbox" className="switch" checked={send} onChange={(e) => setSend(e.target.checked)} />
             Email each client their invoice now
           </label>
         )}
-        <FormError error={run.error} />
+        <FormError error={run.error ?? rates.error} />
         <div className="form-actions">
           <FormChecks />
           <span className="muted small" style={{ marginRight: "auto" }}>{total > 0 ? `${formatMoney(total)} before tax` : null}</span>

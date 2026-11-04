@@ -5,7 +5,7 @@
  * visits added to an organized day, and by automatic routes (settings.schedule.auto_routes), which
  * organize each crew's coming week once and never redo a day someone ordered by hand.
  */
-import { addDays, DISPATCH, localDate, localTime, planRoute, scheduleSettings, zonedTimeToUtc, type LatLng, type PlannedStop, type RouteStop } from "@crewtavo/core";
+import { addDays, DISPATCH, driveBetween, localDate, localTime, planRoute, scheduleSettings, zonedTimeToUtc, type LatLng, type PlannedStop, type RouteStop } from "@crewtavo/core";
 import type { Env } from "../env";
 import { dbError, HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
@@ -423,4 +423,31 @@ export async function undoRoute(s: Scope, body: { date: string; crew_id?: string
   }
   await markDay(s.db, s.companyId, crewId, body.date, { byHand: true, userId: s.userId ?? null });
   return { restored: body.visits.length };
+}
+
+type Place = { lat: number | null; lng: number | null } | null;
+const placeOf = (p: Place): LatLng | null => (p?.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
+
+/**
+ * When a crew on its way should get to a visit, for the client's text ({{eta}}): the drive from where
+ * the phone was when they tapped On my way (`from`, which isn't kept), or else from the crew's last
+ * visit finished that day (the person's own, for a visit with no crew), timed as routes time drives.
+ * Null when neither is known, and the text leaves it out.
+ */
+export async function arrivalTime(db: Db, companyId: string, visitId: string, from: LatLng | null, userId?: string, now = Date.now()): Promise<string | null> {
+  const [{ data: visit }, { data: company }] = await Promise.all([
+    db.from("visits").select("scheduled_on, crew_id, property:properties(lat, lng)").eq("id", visitId).eq("company_id", companyId).maybeSingle(),
+    db.from("companies").select("settings").eq("id", companyId).maybeSingle(),
+  ]);
+  const to = placeOf(visit?.property ?? null);
+  if (!visit || !to) return null;
+  let start = from;
+  if (!start && visit.scheduled_on && (visit.crew_id || userId)) {
+    const last = db.from("visits").select("property:properties(lat, lng)").eq("company_id", companyId).eq("scheduled_on", visit.scheduled_on).eq("status", "completed").neq("id", visitId);
+    const { data } = await (visit.crew_id ? last.eq("crew_id", visit.crew_id) : last.eq("completed_by", userId!)).order("completed_at", { ascending: false }).limit(1).maybeSingle();
+    start = placeOf(data?.property ?? null);
+  }
+  if (!start) return null;
+  const { minutes } = driveBetween(start, to, scheduleSettings(company?.settings).speedMph);
+  return new Date(now + minutes * 60_000).toISOString();
 }

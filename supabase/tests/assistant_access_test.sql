@@ -196,7 +196,7 @@ select t1040.check(t1040.hook(:'owner', :'nomoney', 'PATCH', '/document_template
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'DELETE', '/contract_sections') = 'none', 'and contract terms');
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/campaigns') = 'none', 'and campaigns');
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/promo_codes') like 'PT403: This assistant can''t change money%', 'but not promo codes');
-select t1040.check(t1040.hook(:'owner', :'quoting', 'POST', '/contract_sections') like 'PT403: This assistant can''t change estimate templates and contract terms.%', 'nor an assistant not given templates');
+select t1040.check(t1040.hook(:'owner', :'quoting', 'POST', '/contract_sections') like 'PT403: This assistant can''t change document styles and contract terms.%', 'nor an assistant not given templates');
 select t1040.check(t1040.hook(:'owner', :'quoting', 'POST', '/campaigns') like 'PT403: This assistant can''t change campaigns, reviews and social posts.%', 'or marketing');
 select t1040.check(t1040.hook(:'owner', :'quoting', 'POST', '/social_posts') like 'PT403: An AI assistant can''t change this.%', 'and social posts are only the server''s to write');
 rollback;

@@ -43,6 +43,7 @@ import { MetaPanel } from "./MetaPanel";
 import { SCREENSHOTS } from "./screenshots";
 import { StripePanel } from "./StripePanel";
 import { TeamChatPanel, useTeamChatSwitch } from "./TeamChatPanel";
+import { useTradeAppSwitch } from "./tradeApps";
 import { WebsiteFormsPanel, useWebsiteFormsSwitch } from "./WebsiteFormsPanel";
 import { WebsitePanel } from "./WebsitePanel";
 
@@ -152,6 +153,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
   const careersSwitch = useWebsiteFormsSwitch("careers");
   const driveSwitch = useDriveSwitch();
   const marketingSwitch = useMarketingSwitch();
+  const tradeSwitch = useTradeAppSwitch(app.id === "roofing" ? "roofing" : "paving");
   // Built-in apps turn on and off in the company's settings.
   const builtinSwitch =
     app.id === "website_analytics" ? analyticsSwitch
@@ -159,6 +161,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
     : app.id === "careers" ? careersSwitch
     : app.id === "drive" ? driveSwitch
     : app.id === "marketing" ? marketingSwitch
+    : app.id === "paving" || app.id === "roofing" ? tradeSwitch
     : chatSwitch;
 
   // Uninstall takes this app's own assistants and calendars with it.

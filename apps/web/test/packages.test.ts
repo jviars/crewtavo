@@ -130,11 +130,15 @@ describe("what's on a package's card", () => {
     expect(packagePriceLine({ roof: null, items: [{ kind: "quick" }] }, false, FORMAT)).toBe("Nothing in it yet");
   });
 
-  it("sends a roofer to Roofing → Packages and everyone else to Packages", () => {
-    expect(isRoofingCompany({ trade_preset: "roofing_exteriors" })).toBe(true);
-    expect(isRoofingCompany({ trade_preset: "paving" })).toBe(false);
-    expect(packagesPath({ trade_preset: "roofing_exteriors" })).toBe("/roofing/packages");
-    expect(packagesPath({ trade_preset: "lawn_exterior" })).toBe("/packages");
+  it("sends a business with Roofing installed to Roofing → Packages and everyone else to Packages, whatever its trade", () => {
+    const roofing = { settings: { roofing_app: { enabled: true } } };
+    expect(isRoofingCompany(roofing)).toBe(true);
+    expect(isRoofingCompany({ settings: { roofing_app: { enabled: false } } })).toBe(false);
+    // The price ranges live in settings.roofing: they don't install it.
+    expect(isRoofingCompany({ settings: { roofing: { enabled: true, range_pct: 15 } } })).toBe(false);
+    expect(isRoofingCompany({ trade_preset: "roofing_exteriors", settings: {} } as never)).toBe(false);
+    expect(packagesPath(roofing)).toBe("/roofing/packages");
+    expect(packagesPath({ settings: {} })).toBe("/packages");
   });
 
   it("counts quick adds on a roof's card only, since only a roofer's estimates show them", () => {

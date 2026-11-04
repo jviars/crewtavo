@@ -1,5 +1,5 @@
 /** Online booking: public request forms, their questions and service area, and links to share or embed. */
-import { formSlug as slugify, normalizeIntakeForm } from "@crewtavo/core/forms";
+import { formSlug as slugify, isPostalCode, normalizeIntakeForm } from "@crewtavo/core/forms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -97,7 +97,7 @@ export function BookingAdminPage() {
                 )}
               </div>
               <span className="muted text-sm">
-                {KIND[f.kind] ?? f.kind} · {f.questions.filter((q) => q.type !== "address").length} questions{f.service_area_zips.length ? ` · ${f.service_area_zips.length} ZIP codes` : " · any area"}
+                {KIND[f.kind] ?? f.kind} · {f.questions.filter((q) => q.type !== "address").length} questions{f.service_area_zips.length ? ` · ${f.service_area_zips.length} service area${f.service_area_zips.length === 1 ? "" : "s"}` : " · any area"}
               </span>
               <span className="small"><strong>{counts.data?.[f.id] ?? 0}</strong> <span className="muted">requests in the last 30 days</span></span>
               <code style={{ padding: 8, background: "var(--fill)", borderRadius: "var(--radius-control)", fontSize: 12, overflowWrap: "anywhere" }}>{link(f.slug)}</code>
@@ -126,8 +126,9 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
   const [questions, setQuestions] = useState<Question[]>(form?.questions.filter((q) => q.type !== "address") ?? [{ key: "details", label: "What do you need done?", type: "long_text", required: true }]);
   const finalSlug = slug.trim() ? slugify(slug) : slugify(name);
   const clash = taken.filter((s) => s !== form?.slug).includes(finalSlug);
-  const zipList = zips.split(/[\s,;]+/).map((z) => z.trim()).filter(Boolean);
-  const badZips = zipList.filter((z) => !/^\d{5}$/.test(z));
+  // Not split on spaces, which postal codes like "SW1A 1AA" have.
+  const zipList = zips.split(/[,;\n]+/).map((z) => z.trim()).filter(Boolean);
+  const badZips = zipList.filter((z) => !isPostalCode(z));
   const setQ = (i: number, patch: Partial<Question>) => setQuestions(questions.map((q, j) => (j === i ? { ...q, ...patch } : q)));
 
   const save = useMutation({
@@ -159,7 +160,7 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
         <Field label="Link" error={clash ? "Another form uses this link" : null} hint={`${window.location.origin}/book/${company.slug}/${finalSlug}`}>
           <input className="input" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={slugify(name)} maxLength={50} />
         </Field>
-        <Field label="Service area ZIP codes" optional error={badZips.length ? `Not a ZIP code: ${badZips.slice(0, 3).join(", ")}` : null} hint="Leave empty to accept any ZIP code.">
+        <Field label="Service area ZIP / Postal codes" optional error={badZips.length ? `Not a ZIP or postal code: ${badZips.slice(0, 3).join(", ")}` : null} hint="Separate them with commas. A code covers every one that starts with it, like M5V for M5V 2T6. Leave empty to accept any area.">
           <textarea className="textarea" style={{ minHeight: 60 }} value={zips} onChange={(e) => setZips(e.target.value)} placeholder="24151, 24065, 24184" />
         </Field>
         <div className="form-section">

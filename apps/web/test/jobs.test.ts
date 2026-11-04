@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { repeatText, scheduleText, seasonText } from "../src/features/jobs/repeatText";
 
@@ -41,5 +43,33 @@ describe("how often, on a quote", () => {
   it("says the repeat, then the season", () => {
     expect(scheduleText("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU", [4, 5, 6, 7, 8, 9, 10])).toBe("Every 2 weeks, Tuesday, April to October");
     expect(scheduleText("FREQ=WEEKLY;INTERVAL=1;BYDAY=MO", null)).toBe("Weekly, Monday");
+  });
+});
+
+// A job shows Late, Today, Upcoming or Unscheduled from its visits (public.job_state), so whatever
+// changes a visit's status, date or job refreshes the Jobs list (["jobs", …]) and job pages (["job", …]).
+describe("the Jobs list after a visit changes", () => {
+  const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+
+  it("refreshes from the field app, the visit dialog and the schedule", () => {
+    expect(source("../src/features/field/FieldVisitPage.tsx")).toMatch(/\["schedule"\], \["job"\], \["jobs"\]/);
+    const today = source("../src/features/field/FieldTodayPage.tsx");
+    expect(today).toContain(`queryClient.invalidateQueries({ queryKey: ["job"] });\n    queryClient.invalidateQueries({ queryKey: ["jobs"] });`);
+    expect(source("../src/features/schedule/VisitDialog.tsx")).toContain(`["schedule", "job", "jobs", "request", "dashboard", "field"]`);
+    // Dragging a visit, moving a day's visits, and adding a visit to many jobs.
+    const schedule = source("../src/features/schedule/SchedulePage.tsx");
+    expect(schedule).toContain(`for (const key of ["jobs", "job"]) queryClient.invalidateQueries({ queryKey: [key] });`);
+    expect(schedule.match(/refreshJobs\(queryClient\);/g)).toHaveLength(3);
+  });
+});
+
+// A new job takes the business's job fields too, as its details dialog does.
+describe("the new job dialog", () => {
+  it("fills in the job's custom fields and saves them with it", () => {
+    const dialog = readFileSync(fileURLToPath(new URL("../src/features/jobs/JobDialogs.tsx", import.meta.url)), "utf8");
+    const create = dialog.slice(dialog.indexOf("export function NewJobDialog"), dialog.indexOf("export interface JobRecord"));
+    expect(create).toContain(`const customFields = useCustomFields("job");`);
+    expect(create).toContain(`custom_fields: customFieldsToSave(customFields, null, custom)`);
+    expect(create).toContain(`<CustomFieldInputs fields={customFields} current={null} draft={custom} onChange={setCustom} />`);
   });
 });

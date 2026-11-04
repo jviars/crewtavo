@@ -500,6 +500,14 @@ describe("referrals", () => {
     expect(creditMoney("45.06")).toBe("$45.06");
   });
 
+  it("says the credit in the business's currency", () => {
+    expect(creditMoney(1250, "CAD")).toBe("CA$1,250");
+    expect(creditMoney("45.06", "GBP")).toBe("£45.06");
+    expect(referralRewardWords({ kind: "amount", value: 50 }, "EUR")).toBe("a €50 credit");
+    expect(referrerLine({ kind: "amount", value: 50 }, "CAD")).toBe("You'll get a CA$50 credit on your next invoice once they pay their first one.");
+    expect(referralRewards({ referrals: { reward: { kind: "amount", value: 50 } } }, "AUD")).toBe("You'll get a A$50 credit on your next invoice once they pay their first one.");
+  });
+
   it("writes {{rewards}} as the friend's offer and the client's credit, each on its own line, or nothing", () => {
     const offer = "10% off your first service";
     expect(referralRewards({ referrals: { reward: { kind: "amount", value: 50 }, offer } }))
@@ -548,6 +556,7 @@ describe("referrals", () => {
     expect(text({ reward_status: "none", no_reward_reason: "already_client" })).toBe("No credit: they were already a client");
     expect(text({ status: "lost", reward_status: "none", no_reward_reason: "lost" })).toBe("No credit: the work was lost");
     expect(creditLine({ ...base, reward_status: "applied" }, [inv(1042, 50)])).toEqual(["$50 credit ", "on invoice ", { invoice: { id: "inv-1042", number: 1042 } }]);
+    expect(creditText(creditLine({ ...base, reward_status: "applied" }, [inv(1042, 50)], "CAD"))).toBe("CA$50 credit on invoice #1042");
   });
 
   it("shows one pill: the credit's once there is one, the referral's own otherwise", () => {

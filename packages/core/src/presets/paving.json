@@ -129,14 +129,6 @@
       "unit_cost": 85
     }
   ],
-  "job_types": [
-    "Driveway replacement",
-    "Overlay",
-    "Sealcoat and striping",
-    "Parking lot",
-    "Municipal work order",
-    "GC subcontract"
-  ],
   "formulas": [
     {
       "name": "Hot-mix asphalt tons",
@@ -194,7 +186,10 @@
   "checklists": [
     {
       "name": "Driveway quality check",
-      "job_type": "Driveway replacement",
+      "services": [
+        "Grade and compact stone base",
+        "Hot-mix asphalt surface"
+      ],
       "items": [
         {
           "key": "811_ticket_confirmed",

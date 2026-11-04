@@ -161,6 +161,8 @@ export interface QuoteContractInput {
     sent_at: string | null;
     created_at: string;
     deposit_amount: Amount;
+    /** The deposit as a percent of the total, which {Deposit} follows; null for an amount. */
+    deposit_percent?: Amount;
     /** The sections added to this job (quotes.section_ids). */
     section_ids?: readonly string[] | null;
     /** A signed quote prints the contract kept with it. */

@@ -1,0 +1,315 @@
+{
+  "id": "handyman",
+  "name": "Handyman & Home Repair",
+  "description": "Small repairs, installs, drywall and paint, carpentry and to-do lists, by the hour or the job.",
+  "services": [
+    {
+      "name": "Service call",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 89
+    },
+    {
+      "name": "Labor",
+      "category": "Service and labor",
+      "unit": "hr",
+      "unit_price": 85
+    },
+    {
+      "name": "Half-day rate",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 340
+    },
+    {
+      "name": "Full-day rate",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 640
+    },
+    {
+      "name": "Materials at cost",
+      "category": "Service and labor",
+      "unit": "lump sum",
+      "unit_price": 0
+    },
+    {
+      "name": "Drywall patch, up to 1 ft",
+      "category": "Drywall and paint",
+      "unit": "ea",
+      "unit_price": 150
+    },
+    {
+      "name": "Drywall repair, larger areas",
+      "category": "Drywall and paint",
+      "unit": "sq ft",
+      "unit_price": 10
+    },
+    {
+      "name": "Interior painting",
+      "category": "Drywall and paint",
+      "unit": "sq ft",
+      "unit_price": 3
+    },
+    {
+      "name": "Caulking, tub or shower",
+      "category": "Drywall and paint",
+      "unit": "ea",
+      "unit_price": 145
+    },
+    {
+      "name": "TV wall mount",
+      "category": "Installs and mounting",
+      "unit": "ea",
+      "unit_price": 149
+    },
+    {
+      "name": "Shelves, rods or pictures hung",
+      "category": "Installs and mounting",
+      "unit": "ea",
+      "unit_price": 65
+    },
+    {
+      "name": "Light fixture swap",
+      "category": "Installs and mounting",
+      "unit": "ea",
+      "unit_price": 125
+    },
+    {
+      "name": "Faucet replacement",
+      "category": "Installs and mounting",
+      "unit": "ea",
+      "unit_price": 185
+    },
+    {
+      "name": "Furniture assembly",
+      "category": "Installs and mounting",
+      "unit": "ea",
+      "unit_price": 95
+    },
+    {
+      "name": "Interior door install",
+      "category": "Doors and carpentry",
+      "unit": "ea",
+      "unit_price": 275
+    },
+    {
+      "name": "Door repair or adjustment",
+      "category": "Doors and carpentry",
+      "unit": "ea",
+      "unit_price": 125
+    },
+    {
+      "name": "Fence or gate repair",
+      "category": "Doors and carpentry",
+      "unit": "ea",
+      "unit_price": 225
+    },
+    {
+      "name": "Deck board replacement",
+      "category": "Doors and carpentry",
+      "unit": "ft",
+      "unit_price": 14
+    }
+  ],
+  "formulas": [],
+  "checklists": [
+    {
+      "name": "Repair visit",
+      "services": [
+        "Service call",
+        "Labor",
+        "Half-day rate",
+        "Full-day rate"
+      ],
+      "items": [
+        {
+          "key": "what_we_did",
+          "label": "What we did",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "left_for_next_time",
+          "label": "Anything left for next time",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "before_photos",
+          "label": "Before photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "after_photos",
+          "label": "After photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "work_area_cleaned_up",
+          "label": "Work area cleaned up",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "customer_sign_off",
+          "label": "Customer sign-off",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Drywall and paint",
+      "services": [
+        "Drywall patch, up to 1 ft",
+        "Drywall repair, larger areas",
+        "Interior painting"
+      ],
+      "items": [
+        {
+          "key": "floors_and_furniture_covered",
+          "label": "Floors and furniture covered",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "texture_matched",
+          "label": "Texture matched",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "paint_used",
+          "label": "Paint brand, color and sheen",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "coats_applied",
+          "label": "Coats applied",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "leftover_paint_labeled",
+          "label": "Leftover paint labeled and left with the customer",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "after_photos",
+          "label": "After photos",
+          "type": "photo",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Mounting and installs",
+      "services": [
+        "TV wall mount",
+        "Shelves, rods or pictures hung",
+        "Light fixture swap",
+        "Faucet replacement",
+        "Interior door install"
+      ],
+      "items": [
+        {
+          "key": "mounted_into",
+          "label": "Mounted into",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Studs",
+            "Wall anchors",
+            "Masonry anchors",
+            "Not mounted"
+          ]
+        },
+        {
+          "key": "level_and_secure",
+          "label": "Level and secure",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "tested",
+          "label": "Tested: water, power or door swing",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "photo",
+          "label": "Photo when done",
+          "type": "photo",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Request a handyman",
+      "slug": "request-a-handyman",
+      "kind": "request",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Service address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "tasks",
+          "label": "What needs doing? List as many things as you like.",
+          "type": "long_text",
+          "required": true
+        },
+        {
+          "key": "kind_of_work",
+          "label": "Kind of work",
+          "type": "multi_choice",
+          "required": false,
+          "options": [
+            "Drywall or paint",
+            "Mounting or hanging",
+            "Doors or windows",
+            "Faucets or fixtures",
+            "Carpentry or decks",
+            "Assembly",
+            "Something else"
+          ]
+        },
+        {
+          "key": "materials",
+          "label": "Who's buying the materials?",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "You do",
+            "I have them",
+            "Not sure"
+          ]
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [],
+  "sop_categories": [
+    "Safety",
+    "Repairs and installs",
+    "Client homes",
+    "Tools and van stock"
+  ]
+}

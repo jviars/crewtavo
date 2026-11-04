@@ -9,11 +9,14 @@
  *   - jobs: one total price, no lines; weekly, every two weeks or monthly; 1,000 rows a file;
  *     nothing that started more than ten years ago;
  *   - clients: a row for each property; Jobber's own lead sources; about 5,000 rows a file.
+ * The business's own fields on clients and properties go in the clients file too, a column each named
+ * for the field: Jobber's client import matches those to custom fields made in Jobber first.
  * Jobber finds a client again by email, then by name, so every file spells each one the same way.
  * A job still running starts from its next visit, so Jobber doesn't fill in past visits to invoice;
  * a finished one comes in as finished, invoiced never (its invoices are in the invoices file).
  */
 import { normalizeKey } from "./clientImport";
+import { billingAnswers, invoiceDayText } from "./jobBilling";
 import { lineTotal, taxPercent } from "./money";
 import { phoneDisplay, phoneE164 } from "./phone";
 import { describeRule, occurrenceDates } from "./recurrence";
@@ -32,9 +35,13 @@ export interface JobberClient {
   notes: string | null;
   created_at: string;
   billing_address: JobberAddress | null;
+  /** Its custom fields, as [column name, value], the same columns for every client. */
+  custom?: ReadonlyArray<readonly [string, string]>;
+  /** Jobber's client import has no column for it, so it's only said in the READ ME. */
+  tax_exempt?: boolean;
 }
 export interface JobberContact { client_id: string; name: string; role: string | null; email: string | null; phone: string | null }
-export interface JobberProperty extends JobberAddress { id: string; client_id: string; line1: string; country: string | null }
+export interface JobberProperty extends JobberAddress { id: string; client_id: string; line1: string; country: string | null; custom?: ReadonlyArray<readonly [string, string]> }
 export interface JobberLine { name: string; description: string | null; quantity: number; unit_price: number; unit_cost?: number | null; taxable: boolean }
 export interface JobberQuote {
   client_id: string;
@@ -67,6 +74,13 @@ export interface JobberJob {
   recurrence_rule: string | null;
   active_months: number[] | null;
   billing_mode: string;
+  /** How a recurring job is priced and invoiced (core/jobBilling); missing reads from billing_mode. */
+  pricing?: string | null;
+  invoice_schedule?: string | null;
+  invoice_day?: number | null;
+  /** A paused recurring job: since when, and the day it resumes (null: until someone resumes it). */
+  paused_at?: string | null;
+  resume_on?: string | null;
   /** "08:00" or "08:00:00"; null for anytime visits. */
   visit_start_time: string | null;
   visit_duration_min: number;
@@ -171,15 +185,23 @@ const JOB_COLUMNS = [
 
 export const JOBBER_COLUMNS = { clients: CLIENT_COLUMNS, quotes: QUOTE_COLUMNS, jobs: JOB_COLUMNS, invoices: INVOICE_COLUMNS } as const;
 
+/** Custom fields as cells: one named like a Jobber column says it's a custom field, so it doesn't take that column's place. */
+const customCells = (custom: ReadonlyArray<readonly [string, string]> | undefined): JobberRow =>
+  Object.fromEntries((custom ?? []).map(([name, value]) => [(CLIENT_COLUMNS as readonly string[]).includes(name) ? `${name} (custom field)` : name, value]));
+
 const QUOTE_STATUS: Record<string, string> = { draft: "Draft", sent: "Awaiting Response", changes_requested: "Awaiting Response", approved: "Approved", converted: "Approved" };
 const INVOICE_STATUS: Record<string, string> = { draft: "Draft", sent: "Sent", overdue: "Sent", partially_paid: "Sent", paid: "Paid" };
-/** A running job's billing, as Jobber's job import asks: how, then when. */
-const INVOICING: Record<string, [string, string]> = {
-  per_visit: ["Per visit", "Per visit"],
-  on_completion: ["One price", "On complete"],
-  fixed_schedule: ["Per visit", "Periodic"],
-  progress: ["One price", "Never"],
-};
+/**
+ * A running job's billing, as Jobber's job import asks: how (per visit, or one price: a recurring
+ * job's fixed price), then when (after each visit, periodically: monthly, never: as needed or by
+ * progress, or when it's complete).
+ */
+function jobberInvoicing(job: JobberJob, recurring: boolean): [string, string] {
+  const answers = recurring ? billingAnswers(job) : null;
+  if (answers) return [answers.pricing === "fixed" ? "One price" : "Per visit", answers.schedule === "after_visit" ? "Per visit" : answers.schedule === "monthly" ? "Periodic" : "Never"];
+  if (!recurring && job.billing_mode === "per_visit") return ["Per visit", "Per visit"];
+  return job.billing_mode === "progress" ? ["One price", "Never"] : ["One price", "On complete"];
+}
 
 /** Words that make a client's name a business's, not a person's ("Summit Ridge Builders", "Meadowbrook HOA", "Town of Vinton"). */
 const BUSINESS =
@@ -411,8 +433,13 @@ export function jobberExport(input: JobberInput): JobberExport {
       "Tags": [...client.tags, ...(client.status === "lead" ? ["Lead"] : [])].join(", "),
     };
     const own = propertiesOf.get(client.id) ?? [];
-    for (const p of own.length ? own : [undefined]) clientRows.push({ ...base, ...propertyCells(p) });
+    for (const p of own.length ? own : [undefined]) clientRows.push({ ...base, ...customCells(client.custom), ...propertyCells(p), ...customCells(p?.custom) });
   }
+  // Each custom field's column once, in the order given, after Jobber's own.
+  const customColumns = [...new Set([...input.clients, ...input.properties].flatMap((r) => Object.keys(customCells(r.custom))))];
+  if (customColumns.length) notes.push(`Your custom fields are in the clients file, a column each (${customColumns.join(", ")}). Make the same fields in Jobber first, under Settings, then match each column to its field when you import.`);
+  const exempt = input.clients.filter((c) => c.tax_exempt).length;
+  if (exempt) notes.push(`${plural(exempt, "tax-exempt client")} ${exempt === 1 ? "comes" : "come"} in like any other: Jobber's client import has no column for it. Their quotes and invoices come in with no tax; mark them exempt in Jobber.`);
 
   // Quotes Jobber has a status for, with a property (it needs one).
   const quoteRows: JobberRow[] = [];
@@ -466,12 +493,16 @@ export function jobberExport(input: JobberInput): JobberExport {
     const recurring = job.kind === "recurring" && Boolean(job.recurrence_rule);
     const repeat = recurring ? jobberRepeat(job.recurrence_rule) : null;
     const extra: string[] = [];
+    // A paused job runs again from its resume date; one paused until someone resumes it isn't running.
+    const paused = recurring && Boolean(job.paused_at);
+    const runsFrom = !paused ? today : job.resume_on ? [job.resume_on, today].sort()[1]! : null;
+    if (paused) extra.push(job.resume_on ? `Paused in Crewtavo until ${jobDate(job.resume_on)}.` : "Paused in Crewtavo.");
     let start: string | null;
     let visit: JobberVisit | undefined;
     let length = "";
     let invoicing: [string, string];
     const nextDate = recurring
-      ? next?.date ?? occurrenceDates({ starts_on: job.starts_on ?? today, ends_on: job.ends_on, recurrence_rule: job.recurrence_rule!, active_months: job.active_months }, job.starts_on && job.starts_on > today ? job.starts_on : today, addDays(today, 400))[0]
+      ? next?.date ?? (runsFrom ? occurrenceDates({ starts_on: job.starts_on ?? today, ends_on: job.ends_on, recurrence_rule: job.recurrence_rule!, active_months: job.active_months }, job.starts_on && job.starts_on > runsFrom ? job.starts_on : runsFrom, addDays(runsFrom, 400))[0] : undefined)
       : next?.date;
     if (job.status === "active" && (nextDate || !recurring)) {
       start = nextDate ?? null;
@@ -479,8 +510,9 @@ export function jobberExport(input: JobberInput): JobberExport {
       if (recurring && start) length = String(job.ends_on ? Math.max(1, daysThrough(start, job.ends_on)) : 365);
       if (!start) jobsUnscheduled++;
       if (!recurring && dated.filter((v) => v.date! >= today && v.status !== "completed").length > 1) jobsMoreVisits++;
-      invoicing = INVOICING[job.billing_mode] ?? INVOICING.on_completion;
-      if (!recurring && job.billing_mode === "fixed_schedule") invoicing = INVOICING.on_completion;
+      invoicing = jobberInvoicing(job, recurring);
+      // Jobber's import has no invoice day: a day other than the month's last is said.
+      if (invoicing[1] === "Periodic" && job.invoice_day) extra.push(`Invoiced monthly on ${invoiceDayText(job.invoice_day)} in Crewtavo.`);
     } else {
       const done = dated.filter((v) => v.date! < today);
       start = dated[0]?.date ?? job.starts_on;
@@ -567,7 +599,7 @@ export function jobberExport(input: JobberInput): JobberExport {
 
   return {
     files: [
-      ...split("1-clients", CLIENT_COLUMNS, clientRows, JOBBER_ROWS.clients),
+      ...split("1-clients", [...CLIENT_COLUMNS, ...customColumns], clientRows, JOBBER_ROWS.clients),
       ...split("2-quotes", QUOTE_COLUMNS, quoteRows, JOBBER_ROWS.quotes),
       ...split("3-jobs", JOB_COLUMNS, jobRows, JOBBER_ROWS.jobs),
       ...split("4-invoices", INVOICE_COLUMNS, invoiceRows, JOBBER_ROWS.invoices),

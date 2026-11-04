@@ -344,11 +344,11 @@ describe("where Settings lists contract terms and packages", () => {
   const items = (role: string, permissions: string[]) => settingsGroups(session(role, permissions)).flatMap((g) => g.items);
   const has = (list: ReturnType<typeof items>, match: (i: (typeof list)[number]) => boolean) => list.some(match);
 
-  it("shows Contract terms to the people who manage Settings, beside the estimate template", () => {
+  it("shows Contract terms to the people who manage Settings, beside the document style", () => {
     const office = items("office", ["sales", "settings"]);
     expect(has(office, (i) => "tab" in i && i.tab === "contracts")).toBe(true);
     const business = settingsGroups(session("owner", [])).find((g) => g.title === "Business")!.items.map((i) => i.label);
-    expect(business.indexOf("Contract terms")).toBe(business.indexOf("Estimate template") + 1);
+    expect(business.indexOf("Contract terms")).toBe(business.indexOf("Document style") + 1);
     expect(has(items("office", ["sales"]), (i) => "tab" in i && i.tab === "contracts")).toBe(false);
     expect(has(items("estimator", ["sales", "settings"]), (i) => "tab" in i && i.tab === "contracts")).toBe(false);
   });

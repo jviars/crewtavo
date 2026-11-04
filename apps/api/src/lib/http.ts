@@ -55,7 +55,7 @@ export async function readJson<S extends z.ZodType>(c: Context, schema: S): Prom
 const FIELD_NAMES: Record<string, string> = {
   client_id: "client", property_id: "property", job_id: "job", quote_id: "quote", request_id: "request", visit_id: "visit",
   to: "recipient", body: "message", due_on: "due date", starts_at: "start time", ends_at: "end time", scheduled_on: "date",
-  full_name: "name", display_name: "name", line1: "street address", postal_code: "ZIP code", api_key: "key", amount: "amount",
+  full_name: "name", display_name: "name", line1: "street address", postal_code: "ZIP or postal code", api_key: "key", amount: "amount",
   config_id: "Configuration ID",
 };
 

@@ -1,4 +1,5 @@
 import { autopayAllowed, autopayDueText, autopaySettings, methodLabel, type AutopaySettings } from "@crewtavo/core/autopay";
+import { billingText, monthText } from "@crewtavo/core/jobBilling";
 import type { TablesUpdate } from "@crewtavo/core/database";
 import { askRefusal, marketingOn } from "@crewtavo/core/marketing";
 import { contractDiscountNote } from "@crewtavo/core/promos";
@@ -14,13 +15,14 @@ import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
-import { EntityStatus, StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
+import { EntityStatus, StatusPill, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatDate, formatDateTime, formatMoney, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { AddWorkDialog } from "../invoices/AddWorkDialog";
 import { LineItems } from "../quotes/LineItems";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
 import { useSchedulingRights } from "../schedule/myCrews";
@@ -29,14 +31,18 @@ import { ChangeOrders, useStartChangeOrder } from "./ChangeOrders";
 import { ExpensesCard, useJobExpenses } from "./ExpensesCard";
 import { MaterialsCard, useJobMaterials } from "./JobMaterials";
 import { PhotosCard } from "../files/PhotosCard";
+import { JobChecklists } from "./FilledChecklists";
 import { PlansCard } from "../plans/PlansCard";
-import { InvoiceJobDialog, JobDetailsDialog, type JobRecord } from "./JobDialogs";
+import { PropertyEquipment } from "../clients/PropertyEquipment";
+import { InvoiceJobDialog, JobDetailsDialog, PauseJobDialog, type JobRecord } from "./JobDialogs";
 import { JobDiscountNote } from "./JobDiscountNote";
+import { FieldAddedLines } from "./FieldAddedLines";
 import { jobCosts } from "./jobCosts";
 import { JobPayCard, seesJobPay } from "./JobPayCard";
 import { repeatText } from "./repeatText";
 import { ScopeOfWork } from "./ScopeOfWork";
 import { askToastKind, type AskResult } from "../marketing/askForm";
+import { CustomFieldList, useCustomFields } from "../customFields/CustomFields";
 
 /** The sections a job only shows once it uses them, offered under its line items until then. */
 type Extra = "materials" | "expenses" | "pay";
@@ -54,10 +60,13 @@ export function JobPage() {
   const session = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const jobFields = useCustomFields("job");
   const [visit, setVisit] = useState<VisitInput | null>(null);
   // ?invoice=1 (from a paving project's Invoice step) opens Create invoice straight away.
   const [params] = useSearchParams();
-  const [dialog, setDialog] = useState<null | "details" | "invoice">(() => (params.get("invoice") ? "invoice" : null));
+  const [dialog, setDialog] = useState<null | "details" | "invoice" | "pause">(() => (params.get("invoice") ? "invoice" : null));
+  // The invoice just made, while its next step offers the job's logged hours and materials.
+  const [madeInvoice, setMadeInvoice] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
   // The empty section an add button under the line items just opened, shown while its dialog is up.
   const [adding, setAdding] = useState<Extra | null>(null);
@@ -92,7 +101,7 @@ export function JobPage() {
       unwrapOne(
         await supabase()
           .from("jobs")
-          .select("*, financials:job_financials(contract_total), client:clients(id, display_name, phone, email, status, review_opt_out, marketing_opt_out, sms_opt_out_at, reviewed_at), property:properties(id, line1, city, region, postal_code, lat, lng), quote:quotes!jobs_company_id_quote_id_fkey(id, number, deposit_amount), crew:crews(name), lines:job_line_items(id, name, description, quantity, unit, unit_price, unit_cost, unit_labor_cost, taxable, sort, service_id, source_quote_id, discount_billing, discount_key), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, hold_reason, invoice_id, completed_at, crew:crews(name, color), assignees:visit_assignees(user_id))")
+          .select("*, job_state, financials:job_financials(contract_total), client:clients(id, display_name, phone, email, status, review_opt_out, marketing_opt_out, sms_opt_out_at, reviewed_at), property:properties(id, line1, city, region, postal_code, lat, lng), quote:quotes!jobs_company_id_quote_id_fkey(id, number, deposit_amount), crew:crews(name), lines:job_line_items(id, name, description, quantity, unit, unit_price, unit_cost, unit_labor_cost, taxable, sort, service_id, source_quote_id, discount_billing, discount_key, added_in_field_by, added_in_field_at), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, hold_reason, invoice_id, completed_at, crew:crews(name, color), assignees:visit_assignees(user_id))")
           .eq("id", id)
           .order("sort", { referencedTable: "job_line_items" })
           .order("scheduled_on", { referencedTable: "visits" })
@@ -138,6 +147,21 @@ export function JobPage() {
     enabled: seesInvoices,
     queryFn: async () => unwrap(await supabase().from("invoices").select("id, number, kind, status, subtotal, total, balance_due, retainage_amount, pay_app_number").eq("job_id", id).order("number")),
   });
+  // The months a monthly job still has to invoice (made on its invoice day).
+  const dueMonths = useQuery({
+    queryKey: ["job", id, "due-invoices"],
+    enabled: seesInvoices,
+    queryFn: async () => unwrap(await supabase().from("due_invoices").select("month").eq("job_id", id).order("month")),
+  });
+  const invoiceMonth = useMutation({
+    meta: { success: "Invoice created as a draft", tone: "invoice" },
+    mutationFn: (month: string) => api.post<{ invoice_id: string }>(`/jobs/${id}/invoice`, { kind: j?.pricing === "fixed" ? "standard" : "visits", month }),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ["job", id] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      navigate(`/invoices/${r.invoice_id}`);
+    },
+  });
   const costs = useQuery({
     queryKey: ["job", id, "costs"],
     enabled: seesCosts,
@@ -182,6 +206,15 @@ export function JobPage() {
       queryClient.invalidateQueries({ queryKey: ["job", id] });
       if (clientId) queryClient.invalidateQueries({ queryKey: ["client", clientId, "autopay"] });
     },
+  });
+  // Its visits are made again from today (the server's, as when the schedule changes; else the nightly run).
+  const resume = useMutation({
+    meta: { success: "Job resumed", tone: "job" },
+    mutationFn: async () => {
+      unwrap(await supabase().from("jobs").update({ paused_at: null }).eq("id", id));
+      if (canDispatch) await api.post(`/jobs/${id}/generate-visits`);
+    },
+    onSuccess: refresh,
   });
   const completeVisit = useMutation({
     meta: { success: "Visit completed", tone: "job" },
@@ -231,8 +264,8 @@ export function JobPage() {
   const reviewBy = j.client ? (["email", "sms"] as const).find((channel) => !askRefusal(j.client!, channel, ready)) ?? null : null;
   // A charge is already waiting for this job's finished work: it bills itself, so nobody invoices it by hand.
   const charging = autopayOn && j.autopay && jobAutopay.data?.waiting ? jobAutopay.data.waiting : null;
-  const autopayHint = !autopayAllowed(j.kind, j.billing_mode)
-    ? "Autopay works with recurring jobs billed per visit, or one-off jobs billed when the work is done."
+  const autopayHint = !autopayAllowed(j.kind, j.billing_mode, j.pricing, j.invoice_schedule)
+    ? "Autopay works with recurring jobs billed per visit or at a fixed price monthly, or one-off jobs billed when the work is done."
     : jobAutopay.data && !jobAutopay.data.ready && j.client
       ? jobAutopay.data.paused ? `Autopay is paused for ${j.client.display_name}.`
         : jobAutopay.data.checking ? `Charges start once ${j.client.display_name}'s bank account is checked.`
@@ -290,6 +323,8 @@ export function JobPage() {
                     hidden: !marketingOn(session.company.settings) || !j.client, disabled: !reviewBy, onSelect: () => review.mutate(reviewBy!),
                   },
                   { separator: true },
+                  { label: "Pause job", icon: "pause", hidden: j.status !== "active" || j.kind !== "recurring" || Boolean(j.paused_at), onSelect: () => setDialog("pause") },
+                  { label: "Resume job", icon: "play", hidden: !j.paused_at, onSelect: () => resume.mutate() },
                   { label: "Mark work complete", icon: "check", hidden: j.status !== "active" || j.kind === "one_off", onSelect: () => update.mutate({ status: "requires_invoicing" }) },
                   { label: "Close job", icon: "check", hidden: !["requires_invoicing"].includes(j.status), onSelect: () => update.mutate({ status: "completed" }) },
                   { label: "Reopen job", icon: "undo", hidden: j.status === "active", onSelect: () => update.mutate({ status: "active" }) },
@@ -309,15 +344,22 @@ export function JobPage() {
           </>
         }
       />
-      {/* The status, who it's for and how often it repeats. The number is under Details, the address with the client. */}
+      {/* The status (an active job's late, today, upcoming or unscheduled), who it's for and how often it repeats. The number is under Details, the address with the client. */}
       <div className="page-meta">
-        <EntityStatus kind="job" status={j.status} />
+        <EntityStatus kind="job" status={j.job_state ?? j.status} />
         {j.client && <Link to={`/clients/${j.client.id}`}>{j.client.display_name}</Link>}
         {j.kind === "recurring" && <span className="muted">{j.recurrence_rule ? repeatText(j.recurrence_rule) : "Recurring"}</span>}
         {/* Every client needs a card on file, and this one has none they agreed to that can be charged. */}
         {autopay.card_required && jobAutopay.data && !jobAutopay.data.onFile && !["completed", "archived"].includes(j.status) && <span className="chip chip-amber"><Icon name="card" size={12} />Card not set up</span>}
       </div>
 
+      {j.paused_at && j.status === "active" && (
+        <div className="callout callout-info">
+          <Icon name="pause" size={20} />
+          <div className="grow">Paused since {formatDate(j.paused_at)}. {j.resume_on ? `Visits start again on ${formatDate(j.resume_on)}.` : "No visits are scheduled until it's resumed."}</div>
+          {canSell && <Button size="sm" icon="play" loading={resume.isPending} onClick={() => resume.mutate()}>Resume</Button>}
+        </div>
+      )}
       {/* Requires invoicing needs no banner: the pill says so and Create invoice is the page's green button. */}
       {uninvoiced > 0 && seesInvoices && j.status === "active" && j.billing_mode === "per_visit" && !charging && (
         <div className="callout callout-info">
@@ -326,6 +368,14 @@ export function JobPage() {
           <Button size="sm" onClick={() => setDialog("invoice")}>Invoice visits</Button>
         </div>
       )}
+      {/* A monthly job's month that's due: its invoice, made here or with the others on Invoices. */}
+      {seesInvoices && !charging && dueMonths.data?.map((d) => (
+        <div key={d.month} className="callout callout-info">
+          <Icon name="invoice" size={20} />
+          <div className="grow">{monthText(d.month!)} needs its invoice.</div>
+          <Button size="sm" loading={invoiceMonth.isPending && invoiceMonth.variables === d.month} onClick={() => invoiceMonth.mutate(d.month!)}>Invoice {monthText(d.month!).split(" ")[0]}</Button>
+        </div>
+      ))}
       {charging && j.status !== "archived" && (
         <div className="muted small row" style={{ gap: 6 }}><Icon name="card" size={14} />Charged automatically {autopayDueText(charging.due_at, session.company.timezone)}.</div>
       )}
@@ -375,6 +425,8 @@ export function JobPage() {
             </div>
           </section>
 
+          <JobChecklists jobId={j.id} />
+
           {!hasRole(session, "admin", "office", "estimator") && (
             <>
               <ScopeOfWork jobId={j.id} />
@@ -386,6 +438,7 @@ export function JobPage() {
             <section className="stack">
               <h2 className="section-title">Line items</h2>
               <LineItems table="job_line_items" parent="job_id" parentId={j.id} lines={j.lines} editable={canSell && ["active", "requires_invoicing"].includes(j.status)} onChanged={refresh} />
+              <FieldAddedLines jobId={j.id} lines={j.lines} />
               {repeats && <JobDiscountNote jobId={j.id} lines={j.lines} seesInvoices={seesInvoices} canSwitch={canSell && j.status === "active"} onChanged={refresh} />}
               {addButtons}
             </section>
@@ -466,13 +519,13 @@ export function JobPage() {
                   </dd>
                 </>
               )}
-              <dt>Billing</dt><dd>{statusLabel(j.billing_mode)}</dd>
+              <dt>Billing</dt><dd>{billingText(j)}</dd>
               {autopayOn && j.client && (
                 <>
                   <dt>Autopay</dt>
                   <dd>
                     <label className="switch-row" style={{ fontWeight: 400 }}>
-                      <input type="checkbox" className="switch" checked={j.autopay} disabled={!autopayAllowed(j.kind, j.billing_mode) || j.status === "archived"} onChange={(e) => setAutopay.mutate(e.target.checked)} />
+                      <input type="checkbox" className="switch" checked={j.autopay} disabled={!autopayAllowed(j.kind, j.billing_mode, j.pricing, j.invoice_schedule) || j.status === "archived"} onChange={(e) => setAutopay.mutate(e.target.checked)} />
                       Charge their saved card
                     </label>
                     {autopayHint && <span className="muted small" style={{ display: "block" }}>{autopayHint}</span>}
@@ -486,6 +539,7 @@ export function JobPage() {
               {Number(j.retainage_pct) > 0 && <><dt>Retainage</dt><dd>{Number(j.retainage_pct)}%</dd></>}
               {j.warranty_until && <><dt>Warranty</dt><dd>until {formatDate(j.warranty_until)}</dd></>}
               {j.quote && <><dt>From</dt><dd><Link to={`/quotes/${j.quote.id}`}>Quote #{j.quote.number}</Link></dd></>}
+              <CustomFieldList fields={jobFields} values={j.custom_fields} />
             </dl>
             {j.instructions && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: "var(--radius-control)", border: "1px solid var(--note-border)" }}>{j.instructions}</p>}
           </div>
@@ -498,6 +552,7 @@ export function JobPage() {
                 <>
                   <span className="small">{addressLine(j.property)}</span>
                   <span style={{ justifySelf: "start" }}><MapsLink className="btn btn-sm" place={j.property}><Icon name="navigation" size={14} />Directions</MapsLink></span>
+                  <PropertyEquipment propertyId={j.property.id} inCard />
                 </>
               )}
             </div>
@@ -507,16 +562,19 @@ export function JobPage() {
 
       {visit && <VisitDialog visit={visit} onClose={() => setVisit(null)} onSaved={refresh} />}
       {dialog === "details" && <JobDetailsDialog job={j as unknown as JobRecord} onClose={() => setDialog(null)} onSaved={refresh} />}
+      {dialog === "pause" && <PauseJobDialog jobId={j.id} canSchedule={canDispatch} onClose={() => setDialog(null)} onSaved={refresh} />}
       {dialog === "invoice" && (
         <InvoiceJobDialog
-          job={{ id: j.id, contract_total: contract, deposit: Number(j.quote?.deposit_amount ?? 0), billed, uninvoicedVisits: uninvoiced, kind: j.kind, retainageHeld, finalInvoice }}
+          job={{ id: j.id, contract_total: contract, deposit: Number(j.quote?.deposit_amount ?? 0), billed, uninvoicedVisits: uninvoiced, kind: j.kind, fixed: j.kind === "recurring" && j.pricing === "fixed", retainageHeld, finalInvoice }}
           onClose={() => setDialog(null)}
           onCreated={(invoiceId) => {
             refresh();
-            navigate(`/invoices/${invoiceId}`);
+            setDialog(null);
+            setMadeInvoice(invoiceId);
           }}
         />
       )}
+      {madeInvoice && <AddWorkDialog invoiceId={madeInvoice} jobId={j.id} skipEmpty onClose={() => navigate(`/invoices/${madeInvoice}`)} />}
     </>
   );
 }

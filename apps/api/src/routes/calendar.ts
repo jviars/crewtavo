@@ -16,7 +16,7 @@
  *   POST   /api/calendars                 add a calendar by its ICS link
  *   POST   /api/calendars/file            add a calendar from an uploaded file (one .ics's text)
  *   POST   /api/calendars/:id/file        upload a file calendar again, replacing its events
- *   PATCH  /api/calendars/:id             rename, recolor, assign to a crew, details on/off...
+ *   PATCH  /api/calendars/:id             rename, recolor, assign to a crew or a person, details on/off...
  *   POST   /api/calendars/:id/refresh     read it again now
  *   DELETE /api/calendars/:id             stop showing it
  *   GET    /api/calendars/google          calendars in the connected Google account
@@ -266,6 +266,8 @@ calendar.post("/calendars", ...manage, async (c) => {
       name: z.string().trim().max(80).optional(),
       color: color.optional(),
       crew_id: uuid.nullable().optional(),
+      // Whose own calendar it is: someone on the team (the database checks), or nobody in particular.
+      user_id: uuid.nullable().optional(),
       show_details: z.boolean().default(true),
       blocks_time: z.boolean().default(true),
     }),
@@ -287,6 +289,7 @@ calendar.post("/calendars", ...manage, async (c) => {
       name: clip(body.name || own || fallback, 80),
       color: body.color ?? null,
       crew_id: body.crew_id ?? null,
+      user_id: body.user_id ?? null,
       show_details: body.show_details,
       blocks_time: body.blocks_time,
       url_sealed: await encryptJson(c.env, { url: url.toString() }),
@@ -318,6 +321,7 @@ calendar.post("/calendars/file", ...manage, async (c) => {
       name: z.string().trim().max(80).optional(),
       color: color.optional(),
       crew_id: uuid.nullable().optional(),
+      user_id: uuid.nullable().optional(),
       show_details: z.boolean().default(true),
       blocks_time: z.boolean().default(true),
     }),
@@ -335,6 +339,7 @@ calendar.post("/calendars/file", ...manage, async (c) => {
       name: clip(body.name || file.name?.trim() || nameFromFile(body.file_name) || "Calendar", 80),
       color: body.color ?? null,
       crew_id: body.crew_id ?? null,
+      user_id: body.user_id ?? null,
       show_details: body.show_details,
       blocks_time: body.blocks_time,
       created_by: c.var.userId,
@@ -372,6 +377,8 @@ calendar.patch("/calendars/:id", ...manage, async (c) => {
       name: z.string().trim().min(1).max(80).optional(),
       color: color.optional(),
       crew_id: uuid.nullable().optional(),
+      // Whose own calendar it is: someone on the team (the database checks), or nobody in particular.
+      user_id: uuid.nullable().optional(),
       show_details: z.boolean().optional(),
       blocks_time: z.boolean().optional(),
       enabled: z.boolean().optional(),
@@ -434,7 +441,7 @@ calendar.get("/calendars/google", ...manage, async (c) => {
 });
 
 calendar.post("/calendars/google", ...manage, async (c) => {
-  const body = await readJson(c, z.object({ calendar_id: z.string().min(1).max(300), crew_id: uuid.nullable().optional(), show_details: z.boolean().default(true) }));
+  const body = await readJson(c, z.object({ calendar_id: z.string().min(1).max(300), crew_id: uuid.nullable().optional(), user_id: uuid.nullable().optional(), show_details: z.boolean().default(true) }));
   const state = await requireGoogle(c);
   const admin = adminClient(c.env);
   const found = (await readable(() => listGoogleCalendars(c.env, admin, c.var.companyId, state.push_calendar_id))).find((cal) => cal.id === body.calendar_id);
@@ -448,6 +455,7 @@ calendar.post("/calendars/google", ...manage, async (c) => {
       name: found.name,
       color: found.color,
       crew_id: body.crew_id ?? null,
+      user_id: body.user_id ?? null,
       show_details: body.show_details,
       external_id: found.id,
       created_by: c.var.userId,

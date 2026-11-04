@@ -89,6 +89,9 @@ export function FieldTodayPage() {
     queryClient.invalidateQueries({ queryKey: ["field"] });
     queryClient.invalidateQueries({ queryKey: ["field-visit"] });
     queryClient.invalidateQueries({ queryKey: ["schedule"] });
+    // The Jobs list and job pages say Late, Today, Upcoming or Unscheduled from the visits (public.job_state).
+    queryClient.invalidateQueries({ queryKey: ["job"] });
+    queryClient.invalidateQueries({ queryKey: ["jobs"] });
     queryClient.invalidateQueries({ queryKey: ["running-timer"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
@@ -163,7 +166,7 @@ export function FieldTodayPage() {
         {open.map((v, i) => {
           const next = NEXT[v.status];
           // Which of the card's steps is on its way: finding the phone's place comes first for one that clocks.
-          const going = statusTap.locating === v.id ? "locating" : setStatus.isPending && !setStatus.isPaused && setStatus.variables?.visitId === v.id ? setStatus.variables.status : null;
+          const going = statusTap.locating?.id === v.id ? statusTap.locating.status : setStatus.isPending && !setStatus.isPaused && setStatus.variables?.visitId === v.id ? setStatus.variables.status : null;
           return (
             <article key={v.id} className="field-card" data-now={v.status === "in_progress" || undefined}>
               <div className="field-card-info">
@@ -190,7 +193,7 @@ export function FieldTodayPage() {
                     </div>
                   )}
                   {next && (
-                    <Button variant={v.id === now?.id ? "primary" : "secondary"} icon={next.icon} block className="big-action" loading={going === next.status || going === "locating"} onClick={() => changeStatus(v, next.status)}>
+                    <Button variant={v.id === now?.id ? "primary" : "secondary"} icon={next.icon} block className="big-action" loading={going === next.status} onClick={() => changeStatus(v, next.status)}>
                       {next.label}
                     </Button>
                   )}

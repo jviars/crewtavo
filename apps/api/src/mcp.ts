@@ -127,7 +127,7 @@ mcp.post("/mcp", async (c) => {
           capabilities: { tools: { listChanged: false } },
           serverInfo: SERVER_INFO,
           instructions:
-            "Crewtavo runs a service business: clients and their properties, requests, quotes, jobs (one-off and recurring services), the schedule, invoices and payments, the team, time clocks, pay, its setup (company details, price list, crews, checklists, booking forms, guides, automations, the estimate templates and contract terms its estimates and invoices print with), and marketing (email campaigns, review and referral asks, Google review replies, social posts, promo codes). " +
+            "Crewtavo runs a service business: clients and their properties, requests, quotes, jobs (one-off and recurring services), the schedule, invoices and payments, the team, time clocks, pay, its setup (company details, price list, crews, checklists, booking forms, guides, automations, the document styles (estimate templates) and contract terms its estimates and invoices print with), and marketing (email campaigns, review and referral asks, Google review replies, social posts, promo codes). " +
             "Look before changing anything: find clients with search_clients or list_clients, jobs with list_jobs, and read a record before you change it. " +
             "To bring data in from another system, use import_clients and import_schedule with mode preview first, show the person what it found, then commit. " +
             "Times and dates are in the company's time zone. Confirm with the person before deleting, sending anything to a client (a campaign: say how many it reaches), posting anything publicly (a social post, a review reply), inviting someone, or marking people paid. " +

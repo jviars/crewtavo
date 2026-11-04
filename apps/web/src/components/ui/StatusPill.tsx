@@ -9,6 +9,8 @@
  *   Quote    draft "Draft" · sent "Awaiting response" · changes_requested "Changes requested" ·
  *            approved "Approved" · converted "Converted" · lost "Lost" · archived "Archived"
  *   Job      active "Active" · requires_invoicing "Requires invoicing" · completed "Completed" · archived "Archived"
+ *            (an active job shows its state from its visits instead, public.job_state: late "Late" ·
+ *            today "Today" · upcoming "Upcoming" · unscheduled "Unscheduled", or paused "Paused")
  *   Invoice  draft "Draft" · sent "Awaiting payment" · partially_paid "Partly paid" · paid "Paid" ·
  *            overdue "Past due" · void "Void" · written_off "Written off"
  *   Visit    unscheduled "Unscheduled" · scheduled "Scheduled" · en_route "On the way" ·
@@ -30,9 +32,9 @@
  *            unknown "Unconfirmed" · skipped "Skipped" (where a social post goes, and how it went there)
  *
  * Money that's late is "Past due", never "Overdue" or "Waiting on payment". "Overdue" is kept for work
- * that's late: a new request nobody has answered in two days (Home's workflow), a visit past its day,
- * equipment maintenance. packages/core/src/automations.ts (STATUS_CHOICES) repeats these words for the
- * automation builder, so change both together. A paving or roofing project's stage ("Proposal sent",
+ * that's late: a new request nobody has answered in two days (Home's workflow), a visit past its day
+ * (its job is "Late", the word Jobber uses), equipment maintenance. packages/core/src/automations.ts
+ * (STATUS_CHOICES) repeats these words for the automation builder, so change both together. A paving or roofing project's stage ("Proposal sent",
  * "Won") is its own thing, worded in features/paving/data.ts and features/roofing/data.ts.
  */
 
@@ -64,7 +66,7 @@ const STATUS_TEXT = {
   client: { lead: "Lead", active: "Active", archived: "Archived" },
   request: { new: "New", assessment_scheduled: "Assessment booked", assessment_complete: "Assessment done", quoted: "Quoted", converted: "Converted", archived: "Archived" },
   quote: { draft: "Draft", sent: "Awaiting response", changes_requested: "Changes requested", approved: "Approved", converted: "Converted", lost: "Lost", archived: "Archived" },
-  job: { active: "Active", requires_invoicing: "Requires invoicing", completed: "Completed", archived: "Archived" },
+  job: { active: "Active", requires_invoicing: "Requires invoicing", completed: "Completed", archived: "Archived", late: "Late", today: "Today", upcoming: "Upcoming", unscheduled: "Unscheduled", paused: "Paused" },
   invoice: { draft: "Draft", sent: "Awaiting payment", partially_paid: "Partly paid", paid: "Paid", overdue: "Past due", void: "Void", written_off: "Written off" },
   visit: { unscheduled: "Unscheduled", scheduled: "Scheduled", en_route: "On the way", in_progress: "In progress", completed: "Completed", cancelled: "Cancelled" },
   referral: { new: "New lead", quoted: "Quoted", won: "Won", lost: "Lost" },
@@ -96,7 +98,8 @@ const ENTITY_TONES: Record<StatusKind, Record<string, Tone>> = {
   client: { lead: "warning", active: "good", archived: "muted" },
   request: { new: "warning", assessment_scheduled: "info", assessment_complete: "info", quoted: "good", converted: "good", archived: "muted" },
   quote: { draft: "muted", sent: "info", changes_requested: "warning", approved: "good", converted: "good", lost: "danger", archived: "muted" },
-  job: { active: "info", requires_invoicing: "warning", completed: "good", archived: "muted" },
+  // An active job's states read like its visits': late in red, today under way, upcoming waiting, unscheduled to see to, paused at rest.
+  job: { active: "info", requires_invoicing: "warning", completed: "good", archived: "muted", late: "danger", today: "info", upcoming: "muted", unscheduled: "warning", paused: "muted" },
   invoice: { draft: "muted", sent: "info", partially_paid: "warning", paid: "good", overdue: "danger", void: "muted", written_off: "muted" },
   visit: VISIT_TONES,
   referral: { new: "warning", quoted: "info", won: "good", lost: "danger" },

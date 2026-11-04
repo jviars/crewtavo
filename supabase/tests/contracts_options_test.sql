@@ -1172,7 +1172,7 @@ select t_options.check(not has_function_privilege('anon', 'public.accept_hub_ran
 -- what it can reach.)
 select t_options.check((select bool_and(not has_function_privilege('anon', f, 'execute') and has_function_privilege('authenticated', f, 'execute'))
                           from unnest(array['public.apply_quote_options(uuid, jsonb, text, uuid[], jsonb)', 'public.remove_quote_option(uuid, uuid)',
-                                            'public.duplicate_quote(uuid)', 'public.put_quote_package(uuid, uuid, jsonb, boolean)',
+                                            'public.duplicate_quote(uuid, text, uuid, uuid, text, jsonb)', 'public.put_quote_package(uuid, uuid, jsonb, boolean)',
                                             'public.sign_quote(uuid, jsonb, uuid, numeric)']) f),
   'the options functions, pricing from a package and signing are for people signed in, not for anyone without an account');
 select t_options.check((select count(*) = 1 from pg_proc where proname = 'apply_promo_code') and (select count(*) = 1 from pg_proc where proname = 'put_quote_package')

@@ -13,7 +13,7 @@
  *   - what Settings → Payments shows (autopayStatus).
  * Uses the admin client, and every lookup filters by company. Crews never reach any of it.
  */
-import { autopaySettings, autopayTimingText, methodExpiry, methodLabel, tipsAllowed, type AutopaySettings } from "@crewtavo/core/autopay";
+import { autopayCoversMonthly, autopaySettings, autopayTimingText, methodExpiry, methodLabel, tipsAllowed, type AutopaySettings } from "@crewtavo/core/autopay";
 import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { textsOff, textsOffReason } from "@crewtavo/core/marketing";
 import type { Env } from "../env";
@@ -71,8 +71,14 @@ export interface HubAutopay {
   next_charge: string | null;
   /** The price of a visit on the client's one recurring job that autopay charges, if just one. */
   per_visit: number | null;
-  /** Tax goes on top of per_visit: a line is taxable and the rate the invoice uses is above 0. */
+  /** Tax goes on top of per_visit: a line is taxable, the rate the invoice uses is above 0, and the client isn't tax exempt. */
   per_visit_taxed: boolean;
+  /**
+   * Their agreement in force doesn't mention a monthly plan, today's terms do, and they have a
+   * monthly plan on autopay: its charges wait for the office's OK until they agree to today's terms
+   * (with the card they have, through confirm).
+   */
+  reagree: boolean;
   /**
    * False while the business can't take autopay (off in Settings, or its key can't charge cards):
    * only then for a client with an agreement in force, so they can still see it and turn it off.
@@ -863,12 +869,13 @@ const methodView = (m: Method) => ({ id: m.id, type: m.type, label: methodLabel(
 export async function hubAutopay(env: Env, admin: Db, companyId: string, clientId: string, options: { trust?: Trust } = {}): Promise<HubAutopay | null> {
   const available = await autopayAvailable(env, admin, companyId);
   if (!available && !(await agreementOf(admin, companyId, clientId))) return null;
-  const [company, agreements, methods, charges, jobs] = await Promise.all([
+  const [company, agreements, methods, charges, jobs, client] = await Promise.all([
     admin.from("companies").select("trade_preset, settings->autopay, settings->default_tax_rate").eq("id", companyId).maybeSingle(),
-    admin.from("autopay_authorizations").select("id, payment_method_id, accepted_at, paused_at, revoked_at, revoked_via").eq("company_id", companyId).eq("client_id", clientId),
+    admin.from("autopay_authorizations").select("id, payment_method_id, terms, accepted_at, paused_at, revoked_at, revoked_via").eq("company_id", companyId).eq("client_id", clientId),
     admin.from("client_payment_methods").select(METHOD_FIELDS).eq("company_id", companyId).eq("client_id", clientId),
     admin.from("autopay_charges").select("due_at").eq("company_id", companyId).eq("client_id", clientId).eq("status", "waiting"),
     admin.from("jobs").select("id, autopay, quote_id").eq("company_id", companyId).eq("client_id", clientId).eq("kind", "recurring").eq("billing_mode", "per_visit").eq("status", "active"),
+    admin.from("clients").select("tax_exempt").eq("company_id", companyId).eq("id", clientId).maybeSingle(),
   ]);
   const row = company.data as { trade_preset?: string; autopay?: unknown; default_tax_rate?: unknown } | null;
   const settings = autopaySettings({ autopay: row?.autopay }, row?.trade_preset);
@@ -895,7 +902,8 @@ export async function hubAutopay(env: Env, admin: Db, companyId: string, clientI
 
   // The price of a visit, when there's just one recurring job it would charge (the one with autopay
   // on, or, as agreeing turns it on for them, all of them). Before tax: whether tax goes on top is
-  // create_invoice_for_job's rule, a taxable line and the job's quote's rate, else the company's.
+  // create_invoice_for_job's rule, a taxable line and the job's quote's rate, else the company's,
+  // and none for a client who is tax exempt.
   const charged = (jobs.data ?? []).filter((j) => j.autopay || (!live && settings.jobs_default));
   let perVisit: number | null = null;
   let taxed = false;
@@ -904,11 +912,19 @@ export async function hubAutopay(env: Env, admin: Db, companyId: string, clientI
     const { data: lines } = await admin.from("job_line_items").select("quantity, unit_price, taxable").eq("company_id", companyId).eq("job_id", job.id);
     const cents = (lines ?? []).reduce((sum, l) => sum + Math.round(Number(l.quantity) * Number(l.unit_price) * 100), 0);
     perVisit = lines?.length ? cents / 100 : null;
-    if ((lines ?? []).some((l) => l.taxable)) {
+    if (!client.data?.tax_exempt && (lines ?? []).some((l) => l.taxable)) {
       const quote = job.quote_id ? (await admin.from("quotes").select("tax_rate").eq("company_id", companyId).eq("id", job.quote_id).maybeSingle()).data : null;
       taxed = Number(quote?.tax_rate ?? row?.default_tax_rate ?? 0) > 0;
     }
   }
+  // Agreed before the terms mentioned a monthly plan, with one on autopay: asked to agree to today's
+  // terms with the card they have (one this link can say yes to), so its months stop waiting.
+  const reagree = Boolean(
+    available && live && method && (status === "active" || status === "pending") && confirmable(method, options.trust)
+      && !autopayCoversMonthly(live.terms) && autopayCoversMonthly(settings.terms)
+      && (await admin.from("jobs").select("id").eq("company_id", companyId).eq("client_id", clientId).eq("kind", "recurring").eq("status", "active")
+        .eq("pricing", "fixed").eq("invoice_schedule", "monthly").eq("autopay", true).limit(1)).data?.length,
+  );
   const due = (charges.data ?? []).map((c) => c.due_at).sort()[0] ?? null;
   return {
     status,
@@ -921,6 +937,7 @@ export async function hubAutopay(env: Env, admin: Db, companyId: string, clientI
     next_charge: due,
     per_visit: perVisit,
     per_visit_taxed: perVisit !== null && taxed,
+    reagree,
     available,
     card_required: settings.card_required,
   };

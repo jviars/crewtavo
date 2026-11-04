@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseCsv } from "../src/lib/csv";
-import { guessMapping, toClients } from "../src/features/clients/importClients";
+import { customColumns, guessMapping, toClients } from "../src/features/clients/importClients";
 
 const read = (csv: string) => {
   const rows = parseCsv(csv);
@@ -28,6 +28,28 @@ describe("client import", () => {
     expect(summit.billing).toMatchObject({ line1: "9 Main St", city: "Rocky Mount" });
     // Only a billing address: that's where the work is.
     expect(clients[1]).toMatchObject({ display_name: "Jordan Rivera", properties: [{ line1: "418 Pell Ave", city: "Roanoke" }] });
+  });
+
+  it("fills custom fields from columns with their names, in any case, and lists the columns left over", () => {
+    const rows = parseCsv(
+      [
+        "Client Name,Client Email,Street 1,PETS ON SITE,Gate code,Pool volume,Created Date",
+        "Meadowbrook HOA,board@hoa.test,75 Meadowbrook Ln,yes,4821,\"12,500\",2024-01-02",
+        "Meadowbrook HOA,board@hoa.test,80 Pool Rd,no,,lots,2024-01-02",
+      ].join("\n"),
+    );
+    const mapping = guessMapping(rows[0]!);
+    const fields = {
+      client: [{ key: "pets", label: "Pets on site", type: "yes_no" }],
+      property: [{ key: "gate_code", label: "Gate code", type: "text" }, { key: "pool_volume", label: "Pool volume", type: "number" }],
+    };
+    const columns = customColumns(rows[0]!, mapping, fields);
+    expect(columns.matched.map((c) => [c.column, c.record, c.field.key])).toEqual([[3, "client", "pets"], [4, "property", "gate_code"], [5, "property", "pool_volume"]]);
+    expect(columns.others).toEqual([6]);
+    const [hoa] = toClients(rows.slice(1), mapping, columns.matched);
+    // The first row with a value gives the client's; a cell that doesn't fit its field is left out.
+    expect(hoa!.custom_fields).toEqual({ pets: true });
+    expect(hoa!.properties.map((p) => p.custom_fields)).toEqual([{ gate_code: "4821", pool_volume: 12500 }, {}]);
   });
 
   it("groups a properties export by client and skips repeats and nameless rows", () => {

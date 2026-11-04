@@ -7,6 +7,7 @@
  */
 import { contractInput, contractValues, resolveSections, sectionsHash } from "@crewtavo/core/contracts";
 import { DEFAULT_TEMPLATE, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
+import { getPreset } from "@crewtavo/core/presets";
 import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -43,6 +44,7 @@ import {
   sampleDocument,
   signedTemplate,
   stillInitialed,
+  TRADE_SAMPLES,
   websiteLabel,
   withInitials,
 } from "../src/features/documents/build";
@@ -270,6 +272,28 @@ describe("a quote as a document", () => {
     expect(custom).toMatchObject({ client: { name: "Dana", lines: [] }, date: "2026-10-24", discountLabel: undefined });
   });
 
+  it("prints the custom fields marked for the PDF in the strip under the address", () => {
+    const fields = [{ label: "Permit number", text: "P-1042" }, { label: "Unit", text: "Heat pump" }];
+    const quote = quoteDocument({ number: 9, subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0, pdf_fields: fields }, [], { choice: { name: "Designer shingle", tier: "Better" } });
+    expect(quote.facts).toEqual(["Your choice: Better · Designer shingle", "Permit number: P-1042", "Unit: Heat pump"]);
+    expect(page({}, quote)).toContain("Permit number: P-1042");
+    const invoice = { number: 5, issued_on: "2026-10-01", due_on: null, subject: "Roof", notes: null, subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0, retainage_amount: 0, balance_due: 0, lines: [], payments: [] };
+    expect(invoiceDocument({ ...invoice, pdf_fields: fields }, { timeZone: "UTC" }).facts).toEqual(["Permit number: P-1042", "Unit: Heat pump"]);
+    expect(invoiceDocument(invoice, { timeZone: "UTC" })).not.toHaveProperty("facts");
+  });
+
+  it("says Tax exempt for a tax-exempt client charged no tax, with their certificate number", () => {
+    const invoice = { number: 5, issued_on: "2026-10-01", due_on: null, subject: "Roof", notes: null, subtotal: 100, discount_amount: 0, tax_amount: 0, total: 100, retainage_amount: 0, balance_due: 100, lines: [], payments: [] };
+    const exempt = invoiceDocument({ ...invoice, client: { display_name: "Grace Church", tax_exempt: true, tax_exempt_note: "E-4410" } }, { timeZone: "UTC" });
+    expect(exempt.taxExempt).toBe("E-4410");
+    expect(page({}, exempt)).toContain("Tax exempt · E-4410");
+    const quote = quoteDocument({ number: 9, subtotal: 100, discount_amount: 0, tax_amount: 0, total: 100, client: { display_name: "Grace Church", tax_exempt: true } }, []);
+    expect(quote.taxExempt).toBe("");
+    // Not for anyone else, nor on one sent with tax before they were exempt.
+    expect(invoiceDocument({ ...invoice, client: { display_name: "Hal" } }, { timeZone: "UTC" })).not.toHaveProperty("taxExempt");
+    expect(invoiceDocument({ ...invoice, tax_amount: 8, client: { display_name: "Grace Church", tax_exempt: true } }, { timeZone: "UTC" })).not.toHaveProperty("taxExempt");
+  });
+
   it("says how often recurring work is done, and that its total is per visit", () => {
     const quote = { number: 8, subtotal: 55, discount_amount: 0, tax_amount: 0, total: 55, recurrence_rule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU", active_months: [4, 5, 6, 7, 8, 9, 10] };
     const doc = quoteDocument(quote, [{ name: "Mow", quantity: 1, unit: "visit", unit_price: 55, option_id: null }]);
@@ -290,6 +314,19 @@ describe("a quote as a document", () => {
     expect(SAMPLE_GENERAL_DOCUMENT.total).toBe(2330);
     expect(sampleDocument("roofing_exteriors")).toBe(SAMPLE_DOCUMENT);
     expect(sampleDocument("lawn_exterior")).toBe(SAMPLE_GENERAL_DOCUMENT);
+    expect(sampleDocument("plumbing")).toBe(TRADE_SAMPLES.plumbing);
+  });
+
+  it("prices each trade's sample from that trade's price list", () => {
+    for (const [trade, sample] of Object.entries(TRADE_SAMPLES)) {
+      const services = new Map(getPreset(trade).services.map((s) => [s.name, s]));
+      for (const line of sample.lines) {
+        const service = services.get(line.name);
+        expect(service?.unit, `${trade}: ${line.name}`).toBe(line.unit);
+        // Materials at cost are priced on each job.
+        if (service?.unit_price) expect(line.unit_price, `${trade}: ${line.name}`).toBe(service.unit_price);
+      }
+    }
   });
 });
 

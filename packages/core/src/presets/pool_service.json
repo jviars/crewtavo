@@ -1,0 +1,383 @@
+{
+  "id": "pool_service",
+  "name": "Pool & Spa Service",
+  "description": "Weekly pool service plans, openings and closings, green-pool cleanups, repairs and equipment.",
+  "services": [
+    {
+      "name": "Service call",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 95
+    },
+    {
+      "name": "Labor",
+      "category": "Service and labor",
+      "unit": "hr",
+      "unit_price": 95
+    },
+    {
+      "name": "Weekly pool service plan",
+      "category": "Service plans",
+      "unit": "month",
+      "unit_price": 165
+    },
+    {
+      "name": "Bi-weekly pool service plan",
+      "category": "Service plans",
+      "unit": "month",
+      "unit_price": 110
+    },
+    {
+      "name": "Spa service",
+      "category": "Service plans",
+      "unit": "visit",
+      "unit_price": 85
+    },
+    {
+      "name": "One-time pool cleaning",
+      "category": "Seasonal and cleanups",
+      "unit": "visit",
+      "unit_price": 175
+    },
+    {
+      "name": "Pool opening",
+      "category": "Seasonal and cleanups",
+      "unit": "visit",
+      "unit_price": 325
+    },
+    {
+      "name": "Pool closing",
+      "category": "Seasonal and cleanups",
+      "unit": "visit",
+      "unit_price": 325
+    },
+    {
+      "name": "Green pool cleanup",
+      "category": "Seasonal and cleanups",
+      "unit": "visit",
+      "unit_price": 450
+    },
+    {
+      "name": "Shock treatment",
+      "category": "Seasonal and cleanups",
+      "unit": "ea",
+      "unit_price": 45
+    },
+    {
+      "name": "Filter cleaning",
+      "category": "Repairs and equipment",
+      "unit": "ea",
+      "unit_price": 125
+    },
+    {
+      "name": "Salt cell cleaning",
+      "category": "Repairs and equipment",
+      "unit": "ea",
+      "unit_price": 95
+    },
+    {
+      "name": "Tile line cleaning",
+      "category": "Repairs and equipment",
+      "unit": "ft",
+      "unit_price": 6
+    },
+    {
+      "name": "Leak detection",
+      "category": "Repairs and equipment",
+      "unit": "visit",
+      "unit_price": 395
+    },
+    {
+      "name": "Pump motor replacement",
+      "category": "Repairs and equipment",
+      "unit": "ea",
+      "unit_price": 850,
+      "unit_cost": 380
+    },
+    {
+      "name": "Variable-speed pump install",
+      "category": "Repairs and equipment",
+      "unit": "ea",
+      "unit_price": 1950,
+      "unit_cost": 1100
+    },
+    {
+      "name": "Pool heater install",
+      "category": "Repairs and equipment",
+      "unit": "ea",
+      "unit_price": 4200,
+      "unit_cost": 2600
+    }
+  ],
+  "formulas": [],
+  "checklists": [
+    {
+      "name": "Pool service log",
+      "services": [
+        "Weekly pool service plan",
+        "Bi-weekly pool service plan",
+        "One-time pool cleaning",
+        "Spa service"
+      ],
+      "items": [
+        {
+          "key": "free_chlorine_ppm",
+          "label": "Free chlorine (ppm)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "ph",
+          "label": "pH",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "total_alkalinity_ppm",
+          "label": "Total alkalinity (ppm)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "cya_ppm",
+          "label": "Stabilizer, CYA (ppm)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "salt_ppm",
+          "label": "Salt (ppm)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "water_temperature_f",
+          "label": "Water temperature (°F)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "chemicals_added",
+          "label": "Chemicals added, and how much",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "skimmed_brushed_vacuumed",
+          "label": "Skimmed, brushed and vacuumed",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "baskets_emptied",
+          "label": "Skimmer and pump baskets emptied",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "filter_pressure_psi",
+          "label": "Filter pressure (psi)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "equipment",
+          "label": "Equipment",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Running normally",
+            "Needs attention"
+          ]
+        },
+        {
+          "key": "gate_closed_and_latched",
+          "label": "Gate closed and latched",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "photo_of_the_pool",
+          "label": "Photo of the pool",
+          "type": "photo",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Opening and closing",
+      "services": [
+        "Pool opening",
+        "Pool closing"
+      ],
+      "items": [
+        {
+          "key": "cover",
+          "label": "Cover",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Removed and stored",
+            "Installed"
+          ]
+        },
+        {
+          "key": "water_level_set",
+          "label": "Water level set",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "equipment_started",
+          "label": "Equipment started and checked (opening)",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "lines_blown_out_and_plugged",
+          "label": "Lines blown out and plugged (closing)",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "chemicals_added",
+          "label": "Chemicals added",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "before_and_after_photos",
+          "label": "Before and after photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "notes_for_next_visit",
+          "label": "Notes for next visit",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Green pool cleanup",
+      "services": [
+        "Green pool cleanup"
+      ],
+      "items": [
+        {
+          "key": "water_at_start",
+          "label": "Water at the start",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Cloudy",
+            "Light green",
+            "Dark green or black"
+          ]
+        },
+        {
+          "key": "shock_added_lbs",
+          "label": "Shock added (lbs)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "filter_cleaned",
+          "label": "Filter cleaned or backwashed",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "follow_up_visits_needed",
+          "label": "Follow-up visits needed",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "before_photo",
+          "label": "Before photo",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "after_photo",
+          "label": "After photo",
+          "type": "photo",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Get a pool service quote",
+      "slug": "get-a-pool-service-quote",
+      "kind": "request",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Service address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "service",
+          "label": "What do you need?",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Weekly service",
+            "Opening or closing",
+            "Green pool cleanup",
+            "Repair or equipment",
+            "Something else"
+          ]
+        },
+        {
+          "key": "pool_type",
+          "label": "Pool type",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "In-ground",
+            "Above-ground",
+            "Hot tub or spa"
+          ]
+        },
+        {
+          "key": "sanitizer",
+          "label": "Chlorine or salt?",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "Chlorine",
+            "Salt",
+            "Not sure"
+          ]
+        },
+        {
+          "key": "access",
+          "label": "How do we get to the pool? Gate code, dogs, anything we should know",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [],
+  "sop_categories": [
+    "Safety and chemicals",
+    "Weekly service",
+    "Openings and closings",
+    "Equipment"
+  ]
+}

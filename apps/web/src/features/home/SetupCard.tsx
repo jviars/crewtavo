@@ -1,6 +1,7 @@
 /**
  * Home: the few things that make Crewtavo the business's own, for owners and the office, here rather
- * than inside the quotes and invoices being worked on. Each step ticks itself off once it's been done
+ * than inside the quotes and invoices being worked on: in any trade, prices, payments, logo, team and
+ * a first client, then options on a quote, and measuring for work priced by area or length. Each step ticks itself off once it's been done
  * (one small read finds out), the card goes when every step is done, and anyone can hide it for good.
  */
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +12,7 @@ import { Icon } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, useSession, type Session } from "@/lib/session";
 import { undoable } from "@/lib/undo";
+import { useAutopayStatus } from "../settings/PaymentSettings";
 import styles from "./Home.module.css";
 
 export const seesSetup = (session: Session) => hasRole(session, "admin", "office") && can(session, "settings");
@@ -34,7 +36,26 @@ function storeHidden(key: string) {
   }
 }
 
-/** Whether each step has been done: any contract section, any quote with options, any measurement. */
+// Price list units a measurement fills in (areas, lengths, and tons worked out from an area).
+const MEASURED_UNIT = /^(sq ?ft|sf|sq ?yd|sy|squares?|ft|feet|lf|linear ft|tons?)$/i;
+
+/** One price list item: what's needed to tell whether the business made the list its own. */
+type PriceRow = { unit: string; formula: string | null; created_at: string; updated_at: string };
+
+/**
+ * The price list is theirs once an item was changed (updated_at moves on an edit) or added after the
+ * starter list (an hour after the business was made); it's priced by measuring when an item's unit
+ * is an area or length, or a formula works it out from a measurement.
+ */
+export function priceListState(companyCreatedAt: string, services: PriceRow[]) {
+  const settled = new Date(companyCreatedAt).getTime() + 60 * 60_000;
+  return {
+    prices: services.some((s) => s.updated_at > s.created_at || new Date(s.created_at).getTime() > settled),
+    measures: services.some((s) => Boolean(s.formula) || MEASURED_UNIT.test(s.unit.trim())),
+  };
+}
+
+/** Whether each step has been done, from one small read: the price list, the team, and any client, quote with options or measurement. */
 export function useSetupSteps(enabled: boolean) {
   const { company } = useSession();
   return useQuery({
@@ -42,18 +63,25 @@ export function useSetupSteps(enabled: boolean) {
     enabled,
     meta: { silent: true },
     queryFn: async () => {
-      // One request: the company with at most one of each, by id.
+      // One request: the company with at most one or two of each, by id, and its price list's few columns.
       const row = unwrap(
         await supabase()
           .from("companies")
-          .select("id, contract_sections(id), quote_options(id), measurements(id)")
+          .select("id, created_at, clients(id), memberships(user_id), quote_options(id), measurements(id), services(unit, formula, created_at, updated_at)")
           .eq("id", company.id)
-          .limit(1, { referencedTable: "contract_sections" })
+          .limit(1, { referencedTable: "clients" })
+          .limit(2, { referencedTable: "memberships" })
           .limit(1, { referencedTable: "quote_options" })
           .limit(1, { referencedTable: "measurements" })
           .single(),
       );
-      return { contracts: row.contract_sections.length > 0, options: row.quote_options.length > 0, measured: row.measurements.length > 0 };
+      return {
+        ...priceListState(row.created_at, row.services),
+        client: row.clients.length > 0,
+        team: row.memberships.length > 1,
+        options: row.quote_options.length > 0,
+        measured: row.measurements.length > 0,
+      };
     },
   });
 }
@@ -63,12 +91,21 @@ export function SetupCard() {
   const key = hiddenKey(session.company.id, session.userId);
   const [hidden, setHidden] = useState(() => readHidden(key));
   const steps = useSetupSteps(seesSetup(session) && !hidden);
-  if (hidden || !steps.data) return null;
+  // Online payments are for the people who look after money (Settings → Payments shows them the same).
+  const takesMoney = hasRole(session, "admin") && can(session, "invoices");
+  const payments = useAutopayStatus(seesSetup(session) && !hidden && takesMoney);
+  if (hidden || !steps.data || (takesMoney && payments.isPending)) return null;
+  const logo = Boolean((session.company.settings.branding as { logo?: string } | undefined)?.logo);
   const list = [
-    { key: "contracts", done: steps.data.contracts, title: "Add your contract terms", detail: "Payment, your warranty and the right to cancel, printed with your estimates.", to: "/settings?tab=contracts" },
-    { key: "options", done: steps.data.options, title: "Offer options on a quote", detail: "Good, Better and Best side by side, and the client picks one.", to: "/quotes" },
-    { key: "measure", done: steps.data.measured, title: "Measure a property from the map", detail: "Areas, lengths and roofs drawn over the satellite view.", to: "/measure" },
-  ];
+    { key: "prices", show: true, done: steps.data.prices, title: "Set your prices", detail: "Your services and what you charge, so quotes and invoices fill themselves in.", to: "/settings?tab=prices" },
+    { key: "payments", show: takesMoney, done: Boolean(payments.data?.connected), title: "Take payments online", detail: "Clients pay their invoices by card or bank from the link you send.", to: "/settings?tab=payments" },
+    { key: "logo", show: hasRole(session, "admin"), done: logo, title: "Add your logo", detail: "On your quotes, invoices and the client's portal.", to: "/settings?tab=company" },
+    { key: "team", show: hasRole(session, "admin") && can(session, "team"), done: steps.data.team, title: "Invite your team", detail: "The office and your crews, each seeing what their role allows.", to: "/settings?tab=team" },
+    { key: "client", show: true, done: steps.data.client, title: "Add your first client", detail: "Or bring your clients over from Jobber or a spreadsheet.", to: "/clients" },
+    { key: "options", show: true, done: steps.data.options, title: "Offer options on a quote", detail: "Good, Better and Best side by side, and the client picks one.", to: "/quotes" },
+    // Only for work priced by area or length: a plumber's price list has nothing to measure.
+    { key: "measure", show: steps.data.measures, done: steps.data.measured, title: "Measure a property from the map", detail: "Areas, lengths and roofs drawn over the satellite view.", to: "/measure" },
+  ].filter((s) => s.show);
   const done = list.filter((s) => s.done).length;
   if (done === list.length) return null;
   const hide = () =>

@@ -7,13 +7,15 @@
  *   data-drop="anytime"     the "anytime" row of a column: data-date, data-crew (optional)
  *   data-drop="day"         a month cell: data-date (the visit keeps its time of day)
  *   data-drop="unscheduled" the unscheduled list
+ * In the People view these also carry data-person (a person's id, "" for nobody), for both where a
+ * visit lands and the row it was dragged from.
  */
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 export type DropTarget =
-  | { type: "slot"; date: string; crew?: string; minutes: number }
-  | { type: "anytime"; date: string; crew?: string }
-  | { type: "day"; date: string }
+  | { type: "slot"; date: string; crew?: string; person?: string; minutes: number }
+  | { type: "anytime"; date: string; crew?: string; person?: string }
+  | { type: "day"; date: string; person?: string }
   | { type: "unscheduled" };
 
 export interface DragState<V> {
@@ -31,10 +33,10 @@ function readTarget(x: number, y: number, offsetMin: number, duration: number, m
   const snap = (m: number) => Math.round(m / step) * step;
   const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop]");
   if (!el) return null;
-  const { drop, date = "", crew } = el.dataset;
+  const { drop, date = "", crew, person } = el.dataset;
   if (drop === "unscheduled") return mode === "move" ? { target: { type: "unscheduled" }, duration } : null;
-  if (drop === "day") return mode === "move" ? { target: { type: "day", date }, duration } : null;
-  if (drop === "anytime") return mode === "move" ? { target: { type: "anytime", date, crew }, duration } : null;
+  if (drop === "day") return mode === "move" ? { target: { type: "day", date, person }, duration } : null;
+  if (drop === "anytime") return mode === "move" ? { target: { type: "anytime", date, crew, person }, duration } : null;
   if (drop !== "slot") return null;
   const rect = el.getBoundingClientRect();
   const top = Number(el.dataset.startMin ?? 0);
@@ -42,10 +44,10 @@ function readTarget(x: number, y: number, offsetMin: number, duration: number, m
   const at = top + (y - rect.top) / ppm;
   if (mode === "resize" && startMin !== null) {
     const length = Math.max(step, snap(at) - startMin);
-    return { target: { type: "slot", date, crew, minutes: startMin }, duration: Math.min(length, 24 * 60 - startMin) };
+    return { target: { type: "slot", date, crew, person, minutes: startMin }, duration: Math.min(length, 24 * 60 - startMin) };
   }
   const minutes = Math.max(0, Math.min(24 * 60 - Math.min(duration, 24 * 60), snap(at - offsetMin)));
-  return { target: { type: "slot", date, crew, minutes }, duration };
+  return { target: { type: "slot", date, crew, person, minutes }, duration };
 }
 
 export function useVisitDrag<V extends { id: string }>({
@@ -59,7 +61,8 @@ export function useVisitDrag<V extends { id: string }>({
   step?: number;
   /** The visit's start (minutes after midnight, local) and length, or null start for anytime. */
   timing: (visit: V) => { start: number | null; duration: number };
-  onDrop: (visit: V, target: DropTarget, duration: number) => void;
+  /** `from`: the person whose row it was dragged from, in the People view. */
+  onDrop: (visit: V, target: DropTarget, duration: number, from?: string) => void;
 }) {
   const [drag, setDrag] = useState<DragState<V> | null>(null);
   const justDragged = useRef(false);
@@ -78,6 +81,7 @@ export function useVisitDrag<V extends { id: string }>({
       const x0 = e.clientX;
       const y0 = e.clientY;
       const touch = e.pointerType === "touch";
+      const from = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-drop]")?.dataset.person;
       // Where on the card it was grabbed, so the card doesn't jump under the pointer.
       let offsetMin = 0;
       if (mode === "move" && startMin !== null) {
@@ -138,7 +142,7 @@ export function useVisitDrag<V extends { id: string }>({
         justDragged.current = true;
         setTimeout(() => (justDragged.current = false), 80);
         setDrag(null);
-        if (commit && current) latest.current.onDrop(visit, current.target, current.duration);
+        if (commit && current) latest.current.onDrop(visit, current.target, current.duration, from);
       }
 
       window.addEventListener("pointermove", onMove);

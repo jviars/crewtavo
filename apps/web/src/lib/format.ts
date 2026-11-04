@@ -1,8 +1,38 @@
 import { taxPercent } from "@crewtavo/core/money";
 
-const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-const moneyCents = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const compact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
+/** Currencies a business can pick (Settings → Company and sign-up). */
+export const CURRENCIES = [
+  { code: "USD", name: "US dollar" },
+  { code: "CAD", name: "Canadian dollar" },
+  { code: "AUD", name: "Australian dollar" },
+  { code: "NZD", name: "New Zealand dollar" },
+  { code: "GBP", name: "British pound" },
+  { code: "EUR", name: "Euro" },
+  { code: "ZAR", name: "South African rand" },
+];
+
+let currency = "USD";
+let money = new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 });
+let moneyCents = new Intl.NumberFormat("en-US", { style: "currency", currency });
+let compact = new Intl.NumberFormat("en-US", { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 });
+
+/** The business's currency (companies.currency), which the session sets; numbers stay en-US, only the symbol changes. */
+export function setCurrency(code: string | null | undefined) {
+  const next = (code || "USD").toUpperCase();
+  if (next === currency) return;
+  try {
+    money = new Intl.NumberFormat("en-US", { style: "currency", currency: next, maximumFractionDigits: 0 });
+    moneyCents = new Intl.NumberFormat("en-US", { style: "currency", currency: next });
+    compact = new Intl.NumberFormat("en-US", { style: "currency", currency: next, notation: "compact", maximumFractionDigits: 1 });
+    currency = next;
+  } catch {
+    // Not a currency code: keep what was there.
+  }
+}
+
+/** The currency money shows in: "USD", "CAD". */
+export const moneyCurrency = () => currency;
+
 
 export const formatMoney = (n: number | null | undefined) => money.format(n ?? 0);
 export const formatMoneyCents = (n: number | null | undefined) => moneyCents.format(n ?? 0);
@@ -40,6 +70,20 @@ export function timeAgo(value: string | Date): string {
   for (const [unit, size] of units) if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit);
   return "just now";
 }
+
+const US_ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"];
+// For browsers that can't list every zone.
+const SOME_ZONES = ["America/Puerto_Rico", "America/Toronto", "America/Vancouver", "Europe/London", "Australia/Sydney"];
+const ALL_ZONES = (() => {
+  try {
+    return (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone") ?? SOME_ZONES;
+  } catch {
+    return SOME_ZONES;
+  }
+})();
+
+/** Time zones to pick from: the business's own first, then the US ones, then every other. */
+export const timeZoneChoices = (current?: string | null) => [...new Set([current, ...US_ZONES, ...ALL_ZONES])].filter((z): z is string => Boolean(z));
 
 /** Today's date (YYYY-MM-DD) in a time zone. */
 export const todayIn = (timeZone: string) => new Date().toLocaleDateString("en-CA", { timeZone });

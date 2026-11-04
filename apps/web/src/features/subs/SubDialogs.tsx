@@ -95,8 +95,8 @@ export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose:
           <Field label="Suite or unit" optional><input className="input" value={f.line2} onChange={set("line2")} maxLength={200} /></Field>
           <div className="form-grid-3">
             <Field label="City" optional><input className="input" value={f.city} onChange={set("city")} maxLength={100} /></Field>
-            <Field label="State" optional><input className="input" value={f.region} onChange={set("region")} maxLength={20} /></Field>
-            <Field label="ZIP" optional><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+            <Field label="State / Province" optional><input className="input" value={f.region} onChange={set("region")} maxLength={20} /></Field>
+            <Field label="ZIP / Postal code" optional><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
           </div>
           <Field label="Notes" optional hint="Only the office sees these."><textarea className="textarea" value={f.notes} onChange={set("notes")} maxLength={4000} rows={3} /></Field>
         </details>

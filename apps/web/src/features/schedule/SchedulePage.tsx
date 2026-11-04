@@ -7,11 +7,14 @@
  * opens in Apple Maps or Google Maps from the crew's lane.
  * Events from other calendars (added on the Apps page) show alongside, and can be hidden.
  * Each visit shows the initials of the people on it, and the board can show one person's visits.
+ * Crews | People switches the day and week views between a lane per crew and a row per person
+ * (dropping a visit on someone puts them on it, and someone on two visits at once is marked). List
+ * shows a day's, week's or month's visits under each day, and Map a day's visits as pins.
  */
 import { scheduleSettings } from "@crewtavo/core/routing";
 import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
@@ -23,20 +26,31 @@ import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
+import { EntityStatus } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
-import { addDaysIso, formatTime, todayIn } from "@/lib/format";
+import { addDaysIso, addressLine, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
 import { dayRoute } from "./dayRoute";
 import { RouteDialog } from "./RouteDialog";
-import { clock, fitBlock, lengthOf, minutesOf, TimeGrid, TimeRange, useGridScale, type GridColumn, type GridExternal } from "./TimeGrid";
+import { clock, conflictsOf, conflictText, fitBlock, lengthOf, minutesOf, TimeGrid, TimeRange, useGridScale, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
 import { VisitDetails } from "./VisitDetails";
 import { VisitDialog, type VisitInput } from "./VisitDialog";
+import { usePendingChanges } from "./changeRequests";
 import { useSchedulingRights } from "./myCrews";
+import { eventOnRow, movePeople, onRow, peopleRows } from "./people";
+import { spanDays, stepMonth, type Span } from "./range";
+
+const ScheduleMap = lazy(() => import("./ScheduleMap").then((m) => ({ default: m.ScheduleMap })));
+
+/** The Jobs list and job pages say Late, Today, Upcoming or Unscheduled from the visits (public.job_state). */
+const refreshJobs = (queryClient: QueryClient) => {
+  for (const key of ["jobs", "job"]) queryClient.invalidateQueries({ queryKey: [key] });
+};
 
 interface Visit {
   id: string;
@@ -65,17 +79,18 @@ interface ScheduleData {
   /** Other calendars' events (people who see the whole schedule). */
   events?: CalendarEvent[];
 }
-type View = "day" | "week" | "month";
+type View = "day" | "week" | "month" | "list" | "map";
+const VIEWS: View[] = ["day", "week", "month", "list", "map"];
+const SPANS: Span[] = ["day", "week", "month"];
+type Board = "crews" | "people";
 /** Someone on the team, from GET /api/team (former members too, so old visits keep their names). */
 /** Someone on visits (GET /team?with_subs=1): the team, and subs, with their business as `sub`. */
 interface Person { user_id: string; active: boolean; profile: { full_name: string | null; email: string | null; color: string | null; avatar_url?: string | null } | null; sub?: { id: string; name: string } }
-type Patch = Partial<Pick<Visit, "scheduled_on" | "starts_at" | "ends_at" | "crew_id" | "status">>;
+type Moves = Partial<Pick<Visit, "scheduled_on" | "starts_at" | "ends_at" | "crew_id" | "status">>;
+type Patch = Moves & { assignee_ids?: string[] };
+/** A visit with a change made: the people go to the API as assignee_ids, and the board reads them as assignees. */
+const applied = (visit: Visit, patch: Patch): Visit => ({ ...visit, ...patch, ...(patch.assignee_ids && { assignees: patch.assignee_ids.map((user_id) => ({ user_id })) }) });
 
-/** Monday of the week containing `date`. */
-function weekStart(date: string) {
-  const d = new Date(`${date}T12:00:00Z`);
-  return addDaysIso(date, -((d.getUTCDay() + 6) % 7));
-}
 const label = (date: string, opts: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { ...opts, timeZone: "UTC" });
 const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 const lengthLabel = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} ${m === 60 ? "hour" : "hours"}`);
@@ -106,11 +121,20 @@ export function SchedulePage() {
   const tz = session.company.timezone;
   const today = todayIn(tz);
   const [params, setParams] = useSearchParams();
+  // The view and Crews | People are each person's own on this device, so a shared tablet keeps everyone's.
+  const viewKey = `crewtavo.schedule.view.${session.company.id}.${session.userId}`;
+  const boardKey = `crewtavo.schedule.board.${session.company.id}.${session.userId}`;
+  const listKey = `crewtavo.schedule.list.${session.company.id}.${session.userId}`;
+  const [listSpan, setListSpanState] = useState<Span>(() => {
+    const choice = readPref(listKey) ?? readPref(viewKey);
+    return SPANS.includes(choice as Span) ? (choice as Span) : "week";
+  });
   const [view, setViewState] = useState<View>(() => {
-    const choice = params.get("view") ?? readPref("crewtavo.schedule.view");
-    if (choice === "day" || choice === "week" || choice === "month") return choice;
+    const choice = params.get("view") ?? readPref(viewKey) ?? readPref("crewtavo.schedule.view");
+    if (VIEWS.includes(choice as View)) return choice as View;
     return window.matchMedia("(max-width: 700px)").matches ? "day" : "week";
   });
+  const [boardChoice, setBoardChoice] = useState(() => readPref(boardKey));
   const [anchor, setAnchor] = useState(params.get("date") ?? today);
   const [crewId, setCrewId] = useState("");
   // Whose visits: "" everyone, a person's id, or "none" for visits nobody is on yet.
@@ -136,9 +160,19 @@ export function SchedulePage() {
       setParams({}, { replace: true });
     }
   }, [params, setParams, anchor]);
+  const setListSpan = (s: Span) => {
+    setListSpanState(s);
+    writePref(listKey, s);
+  };
   const setView = (v: View) => {
     setViewState(v);
-    writePref("crewtavo.schedule.view", v);
+    writePref(viewKey, v);
+    // List shows the days of the view it's opened from, until its Range is changed.
+    if (SPANS.includes(v as Span)) setListSpan(v as Span);
+  };
+  const setBoard = (b: Board) => {
+    setBoardChoice(b);
+    writePref(boardKey, b);
   };
   const setPanel = (open: boolean) => {
     setPanelState(open);
@@ -155,17 +189,11 @@ export function SchedulePage() {
   const ppm = useGridScale();
   const unscheduledList = useListAnimation<HTMLDivElement>();
 
-  const range = useMemo(() => {
-    if (view === "day") return { from: anchor, to: anchor };
-    if (view === "week") {
-      const from = weekStart(anchor);
-      return { from, to: addDaysIso(from, 6) };
-    }
-    const first = `${anchor.slice(0, 7)}-01`;
-    const from = weekStart(first);
-    return { from, to: addDaysIso(from, 41) };
-  }, [view, anchor]);
-  const days = useMemo(() => Array.from({ length: view === "day" ? 1 : view === "week" ? 7 : 42 }, (_, i) => addDaysIso(range.from, i)), [range.from, view]);
+  // The map shows a day, and the list a day, a week or a month (its own days, not the month grid's).
+  const period: Span = view === "list" ? listSpan : view === "map" ? "day" : view;
+  const oneDay = period === "day";
+  const days = useMemo(() => spanDays(period, anchor, view !== "list"), [period, anchor, view]);
+  const range = { from: days[0]!, to: days[days.length - 1]! };
   const key = ["schedule", session.company.id, range.from, range.to, crewId];
 
   const schedule = useQuery({
@@ -202,6 +230,17 @@ export function SchedulePage() {
   const withColor = (v: Visit): Visit => ({ ...v, crewColor: crewOf(v.crew_id)?.color ?? undefined });
   const scheduled = (schedule.data?.visits ?? []).map(withColor).filter(forPerson);
   const unscheduled = (schedule.data?.unscheduled ?? []).map(withColor).filter(forPerson);
+  // Until someone picks, a business with no crews sees People.
+  const board: Board = boardChoice === "crews" || boardChoice === "people" ? boardChoice : schedule.data && !crews.length ? "people" : "crews";
+  const byPerson = board === "people" && (view === "day" || view === "week");
+  // A row (lane) per person, and one for visits nobody's on yet, like "No crew". Picking a person shows only theirs.
+  const rowPeople = peopleRows(team.data ?? [], scheduled, nameOf, session.userId);
+  const rowIds = new Set(rowPeople.map((p) => p.user_id));
+  const personLanes: GridColumn[] = [
+    ...rowPeople.map((p): GridColumn => ({ key: p.user_id, date: anchor, person: p.user_id, color: p.profile?.color, label: nameOf(p.user_id) })),
+    { key: "nobody", date: anchor, person: "", label: "Nobody assigned" },
+  ].filter((col) => !shownPerson || col.person === (shownPerson === "none" ? "" : shownPerson));
+  const who = (id: string) => (id === session.userId ? "you" : nameOf(id));
   // A route's stop numbers set the order; otherwise timed visits by time, then anytime ones.
   const byDay = (date: string) =>
     scheduled
@@ -220,10 +259,25 @@ export function SchedulePage() {
   /** Opening a visit shows it; its Edit button opens the form. */
   const show = (v: Visit) => setDetails(v);
   const open = (v: Visit) => setEditing({ ...v, job_id: v.job?.id ?? null, property_id: v.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id), context: v.job ? { label: `Job #${v.job.number}${v.job.client ? ` · ${v.job.client.display_name}` : ""}`, to: `/jobs/${v.job.id}` } : null });
+  // Clients' requests to move or cancel a visit, marked on it; a link to one (?visit=) opens its dialog
+  // once the day's visits are in.
+  const changes = new Set((usePendingChanges(canDispatch).data ?? []).map((r) => r.visit_id));
+  const linked = params.get("visit");
+  useEffect(() => {
+    const v = linked ? schedule.data?.visits.find((x) => x.id === linked) : undefined;
+    if (!v) return;
+    if (canMove(v)) open(withColor(v));
+    else setDetails(withColor(v));
+    setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked, schedule.data]);
 
   // ---- Other calendars ---------------------------------------------------------------------------
   const allEvents = schedule.data?.events ?? [];
-  const events = showCalendars ? allEvents : [];
+  // A calendar can be one person's (set on the Apps page).
+  const ownerOf = (e: CalendarEvent) => e.source?.user_id ?? null;
+  // One person's schedule keeps the team's calendars and theirs, not other people's.
+  const events = showCalendars ? allEvents.filter((e) => !shownPerson || !ownerOf(e) || ownerOf(e) === shownPerson) : [];
   const calendarsShown = [...new Map(allEvents.filter((e) => e.source).map((e) => [e.source!.id, e.source!])).values()];
   const eventById = new Map(allEvents.map((e) => [e.id, e]));
   /** An event as one day's column shows it: timed if it fits in the day, otherwise in Anytime. */
@@ -237,16 +291,20 @@ export function SchedulePage() {
       color: e.source?.color ?? null,
       busy: e.busy,
       calendar: e.source?.name ?? "Calendar",
-      // A crew's own busy time marks its visits double-booked.
+      // A crew's own busy time marks its visits double-booked, and a person's theirs on their row.
       crew_id: e.busy && e.source?.blocks_time ? e.source.crew_id : null,
+      person: e.busy && e.source?.blocks_time ? ownerOf(e) : null,
     };
   };
   const eventsOn = (date: string) => events.filter((e) => e.starts_on <= date && e.ends_on >= date);
   const ownCrew = (e: CalendarEvent) => (e.source?.crew_id && crews.some((c) => c.id === e.source!.crew_id) ? e.source.crew_id : null);
-  /** Day view: a crew's calendars in its lane, the whole team's in "No crew" (or the one lane when filtered). */
+  /**
+   * Day view: a crew's calendars in its lane, the whole team's in "No crew" (or the one lane when filtered).
+   * People lanes put a person's own calendar on their row, and the rest in "Nobody assigned".
+   */
   const externalFor = (col: GridColumn) =>
     eventsOn(col.date)
-      .filter((e) => col.crew === undefined || Boolean(crewId) || (col.crew ? ownCrew(e) === col.crew : !ownCrew(e)))
+      .filter((e) => (col.person !== undefined ? eventOnRow(ownerOf(e), col.person, rowIds) : col.crew === undefined || Boolean(crewId) || (col.crew ? ownCrew(e) === col.crew : !ownCrew(e))))
       .map((e) => onDay(e, col.date));
   const openExternal = (g: GridExternal) => {
     const e = eventById.get(g.id.split(":")[0]!);
@@ -261,7 +319,7 @@ export function SchedulePage() {
       const previous = queryClient.getQueryData<ScheduleData>(key);
       queryClient.setQueryData<ScheduleData>(key, (old) => {
         if (!old) return old;
-        const next = { ...visit, ...patch } as Visit;
+        const next = applied(visit, patch);
         const off = next.status === "unscheduled" || !next.scheduled_on;
         const inRange = !off && next.scheduled_on! >= range.from && next.scheduled_on! <= range.to;
         return {
@@ -274,29 +332,29 @@ export function SchedulePage() {
     },
     onError: (_e, _v, context) => context?.previous && queryClient.setQueryData(key, context.previous),
     onSuccess: (_d, { visit, patch, message, undoable }) => {
-      const before = Object.fromEntries(Object.keys(patch).map((k) => [k, visit[k as keyof Patch]])) as Patch;
-      toast.success(message, { tone: "job", ...(undoable && { action: { label: "Undo", onClick: () => update.mutate({ visit: { ...visit, ...patch } as Visit, patch: before, message: "Change undone", undoable: false }) } }) });
+      const before = Object.fromEntries(Object.keys(patch).map((k) => [k, k === "assignee_ids" ? visit.assignees.map((a) => a.user_id) : visit[k as keyof Moves]])) as Patch;
+      toast.success(message, { tone: "job", ...(undoable && { action: { label: "Undo", onClick: () => update.mutate({ visit: applied(visit, patch), patch: before, message: "Change undone", undoable: false }) } }) });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["schedule", session.company.id] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      refreshJobs(queryClient);
     },
   });
 
-  const drop = (visit: Visit, target: DropTarget, duration: number) => {
+  const drop = (visit: Visit, target: DropTarget, duration: number, from?: string) => {
     const wasOff = visit.status === "unscheduled";
     const when = (date: string) => label(date, { weekday: "short", month: "short", day: "numeric" });
-    const crewPart = (crew: string | undefined): Patch => (crew !== undefined && (crew || null) !== visit.crew_id ? { crew_id: crew || null } : {});
+    const crewPart = (crew: string | undefined): Moves => (crew !== undefined && (crew || null) !== visit.crew_id ? { crew_id: crew || null } : {});
     const crewNote = (crew: string | undefined) => (crew !== undefined && (crew || null) !== visit.crew_id ? ` · ${crewOf(crew || null)?.name ?? "no crew"}` : "");
-    let patch: Patch;
+    let patch: Moves;
     let message: string;
     if (target.type === "unscheduled") {
       if (wasOff) return;
       patch = { status: "unscheduled", scheduled_on: null, starts_at: null, ends_at: null };
       message = "Moved to unscheduled";
     } else if (target.type === "day") {
-      if (visit.scheduled_on === target.date && !wasOff) return;
-      patch = { ...patchFor(visit, target.date, tz), ...(wasOff ? { status: "scheduled" } : {}) };
+      patch = visit.scheduled_on === target.date && !wasOff ? {} : { ...patchFor(visit, target.date, tz), ...(wasOff ? { status: "scheduled" } : {}) };
       message = `Moved to ${when(target.date)}`;
     } else if (target.type === "anytime") {
       patch = { scheduled_on: target.date, starts_at: null, ends_at: null, ...crewPart(target.crew), ...(wasOff ? { status: "scheduled" } : {}) };
@@ -313,8 +371,14 @@ export function SchedulePage() {
       const resized = visit.scheduled_on === target.date && sameTime(visit.starts_at, patch.starts_at) && !sameTime(visit.ends_at, patch.ends_at);
       message = resized ? `Now ${lengthLabel(duration)}` : `${when(target.date)} at ${clock(target.minutes)}${crewNote(target.crew)}`;
     }
-    const changed = (Object.keys(patch) as Array<keyof Patch>).some((k) => (k === "starts_at" || k === "ends_at" ? !sameTime(visit[k], patch[k]) : (visit[k] ?? null) !== (patch[k] ?? null)));
-    if (changed) update.mutate({ visit, patch, message, undoable: true });
+    const changed = (Object.keys(patch) as Array<keyof Moves>).some((k) => (k === "starts_at" || k === "ends_at" ? !sameTime(visit[k], patch[k]) : (visit[k] ?? null) !== (patch[k] ?? null)));
+    // People view: off the row it was dragged from, onto the row it was dropped on.
+    const to = target.type === "unscheduled" ? undefined : target.person;
+    const assignees = to === undefined ? null : movePeople(visit.assignees.map((a) => a.user_id), from, to);
+    const peopleNote = assignees && (to ? (from ? `Moved to ${who(to)}` : `Added ${who(to)}`) : `Took ${who(from!)} off`);
+    if (changed || assignees) {
+      update.mutate({ visit, patch: { ...(changed && patch), ...(assignees && { assignee_ids: assignees }) }, message: [changed && message, peopleNote].filter(Boolean).join(" · "), undoable: true });
+    }
   };
 
   const { drag, start: startDrag, wasDragging } = useVisitDrag<Visit>({
@@ -324,17 +388,11 @@ export function SchedulePage() {
     onDrop: drop,
   });
 
-  const step = (dir: 1 | -1) => {
-    if (view === "month") {
-      const d = new Date(`${anchor.slice(0, 7)}-15T12:00:00Z`);
-      d.setUTCMonth(d.getUTCMonth() + dir);
-      setAnchor(d.toISOString().slice(0, 10));
-    } else setAnchor(addDaysIso(anchor, view === "week" ? 7 * dir : dir));
-  };
+  const step = (dir: 1 | -1) => setAnchor(period === "month" ? stepMonth(anchor, dir) : addDaysIso(anchor, oneDay ? dir : 7 * dir));
   const heading =
-    view === "day"
+    oneDay
       ? label(anchor, { weekday: "long", month: "long", day: "numeric" })
-      : view === "week"
+      : period === "week"
         ? range.from.slice(5, 7) === range.to.slice(5, 7)
           ? `${label(range.from, { month: "short", day: "numeric" })} – ${Number(range.to.slice(8))}, ${range.to.slice(0, 4)}`
           : `${label(range.from, { month: "short", day: "numeric" })} – ${label(range.to, { month: "short", day: "numeric" })}, ${range.to.slice(0, 4)}`
@@ -381,17 +439,20 @@ export function SchedulePage() {
     const done = v.status === "completed" ? "✓ " : "";
     const day = v.series_total && v.series_total > 1 ? ` · day ${v.series_day}/${v.series_total}` : "";
     const stop = v.route_order && v.status === "scheduled" ? `${v.route_order}. ` : "";
-    if (height === undefined) return <span className="tg-line"><span className="tg-n" style={{ WebkitLineClamp: 1 }}>{stop}{done}{v.title}{day}</span>{faces(v)}</span>;
-    const fit = fitBlock(height, { time: Boolean(v.starts_at), people: v.assignees.length > 0, hold: Boolean(v.hold_reason), client: Boolean(who) });
+    const changed = changes.has(v.id);
+    const asked = changed && <span title="Change requested">↺ <span className="sr-only">Change requested: </span></span>;
+    if (height === undefined) return <span className="tg-line"><span className="tg-n" style={{ WebkitLineClamp: 1 }}>{asked}{stop}{done}{v.title}{day}</span>{faces(v)}</span>;
+    // A change requested takes the weather hold's row: it's what to see to first.
+    const fit = fitBlock(height, { time: Boolean(v.starts_at), people: v.assignees.length > 0, hold: Boolean(v.hold_reason) || changed, client: Boolean(who) });
     const time = fit.time && v.starts_at && <span className="tg-t">{stop}<TimeRange start={timeOf(v.starts_at)} end={v.ends_at && timeOf(v.ends_at)} /></span>;
-    const title = <span className="tg-n" style={{ WebkitLineClamp: fit.title }}>{time ? "" : stop}{done}{v.title}{day}</span>;
+    const title = <span className="tg-n" style={{ WebkitLineClamp: fit.title }}>{!fit.hold && asked}{time ? "" : stop}{done}{v.title}{day}</span>;
     return (
       <>
         {time}
         {fit.people === "inline" ? <span className="tg-line">{title}{faces(v)}</span> : title}
         {fit.client && <span className="tg-m">{who}</span>}
         {fit.people === "row" && <span className="tg-line tg-who">{faces(v)}<span className="tg-m" aria-hidden="true">{firstNames(v)}</span></span>}
-        {fit.hold && <span className="tg-w" title={v.hold_reason ?? undefined}>⚠ {v.hold_reason?.split(";")[0]}</span>}
+        {fit.hold && (changed ? <span className="tg-w">↺ Change requested</span> : <span className="tg-w" title={v.hold_reason ?? undefined}>⚠ {v.hold_reason?.split(";")[0]}</span>)}
         {!fit.people && v.assignees.length > 0 && <span className="sr-only">With {namesOn(v).replace(/^You\b/, "you")}</span>}
       </>
     );
@@ -410,11 +471,12 @@ export function SchedulePage() {
       ends_at: start ? new Date(start.getTime() + 60 * 60_000).toISOString() : null,
       anytime: minutes === null,
       crew_id: col.crew || null,
+      ...(col.person && { assignee_ids: [col.person] }),
     });
   };
 
   const inLane = (crew: string | undefined) => (v: Visit) => crew === undefined || (crew ? v.crew_id === crew : !v.crew_id || !crews.some((c) => c.id === v.crew_id));
-  const laneVisits = (col: GridColumn) => byDay(col.date).filter(inLane(col.crew));
+  const laneVisits = (col: GridColumn) => byDay(col.date).filter(inLane(col.crew)).filter((v) => col.person === undefined || onRow(v, col.person));
   const lanes: GridColumn[] = [
     ...(crewId ? crews.filter((c) => c.id === crewId) : crews).map((c) => ({ key: c.id, date: anchor, crew: c.id, color: c.color, label: c.name })),
     ...(crewId ? [] : [{ key: "none", date: anchor, crew: "", label: "No crew" }]),
@@ -443,6 +505,7 @@ export function SchedulePage() {
       ),
     };
   });
+  const personColumns: GridColumn[] = personLanes.map((col) => ({ ...col, today: anchor === today, past: anchor < today, headerExtra: visitCount(laneVisits(col).length) }));
   const weekColumns: GridColumn[] = days.map((date) => ({
     key: date,
     date,
@@ -476,6 +539,15 @@ export function SchedulePage() {
     selected: details?.id ?? editing?.id ?? null,
   };
 
+  // List: the week's days that have visits. Map: the day's visits, numbered in the day's order.
+  const listDays = view === "list" ? days.map((date) => ({ date, visits: byDay(date) })).filter((d) => d.visits.length) : [];
+  const mapVisits = view === "map" ? byDay(anchor) : [];
+  const located = (v: Visit) => v.property?.lat != null && v.property.lng != null;
+  const mapPins = mapVisits.flatMap((v, i) =>
+    located(v) ? [{ id: v.id, lat: v.property!.lat!, lng: v.property!.lng!, label: String(i + 1), title: [v.starts_at ? timeOf(v.starts_at) : "Anytime", v.title, v.job?.client?.display_name].filter(Boolean).join(" · "), color: v.crewColor }] : [],
+  );
+  const unplaced = mapVisits.filter((v) => !located(v));
+
   return (
     <>
       <PageHeader
@@ -490,7 +562,7 @@ export function SchedulePage() {
                   { label: "Add a visit to many jobs", icon: "calendarCheck", hidden: !wholeTeam, onSelect: () => setDialog("bulk") },
                 ]}
               />
-              <Button variant="primary" icon="plus" onClick={() => setEditing({ title: "", kind: "job", scheduled_on: view === "day" ? anchor : today })}>New visit</Button>
+              <Button variant="primary" icon="plus" onClick={() => setEditing({ title: "", kind: "job", scheduled_on: oneDay ? anchor : today })}>New visit</Button>
             </>
           )
         }
@@ -529,13 +601,19 @@ export function SchedulePage() {
           />
         )}
         {crews.length > 1 && <FilterSelect label="Crew" value={crewId} onChange={setCrewId} options={[["", "All"], ...crews.map((c): [string, string] => [c.id, c.name])]} />}
+        {(view === "day" || view === "week") && (
+          <div className="segmented" role="group" aria-label="Show by">
+            {(["crews", "people"] as const).map((b) => <button key={b} type="button" aria-pressed={board === b} onClick={() => setBoard(b)}>{b === "crews" ? "Crews" : "People"}</button>)}
+          </div>
+        )}
+        {view === "list" && <FilterSelect label="Range" value={listSpan} onChange={(s) => setListSpan(s as Span)} options={SPANS.map((s): [string, string] => [s, s[0].toUpperCase() + s.slice(1)])} />}
         <div className="segmented" role="group" aria-label="View">
-          {(["day", "week", "month"] as const).map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>)}
+          {VIEWS.map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>)}
         </div>
       </div>
-      {((crews.length > 0 && view !== "day") || (showCalendars && calendarsShown.length > 0)) && (
+      {((crews.length > 0 && (view !== "day" || byPerson)) || (showCalendars && calendarsShown.length > 0)) && (
         <div className="crew-legend">
-          {view !== "day" && crews.map((c) => <span key={c.id}><i style={{ ["--c" as string]: c.color ?? "var(--text-4)" }} />{c.name}</span>)}
+          {(view !== "day" || byPerson) && crews.map((c) => <span key={c.id}><i style={{ ["--c" as string]: c.color ?? "var(--text-4)" }} />{c.name}</span>)}
           {showCalendars && calendarsShown.map((s) => <span key={s.id} title="Another calendar"><i data-calendar style={{ ["--c" as string]: s.color ?? "var(--text-4)" }} />{s.name}</span>)}
         </div>
       )}
@@ -546,8 +624,113 @@ export function SchedulePage() {
       {schedule.data && (
         <div className="schedule-layout" data-panel={showPanel || undefined}>
           <div style={{ minWidth: 0 }}>
-            {view === "week" && <TimeGrid columns={weekColumns} minColumn={96} {...grid} />}
-            {view === "day" && <TimeGrid columns={dayColumns} minColumn={160} {...grid} />}
+            {view === "week" && !byPerson && <TimeGrid columns={weekColumns} minColumn={96} {...grid} />}
+            {view === "day" && <TimeGrid columns={byPerson ? personColumns : dayColumns} minColumn={160} {...grid} />}
+            {view === "week" && byPerson && (
+              <div className={`tg-wrap people-week${schedule.isPlaceholderData ? " is-stale" : ""}`}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col"><span className="sr-only">Person</span></th>
+                      {days.map((date) => (
+                        <th key={date} scope="col" data-today={date === today || undefined}>
+                          <button type="button" className="link-btn" onClick={() => { setAnchor(date); setView("day"); }}>{label(date, { weekday: "short", day: "numeric" })}</button>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {personLanes.map((row) => (
+                      <tr key={row.key}>
+                        <th scope="row" style={{ "--lane": row.color ?? undefined } as CSSProperties}>{row.label}</th>
+                        {days.map((date) => {
+                          const visits = byDay(date).filter((v) => onRow(v, row.person!));
+                          const rowEvents = eventsOn(date).filter((e) => eventOnRow(ownerOf(e), row.person!, rowIds));
+                          // Marked like the person's row in Day view: on two visits at once, or busy in their calendar.
+                          const marks = conflictsOf(visits, rowEvents.map((e) => onDay(e, date)), tz, row.person);
+                          return (
+                            <td
+                              key={date}
+                              data-drop="day"
+                              data-date={date}
+                              data-person={row.person}
+                              data-today={date === today || undefined}
+                              data-over={(drag?.target?.type === "day" && drag.target.date === date && drag.target.person === row.person) || undefined}
+                            >
+                              {visits.map((v) => {
+                                const conflict = marks.get(v.id)?.conflict;
+                                return (
+                                  <button
+                                    key={v.id}
+                                    type="button"
+                                    className="tg-chip"
+                                    data-status={v.status}
+                                    data-conflict={conflict || undefined}
+                                    data-dragging={drag?.visit.id === v.id || undefined}
+                                    data-selected={grid.selected === v.id || undefined}
+                                    style={{ "--crew": v.crewColor } as CSSProperties}
+                                    title={conflictText(conflict ?? false, true) ?? (v.assignees.length ? `${v.title} · ${namesOn(v)}` : v.title)}
+                                    onPointerDown={canDispatch && canMove(v) && !["completed", "cancelled"].includes(v.status) ? startDrag(v, "move") : undefined}
+                                    onClick={() => !wasDragging() && show(v)}
+                                  >
+                                    {v.starts_at ? `${timeOf(v.starts_at)} ` : ""}{v.title}
+                                  </button>
+                                );
+                              })}
+                              {rowEvents.map((e) => (
+                                <button key={e.id} type="button" className="tg-chip" data-external data-free={!e.busy || undefined} style={{ "--cal": e.source?.color ?? undefined } as CSSProperties} title={`${e.title} · ${e.source?.name ?? "Calendar"}`} onClick={() => setViewing(e)}>
+                                  {monthLabel(e, date, tz)}
+                                </button>
+                              ))}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {view === "list" && (
+              <div className={`stack${schedule.isPlaceholderData ? " is-stale" : ""}`}>
+                {listDays.length === 0 && <div className="card"><EmptyState inline title={`Nothing scheduled this ${period}`} /></div>}
+                {listDays.map(({ date, visits }) => (
+                  <section key={date}>
+                    <h2 className="schedule-list-day">{label(date, { weekday: "long", month: "long", day: "numeric" })} {visitCount(visits.length)}</h2>
+                    <div className="card">
+                      {visits.map((v) => (
+                        <button key={v.id} type="button" className="card-row schedule-list-row" data-selected={grid.selected === v.id || undefined} style={{ "--crew": v.crewColor } as CSSProperties} onClick={() => show(v)}>
+                          <span className="schedule-list-time">{v.starts_at ? <TimeRange start={timeOf(v.starts_at)} end={v.ends_at && timeOf(v.ends_at)} /> : "Anytime"}</span>
+                          <span className="grow" style={{ minWidth: 0 }}>
+                            <strong>{v.title}</strong>
+                            {(v.job?.client || v.property) && <span className="muted small" style={{ display: "block" }}>{[v.job?.client?.display_name, addressLine(v.property)].filter(Boolean).join(" · ")}</span>}
+                            <span className="muted small" style={{ display: "block" }}>{[namesOn(v) || "Nobody assigned", crewOf(v.crew_id)?.name].filter(Boolean).join(" · ")}</span>
+                          </span>
+                          <EntityStatus kind="visit" status={v.status} />
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+            {view === "map" && (
+              <div className="stack-sm">
+                {mapPins.length > 0 ? (
+                  <Suspense fallback={<Skeleton height={420} radius={12} />}>
+                    <ScheduleMap pins={mapPins} onOpen={(id) => { const v = mapVisits.find((x) => x.id === id); if (v) show(v); }} />
+                  </Suspense>
+                ) : (
+                  <div className="card"><EmptyState inline title={mapVisits.length ? "None of this day's visits has a map location yet" : "Nothing scheduled this day"} /></div>
+                )}
+                {unplaced.length > 0 && (
+                  <p className="muted small" style={{ margin: "0 2px" }}>
+                    Not on the map, with no location yet:{" "}
+                    {unplaced.map((v, i) => <span key={v.id}>{i > 0 && ", "}<button type="button" className="link-btn" onClick={() => show(v)}>{v.title}</button></span>)}
+                  </p>
+                )}
+              </div>
+            )}
             {view === "month" && (
               <div className={`month${schedule.isPlaceholderData ? " is-stale" : ""}`}>
                 {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => <div key={d} className="month-head">{d}</div>)}
@@ -597,7 +780,11 @@ export function SchedulePage() {
                 })}
               </div>
             )}
-            {canDispatch && view !== "month" && <p className="muted small" style={{ margin: "8px 2px 0" }}>Drag a visit to move it, drag its bottom edge to change how long it takes, or click an open time to book it.</p>}
+            {canDispatch && (view === "day" || view === "week") && (
+              <p className="muted small" style={{ margin: "8px 2px 0" }}>
+                {byPerson ? "Drag a visit onto someone to put them on it, or from one person to another to move it." : "Drag a visit to move it, drag its bottom edge to change how long it takes, or click an open time to book it."}
+              </p>
+            )}
           </div>
 
           {showPanel && (
@@ -654,8 +841,8 @@ export function SchedulePage() {
           onAddVisit={canDispatch ? (input) => { setViewing(null); setEditing(input); } : undefined}
         />
       )}
-      {dialog === "shift" && <ShiftDialog defaultDate={view === "day" ? anchor : today} crews={wholeTeam ? crews : crews.filter((c) => rights.myCrews.includes(c.id))} allCrews={wholeTeam} onClose={() => setDialog(null)} />}
-      {dialog === "bulk" && <BulkVisitsDialog defaultDate={view === "day" ? anchor : addDaysIso(today, 1)} crews={crews} onClose={() => setDialog(null)} />}
+      {dialog === "shift" && <ShiftDialog defaultDate={oneDay ? anchor : today} crews={wholeTeam ? crews : crews.filter((c) => rights.myCrews.includes(c.id))} allCrews={wholeTeam} onClose={() => setDialog(null)} />}
+      {dialog === "bulk" && <BulkVisitsDialog defaultDate={oneDay ? anchor : addDaysIso(today, 1)} crews={crews} onClose={() => setDialog(null)} />}
     </>
   );
 }
@@ -712,6 +899,7 @@ function ShiftDialog({ defaultDate, crews, allCrews, onClose }: { defaultDate: s
     mutationFn: () => api.post<{ moved: number }>("/schedule/shift", { from_date: fromDate, to_date: toDate, crew_id: crewId || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["schedule"] });
+      refreshJobs(queryClient);
       onClose();
     },
   });
@@ -763,6 +951,7 @@ function BulkVisitsDialog({ defaultDate, crews, onClose }: { defaultDate: string
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["schedule"] });
+      refreshJobs(queryClient);
       onClose();
     },
   });

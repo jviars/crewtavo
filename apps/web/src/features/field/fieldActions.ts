@@ -15,7 +15,7 @@ export interface VisitStatusChange {
   status: string;
   /** When it was tapped. For Complete, also when the visit was finished (visitStatusBody). */
   at: string;
-  /** Where the phone was, when the tap starts or stops the clock (useStatusTap). */
+  /** Where the phone was, when the tap starts or stops the clock or is On my way (useStatusTap). */
   place?: ClockPlace;
   /**
    * Whether Start and Complete clock this person in and out, decided at the tap (useStatusTap): the
@@ -55,6 +55,16 @@ export function pendingVisitSave<V extends { visitId: string }>(queryClient: Que
     .at(-1);
 }
 
+/** Like pendingVisitSave, for each of a visit's checklists: the last save waiting for each, by its response's id. */
+export function pendingChecklistSaves(queryClient: QueryClient, visitId: string): Map<string, ChecklistSave> {
+  const waiting = queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: ["checklist-save"], status: "pending" })
+    .map((m) => m.state.variables as ChecklistSave | undefined)
+    .filter((v): v is ChecklistSave => v?.visitId === visitId);
+  return new Map(waiting.map((v) => [v.responseId, v]));
+}
+
 /** Show a tapped status at once, on My day and on the visit's own screen alike. */
 export function showVisitStatus(queryClient: QueryClient, change: VisitStatusChange) {
   queryClient.setQueriesData<{ today: Array<{ id: string; status: string }> }>({ queryKey: ["field"] }, (old) => old && { ...old, today: old.today.map((v) => (v.id === change.visitId ? { ...v, status: change.status } : v)) });
@@ -66,7 +76,13 @@ export function showVisitStatus(queryClient: QueryClient, change: VisitStatusCha
  * dated when the work was done, not when it went out: autopay goes by that date. The server keeps
  * it only with Complete, and not from the future or more than a few days back.
  */
-const visitStatusBody = (v: Pick<VisitStatusChange, "status" | "at">) => ({ status: v.status, forward_only: true, ...(v.status === "completed" && { completed_at: v.at }) });
+const visitStatusBody = (v: Pick<VisitStatusChange, "status" | "at" | "place">) => ({
+  status: v.status,
+  forward_only: true,
+  ...(v.status === "completed" && { completed_at: v.at }),
+  // On my way: where the phone is, only to time the drive for the client's text. The server keeps the time, not the place.
+  ...(v.status === "en_route" && v.place && "lat" in v.place && { from: { lat: v.place.lat, lng: v.place.lng } }),
+});
 
 export async function setVisitStatus(v: VisitStatusChange) {
   // As the company it was tapped in, even if the app has switched company since. Forward only: a
@@ -144,6 +160,35 @@ export async function setPhotoShareable(v: PhotoShareChange) {
   unwrap(await supabase().rpc("set_photo_shareable", { p_attachment: v.attachmentId, p_shareable: v.shareable }));
 }
 
+export interface JobLineAdd {
+  visitId: string;
+  jobId: string;
+  /** Made on the phone, so sending it twice adds one line (add_field_line). */
+  lineId: string;
+  serviceId: string;
+  quantity: number;
+  /** The item's name and unit, to show it on the visit while it waits: not sent, the server uses the price list's. */
+  name: string;
+  unit: string;
+}
+
+/** Work added on site: the item and how many, never a price (the office's applies). Safe to send twice. */
+export async function addJobLine(v: JobLineAdd) {
+  unwrap(await supabase().rpc("add_field_line", { p_visit: v.visitId, p_service: v.serviceId, p_quantity: v.quantity, p_id: v.lineId }));
+}
+
+/** Lines added on this phone for a job that haven't gone yet, so its list of work shows them meanwhile. */
+export function pendingJobLines(queryClient: QueryClient, jobId: string): JobLineAdd[] {
+  return queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: ["job-line-add"], status: "pending" })
+    .map((m) => m.state.variables as JobLineAdd | undefined)
+    .filter((v): v is JobLineAdd => v?.jobId === jobId);
+}
+
+/** A line waiting on this phone as the job's list of work (job_scope) shows it: last, as the server adds it. */
+export const waitingScopeLine = (v: JobLineAdd) => ({ id: v.lineId, name: v.name, description: null, quantity: v.quantity, unit: v.unit, sort: Number.MAX_SAFE_INTEGER });
+
 /**
  * Field actions wait for signal ("online" mode): with none, React Query pauses them and lib/offline.ts
  * keeps them on the phone. Every other save fails at once instead (lib/queryClient.ts).
@@ -163,4 +208,5 @@ export function registerFieldActions(queryClient: QueryClient) {
   queryClient.setMutationDefaults(["checklist-save"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: ChecklistSave) => saveChecklist(v) });
   queryClient.setMutationDefaults(["visit-notes"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: VisitNotesSave) => saveVisitNotes(v) });
   queryClient.setMutationDefaults(["photo-share"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: PhotoShareChange) => setPhotoShareable(v) });
+  queryClient.setMutationDefaults(["job-line-add"], { ...WAIT_FOR_SIGNAL, mutationFn: (v: JobLineAdd) => addJobLine(v) });
 }

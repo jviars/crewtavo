@@ -8,8 +8,10 @@
  *     by email, then by name when the row has no email; it isn't duplicated, it gets any new
  *     properties, and its status when the row gives one;
  *   - a property already on the client (the same street) isn't added again.
- * So running the same import twice changes nothing the second time.
+ * So running the same import twice changes nothing the second time. A spreadsheet's other columns
+ * fill the business's custom fields whose names they have (customColumns).
  */
+import { checkCustomValue, fieldForHeader, mergeCustomValues, type CustomFieldDef, type CustomValue } from "./customFields";
 
 export const CLIENT_STATUSES = ["lead", "active", "archived"] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
@@ -64,7 +66,7 @@ export function guessMapping(headers: string[]): ImportMapping {
   return guess;
 }
 
-export interface ImportAddress { label: string | null; line1: string; line2: string | null; city: string | null; region: string | null; postal_code: string | null; notes?: string | null }
+export interface ImportAddress { label: string | null; line1: string; line2: string | null; city: string | null; region: string | null; postal_code: string | null; notes?: string | null; custom_fields?: Record<string, CustomValue> }
 export interface ImportClient {
   key: string;
   /** The client's ID in the old system, kept so a second import finds it. */
@@ -78,8 +80,43 @@ export interface ImportClient {
   notes: string | null;
   /** Null: active for a new client, unchanged for one already here. */
   status: ClientStatus | null;
-  billing: Omit<ImportAddress, "label" | "line2" | "notes"> | null;
+  billing: Omit<ImportAddress, "label" | "line2" | "notes" | "custom_fields"> | null;
   properties: ImportAddress[];
+  /** Its custom fields' values from the file, by key. */
+  custom_fields?: Record<string, CustomValue>;
+}
+
+/** A spreadsheet column that fills a client's or property's custom field. */
+export interface ImportCustomColumn { column: number; record: "client" | "property"; field: CustomFieldDef }
+
+/**
+ * The columns not matched to anything else, against the business's custom fields: each whose header
+ * is a field's name (a client's first, then a property's) fills it; `others` are the rest with a name.
+ */
+export function customColumns(headers: readonly string[], mapping: ImportMapping, fields: { client: readonly CustomFieldDef[]; property: readonly CustomFieldDef[] }): { matched: ImportCustomColumn[]; others: number[] } {
+  const used = new Set(Object.values(mapping));
+  const matched: ImportCustomColumn[] = [];
+  const others: number[] = [];
+  headers.forEach((header, column) => {
+    if (used.has(column) || !header.trim()) return;
+    const client = fieldForHeader(fields.client, header);
+    const property = client ? undefined : fieldForHeader(fields.property, header);
+    if (client) matched.push({ column, record: "client", field: client });
+    else if (property) matched.push({ column, record: "property", field: property });
+    else others.push(column);
+  });
+  return { matched, others };
+}
+
+/** A row's values for one kind of record's custom fields; a cell that doesn't fit its field is left out. */
+function customCells(row: readonly string[], columns: readonly ImportCustomColumn[], record: ImportCustomColumn["record"]): Record<string, CustomValue> {
+  const values: Record<string, CustomValue> = {};
+  for (const c of columns) {
+    if (c.record !== record) continue;
+    const checked = checkCustomValue(c.field, row[c.column] ?? "");
+    if ("value" in checked && checked.value !== null) values[c.field.key] = checked.value;
+  }
+  return values;
 }
 
 /** "a@x.com, b@y.com" or "(540) 555-0100, (540) 555-0199": the first one. */
@@ -116,8 +153,8 @@ function billingAsProperty(clients: Iterable<ImportClient>) {
   for (const c of clients) if (!c.properties.length && c.billing) c.properties.push({ label: null, line2: null, ...c.billing });
 }
 
-/** Spreadsheet rows (without the header) as clients, with the columns mapped. */
-export function toClients(rows: string[][], mapping: ImportMapping): ImportClient[] {
+/** Spreadsheet rows (without the header) as clients, with the columns mapped, and `custom` columns filling custom fields. */
+export function toClients(rows: string[][], mapping: ImportMapping, custom: readonly ImportCustomColumn[] = []): ImportClient[] {
   const get = (row: string[], key: ImportTargetKey) => (mapping[key] === undefined ? "" : (row[mapping[key]!] ?? "").trim());
   const clients = new Map<string, ImportClient>();
   for (const row of rows) {
@@ -142,10 +179,13 @@ export function toClients(rows: string[][], mapping: ImportMapping): ImportClien
         status: clientStatus(get(row, "status")),
         billing: billingLine ? { line1: billingLine, city: get(row, "billing_city") || null, region: get(row, "billing_region") || null, postal_code: get(row, "billing_postal_code") || null } : null,
         properties: [],
+        custom_fields: {},
       };
       clients.set(key, client);
     }
-    addProperty(client, { label: get(row, "label") || null, line1: get(row, "line1"), line2: get(row, "line2") || null, city: get(row, "city") || null, region: get(row, "region") || null, postal_code: get(row, "postal_code") || null });
+    // The first row with a value for a field gives it.
+    client.custom_fields = { ...customCells(row, custom, "client"), ...client.custom_fields };
+    addProperty(client, { label: get(row, "label") || null, line1: get(row, "line1"), line2: get(row, "line2") || null, city: get(row, "city") || null, region: get(row, "region") || null, postal_code: get(row, "postal_code") || null, custom_fields: customCells(row, custom, "property") });
   }
   billingAsProperty(clients.values());
   return [...clients.values()];
@@ -166,16 +206,24 @@ export interface ImportRecord {
   notes?: string | null;
   billing_address?: { line1: string; city?: string | null; region?: string | null; postal_code?: string | null } | null;
   properties?: ReadonlyArray<{ label?: string | null; line1: string; line2?: string | null; city?: string | null; region?: string | null; postal_code?: string | null; notes?: string | null }> | null;
+  /** Its custom fields' values, by key, checked against the business's client `fields`. */
+  custom_fields?: Readonly<Record<string, unknown>> | null;
 }
 
-/** Records as clients, grouped like spreadsheet rows; records without a name are skipped (with their place in the list). */
-export function recordsToClients(records: readonly ImportRecord[]): { clients: ImportClient[]; skipped: Array<{ row: number; reason: string }> } {
+/**
+ * Records as clients, grouped like spreadsheet rows; records without a name, or with a status or
+ * custom field value (checked against the business's client `fields`) that doesn't fit, are skipped
+ * (with their place in the list).
+ */
+export function recordsToClients(records: readonly ImportRecord[], fields: readonly CustomFieldDef[] = []): { clients: ImportClient[]; skipped: Array<{ row: number; reason: string }> } {
   const clients = new Map<string, ImportClient>();
   const skipped: Array<{ row: number; reason: string }> = [];
   records.forEach((r, i) => {
     const display = (r.name?.trim() || [r.first_name?.trim(), r.last_name?.trim()].filter(Boolean).join(" ") || r.company_name?.trim() || "").slice(0, 200);
     if (!display) return skipped.push({ row: i, reason: "No name, first and last name, or company." });
     if (r.status && !clientStatus(r.status)) return skipped.push({ row: i, reason: `Status "${r.status}" isn't one of active, inactive (archived) or lead.` });
+    const custom = mergeCustomValues(fields, {}, r.custom_fields ?? {});
+    if (custom.errors.length) return skipped.push({ row: i, reason: custom.errors.join(" ") });
     const email = first(r.email ?? "").toLowerCase() || null;
     const sourceId = r.source_id?.trim() || null;
     const key = groupKey(sourceId, email, display);
@@ -196,11 +244,14 @@ export function recordsToClients(records: readonly ImportRecord[]): { clients: I
           ? { line1: r.billing_address.line1.trim(), city: r.billing_address.city?.trim() || null, region: r.billing_address.region?.trim() || null, postal_code: r.billing_address.postal_code?.trim() || null }
           : null,
         properties: [],
+        custom_fields: {},
       };
       clients.set(key, client);
     } else if (!client.status && r.status) {
       client.status = clientStatus(r.status);
     }
+    // The first record with a value for a field gives it.
+    client.custom_fields = { ...custom.values, ...client.custom_fields };
     for (const p of r.properties ?? []) {
       addProperty(client, { label: p.label?.trim() || null, line1: p.line1.trim(), line2: p.line2?.trim() || null, city: p.city?.trim() || null, region: p.region?.trim() || null, postal_code: p.postal_code?.trim() || null, notes: p.notes?.trim() || null });
     }

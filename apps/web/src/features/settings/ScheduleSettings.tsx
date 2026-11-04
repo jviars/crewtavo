@@ -38,12 +38,10 @@ export function ScheduleSettings() {
       const v = f!;
       if (!(v.speedMph >= 5 && v.speedMph <= 80)) throw new Error("Driving speed has to be between 5 and 80 mph.");
       if (!(v.setupMin >= 0 && v.setupMin <= 120)) throw new Error("Unloading time has to be between 0 and 120 minutes.");
-      const previous = (details.data?.settings ?? {}) as Record<string, unknown>;
-      const settings = {
-        ...previous,
-        schedule: { time_step: v.timeStep, auto_routes: v.autoRoutes, route_times: v.routeTimes, return_to_shop: v.returnToShop, speed_mph: v.speedMph, setup_min: Math.round(v.setupMin) },
-      };
-      unwrap(await supabase().from("companies").update({ settings: settings as never }).eq("id", company.id));
+      // Only settings.schedule, merged into the settings as they are when it saves, so a change made
+      // since this page opened isn't undone.
+      const schedule = { time_step: v.timeStep, auto_routes: v.autoRoutes, route_times: v.routeTimes, return_to_shop: v.returnToShop, speed_mph: v.speedMph, setup_min: Math.round(v.setupMin) };
+      unwrap(await supabase().rpc("merge_company_settings", { p_company: company.id, p_settings: { schedule } }));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["company", company.id] });

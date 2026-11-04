@@ -1,6 +1,6 @@
 /**
- * Settings, grouped the way people look for things (sections.ts): you, the business, the team, and
- * what it connects to. Automations, online booking and apps have their own screens and open from here.
+ * Settings, grouped the way people look for things (sections.ts): you, the business, talking to
+ * clients, the team, what it connects to, and where it's hosted. Automations, online booking and apps have their own screens and open from here.
  */
 import { Link, useSearchParams } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
@@ -9,9 +9,11 @@ import { hasRole, isSub, useSession } from "@/lib/session";
 import { AssistantSettings } from "./AssistantSettings";
 import { CalendarSettings } from "./CalendarSettings";
 import { ChecklistSettings } from "./ChecklistSettings";
+import { ClientNotificationSettings } from "./ClientNotificationSettings";
 import { CompanySettings } from "./CompanySettings";
 import { ContractSettings } from "./ContractSettings";
 import { CrewSettings } from "./CrewSettings";
+import { CustomFieldSettings } from "./CustomFieldSettings";
 import { DataSettings } from "./DataSettings";
 import { EmailSettings } from "./EmailSettings";
 import { HostingSettings } from "./HostingSettings";
@@ -27,6 +29,7 @@ import { StorageSettings } from "./StorageSettings";
 import { TeamSettings } from "./TeamSettings";
 import { TemplateSettings } from "./TemplateSettings";
 import { WebAddressSettings } from "./WebAddressSettings";
+import { WeatherSettings } from "./WeatherSettings";
 
 export function SettingsPage() {
   const session = useSession();
@@ -79,7 +82,10 @@ export function SettingsPage() {
           {tab === "prices" && <PriceList />}
           {tab === "templates" && <TemplateSettings />}
           {tab === "contracts" && <ContractSettings />}
+          {tab === "custom-fields" && <CustomFieldSettings />}
           {tab === "checklists" && <ChecklistSettings />}
+          {tab === "weather" && <WeatherSettings />}
+          {tab === "client-notifications" && <ClientNotificationSettings />}
           {tab === "email" && <EmailSettings />}
           {tab === "calendars" && <CalendarSettings />}
           {tab === "assistants" && <AssistantSettings />}

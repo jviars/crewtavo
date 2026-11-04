@@ -6,12 +6,14 @@
  * estimate itself, so it works after a reload too. The copy prints the option they chose and the
  * contract as they signed it (with their initials), kept with the signature.
  */
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import { useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { Spinner } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/session";
+import { useCustomFields } from "../../customFields/CustomFields";
 import { documentCompany, quoteDate, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
 import { PrintableDocument, printDocument } from "../../documents/EstimateDocument";
 import { useEstimateQuote } from "../estimate/data";
@@ -47,6 +49,7 @@ function SignedScreen({ quote }: { quote: EstimateQuote }) {
   const features = session.config.features;
   const outcome = signingOutcome(quote.id, location.state);
   const details = useVisitDetails(quote.id);
+  const fields = useCustomFields("quote");
   const copies = useSignedCopies(quote.id, quote.approved_at);
   // The template it was signed on, saved with the signatures.
   const { template, isPending: templatePending } = useQuoteTemplate(quote);
@@ -91,6 +94,8 @@ function SignedScreen({ quote }: { quote: EstimateQuote }) {
       deposit_amount: details.data?.deposit_amount ?? 0,
       sent_at: details.data?.sent_at ?? null,
       created_at: details.data?.created_at ?? null,
+      // The business's fields marked to print, as the quote's own PDF prints them.
+      pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),
     },
     linesWithOptions(quote.lines, details.data?.lineOptions),
     {

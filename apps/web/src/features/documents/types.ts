@@ -98,6 +98,8 @@ export interface DocumentData {
   /** Invoices: referral credits after the discount, each under its note ("Referral credit: thanks for referring Maria"). */
   credits?: Array<{ label: string; amount: number }>;
   tax: number;
+  /** The client is tax exempt: the totals say "Tax exempt", with their certificate number or note when there is one. */
+  taxExempt?: string;
   total: number;
   /** Estimates: the deposit to get on the schedule. */
   deposit?: number | null;

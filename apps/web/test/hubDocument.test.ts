@@ -305,6 +305,23 @@ describe("an open quote that offers options", () => {
     expect(invoiceDocument(view).contract).toEqual({ sections: [{ id: "k9", title: "Late payments", html: "<p>Due on receipt.</p>", place: "signatures", initials: false }] });
     expect(invoiceDocument({ ...view, contract: null }).contract).toBeUndefined();
   });
+
+  it("prints the checklists shown to the client after its contract, a section each, their words escaped", () => {
+    const view: InvoiceView = {
+      kind: "invoice", home: null, company, can_pay: false, tips: false, contract: null,
+      invoice: {
+        id: "i1", number: 77, status: "sent", subject: null, notes: null, issued_on: "2026-10-01", due_on: null, subtotal: 100, discount_amount: 0, tax_amount: 0, total: 100,
+        retainage_amount: 0, amount_paid: 0, balance_due: 100, promo: null, client: { display_name: "Dana" }, lines: [], payments: [],
+        checklists: [{ name: "Cleanup sign-off", visit_on: "2026-10-03", answers: [{ label: "Gutters cleared", text: "Yes" }, { label: "Notes", text: "Moved <b>pots</b>\nback" }] }],
+      },
+    };
+    expect(invoiceDocument(view).contract).toEqual({
+      sections: [{
+        id: "checklist-0", title: "Cleanup sign-off · Oct 3, 2026", place: "terms", initials: false,
+        html: "<table><tbody><tr><td>Gutters cleared</td><td>Yes</td></tr><tr><td>Notes</td><td>Moved &lt;b&gt;pots&lt;/b&gt;<br>back</td></tr></tbody></table>",
+      }],
+    });
+  });
 });
 
 describe("the price range page", () => {

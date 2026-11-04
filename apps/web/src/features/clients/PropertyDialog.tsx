@@ -3,8 +3,10 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
+import { TagInput } from "@/components/ui/TagInput";
 import { api, supabase, unwrap } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
+import { CustomFieldInputs, customFieldsToSave, useCustomFields } from "../customFields/CustomFields";
 
 export interface PropertyRow {
   id: string;
@@ -17,6 +19,9 @@ export interface PropertyRow {
   notes: string | null;
   lat?: number | null;
   lng?: number | null;
+  tags?: string[];
+  lot_size_sqft?: number | null;
+  custom_fields?: unknown;
 }
 
 export interface AccessRow {
@@ -27,7 +32,7 @@ export interface AccessRow {
   instructions: string | null;
 }
 
-/** Add or edit a service address, including gate and lockbox codes (office only). */
+/** Add or edit a service address, including gate and lockbox codes (office only), its tags, lot size and the business's own fields. */
 export function PropertyDialog({ clientId, property, access, onClose }: { clientId: string; property?: PropertyRow; access?: AccessRow | null; onClose: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -43,7 +48,11 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
     gate_code: access?.gate_code ?? "",
     lockbox_code: access?.lockbox_code ?? "",
     instructions: access?.instructions ?? "",
+    lot_size_sqft: property?.lot_size_sqft != null ? String(property.lot_size_sqft) : "",
   });
+  const [tags, setTags] = useState<string[]>(property?.tags ?? []);
+  const [custom, setCustom] = useState<Record<string, string>>({});
+  const customFields = useCustomFields("property");
   const set = (key: keyof typeof p) => (e: { target: { value: string } }) => setP({ ...p, [key]: e.target.value });
   const addressChanged = !property || ["line1", "line2", "city", "region", "postal_code"].some((k) => (property as unknown as Record<string, unknown>)[k] !== (p as Record<string, string>)[k]);
 
@@ -58,6 +67,10 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
         region: p.region.trim() || null,
         postal_code: p.postal_code.trim() || null,
         notes: p.notes.trim() || null,
+        tags,
+        lot_size_sqft: p.lot_size_sqft.trim() ? Number(p.lot_size_sqft) : null,
+        // Only when one was typed into, so saved values are never written over unseen.
+        ...(Object.keys(custom).length && { custom_fields: customFieldsToSave(customFields, property?.custom_fields, custom) }),
         // A new address needs a new map location.
         ...(addressChanged ? { lat: null, lng: null } : {}),
       };
@@ -88,8 +101,8 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
         <Field label="Apartment, suite or unit" optional><input className="input" value={p.line2} onChange={set("line2")} maxLength={100} /></Field>
         <div className="form-grid-3">
           <Field label="City"><input className="input" value={p.city} onChange={set("city")} maxLength={100} /></Field>
-          <Field label="State"><input className="input" value={p.region} onChange={set("region")} maxLength={20} /></Field>
-          <Field label="ZIP"><input className="input" value={p.postal_code} onChange={set("postal_code")} maxLength={12} inputMode="numeric" /></Field>
+          <Field label="State / Province"><input className="input" value={p.region} onChange={set("region")} maxLength={20} /></Field>
+          <Field label="ZIP / Postal code"><input className="input" value={p.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
         </div>
         {isOffice && (
           <div className="form-section">
@@ -103,6 +116,11 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
           </div>
         )}
         <Field label="Property notes" optional><textarea className="textarea" value={p.notes} onChange={set("notes")} maxLength={4000} /></Field>
+        <div className="form-grid">
+          <Field label="Lot size (sq ft)" optional><input className="input" type="number" inputMode="numeric" min={0} max={1000000000} step="any" value={p.lot_size_sqft} onChange={set("lot_size_sqft")} /></Field>
+          <Field label="Tags" optional><TagInput value={tags} onChange={setTags} /></Field>
+        </div>
+        <CustomFieldInputs fields={customFields} current={property?.custom_fields} draft={custom} onChange={setCustom} />
         <FormError error={save.error} />
         <div className="form-actions">
           <FormChecks />

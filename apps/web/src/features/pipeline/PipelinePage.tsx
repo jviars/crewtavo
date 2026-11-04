@@ -80,7 +80,7 @@ export function PipelinePage() {
       const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const [requests, quotes, closed] = await Promise.all([
         supabase().from("requests").select("id, number, title, status, updated_at, client:clients(display_name, email, phone)").eq("company_id", company.id).in("status", ["new", "assessment_scheduled", "assessment_complete"]),
-        supabase().from("quotes").select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), updated_at, client:clients(display_name, email, phone), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)").eq("company_id", company.id).in("status", ["draft", "sent", "changes_requested", "approved"]),
+        supabase().from("quotes").select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), updated_at, client:clients(display_name, email, phone), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)").eq("company_id", company.id).in("status", ["draft", "sent", "changes_requested", "approved"]).eq("is_template", false),
         supabase().from("quotes").select("id, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), options:quote_options!quote_options_quote_fkey(id)").eq("company_id", company.id).in("status", ["converted", "lost"]).gte("updated_at", since),
       ]);
       // Quotes that offer options are worth their cheapest option until they're signed.

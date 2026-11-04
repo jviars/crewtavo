@@ -74,6 +74,9 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   builtinOn.careers = (company.data?.settings as { careers?: { enabled?: boolean } } | null)?.careers?.enabled === true;
   builtinOn.drive = (company.data?.settings as { drive?: { enabled?: boolean } } | null)?.drive?.enabled === true;
   builtinOn.marketing = marketingOn(company.data?.settings as Record<string, unknown> | null);
+  // Paving and Roofing (routes/paving.ts, routes/roofing.ts).
+  builtinOn.paving = (company.data?.settings as { paving_app?: { enabled?: boolean } } | null)?.paving_app?.enabled === true;
+  builtinOn.roofing = (company.data?.settings as { roofing_app?: { enabled?: boolean } } | null)?.roofing_app?.enabled === true;
   const calendarRows = must(calendars);
   const stripeSettings = (integrations.find((r) => r.provider === "stripe")?.settings ?? {}) as { webhook?: boolean; livemode?: boolean; key_kind?: string; import?: ImportState };
   // ABC Supply: the account and branch prices come from, and the others there are to pick.

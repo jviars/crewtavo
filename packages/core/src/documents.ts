@@ -67,22 +67,43 @@ export const DEFAULT_TERMS =
   "Warranty: we stand behind our workmanship, plus the manufacturer's warranty on materials.";
 
 /**
- * The starter terms printed above the signatures, by trade. DEFAULT_TERMS is paving's and roofing's
- * (unchanged). A lawn company bills after each visit, often to the card on file, and has no
+ * The starter terms printed above the signatures, by trade. DEFAULT_TERMS is paving's, roofing's and
+ * landscaping's (unchanged). A lawn company bills after each visit, often to the card on file, and has no
  * deposits or materials warranty to speak of. The migration that brought these in
  * (20261101000100_autopay.sql) moved lawn templates still on the old starter to the lawn one.
  */
+const GENERAL_TERMS =
+  "Payment: due when the work is done, unless we agreed otherwise.\n" +
+  "Changes: anything not listed here is extra, and only with your OK.\n" +
+  "Warranty: we stand behind our workmanship.";
+
 export const TRADE_TERMS: Record<string, string> = {
   lawn_exterior:
     "Payment: due after each visit, or charged to your card on file if you're on autopay.\n" +
     "Skipped visits: if we can't do a visit, we'll tell you, and you won't be charged for it.\n" +
     "Our work: if something isn't right, tell us within two days and we'll come back or refund the visit.",
-  general:
-    "Payment: due when the work is done, unless we agreed otherwise.\n" +
-    "Changes: anything not listed here is extra, and only with your OK.\n" +
-    "Warranty: we stand behind our workmanship.",
+  general: GENERAL_TERMS,
   paving: DEFAULT_TERMS,
   roofing_exteriors: DEFAULT_TERMS,
+  landscaping: DEFAULT_TERMS,
+  // Repair trades bill when the work is done, like general.
+  plumbing: GENERAL_TERMS,
+  hvac: GENERAL_TERMS,
+  electrical: GENERAL_TERMS,
+  handyman: GENERAL_TERMS,
+  // Recurring visits and plans bill like lawn.
+  cleaning:
+    "Payment: due after each cleaning, or charged to your card on file if you're on autopay.\n" +
+    "Skipping a cleaning: tell us at least a day ahead.\n" +
+    "Our work: if we missed something, tell us within a day and we'll come back for it.",
+  pool_service:
+    "Payment: your plan is billed each month, or charged to your card on file if you're on autopay.\n" +
+    "Repairs and parts: anything outside your plan is extra, and only with your OK.\n" +
+    "Our work: if something isn't right, tell us and we'll come back.",
+  pest_control:
+    "Payment: due after each treatment, or charged to your card on file if you're on autopay.\n" +
+    "Changes: anything outside your plan is extra, and only with your OK.\n" +
+    "Safety: we'll tell you what we applied and when it's safe to go back in.",
 };
 
 /** The starter terms for a trade; DEFAULT_TERMS when the trade isn't known (or isn't given). */

@@ -164,7 +164,7 @@ function PromoDialog({ promo, onClose, onSaved }: { promo: Promo | null; onClose
     every_visit: promo?.every_visit ?? false,
   });
   const value = Number(f.value);
-  const choices = repeatChoices(f.kind, f.value);
+  const choices = repeatChoices(f.kind, f.value, session.company.currency);
   const codeOk = /^[A-Z0-9-]{3,24}$/.test(f.code);
   const valueError = f.value && (!(value > 0) || (f.kind === "percent" && value > 100)) ? (f.kind === "percent" ? "Enter a percent between 1 and 100." : "Enter an amount more than $0.") : null;
   const datesError = f.starts_on && f.ends_on && f.ends_on < f.starts_on ? "The end date is before the start date." : null;

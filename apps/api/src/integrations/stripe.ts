@@ -1243,6 +1243,7 @@ async function takeBackBefore(admin: Db, paid: { company_id: string; client_id: 
 interface Dispute {
   id: string;
   amount: number;
+  currency?: string;
   charge: string;
   payment_intent: string | null;
   status: string;
@@ -1256,7 +1257,7 @@ async function disputed(admin: Db, route: WebhookRoute, type: string, dispute: D
   const { data: original } = await admin.from("payments").select("company_id, client_id, invoice_id, method, amount, tip_amount, invoice:invoices(number)").eq("processor_ref", ref).maybeSingle();
   if (!original || (route.companyId && original.company_id !== route.companyId)) return null;
   const number = (original.invoice as unknown as { number: number } | null)?.number;
-  const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(dispute.amount / 100);
+  const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: (dispute.currency || "usd").toUpperCase() }).format(dispute.amount / 100);
   const on = number ? ` on invoice #${number}` : "";
   const note = (suffix: string, subject: string, body: string) =>
     noteOnClient(admin, { company_id: original.company_id, client_id: original.client_id, invoice_id: original.invoice_id, key: `${dispute.id}:${suffix}`, subject, body });

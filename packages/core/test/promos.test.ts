@@ -25,6 +25,13 @@ describe("the promo code form's example", () => {
     expect(repeatChoices("percent", "150").everyVisit).toContain("a 10% code");
     expect(repeatChoices("amount", 1500).once).toContain("a $1,500 code");
   });
+
+  it("says the value in the business's currency", () => {
+    expect(repeatChoices("amount", 1500, "CAD").once).toContain("a CA$1,500 code takes CA$1,500 off");
+    expect(repeatChoices("amount", 12.5, "EUR").everyVisit).toContain("a €12.50 code takes €12.50 off every mowing");
+    expect(repeatChoices("amount", "", "GBP").once).toContain("a £25 code");
+    expect(repeatChoices("percent", "15", "GBP").once).toContain("a 15% code");
+  });
 });
 
 describe("a quote's promo code line", () => {
@@ -138,6 +145,10 @@ describe("the job page's note", () => {
       "Promo code WEEKLY25 comes off the first invoice only. $15.00 is on invoice #12, $5.00 on invoice #13, and $5.00 goes on the next invoice.",
     );
     expect(said(discount())).toBe("Promo code WEEKLY25 comes off the first invoice only. It goes on the next invoice you make.");
+    // In the business's currency.
+    expect(wordsText(jobDiscountWords(discount({ placed: 15, left: 10, invoices: [{ id: "i12", number: 12, amount: 15 }] }), "CAD").where!)).toBe(
+      "CA$15.00 is on invoice #12, and CA$10.00 goes on the next invoice.",
+    );
   });
 
   it("names every invoice a code went on while it came off every visit, and says so", () => {

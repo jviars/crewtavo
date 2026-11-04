@@ -73,6 +73,8 @@ export interface VisitDetails {
   billingAddress: unknown;
   /** The promo code on it, which its totals are worked out with. */
   promo: { kind: string; value: number } | null;
+  /** The business's own fields on it (quotes.custom_fields): the ones marked to print go on the document. */
+  customFields: unknown;
 }
 
 interface DetailsRow {
@@ -89,6 +91,7 @@ interface DetailsRow {
   client: { billing_address: unknown } | null;
   options: VisitOption[] | null;
   lines: Array<{ id: string; option_id: string | null }> | null;
+  custom_fields: unknown;
 }
 
 export function useVisitDetails(quoteId: string) {
@@ -99,7 +102,7 @@ export function useVisitDetails(quoteId: string) {
         await supabase()
           .from("quotes")
           .select(
-            "created_by, message, valid_until, deposit_amount, sent_at, created_at, option_id, section_ids, package:roof_packages!quotes_roof_package_fkey(name, warranty), promo:promo_codes(kind, value), client:clients(billing_address), options:quote_options!quote_options_quote_fkey(id, name, tier, picture, picture_width, picture_height, style, highlights, warranty, section_ids, sort), lines:quote_line_items(id, option_id)",
+            "created_by, message, valid_until, deposit_amount, sent_at, created_at, option_id, section_ids, custom_fields, package:roof_packages!quotes_roof_package_fkey(name, warranty), promo:promo_codes(kind, value), client:clients(billing_address), options:quote_options!quote_options_quote_fkey(id, name, tier, picture, picture_width, picture_height, style, highlights, warranty, section_ids, sort), lines:quote_line_items(id, option_id)",
           )
           .eq("id", quoteId)
           .maybeSingle(),
@@ -122,6 +125,7 @@ export function useVisitDetails(quoteId: string) {
         sectionIds: row?.section_ids ?? [],
         billingAddress: row?.client?.billing_address ?? null,
         promo: row?.promo ?? null,
+        customFields: row?.custom_fields ?? null,
       };
     },
   });

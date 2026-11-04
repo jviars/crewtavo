@@ -108,11 +108,11 @@ describe("Settings → Payments in the menu", () => {
     }
   });
 
-  it("sits right after Company, and Contract terms still follows the estimate template", () => {
+  it("sits right after Company, and Contract terms still follows the document style", () => {
     as("owner", []);
     const business = settingsGroups(session.current as never).find((g) => g.title === "Business")!.items.map((i) => i.label);
     expect(business.indexOf("Payments")).toBe(business.indexOf("Company") + 1);
-    expect(business.indexOf("Contract terms")).toBe(business.indexOf("Estimate template") + 1);
+    expect(business.indexOf("Contract terms")).toBe(business.indexOf("Document style") + 1);
   });
 
   it("is found by searching for autopay, tips, a saved card or refunds", () => {
@@ -414,8 +414,8 @@ describe("jobs and the clients list", () => {
   it("puts the job's switch behind the invoices area and the job types autopay charges", () => {
     const code = read("features/jobs/JobPage.tsx");
     expect(code).toContain("const autopayOn = seesInvoices && autopay.enabled;");
-    expect(code).toContain("disabled={!autopayAllowed(j.kind, j.billing_mode)");
-    expect(code).toContain("Autopay works with recurring jobs billed per visit, or one-off jobs billed when the work is done.");
+    expect(code).toContain("disabled={!autopayAllowed(j.kind, j.billing_mode, j.pricing, j.invoice_schedule)");
+    expect(code).toContain("Autopay works with recurring jobs billed per visit or at a fixed price monthly, or one-off jobs billed when the work is done.");
     expect(code).toContain('supabase().from("jobs").update({ autopay: on })');
     expect(code).toContain('title: "Mark work complete?"');
   });

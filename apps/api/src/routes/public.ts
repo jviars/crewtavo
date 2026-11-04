@@ -5,12 +5,16 @@
  */
 import { autopaySettings, methodLabel, tipsAllowed } from "@crewtavo/core/autopay";
 import { contractValues, fillIn } from "@crewtavo/core/contracts";
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import { pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
 import { hidesExactPrice, inRangeMode, isSiteAdjustment, optionsRange, priceRange, rangeSettings } from "@crewtavo/core/estimates";
+import { clientAnswers, inServiceArea, type ClientChecklist } from "@crewtavo/core/forms";
 import { marketingOn, referralSettings, referralsReady, referrerLine } from "@crewtavo/core/marketing";
 import { chosenTotals, countsOn, optionBaseTotal, optionTotals, type OptionLine } from "@crewtavo/core/money";
 import { isPackagePicturePath, packagePictureSrc } from "@crewtavo/core/presets";
 import { quotePromoRule } from "@crewtavo/core/promos";
+import { changeableOnline, openSlots, SLOT_DAYS, SLOT_LEAD_DAYS, slotStep, workdays, type OpenSlot } from "@crewtavo/core/slots";
+import { addDays, arrivalWindowMin, localDate, zonedTimeToUtc } from "@crewtavo/core/time";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -55,13 +59,13 @@ import { LETTERHEAD_MAX_BYTES } from "../services/letterhead";
 import { isDrawnPng, isPng, LOGO_MAX_BYTES, logoImage, logoOf } from "../services/logo";
 import { PACKAGE_PICTURE_MAX_BYTES } from "../services/packagePictures";
 import { isJpeg } from "../services/photos";
-import { isRoofWork, quoteMeasurement, sitePriceSet } from "../services/roofPackages";
+import { isRoofWork, quoteMeasurement, roofingOn, sitePriceSet, workKind } from "../services/roofPackages";
 import { optionsFrom } from "../services/sales";
 import { signatureImage } from "../services/signing";
 import { formPage } from "../services/websiteForms";
 import { firstName } from "../lib/email";
 import { fromBase64Url, signToken, verifyToken } from "../lib/crypto";
-import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
+import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { clientLink, linkPreview, readClientLink, REVIEW_TOKEN, type ClientLink, type LinkKind } from "../lib/links";
 import { storedFile } from "../lib/storedFile";
@@ -104,6 +108,8 @@ async function linkClient(admin: ReturnType<typeof adminClient>, l: ClientLink):
     l.t === "client"
       ? l.id
       : must(await admin.from(l.t === "quote" ? "quotes" : "invoices").select("client_id").eq("company_id", l.c).eq("id", l.id).maybeSingle(), "This link isn't valid anymore.").client_id;
+  // A quote template has no client, and no link of its own.
+  if (!clientId) throw new HttpError(404, "This link isn't valid anymore.");
   must(await admin.from("clients").select("id").eq("company_id", l.c).eq("id", clientId).maybeSingle(), "This link isn't valid anymore.");
   return clientId;
 }
@@ -162,10 +168,11 @@ async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | 
   if (!result.success) throw new HttpError(400, "Please complete the verification and try again.");
 }
 
-// The range settings (settings->roofing), the autopay settings and the trade are read here but never
-// sent: the room on top is the business's own, autopay's only say whether a card is required, and the
-// trade only decides whether a preview shows a roofing range.
-const BRANDING = "name, phone, email, website, timezone, address, trade_preset, settings->branding, settings->hub_tips, settings->roofing, settings->autopay";
+// The range settings (settings->roofing), whether Roofing is installed, the autopay settings and the
+// trade are read here but never sent: the room on top is the business's own, Roofing only decides
+// whether a preview shows a roofing range, autopay's only say whether a card is required, and the
+// trade only picks the starter terms.
+const BRANDING = "name, phone, email, website, timezone, currency, address, trade_preset, settings->branding, settings->hub_tips, settings->roofing, settings->roofing_app, settings->paving_app, settings->autopay";
 
 /** The company as its clients see it, with where its logo loads from (null without one). */
 const withLogo = <T extends { branding?: unknown }>(companyId: string, company: T) => ({ ...company, logo: logoImage("", companyId, { branding: company.branding })?.src ?? null });
@@ -175,11 +182,11 @@ export { addressLines };
 
 /**
  * The company for a Hub page (name, contact details, address lines, logo), and its range settings,
- * whether it needs a card on file, and its trade for the server's own use.
+ * whether it has Roofing, whether it needs a card on file, and its trade for the server's own use.
  */
 async function hubCompany(admin: ReturnType<typeof adminClient>, companyId: string) {
-  const { address, roofing, autopay, trade_preset: trade, ...row } = must(await admin.from("companies").select(BRANDING).eq("id", companyId).maybeSingle());
-  return { company: withLogo(companyId, { ...row, address: addressLines(address) }), roofing, cardRequired: autopaySettings({ autopay }).card_required, trade };
+  const { address, roofing, roofing_app, paving_app, autopay, trade_preset: trade, ...row } = must(await admin.from("companies").select(BRANDING).eq("id", companyId).maybeSingle());
+  return { company: withLogo(companyId, { ...row, address: addressLines(address) }), roofing, roofer: roofingOn({ roofing_app }), apps: { roofing_app, paving_app }, cardRequired: autopaySettings({ autopay }).card_required, trade };
 }
 
 /**
@@ -342,17 +349,33 @@ async function hubDrawings(admin: ReturnType<typeof adminClient>, companyId: str
   }));
 }
 
+/**
+ * A quote's or invoice's custom fields the business marked to print (pdf_fields) and to show on the
+ * Hub (portal_fields), as they read: the other fields, and the values behind them, are never sent.
+ */
+async function hubFields(admin: ReturnType<typeof adminClient>, companyId: string, record: "quote" | "invoice", values: unknown) {
+  const { data } = await admin
+    .from("custom_field_definitions")
+    .select("key, label, type, choices, show_on_pdf, show_in_portal, sort, archived_at")
+    .eq("company_id", companyId)
+    .eq("record_type", record)
+    .is("archived_at", null)
+    .order("sort");
+  const shown = (where: "pdf" | "portal") => shownCustomFields(data ?? [], values, where).map(({ label, text }) => ({ label, text }));
+  return { pdf_fields: shown("pdf"), portal_fields: shown("portal") };
+}
+
 publicRoutes.get("/hub/:token", async (c) => {
   const l = await link(c);
   const admin = adminClient(c.env);
-  const { company, roofing, cardRequired, trade } = await hubCompany(admin, l.c);
+  const { company, roofing, roofer, apps, cardRequired, trade } = await hubCompany(admin, l.c);
   if (l.t === "client") return c.json(await clientHome(c, admin, l, company));
   if (l.t === "quote") {
     const quote = must(
       await admin
         .from("quotes")
         .select(
-          "id, number, status, title, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, sent_at, created_at, approved_at, approval, client_id, change_order_for, template_id, roof_package_id, option_id, section_ids, recurrence_rule, active_months, range_low, range_high, range_sent_at, range_lines, range_accepted_at, priced_on_site_at, exact_sent_at, promo_code_id, promo_every_visit, promo:promo_codes(code, kind, value, description, min_subtotal, every_visit), client:clients(display_name, billing_address), property:properties(line1, city, region, postal_code)",
+          "id, number, status, title, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, deposit_percent, deposit_invoice_id, valid_until, sent_at, created_at, approved_at, approval, client_id, change_order_for, template_id, roof_package_id, work_kind, option_id, section_ids, recurrence_rule, active_months, range_low, range_high, range_sent_at, range_lines, range_accepted_at, priced_on_site_at, exact_sent_at, promo_code_id, promo_every_visit, promo:promo_codes(code, kind, value, description, min_subtotal, every_visit), client:clients(display_name, billing_address, tax_exempt, tax_exempt_note), property:properties(line1, city, region, postal_code), custom_fields",
         )
         .eq("company_id", l.c)
         .eq("id", l.id)
@@ -360,16 +383,19 @@ publicRoutes.get("/hub/:token", async (c) => {
       "Quote not found.",
     );
     if (quote.status === "draft" && !l.pv) throw new HttpError(404, "This quote isn't ready yet.");
+    // A quote template (no client) never reaches the Client Hub, not even as a preview.
+    if (!quote.client_id) throw new HttpError(404, "Quote not found.");
     const signed = quote.status === "approved" || quote.status === "converted";
-    const [lineRows, options, drawings, template, roofPackage, home] = await Promise.all([
+    const [lineRows, options, drawings, template, roofPackage, home, fields] = await Promise.all([
       // The formula only tells the server which line is the tear-off; it's never sent.
       admin.from("quote_line_items").select("id, option_id, service_id, name, description, quantity, unit, unit_price, taxable, optional, selected, option_group, sort, formula").eq("company_id", l.c).eq("quote_id", quote.id).order("sort"),
       loadOptions(admin, l.c, quote.id),
       hubDrawings(admin, l.c, "quote_id", quote.id),
       // Signed, it prints with the template it was signed with.
       hubTemplate(admin, l.c, quote.template_id, trade, signed ? quote.approval : null),
-      quote.roof_package_id ? admin.from("roof_packages").select("name, warranty").eq("company_id", l.c).eq("id", quote.roof_package_id).maybeSingle() : null,
+      quote.roof_package_id ? admin.from("roof_packages").select("name, warranty, roof_service_id").eq("company_id", l.c).eq("id", quote.roof_package_id).maybeSingle() : null,
       l.pv ? null : homeLink(c, l.c, quote.client_id, l),
+      hubFields(admin, l.c, "quote", quote.custom_fields),
     ]);
     const lines = [...must(lineRows)].sort((a, b) => a.sort - b.sort);
     // How the code comes off: as it was approved once it's signed, so a signed quote keeps its words (core quotePromoRule).
@@ -387,11 +413,12 @@ publicRoutes.get("/hub/:token", async (c) => {
     // roofing estimate not sent yet shows the range it would get (from the cheapest option to the
     // priciest), once there's something on it to price and, with options, once one of them has a
     // price (a range can't be sent before); one already sent at its exact price previews as the
-    // client sees it. Roof work is a roofer's, or a roof another trade measured (roofPackages.ts
-    // isRoofWork), which Roofing sends as a range too; other work never goes out as one, so it
-    // previews the price.
+    // client sees it. Roof work is its own kind of work with both Roofing and Paving, else a business
+    // with Roofing's, or a roof another one measured (roofPackages.ts isRoofWork), which Roofing sends
+    // as a range too; other work never goes out as one, so it previews the price.
     const draftPreview = Boolean(l.pv) && quote.status === "draft" && quote.range_low === null;
-    const roofWork = trade === "roofing_exteriors" || (draftPreview && isRoofWork(trade, await quoteMeasurement(admin, l.c, quote.id)));
+    const kind = workKind(apps, quote.work_kind, roofPackage?.data ? [roofPackage.data.roof_service_id] : []);
+    const roofWork = kind ? kind === "roofing" : roofer || (draftPreview && isRoofWork(false, await quoteMeasurement(admin, l.c, quote.id)));
     const previewRange =
       draftPreview && roofWork && (quote.roof_package_id !== null || options.length > 0) && (!options.length || priced.length > 0) &&
       quote.priced_on_site_at === null && Number(quote.total) > 0;
@@ -464,6 +491,11 @@ publicRoutes.get("/hub/:token", async (c) => {
     // price yet) or a change order (the job is set up).
     const perVisit = lines.some((line) => line.selected && line.unit.trim().toLowerCase() === "visit");
     const autopayOffer = !l.pv && (perVisit || cardRequired) && !inRangeMode(quote) && !quote.change_order_for && (await autopayOffered(c.env, admin, l.c, quote.client_id));
+    // The deposit: paid online as they approve when the business takes payments online; once
+    // signed, the invoice made for it then, to pay from here until it's paid.
+    const waiting = quote.status === "sent" || quote.status === "changes_requested";
+    const depositOnline = waiting && exact && !l.pv && Number(quote.deposit_amount) > 0 && Boolean(await stripeAccess(c.env, admin, l.c));
+    const deposit = signed && !l.pv && quote.deposit_invoice_id ? await hubDeposit(c, admin, l, quote.deposit_invoice_id) : null;
     return c.json({
       kind: "quote",
       company,
@@ -472,6 +504,8 @@ publicRoutes.get("/hub/:token", async (c) => {
       autopay_offer: autopayOffer,
       // Signing goes straight on to adding a card: there's no Approve without one.
       card_required: autopayOffer && cardRequired,
+      deposit_online: depositOnline,
+      deposit,
       quote: {
         id: quote.id, number: quote.number, status: quote.status, title: quote.title, message: quote.message,
         subtotal: exact ? quote.subtotal : null,
@@ -480,9 +514,10 @@ publicRoutes.get("/hub/:token", async (c) => {
         tax_amount: exact ? quote.tax_amount : null,
         total: exact ? quote.total : null,
         deposit_amount: exact ? quote.deposit_amount : null,
+        deposit_percent: exact ? quote.deposit_percent : null,
         valid_until: quote.valid_until, sent_at: quote.sent_at, created_at: quote.created_at, approved_at: quote.approved_at, client_id: quote.client_id, change_order_for: quote.change_order_for,
         recurrence_rule: quote.recurrence_rule, active_months: quote.active_months,
-        promo, client: quote.client ? { display_name: quote.client.display_name } : null, property: quote.property,
+        promo, client: quote.client ? { display_name: quote.client.display_name, tax_exempt: quote.client.tax_exempt, tax_exempt_note: quote.client.tax_exempt_note } : null, property: quote.property,
         package: roofPackage?.data ? { name: roofPackage.data.name } : null,
         approval: signed ? publicApproval(quote.approval, quote.approved_at) : null,
         // A price agreed on site is in effect, so a promo code can't go on it (the promo route says so).
@@ -495,6 +530,7 @@ publicRoutes.get("/hub/:token", async (c) => {
           id: line.id, option_id: line.option_id, name: line.name, description: line.description, quantity: line.quantity, unit: line.unit, unit_price: line.unit_price,
           taxable: line.taxable, optional: line.optional, selected: line.selected, option_group: line.option_group, sort: line.sort,
         })),
+        ...fields,
       },
       drawings,
       preview: Boolean(l.pv),
@@ -505,7 +541,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     await admin
       .from("invoices")
       .select(
-        "id, number, status, subject, notes, issued_on, due_on, subtotal, discount_amount, credit_amount, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, promo:promo_codes(code, kind, value, description), credits:referral_credits(amount, note, created_at), client:clients(display_name, billing_address), job:jobs(property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, roof_package_id, option:quote_options!quotes_option_fkey(name, warranty))), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort, discount_quote_id), payments(amount, tip_amount, received_at)",
+        "id, number, status, subject, notes, issued_on, due_on, subtotal, discount_amount, credit_amount, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, job_id, billing_month, promo:promo_codes(code, kind, value, description), credits:referral_credits(amount, note, created_at), client:clients(display_name, billing_address, tax_exempt, tax_exempt_note), job:jobs(property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, roof_package_id, option:quote_options!quotes_option_fkey(name, warranty))), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort, discount_quote_id), payments(amount, tip_amount, received_at), custom_fields",
       )
       .eq("company_id", l.c)
       .eq("id", l.id)
@@ -517,7 +553,13 @@ publicRoutes.get("/hub/:token", async (c) => {
   // The Hub lists what was paid and refunded against the total. A payment that was only a tip (or
   // the refund of one) doesn't change what's owed, so it isn't among them.
   invoice.payments = invoice.payments.filter((p) => Number(p.amount) !== 0);
-  const [online, template, drawings] = await Promise.all([hubPayment(c.env, admin, l.c, invoice.id), hubTemplate(admin, l.c, null, trade), hubDrawings(admin, l.c, "invoice_id", invoice.id)]);
+  const [online, template, drawings, fields, checklists] = await Promise.all([
+    hubPayment(c.env, admin, l.c, invoice.id),
+    hubTemplate(admin, l.c, null, trade),
+    hubDrawings(admin, l.c, "invoice_id", invoice.id),
+    hubFields(admin, l.c, "invoice", invoice.custom_fields),
+    invoiceChecklists(admin, l.c, invoice),
+  ]);
   // The one rule for tips (core tipsAllowed): the business has them on, and the invoice wasn't made
   // in Stripe (those are paid exactly as Stripe billed them).
   const tips = tipsAllowed((company as { hub_tips?: unknown }).hub_tips, online.imported);
@@ -536,14 +578,15 @@ publicRoutes.get("/hub/:token", async (c) => {
   // The template's terms and invoice sections, filled in with the invoice's facts (the customer's
   // billing address and the job's address only go into the words, never out on their own). Its
   // {Option} and {Warranty} are those of the estimate the job came from (contracts.ts invoiceFill).
-  const { client, job, lines: lineRows, ...billed } = invoice;
+  // Its custom fields go only as hubFields shows them.
+  const { client, job, lines: lineRows, custom_fields: _values, job_id: _job, billing_month: _month, ...billed } = invoice;
   const fill = await invoiceFill(admin, l.c, job?.quote);
   const facts = invoiceInput(invoice, client, job?.property ?? null, company, template, fill);
   const contract = await invoiceContract(admin, l.c, template, facts);
   // A line with the job's promo code on it: the invoice takes no other code (apply_promo_code says so too).
   const lines = lineRows.map(({ discount_quote_id: _key, ...line }) => line);
   return c.json({
-    kind: "invoice", company, template, contract, invoice: { ...billed, lines, client: client ? { display_name: client.display_name } : null }, preview: Boolean(l.pv), tips,
+    kind: "invoice", company, template, contract, invoice: { ...billed, lines, client: client ? { display_name: client.display_name, tax_exempt: client.tax_exempt, tax_exempt_note: client.tax_exempt_note } : null, ...fields, checklists }, preview: Boolean(l.pv), tips,
     promo_line: lineRows.some((line) => line.discount_quote_id),
     drawings,
     // Not while the saved card is being charged for it: paying by hand then could charge twice. Nor
@@ -585,7 +628,7 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
     await admin
       .from("quotes")
       .select(
-        "id, number, status, sent_at, created_at, total, deposit_amount, tax_rate, discount_amount, template_id, salesperson_id, option_id, section_ids, roof_package_id, range_low, priced_on_site_at, exact_sent_at, promo:promo_codes(kind, value), client:clients(display_name, billing_address), property:properties(line1, city, region, postal_code)",
+        "id, number, status, sent_at, created_at, total, deposit_amount, deposit_percent, tax_rate, discount_amount, template_id, salesperson_id, option_id, section_ids, roof_package_id, range_low, priced_on_site_at, exact_sent_at, promo:promo_codes(kind, value), client:clients(display_name, billing_address), property:properties(line1, city, region, postal_code)",
       )
       .eq("company_id", l.c)
       .eq("id", l.id)
@@ -667,9 +710,49 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
     const waiting = ["sent", "changes_requested"].includes(now.status);
     throw new HttpError(409, waiting && body.expected_total !== undefined ? "The price changed. Please look it over again." : "This quote can't be approved anymore.");
   }
+  // Before the automations run, so a job one makes from the quote finds its deposit invoice.
+  const deposit = await collectDeposit(c, admin, l);
   kickAutomations(c, l.c);
-  return c.json({ status: "approved" });
+  return c.json({ status: "approved", ...(deposit ? { deposit } : {}) });
 });
+
+/**
+ * The deposit, paid as the client approves when the business takes payments online: its invoice
+ * (hub_deposit_invoice, made once) and Stripe's page to pay it, as any invoice is paid. The approval
+ * is kept whatever happens here, with the deposit owed: when the page can't be made (Stripe is
+ * down, or the amount is too small to pay online), `url` is null and they pay from the link, on
+ * their signed quote, or as the office asks. Null when nothing is paid online: no online payments,
+ * or no deposit.
+ */
+async function collectDeposit(c: Parameters<typeof appUrl>[0], admin: ReturnType<typeof adminClient>, l: ClientLink): Promise<{ url: string | null; link: string } | null> {
+  if (!(await stripeAccess(c.env, admin, l.c))) return null;
+  const { data: invoiceId, error } = await admin.rpc("hub_deposit_invoice", { p_company: l.c, p_quote: l.id });
+  if (error) {
+    // Approved all the same: the office bills the deposit as it did before.
+    console.error("Couldn't make the deposit invoice", error);
+    return null;
+  }
+  if (!invoiceId) return null;
+  const link = await clientLink(c.env, appUrl(c), { c: l.c, t: "invoice", id: invoiceId, ...keepVia(l) });
+  try {
+    return { url: await stripeCheckout(c.env, admin, l.c, invoiceId, 0), link };
+  } catch (error) {
+    console.error("Couldn't open the deposit's payment page", error);
+    return { url: null, link };
+  }
+}
+
+/** A signed quote's deposit invoice as the client sees it, with its link to pay; null once it's void. */
+async function hubDeposit(c: Parameters<typeof appUrl>[0], admin: ReturnType<typeof adminClient>, l: ClientLink, invoiceId: string) {
+  const { data: invoice } = await admin.from("invoices").select("id, status, total, balance_due").eq("company_id", l.c).eq("id", invoiceId).maybeSingle();
+  if (!invoice || invoice.status === "void") return null;
+  return {
+    amount: Number(invoice.total),
+    // Written off, the office chose not to collect it.
+    balance_due: invoice.status === "written_off" ? 0 : Math.max(Number(invoice.balance_due), 0),
+    link: await clientLink(c.env, appUrl(c), { c: l.c, t: "invoice", id: invoice.id, ...keepVia(l) }),
+  };
+}
 
 publicRoutes.post("/hub/:token/request-changes", async (c) => {
   const l = await link(c);
@@ -983,40 +1066,32 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
     const { error } = await admin.rpc("check_promo_code", { p_company: company.id, p_code: body.promo_code });
     if (!error) promo = body.promo_code.toUpperCase().replace(/\s/g, "");
   }
-  if (zips.length && !zips.includes((body.address.postal_code ?? "").slice(0, 5))) {
+  if (!inServiceArea(body.address.postal_code, zips)) {
     throw new HttpError(400, `Sorry, ${company.name} doesn't serve that area yet.`);
   }
   // Files only for this form's file questions.
   const fileQuestions = new Set(((form.questions ?? []) as Array<{ key: string; type: string }>).filter((q) => q.type === "files" || q.type === "photos").map((q) => q.key));
   if (body.files.some((f) => !fileQuestions.has(f.question))) throw new HttpError(400, "This form doesn't take files.");
 
-  const client = must(
-    await admin
-      .from("clients")
-      .insert({ company_id: company.id, status: "lead", display_name: body.name, email: body.email, phone: body.phone, lead_source: "Website form" })
-      .select("id")
-      .single(),
-  );
-  const property = must(
-    await admin
-      .from("properties")
-      .insert({ company_id: company.id, client_id: client.id, line1: body.address.line1, city: body.address.city, postal_code: body.address.postal_code })
-      .select("id")
-      .single(),
-  );
+  // The client Crewtavo already has (by email, else phone) or a new lead, and their property.
+  const found = must(
+    await admin.rpc("booking_form_client", { p_company: company.id, p_name: body.name, p_email: body.email, p_phone: body.phone, p_address: asJson(body.address) }),
+  ) as { client_id: string; property_id: string; matched: boolean; new_property: boolean };
+  // A client already here keeps their details; what was typed goes on the request for the office.
+  const typed = found.matched ? { name: body.name, email: body.email, phone: body.phone } : {};
   // The website visit that brought them in, when the business counts its website's visits (Apps).
   const visit = await bookingVisit(c, company.id);
   const request = must(
     await admin
       .from("requests")
       .insert({
-        company_id: company.id, client_id: client.id, property_id: property.id, intake_form_id: form.id,
-        source: "web_form", title: form.name, answers: asJson(body.answers), promo_code: promo, created_by: null, web_visit: visit,
+        company_id: company.id, client_id: found.client_id, property_id: found.property_id, intake_form_id: form.id,
+        source: "web_form", title: form.name, answers: asJson({ ...typed, ...body.answers }), promo_code: promo, created_by: null, web_visit: visit,
       })
       .select("id, number")
       .single(),
   );
-  geocodeLater(c, property.id, body.address);
+  if (found.new_property) geocodeLater(c, found.property_id, body.address);
   kickAutomations(c, company.id);
   if (!body.files.length) return c.json({ ok: true, reference: request.number }, 201);
 
@@ -1137,11 +1212,55 @@ async function invoiceCharges(admin: ReturnType<typeof adminClient>, companyId: 
   return byInvoice;
 }
 
+/**
+ * The finished checklists on these visits that the business shows clients (Show to client, in
+ * Settings → Checklists), as clientAnswers words them. The others' answers are never read.
+ */
+async function clientChecklists(admin: ReturnType<typeof adminClient>, companyId: string, visits: ReadonlyArray<{ id: string; scheduled_on: string | null }>) {
+  const byVisit = new Map<string, ClientChecklist[]>();
+  if (!visits.length) return byVisit;
+  const shown = await admin.from("checklist_templates").select("id, name, items").eq("company_id", companyId).eq("show_to_client", true);
+  if (shown.error) throw dbError(shown.error);
+  if (!shown.data.length) return byVisit;
+  const { data, error } = await admin
+    .from("checklist_responses")
+    .select("visit_id, template_id, answers")
+    .eq("company_id", companyId)
+    .in("visit_id", visits.map((v) => v.id))
+    .in("template_id", shown.data.map((t) => t.id))
+    .not("completed_at", "is", null)
+    .order("created_at");
+  if (error) throw dbError(error);
+  for (const r of data) {
+    const template = shown.data.find((t) => t.id === r.template_id);
+    const answers = template ? clientAnswers(template.items, r.answers) : [];
+    if (!template || !answers.length) continue;
+    const visit_on = visits.find((v) => v.id === r.visit_id)?.scheduled_on ?? null;
+    byVisit.set(r.visit_id, [...(byVisit.get(r.visit_id) ?? []), { name: template.name, visit_on, answers }]);
+  }
+  return byVisit;
+}
+
+/**
+ * The checklists an invoice prints (clientChecklists): those on the visits it bills, or with none
+ * linked to it, its job's done visits (a monthly invoice's, that month's), by day.
+ */
+async function invoiceChecklists(admin: ReturnType<typeof adminClient>, companyId: string, invoice: { id: string; job_id: string | null; billing_month: string | null }) {
+  if (!invoice.job_id) return [];
+  const { data, error } = await admin.from("visits").select("id, scheduled_on, invoice_id").eq("company_id", companyId).eq("job_id", invoice.job_id).eq("status", "completed").order("scheduled_on");
+  if (error) throw dbError(error);
+  const billed = data.filter((v) => v.invoice_id === invoice.id);
+  const month = invoice.billing_month?.slice(0, 7);
+  const visits = billed.length ? billed : data.filter((v) => !month || v.scheduled_on?.startsWith(month));
+  const byVisit = await clientChecklists(admin, companyId, visits);
+  return visits.flatMap((v) => byVisit.get(v.id) ?? []);
+}
+
 async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typeof adminClient>, l: ClientLink, company: unknown) {
   const companyId = l.c;
   const clientId = l.id;
   const client = must(await admin.from("clients").select("id, display_name, properties(id, line1, city)").eq("company_id", companyId).eq("id", clientId).maybeSingle(), "This link isn't valid anymore.");
-  const settings = must(await admin.from("companies").select("timezone, settings").eq("id", companyId).maybeSingle());
+  const settings = must(await admin.from("companies").select("timezone, currency, settings").eq("id", companyId).maybeSingle());
   const today = new Date().toLocaleDateString("en-CA", { timeZone: settings.timezone || "UTC" });
   const [quotes, invoices, jobs, payments, requests, services, autopay] = await Promise.all([
     admin.from("quotes").select("id, number, title, status, total, tax_rate, discount_amount, valid_until, sent_at, approved_at, recurrence_rule, range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at, promo:promo_codes(kind, value)").eq("company_id", companyId).eq("client_id", clientId).in("status", ["sent", "changes_requested", "approved", "converted"]).order("created_at", { ascending: false }).limit(20),
@@ -1199,11 +1318,21 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
       if (first) names.set(id, first);
     }
   }
+  // A move or cancel they asked for that's waiting on the office.
+  const upcomingIds = (upcoming.data ?? []).map((v) => v.id);
+  const asked = upcomingIds.length
+    ? (await admin.from("visit_change_requests").select("visit_id, kind").eq("company_id", companyId).eq("status", "pending").in("visit_id", upcomingIds)).data ?? []
+    : [];
   const visit = (v: NonNullable<typeof upcoming.data>[number]) => ({
     id: v.id, title: v.title, scheduled_on: v.scheduled_on, starts_at: v.starts_at, ends_at: v.ends_at, status: v.status, completed_at: v.completed_at,
     address: (v.property as unknown as { line1: string } | null)?.line1 ?? null,
     crew: firstNames(v.assignees as Array<{ user_id: string }>, names),
+    // Reschedule and Cancel, or "call us": started, done or today's visits aren't changed online.
+    can_change: changeableOnline(v, today),
+    change_requested: asked.find((a) => a.visit_id === v.id)?.kind ?? null,
   });
+  // A done visit's checklists, the ones the business shows clients.
+  const checklists = await clientChecklists(admin, companyId, done.data ?? []);
 
   const base = appUrl(c);
   // The links on the page are minted from this one, so an office copy's stay office copies.
@@ -1221,6 +1350,7 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
   return {
     kind: "client",
     company,
+    arrival_window_min: arrivalWindowMin(companySettings),
     preview: Boolean(l.pv),
     autopay,
     client: { name: client.display_name, first_name: firstName(client.display_name), properties: client.properties },
@@ -1244,7 +1374,7 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
     // still has Pay, with a way to update the card.
     invoices: await Promise.all((invoices.data ?? []).map(async (i) => ({ ...i, autopay: charges.get(i.id)?.status ?? null, link: await sign("invoice", i.id) }))),
     visits: (upcoming.data ?? []).map(visit),
-    past_visits: (done.data ?? []).map(visit),
+    past_visits: (done.data ?? []).map((v) => ({ ...visit(v), checklists: checklists.get(v.id) ?? [] })),
     // "Charged automatically to Visa ending 4242": a Stripe payment on an invoice its autopay charge paid.
     payments: (payments.data ?? []).map((p) => {
       const charge = p.invoice_id ? charges.get(p.invoice_id) : undefined;
@@ -1260,7 +1390,7 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
       ? {
           link: await clientLink(c.env, base, { c: companyId, t: "refer", id: clientId, ...keepVia(l) }),
           offer: referrals.offer,
-          rewards: referrerLine(referrals.reward) || null,
+          rewards: referrerLine(referrals.reward, settings.currency) || null,
           credit_left: Math.round(creditLeft * 100) / 100,
         }
       : null,
@@ -1405,6 +1535,91 @@ publicRoutes.get("/hub/:token/visits/:file", async (c) => {
     },
   ]);
   return c.body(ics, 200, { "Content-Type": "text/calendar; charset=utf-8", "Content-Disposition": 'attachment; filename="visit.ics"' });
+});
+
+/**
+ * One of the client's own visits, for Reschedule and Cancel, with the business's zone and settings.
+ * Someone else's is not found, like one that isn't there; one started, done or today's can't be
+ * changed online, and says to call.
+ */
+async function changeableVisit(admin: ReturnType<typeof adminClient>, l: ClientLink, id: string | undefined) {
+  if (!z.uuid().safeParse(id).success) throw new HttpError(404, "Visit not found.");
+  const [found, company] = await Promise.all([
+    admin.from("visits").select("id, status, scheduled_on, starts_at, ends_at, job:jobs(client_id)").eq("company_id", l.c).eq("id", id!).maybeSingle(),
+    admin.from("companies").select("phone, timezone, settings").eq("id", l.c).maybeSingle(),
+  ]);
+  if (found.error) throw dbError(found.error);
+  const visit = found.data;
+  if (!visit || (visit.job as unknown as { client_id: string } | null)?.client_id !== l.id) throw new HttpError(404, "Visit not found.");
+  const co = must(company);
+  const tz = co.timezone || "UTC";
+  if (!changeableOnline(visit, localDate(new Date(), tz))) throw new HttpError(409, `This visit can't be changed online now. ${co.phone ? `Call us at ${co.phone}.` : "Message us instead."}`);
+  return { visit, tz, settings: (co.settings ?? {}) as Record<string, any> };
+}
+
+/** The open times for one of the client's visits (core openSlots), on the days the business works, around when its crew and people are busy: times only, never whose. */
+async function slotsFor(admin: ReturnType<typeof adminClient>, companyId: string, { visit, tz, settings }: Awaited<ReturnType<typeof changeableVisit>>) {
+  const now = new Date();
+  const first = addDays(localDate(now, tz), SLOT_LEAD_DAYS);
+  const { data, error } = await admin.rpc("visit_busy_times", {
+    p_company: companyId, p_visit: visit.id, p_from: zonedTimeToUtc(first, "00:00", tz).toISOString(), p_to: zonedTimeToUtc(addDays(first, SLOT_DAYS), "00:00", tz).toISOString(),
+  });
+  if (error) throw dbError(error);
+  const windowMin = arrivalWindowMin(settings);
+  const anytime = !visit.starts_at;
+  // shortcut: an anytime visit has no length, so an hour free makes its day open; use the job's visit length if that's too loose.
+  const lengthMin = visit.starts_at && visit.ends_at ? (Date.parse(visit.ends_at) - Date.parse(visit.starts_at)) / 60_000 : 60;
+  const slots = openSlots({
+    now, timeZone: tz, hours: { start: settings.working_hours?.start ?? "07:00", end: settings.working_hours?.end ?? "18:00" }, workdays: workdays(settings), lengthMin,
+    busy: (data ?? []).map((b) => ({ start: Date.parse(b.starts_at), end: Date.parse(b.ends_at) })),
+    stepMin: slotStep(settings), windowMin, anytime, current: { date: visit.scheduled_on, starts_at: visit.starts_at },
+  });
+  return { slots, window_min: windowMin, anytime };
+}
+
+// Open times to move one of the client's visits to (Reschedule): only free times, never whose visits fill the rest.
+publicRoutes.get("/hub/:token/visits/:id/slots", async (c) => {
+  if (!(await allow(c.env, `hub-slots:${clientIp(c)}`, 60, 60 * 60))) throw new HttpError(429, "Too many tries. Try again later, or call us.");
+  const l = await link(c, ["client"]);
+  const admin = adminClient(c.env);
+  return c.json(await slotsFor(admin, l.c, await changeableVisit(admin, l, c.req.param("id"))));
+});
+
+// Ask to move or cancel one of the client's visits. Nothing changes until the office approves
+// (services/visitChanges.ts), and a time asked for has to be one that's open now.
+publicRoutes.post("/hub/:token/visits/:id/change", async (c) => {
+  if (!(await allow(c.env, `hub-change:${clientIp(c)}`, 20, 60 * 60))) throw new HttpError(429, "Too many requests. Try again later, or call us.");
+  const l = await link(c, ["client"]);
+  if (l.pv) throw new HttpError(400, "Changes can't be asked for from a preview.");
+  const body = await readJson(
+    c,
+    z.object({
+      kind: z.enum(["reschedule", "cancel"]),
+      starts_at: z.iso.datetime({ offset: true }).optional(),
+      scheduled_on: isoDate.optional(),
+      message: z.string().trim().max(2000).optional(),
+      reason: z.string().trim().max(2000).optional(),
+    }),
+  );
+  const admin = adminClient(c.env);
+  const found = await changeableVisit(admin, l, c.req.param("id"));
+  let slot: OpenSlot | undefined;
+  if (body.kind === "reschedule" && (body.starts_at || body.scheduled_on)) {
+    const { slots } = await slotsFor(admin, l.c, found);
+    slot = slots.find((s) => (body.starts_at ? s.starts_at !== null && Date.parse(s.starts_at) === Date.parse(body.starts_at) : !s.starts_at && s.date === body.scheduled_on));
+    if (!slot) throw new HttpError(409, "That time isn't open anymore. Pick another.");
+  } else if (body.kind === "reschedule" && !body.message) throw new HttpError(400, "Pick a time, or tell us what suits you.");
+  // One request waits per visit: a new one takes the old one's place.
+  const old = await admin.from("visit_change_requests").delete().eq("company_id", l.c).eq("visit_id", found.visit.id).eq("status", "pending");
+  if (old.error) throw dbError(old.error);
+  const { error } = await admin.from("visit_change_requests").insert({
+    company_id: l.c, visit_id: found.visit.id, client_id: l.id, kind: body.kind,
+    starts_at: slot?.starts_at ?? null, ends_at: slot?.ends_at ?? null, scheduled_on: slot?.date ?? null,
+    message: body.kind === "reschedule" ? body.message || null : null, reason: body.reason || null,
+  });
+  if (error) throw error.code === "23505" ? new HttpError(409, "Your request crossed with another one. Try again.") : dbError(error);
+  kickAutomations(c, l.c);
+  return c.json({ ok: true }, 201);
 });
 
 publicRoutes.post("/hub/:token/request", async (c) => {

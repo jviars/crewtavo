@@ -3,6 +3,7 @@
  * It renders the first value as is; only later changes animate. Follows prefers-reduced-motion.
  */
 import NumberFlow, { type Format } from "@number-flow/react";
+import { moneyCurrency } from "@/lib/format";
 
 export const MONEY: Format = { style: "currency", currency: "USD", maximumFractionDigits: 0 };
 /** Dollars and cents, for totals on quotes, invoices and job costs. */
@@ -15,7 +16,9 @@ export const COUNT: Format = { maximumFractionDigits: 0 };
 const MOVE = { duration: 250, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }; // --ease-out
 const FADE = { duration: 150, easing: "ease-out" };
 
-export function AnimatedNumber({ value, format = COUNT, className }: { value: number; format?: Format; className?: string }) {
+export function AnimatedNumber({ value, format: given = COUNT, className }: { value: number; format?: Format; className?: string }) {
+  // Money shows in the business's currency, whatever the format says.
+  const format = given.style === "currency" ? { ...given, currency: moneyCurrency() } : given;
   return (
     <span className={className}>
       {/* The digits live in a shadow root that assistive tech and find-in-page don't reliably read. */}

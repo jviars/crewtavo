@@ -239,6 +239,7 @@ account.post("/companies", requireUser, async (c) => {
       name: z.string().trim().min(1).max(200),
       trade_preset: z.string().default("general"),
       timezone: z.string().default("America/New_York"),
+      currency: z.string().regex(/^[A-Za-z]{3}$/, "Pick a currency from the list, like USD.").default("USD"),
       terms_version: z.string().max(40).optional(),
     }),
   );
@@ -269,6 +270,12 @@ account.post("/companies", requireUser, async (c) => {
     p_timezone: body.timezone,
   });
   if (error) throw dbError(error);
+  // create_company makes every business in US dollars; if this fails, the owner can change it in Settings → Company.
+  const currency = body.currency.toUpperCase();
+  if (currency !== "USD") {
+    const set = await db.from("companies").update({ currency }).eq("id", companyId as string);
+    if (set.error) console.error("Couldn't set the currency", set.error.message);
+  }
   await applyPreset(db, companyId as string, preset);
   // An instance on Railway: the next screen offers to connect Railway and set up a web address.
   if (c.env.CREWTAVO_SINGLE_COMPANY === "1" && platformOf(c.env) === "railway") await setRailwaySetup(adminClient(c.env), companyId as string, "pending");
@@ -306,17 +313,29 @@ account.post("/terms", requireUser, requireCompany(ADMINS), async (c) => {
   return c.json({ ok: true }, 201);
 });
 
+/** The app a trade starts with installed (supabase/migrations/20261103000500_paving_roofing_apps.sql). */
+const TRADE_APPS: Record<string, string> = { paving: "paving_app", roofing_exteriors: "roofing_app" };
+const tradeApp = (trade: string) => {
+  const app = TRADE_APPS[trade];
+  return app ? { [app]: { enabled: true } } : {};
+};
+
 /** Load a trade preset into a new company. Runs as the new owner, so RLS still applies. */
 async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
   const formulas = new Map(preset.formulas.map((f) => [f.name, f]));
   const { data: company, error } = await db.from("companies").select("settings").eq("id", companyId).maybeSingle();
   if (error) throw dbError(error);
   const current = (company?.settings ?? {}) as Record<string, unknown>;
-  const steps = [
+  // The price list's ids, made here so the weather rules can name their items by id in the same go.
+  const ids = preset.services.map(() => crypto.randomUUID());
+  const idOf = (name: string | undefined) => ids[preset.services.findIndex((s) => s.name === name)];
+  const weatherRules = preset.weather_rules.map((r) => (idOf(r.applies_to) ? { ...r, service_id: idOf(r.applies_to) } : r));
+  const [services, checklists, ...rest] = await Promise.all([
     db.from("services").insert(
       preset.services.map((s, i) => {
         const formula = s.formula_name ? formulas.get(s.formula_name) : undefined;
         return {
+          id: ids[i],
           company_id: companyId,
           name: s.name,
           unit: s.unit,
@@ -328,10 +347,8 @@ async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
           sort: i,
         };
       }),
-    ),
-    db.from("checklist_templates").insert(
-      preset.checklists.map((cl) => ({ company_id: companyId, name: cl.name, job_type: cl.job_type ?? null, items: asJson(cl.items) })),
-    ),
+    ).select("id, name"),
+    db.from("checklist_templates").insert(preset.checklists.map((cl) => ({ company_id: companyId, name: cl.name, items: asJson(cl.items) }))).select("id, name"),
     db.from("intake_forms").insert(
       preset.intake_forms.map((f) => ({
         company_id: companyId,
@@ -346,14 +363,29 @@ async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
       })),
     ),
     db.from("sop_categories").insert(preset.sop_categories.map((name, i) => ({ company_id: companyId, name, sort: i }))),
-    // Merged into what create_company started it with (Marketing installed, for one).
+    // Merged into what create_company started it with (Marketing installed, for one), with the
+    // trade's own app installed, as the migration did for businesses already in it.
     db
       .from("companies")
-      .update({ settings: asJson({ ...current, job_types: preset.job_types, formulas: preset.formulas, weather_rules: preset.weather_rules, payment_terms_days: 30 }) })
+      .update({ settings: asJson({ ...current, ...tradeApp(preset.id), formulas: preset.formulas, weather_rules: weatherRules, payment_terms_days: 30 }) })
       .eq("id", companyId),
-  ];
-  for (const result of await Promise.all(steps)) {
+  ]);
+  for (const result of [services, checklists, ...rest]) {
     if (result.error) throw dbError(result.error);
+  }
+  // Each checklist goes with the price list items the preset names for it.
+  const serviceIds = new Map((services.data ?? []).map((s) => [s.name, s.id]));
+  const checklistIds = new Map((checklists.data ?? []).map((cl) => [cl.name, cl.id]));
+  const links = preset.checklists.flatMap((cl) =>
+    (cl.services ?? []).flatMap((name) => {
+      const templateId = checklistIds.get(cl.name);
+      const serviceId = serviceIds.get(name);
+      return templateId && serviceId ? [{ company_id: companyId, template_id: templateId, service_id: serviceId }] : [];
+    }),
+  );
+  if (links.length) {
+    const { error: linkError } = await db.from("checklist_template_services").insert(links);
+    if (linkError) throw dbError(linkError);
   }
 }
 
@@ -596,7 +628,7 @@ account.delete("/company/logo", requireUser, requireCompany(ADMINS), async (c) =
 /**
  * A picture of the business's own letterhead (services/letterhead.ts), for an estimate template:
  * its top or its bottom, as a PNG, base64. It goes on the template when the template is saved. Those
- * who change the templates (Settings → Estimate template) add them.
+ * who change the templates (Settings → Document style) add them.
  */
 account.put("/templates/letterhead", requireUser, requireCompany(OFFICE, "settings"), async (c) => {
   const body = await readJson(c, z.object({ picture: z.string().min(100).max(1_900_000).regex(/^[A-Za-z0-9+/]+={0,2}$/) }));

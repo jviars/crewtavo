@@ -17,10 +17,14 @@ import { EmptyState } from "@/components/ui/States";
 import { statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addDaysIso, todayIn } from "@/lib/format";
+import { addDaysIso, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { VisitChecklists } from "../jobs/FilledChecklists";
 import { useSubSignIns } from "../subs/subsData";
+import { ChangeRequestPanel, usePendingChanges } from "./changeRequests";
 import { useSchedulingRights } from "./myCrews";
+import { doubleBookings } from "./people";
+import type { GridVisit } from "./TimeGrid";
 
 export interface VisitInput {
   id?: string;
@@ -51,6 +55,7 @@ const toMin = (t: string) => {
   const [h, m] = t.split(":").map(Number);
   return Number.isFinite(h) && Number.isFinite(m) ? h! * 60 + m! : NaN;
 };
+const sameTime = (a: string | null | undefined, b: string | null | undefined) => (a && b ? Date.parse(a) === Date.parse(b) : (a ?? null) === (b ?? null));
 const fromMin = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
 interface TeamMember {
@@ -109,6 +114,8 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const [moveLater, setMoveLater] = useState(true);
   const [equipment, setEquipment] = useState<string[] | null>(isNew ? [] : null);
   const options = useDispatchOptions();
+  // A client's request from the Client Hub to move or cancel it, waiting for an answer.
+  const request = usePendingChanges(!isNew).data?.find((r) => r.visit_id === visit.id);
   const extra = useQuery({
     queryKey: ["visit-extra", visit.id],
     enabled: !isNew,
@@ -156,6 +163,19 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const subSignIns = useSubSignIns(session.company.id, canDispatch && rights.wholeTeam);
   const subs = (subSignIns.data ?? []).filter((x) => x.active || assignees.includes(x.user_id));
   const toggle = (id: string) => setAssignees(assignees.includes(id) ? assignees.filter((x) => x !== id) : [...assignees, id]);
+  // Someone already on another visit at this time, as the schedule marks their row, on each day of
+  // a multi-day booking. For one day the key is the schedule's Day view's, so the board's copy is used.
+  const bookingDays = isNew && days > 1 && validDate ? workDays(date, days, skipWeekends) : [date];
+  const lastDay = bookingDays[bookingDays.length - 1]!;
+  const sameDay = useQuery({
+    queryKey: ["schedule", session.company.id, date, lastDay, ""],
+    enabled: canDispatch && assignees.length > 0 && Boolean(start) && !badLength,
+    staleTime: 30_000,
+    queryFn: () => api.get<{ visits: Array<GridVisit & { scheduled_on: string | null; assignees: Array<{ user_id: string }> }> }>(`/schedule?from=${date}&to=${lastDay}`),
+  });
+  const draft: GridVisit = { id: visit.id ?? "new", title, kind, status, crew_id: null, starts_at: start?.toISOString() ?? null, ends_at: start ? new Date(start.getTime() + duration * 60_000).toISOString() : null };
+  const doubleBooked = !start || badLength ? [] : doubleBookings(draft, bookingDays, assignees, sameDay.data?.visits ?? [], tz);
+  const nameOf = (id: string) => (options.data?.team ?? []).find((m) => m.user_id === id)?.profile?.full_name || subs.find((x) => x.user_id === id)?.name || "Someone";
   // Once the crews are known, a crew lead's new visit starts on their crew, with its people.
   useEffect(() => {
     if (rights.ownCrew && isNew && !crewId && rights.myCrews.length && options.data) chooseCrew(rights.myCrews[0]!);
@@ -180,7 +200,10 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   });
 
   const refresh = () => {
-    for (const key of ["schedule", "job", "request", "dashboard", "field"]) queryClient.invalidateQueries({ queryKey: [key] });
+    // The Jobs list and job pages say Late, Today, Upcoming or Unscheduled from the visits (public.job_state).
+    for (const key of ["schedule", "job", "jobs", "request", "dashboard", "field"]) queryClient.invalidateQueries({ queryKey: [key] });
+    // Moving it can answer a client's request to (see save).
+    queryClient.invalidateQueries({ queryKey: ["visit-changes"] });
   };
 
   // Toasts about a job's visits are green like jobs; an assessment's are amber like requests.
@@ -211,6 +234,8 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           equipment_ids: canDispatch && equipment ? equipment : undefined,
           shift_series: Boolean(series && series.day < series.total && dateChanged && moveLater),
         });
+        // A client asked to move it in their own words: moving it is the answer, and they're told.
+        if (request?.kind === "reschedule" && !request.scheduled_on && (dateChanged || !sameTime(fields.starts_at, visit.starts_at))) await api.post(`/visit-changes/${request.id}/approve`, {});
         return;
       }
       await api.post<{ ids: string[] }>("/visits", {
@@ -248,6 +273,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   return (
     <Dialog open onClose={onClose} title={heading} description={visit.context ? <Link to={visit.context.to}>{visit.context.label}</Link> : undefined} size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+        {request && canDispatch && <ChangeRequestPanel request={request} onAnswered={onClose} />}
         {pickJob && (
           <div className="segmented" role="group" aria-label="What is it?" style={{ justifySelf: "start" }}>
             {KINDS.map(([k, l]) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}>{l}</button>)}
@@ -405,6 +431,18 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
             <span className="muted small">It shows on their phone with the address and the work. Not your prices, and not your client's phone or email unless you allow it on their page.</span>
           </div>
         )}
+        {canDispatch && doubleBooked.length > 0 && (
+          <div className="callout callout-warning">
+            <Icon name="alert" size={16} />
+            <div className="grow small" style={{ fontWeight: 400 }}>
+              {doubleBooked.map(({ id, clashes }) => (
+                <div key={id}>
+                  <strong>{nameOf(id)}</strong> is also on {clashes.map((c) => `${c.title} (${bookingDays.length > 1 ? `${shortDay(c.day)}, ` : ""}${formatTime(c.starts_at!, tz)}${c.ends_at ? `–${formatTime(c.ends_at, tz)}` : ""})`).join(", ")}.
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {canDispatch && machines.data && machines.data.length > 0 && (
           <div className="field">
@@ -438,6 +476,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
         )}
 
         <Field label="Instructions for the crew" optional><textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={5000} /></Field>
+        {visit.id && <VisitChecklists visitId={visit.id} />}
         <p className="muted small" style={{ margin: 0 }}>Times are in {tz.replace(/_/g, " ")}.</p>
         <FormError error={save.error} />
         <div className="form-actions">

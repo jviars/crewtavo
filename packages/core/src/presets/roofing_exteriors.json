@@ -236,15 +236,6 @@
       "unit_cost": 250
     }
   ],
-  "job_types": [
-    "Roof replacement",
-    "Roof repair",
-    "Gutters",
-    "Siding",
-    "Windows",
-    "Deck",
-    "Insurance claim"
-  ],
   "formulas": [
     {
       "name": "Roofing squares",
@@ -459,7 +450,12 @@
   "checklists": [
     {
       "name": "Daily roof safety",
-      "job_type": "Roof replacement",
+      "services": [
+        "Architectural shingle roof",
+        "Designer shingle roof",
+        "Standing-seam metal roof",
+        "Roof repair"
+      ],
       "items": [
         {
           "key": "anchors_set",
@@ -483,7 +479,11 @@
     },
     {
       "name": "Roof quality",
-      "job_type": "Roof replacement",
+      "services": [
+        "Architectural shingle roof",
+        "Designer shingle roof",
+        "Standing-seam metal roof"
+      ],
       "items": [
         {
           "key": "drip_edge_installed",

@@ -181,7 +181,7 @@ const service = (id: string, name: string, unit: string, unit_price: number, for
 function roofer({ role = "owner", lines = [] as Row[], status = "draft", measured = true } = {}) {
   state.tables = {
     memberships: [{ company_id: ROOFER, user_id: "viewer", active: true, role, role_id: null }],
-    companies: [{ id: ROOFER, name: "Peak Roofing", email: "office@peak.example", phone: "555-0100", address: {}, currency: "USD", trade_preset: "roofing_exteriors", settings: {} }],
+    companies: [{ id: ROOFER, name: "Peak Roofing", email: "office@peak.example", phone: "555-0100", address: {}, currency: "USD", trade_preset: "roofing_exteriors", settings: { roofing_app: { enabled: true } } }],
     clients: [{ id: CLIENT, company_id: ROOFER, display_name: "Dana Whitfield", email: "dana@example.com", phone: "555-0142" }],
     quotes: [{ id: QUOTE, company_id: ROOFER, number: 1042, status, total: 18304, client_id: CLIENT, promo_code_id: null, roof_package_id: null, option_id: null, discount_amount: 0, tax_rate: 0, subtotal: 18304, tax_amount: 0 }],
     quote_line_items: lines.map((l) => ({ quote_id: QUOTE, company_id: ROOFER, option_id: null, optional: false, ...l })),
@@ -299,6 +299,24 @@ describe("a package on an estimate", () => {
     expect(rows("quote_line_items").some((l) => l.id === "keep")).toBe(false);
   });
 
+  it("keeps the estimate's trip charge, as it was, after the package's lines when it starts over", async () => {
+    const TRIP = "00000000-0000-4000-8000-0000000000c1";
+    roofer({ lines: [
+      { id: "keep", name: "Roof repair", quantity: 1, unit_price: 650, sort: 0 },
+      { id: "trip", service_id: TRIP, name: "Trip charge", description: "Out past the county line", quantity: 1, unit: "visit", unit_price: 60, unit_cost: null, taxable: false, formula: null, sort: 1 },
+    ] });
+    state.tables.services!.push({ ...service(TRIP, "Trip charge", "visit", 50, null), add_to_every_job: true });
+    expect(await (await send(`/roofing/${QUOTE}/package`, { package_id: PKG, replace: true })).json()).toMatchObject({ applied: true, lines: 4 });
+    const lines = rows("quote_line_items").sort((a, b) => Number(a.sort) - Number(b.sort));
+    expect(lines.map((l) => l.name)).toEqual(["Architectural shingle roof", "Tear-off and disposal", "Drip edge", "Pipe boot", "Trip charge"]);
+    expect(lines[4]).toMatchObject({ service_id: TRIP, description: "Out past the county line", quantity: 1, unit: "visit", unit_price: 60, taxable: false });
+    // An estimate the office took it off stays without it.
+    roofer({ lines: [{ id: "keep", name: "Roof repair", quantity: 1, unit_price: 650, sort: 0 }] });
+    state.tables.services!.push({ ...service(TRIP, "Trip charge", "visit", 50, null), add_to_every_job: true });
+    await send(`/roofing/${QUOTE}/package`, { package_id: PKG, replace: true });
+    expect(rows("quote_line_items").some((l) => l.name === "Trip charge")).toBe(false);
+  });
+
   it("leaves its contract sections to the database, which swaps the old package's for this one's", async () => {
     roofer();
     const METAL = "00000000-0000-4000-8000-0000000000b9";
@@ -366,9 +384,9 @@ describe("a package on an estimate", () => {
     expect(roof.status).toBe(409);
     expect((await roof.json()).error).toBe("Pick the roof for the Architectural shingle package first, in Roofing → Packages.");
 
-    // A gutter business's package: what's always included, counted, with no main service and nothing measured.
+    // A gutter business's package (no Roofing): what's always included, counted, with no main service and nothing measured.
     roofer({ measured: false });
-    rows("companies")[0]!.trade_preset = "general";
+    rows("companies")[0]!.settings = {};
     Object.assign(rows("roof_packages")[0]!, { roof_service_id: null, name: "Gutter tune-up" });
     state.tables.roof_package_items = [{ id: "g1", company_id: ROOFER, package_id: PKG, service_id: BOOT, kind: "included", quantity: 3, sort: 0 }];
     const res = await send(`/roofing/${QUOTE}/package`, { package_id: PKG });
@@ -376,9 +394,9 @@ describe("a package on an estimate", () => {
     expect(await res.json()).toEqual({ applied: true, lines: 1, skipped: [] });
     expect(rows("quote_line_items").map((l) => [l.name, l.quantity])).toEqual([["Pipe boot", 3]]);
 
-    // Measured services outside roofing wait for the job's measurement, in the job's words.
+    // Measured services outside roofing wait for the job's measurement, in the job's words: a roofer that uninstalled Roofing too.
     roofer({ measured: false });
-    rows("companies")[0]!.trade_preset = "paving";
+    rows("companies")[0]!.settings = { roofing_app: { enabled: false } };
     const unmeasured = await send(`/roofing/${QUOTE}/package`, { package_id: PKG });
     expect(unmeasured.status).toBe(409);
     expect((await unmeasured.json()).error).toBe("Measure the job first.");
@@ -1042,8 +1060,8 @@ describe("automations about an estimate", () => {
     const appPath = async () => (await loadContext(adminClient(env), ROOFER, "quote", QUOTE))?.appPath;
     expect(await appPath()).toBe(`/roofing/${QUOTE}`);
 
-    // A paving business's package: its estimate is worked on as a quote, unless what's measured is a roof.
-    rows("companies")[0]!.trade_preset = "paving";
+    // A package at a business without Roofing: its estimate is worked on as a quote, unless what's measured is a roof.
+    rows("companies")[0]!.settings = { paving_app: { enabled: true } };
     state.tables.measurements = [{ id: "m-lot", company_id: ROOFER, quote_id: QUOTE, sections: [{ kind: "Area", value: 4000 }], roof_pitch: null, roofing_squares: null, updated_at: "2026-10-20T00:00:00Z" }];
     expect(await appPath()).toBe(`/quotes/${QUOTE}`);
     rows("measurements")[0]!.roof_pitch = "6/12";
@@ -1054,6 +1072,16 @@ describe("automations about an estimate", () => {
 
     quote().roof_package_id = null;
     expect(await appPath()).toBe(`/quotes/${QUOTE}`);
+  });
+
+  it("link by the estimate's own kind of work at a business with both Roofing and Paving", async () => {
+    roofer();
+    rows("companies")[0]!.settings = { roofing_app: { enabled: true }, paving_app: { enabled: true } };
+    Object.assign(quote(), { roof_package_id: PKG, range_low: null, range_high: null, work_kind: "paving" });
+    const appPath = async () => (await loadContext(adminClient(env), ROOFER, "quote", QUOTE))?.appPath;
+    expect(await appPath()).toBe(`/quotes/${QUOTE}`);
+    quote().work_kind = "roofing";
+    expect(await appPath()).toBe(`/roofing/${QUOTE}`);
   });
 
   it("know the lines the client is offered before they answer, and the lines they're getting once they've signed", async () => {

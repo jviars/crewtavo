@@ -17,7 +17,7 @@ async function companySlug(ctx: ToolContext) {
 
 export const bookingTools = {
   list_booking_forms: tool({
-    description: "The company's online booking forms: name, kind, questions, service-area ZIP codes, whether it's live, and its public link.",
+    description: "The company's online booking forms: name, kind, questions, service-area ZIP or postal codes, whether it's live, and its public link.",
     input: z.object({ ...companyArg }),
     run: async (ctx) => {
       const [forms, slug] = await Promise.all([
@@ -35,7 +35,7 @@ export const bookingTools = {
       name: z.string().max(120),
       slug: z.string().max(50).optional().describe("The end of its link; made from the name when left out."),
       kind: z.enum(INTAKE_FORM_KINDS).default("request"),
-      service_area_zips: z.array(z.string().max(10)).max(500).default([]).describe("5-digit ZIP codes it takes requests from; empty takes any."),
+      service_area_zips: z.array(z.string().max(10)).max(500).default([]).describe("ZIP or postal codes it takes requests from (a code also takes the longer ones it starts, like M5V for M5V 2T6); empty takes any."),
       questions: z.array(question).max(30),
       active: z.boolean().optional().describe("A form that's turned off stops taking requests."),
       ...companyArg,

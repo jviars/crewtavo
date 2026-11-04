@@ -5,14 +5,17 @@
  * works.
  */
 import { autopayDueText } from "@crewtavo/core/autopay";
+import type { ClientChecklist } from "@crewtavo/core/forms";
 import { friendOfferLine } from "@crewtavo/core/marketing";
-import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { slotLabel, slotTime, type OpenSlot } from "@crewtavo/core/slots";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Fragment, useState, type FormEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { dateIn, formatDate, formatMoney, formatMoneyCents, formatTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { needsNewCard, waitingInvoices, type HubAutopay, type HubInvoiceAutopay } from "./document";
@@ -28,10 +31,19 @@ export interface PortalVisit {
   completed_at: string | null;
   address: string | null;
   crew: string[];
+  /** Reschedule and Cancel work online: not started, and not today. Servers that don't send it have only Ask to change. */
+  can_change?: boolean;
+  /** A move or cancel they asked for, waiting on the office. */
+  change_requested?: ChangeKind | null;
+  /** A done visit's checklists the business shows clients. Servers that don't send them have none. */
+  checklists?: ClientChecklist[];
 }
+type ChangeKind = "reschedule" | "cancel";
 export interface ClientView {
   kind: "client";
   company: { name: string; phone: string | null; email: string | null; website: string | null; timezone?: string | null; branding?: { color?: string } | null };
+  /** Minutes after a visit's start the crew may arrive (0: no window). Servers that don't send it give none. */
+  arrival_window_min?: number;
   /** The office's look at the page: it shows, and nothing on it can be done. */
   preview?: boolean;
   /** Their autopay. Null when the business doesn't take autopay; servers that don't send it have none. */
@@ -69,8 +81,13 @@ export const hubZone = (company: { timezone?: string | null }) => company.timezo
 const doneOn = (v: PortalVisit, tz: string) => (v.completed_at ? dateIn(v.completed_at, tz) : v.scheduled_on);
 
 const METHOD: Record<string, string> = { card: "card", ach: "bank transfer", cash: "cash", check: "check", other: "payment" };
-const when = (v: PortalVisit, tz: string) =>
-  v.starts_at && v.ends_at ? `Arriving between ${formatTime(v.starts_at, tz)} and ${formatTime(v.ends_at, tz)}` : v.starts_at ? `Starting at ${formatTime(v.starts_at, tz)}` : "Time to be confirmed";
+/** The business's arrival window when it gives one; a visit's end is how long the work takes, not when they come. */
+const when = (v: PortalVisit, tz: string, windowMin = 0) =>
+  !v.starts_at
+    ? "Time to be confirmed"
+    : windowMin
+      ? `Arriving between ${formatTime(v.starts_at, tz)} and ${formatTime(new Date(new Date(v.starts_at).getTime() + windowMin * 60_000).toISOString(), tz)}`
+      : `Starting at ${formatTime(v.starts_at, tz)}`;
 const names = (crew: string[]) => (crew.length <= 1 ? crew[0] ?? "" : `${crew.slice(0, -1).join(", ")} and ${crew.at(-1)}`);
 
 /** The views of the client's account, each its own ?view= so the back button works. */
@@ -83,10 +100,19 @@ export function ClientPortal({ token, data, hubFetch, onMessage, onChanged }: { 
     setParams(next === "home" ? {} : { view: next });
     window.scrollTo({ top: 0 });
   };
-  if (view === "visits") return <Visits token={token} data={data} back={() => go("home")} onMessage={onMessage} />;
-  if (view === "request") return <RequestWork token={token} data={data} hubFetch={hubFetch} back={() => go("home")} />;
-  if (view === "autopay") return <AutopayView token={token} data={data} hubFetch={hubFetch} back={() => go("home")} onChanged={onChanged} />;
-  return <Home token={token} data={data} go={go} onMessage={onMessage} />;
+  const [changing, setChanging] = useState<{ visit: PortalVisit; kind: ChangeKind } | null>(null);
+  const onChange = (visit: PortalVisit, kind: ChangeKind) => setChanging({ visit, kind });
+  const page =
+    view === "visits" ? <Visits token={token} data={data} back={() => go("home")} onMessage={onMessage} onChange={onChange} />
+    : view === "request" ? <RequestWork token={token} data={data} hubFetch={hubFetch} back={() => go("home")} />
+    : view === "autopay" ? <AutopayView token={token} data={data} hubFetch={hubFetch} back={() => go("home")} onChanged={onChanged} />
+    : <Home token={token} data={data} go={go} onMessage={onMessage} onChange={onChange} />;
+  return (
+    <>
+      {page}
+      {changing && <ChangeVisitDialog token={token} data={data} {...changing} hubFetch={hubFetch} onClose={() => setChanging(null)} onDone={onChanged} />}
+    </>
+  );
 }
 
 function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
@@ -122,8 +148,14 @@ function Crew({ crew }: { crew: string[] }) {
   );
 }
 
-function VisitCard({ token, visit, tz, onMessage }: { token: string; visit: PortalVisit; tz: string; onMessage: (visit: PortalVisit) => void }) {
-  const live = visit.status === "en_route" ? "On the way" : visit.status === "in_progress" ? "Working now" : null;
+interface VisitActions {
+  onMessage: (visit?: PortalVisit) => void;
+  onChange: (visit: PortalVisit, kind: ChangeKind) => void;
+}
+
+function VisitCard({ token, visit, tz, windowMin, phone, onMessage, onChange }: { token: string; visit: PortalVisit; tz: string; windowMin?: number; phone: string | null } & VisitActions) {
+  const live = visit.status === "en_route" ? "On the way" : visit.status === "in_progress" ? "Working now" : visit.change_requested ? "Change requested" : null;
+  const online = visit.can_change === true;
   return (
     <article className="hub-card hub-visit">
       <div className="hub-visit-body">
@@ -131,20 +163,25 @@ function VisitCard({ token, visit, tz, onMessage }: { token: string; visit: Port
         <div className="grow stack-xs">
           {live && <span className="hub-live">{live}</span>}
           <strong className="hub-title">{visit.title}</strong>
-          <span className="hub-meta"><Icon name="clock" size={14} />{when(visit, tz)}</span>
+          <span className="hub-meta"><Icon name="clock" size={14} />{when(visit, tz, windowMin)}</span>
           {visit.address && <span className="hub-meta"><Icon name="pin" size={14} />{visit.address}</span>}
           <Crew crew={visit.crew} />
+          {visit.change_requested && <span className="hub-meta">We'll let you know by email.</span>}
+          {/* A sentence, not a row of icon and text: hub-meta's flex layout would split it into columns. */}
+          {visit.can_change === false && <span className="hub-meta" style={{ display: "block" }}>To change this visit, {phone ? <>call <a href={`tel:${phone}`} style={{ whiteSpace: "nowrap" }}>{phone}</a></> : "message us"}.</span>}
         </div>
       </div>
-      <div className="hub-card-actions">
+      <div className="hub-card-actions" data-count={online ? 4 : undefined}>
+        {online && <button type="button" onClick={() => onChange(visit, "reschedule")}><Icon name="calendar" size={16} />Reschedule</button>}
+        {online && <button type="button" onClick={() => onChange(visit, "cancel")}><Icon name="x" size={16} />Cancel</button>}
         <a href={`/api/hub/${token}/visits/${visit.id}.ics`}><Icon name="calendar" size={16} />Add to calendar</a>
-        <button type="button" onClick={() => onMessage(visit)}><Icon name="messages" size={16} />Ask to change</button>
+        <button type="button" onClick={() => onMessage(visit)}><Icon name="messages" size={16} />{online ? "Message us" : "Ask to change"}</button>
       </div>
     </article>
   );
 }
 
-function Home({ token, data, go, onMessage }: { token: string; data: ClientView; go: (v: PortalView) => void; onMessage: (visit?: PortalVisit) => void }) {
+function Home({ token, data, go, onMessage, onChange }: { token: string; data: ClientView; go: (v: PortalView) => void } & VisitActions) {
   // A range they've said yes to waits on the business (to book the visit), not on them.
   const waitingQuotes = data.quotes.filter((q) => (q.status === "sent" || q.status === "changes_requested") && !q.range?.accepted_at);
   // One being charged to their card (or on its way from their bank) waits on the card, not on them.
@@ -195,7 +232,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
           q.range ? (
             <article key={q.id} className="hub-card hub-todo">
               <div className="hub-todo-head">
-                <span className="hub-icon-tile blue"><Icon name="roofing" size={20} /></span>
+                <span className="hub-icon-tile blue"><Icon name="quote" size={20} /></span>
                 <span className="grow stack-xs">
                   <span className="hub-meta">Estimate #{q.number}{q.valid_until ? ` · good until ${formatDate(q.valid_until)}` : ""}</span>
                   <strong className="hub-title">{q.title}</strong>
@@ -241,7 +278,7 @@ function Home({ token, data, go, onMessage }: { token: string; data: ClientView;
 
       {next && (
         <Section title="Next visit" action={data.visits.length > 1 || data.past_visits.length ? <button type="button" className="hub-link" onClick={() => go("visits")}>All visits</button> : undefined}>
-          <VisitCard token={token} visit={next} tz={tz} onMessage={onMessage} />
+          <VisitCard token={token} visit={next} tz={tz} windowMin={data.arrival_window_min} phone={data.company.phone} onMessage={onMessage} onChange={onChange} />
         </Section>
       )}
 
@@ -295,7 +332,7 @@ function AutopayCard({ autopay, timeZone, go }: { autopay: HubAutopay; timeZone:
   const open = () => go("autopay");
   const label = autopay.method?.label ?? "your card";
   const onHold = autopay.available === false;
-  if (autopay.status === "active" && !onHold) {
+  if (autopay.status === "active" && !onHold && !autopay.reagree) {
     return (
       <article className="hub-card hub-autopay" aria-label="Autopay">
         <div className="hub-autopay-body">
@@ -326,9 +363,10 @@ function AutopayCard({ autopay, timeZone, go }: { autopay: HubAutopay; timeZone:
       </article>
     );
   }
-  // A step left (agree), or a state to know about: one line, with what to do when there's something.
-  // Active gets here only on hold.
-  const state = onHold || autopay.status === "active" ? { tone: "amber", title: `Autopay is on hold · ${label}`, line: ON_HOLD_TEXT, action: "Turn off" } : {
+  // A step left (agree, or agree to today's terms), or a state to know about: one line, with what to
+  // do when there's something. Active gets here only on hold, or to agree again.
+  const state = autopay.reagree && !onHold ? { tone: "brand", title: "Our autopay terms changed", line: "Agree to them to keep paying for your monthly plan automatically.", action: "Review and agree" }
+    : onHold || autopay.status === "active" ? { tone: "amber", title: `Autopay is on hold · ${label}`, line: ON_HOLD_TEXT, action: "Turn off" } : {
     agree: { tone: "brand", title: autopay.imported ? `We have your ${label} on file` : `${autopay.method?.label ?? "Your card"} is saved`, line: "Agree to the terms to start paying automatically.", action: "Finish setting up" },
     pending: { tone: "amber", title: "Your bank account is being checked", line: "This takes a few days. Charges start once it's done.", action: null },
     paused: { tone: "amber", title: "Autopay is paused", line: "Contact us to turn it back on.", action: null },
@@ -350,14 +388,14 @@ function AutopayCard({ autopay, timeZone, go }: { autopay: HubAutopay; timeZone:
   );
 }
 
-function Visits({ token, data, back, onMessage }: { token: string; data: ClientView; back: () => void; onMessage: (visit?: PortalVisit) => void }) {
+function Visits({ token, data, back, onMessage, onChange }: { token: string; data: ClientView; back: () => void } & VisitActions) {
   const tz = hubZone(data.company);
   return (
     <>
       <button type="button" className="hub-back" onClick={back}><Icon name="chevronLeft" size={16} />Your account</button>
       <h1 className="hub-h1">Visits</h1>
       <Section title="Coming up">
-        {data.visits.length === 0 ? <div className="hub-card hub-calm">Nothing scheduled right now.</div> : data.visits.map((v) => <VisitCard key={v.id} token={token} visit={v} tz={tz} onMessage={onMessage} />)}
+        {data.visits.length === 0 ? <div className="hub-card hub-calm">Nothing scheduled right now.</div> : data.visits.map((v) => <VisitCard key={v.id} token={token} visit={v} tz={tz} windowMin={data.arrival_window_min} phone={data.company.phone} onMessage={onMessage} onChange={onChange} />)}
       </Section>
       {data.past_visits.length > 0 && (
         <Section title="Done">
@@ -368,6 +406,19 @@ function Visits({ token, data, back, onMessage }: { token: string; data: ClientV
                 <span className="grow stack-xs">
                   <strong>{v.title}</strong>
                   <span className="hub-meta">{formatDate(doneOn(v, tz))}{v.crew.length ? ` · ${names(v.crew)}` : ""}</span>
+                  {v.checklists?.map((cl, i) => (
+                    <details key={i}>
+                      <summary className="small">{cl.name}</summary>
+                      <dl className="kv" style={{ margin: "6px 0 0" }}>
+                        {cl.answers.map((a, j) => (
+                          <Fragment key={j}>
+                            <dt>{a.label}</dt>
+                            <dd className="pre-wrap">{a.text}</dd>
+                          </Fragment>
+                        ))}
+                      </dl>
+                    </details>
+                  ))}
                 </span>
               </div>
             ))}
@@ -468,6 +519,85 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
         <Button type="submit" variant="primary" size="lg" icon="send" className="hub-submit" loading={send.isPending}>Send request</Button>
       </form>
     </>
+  );
+}
+
+/**
+ * Reschedule (the open times by day, or "Tell us what suits you", which is all there is when none are
+ * open) or Cancel (with a reason, if they like). Either is a request: the visit stays as it is until
+ * the office approves, and a new one takes an earlier one's place.
+ */
+function ChangeVisitDialog({ token, data, visit, kind, hubFetch, onClose, onDone }: { token: string; data: ClientView; visit: PortalVisit; kind: ChangeKind; hubFetch: Fetch; onClose: () => void; onDone: () => void }) {
+  const tz = hubZone(data.company);
+  const open = useQuery({
+    queryKey: ["hub-slots", token, visit.id],
+    enabled: kind === "reschedule",
+    retry: false,
+    queryFn: () => hubFetch<{ slots: OpenSlot[]; window_min: number; anytime: boolean }>(`${token}/visits/${visit.id}/slots`),
+  });
+  const slots = open.data?.slots ?? [];
+  const days = [...new Set(slots.map((s) => s.date))];
+  const [day, setDay] = useState<string | null>(null);
+  const [picked, setPicked] = useState<OpenSlot | null>(null);
+  const [ownWords, setOwnWords] = useState(false);
+  const [text, setText] = useState("");
+  const shownDay = day ?? days[0] ?? null;
+  const writing = kind === "reschedule" && (ownWords || open.isError || (open.isSuccess && !days.length));
+  const send = useMutation({
+    mutationFn: () =>
+      hubFetch(
+        `${token}/visits/${visit.id}/change`,
+        kind === "cancel" ? { kind, reason: text.trim() || undefined }
+        : writing ? { kind, message: text.trim() }
+        : { kind, ...(picked?.starts_at ? { starts_at: picked.starts_at } : { scheduled_on: picked?.date }) },
+      ),
+    onSuccess: () => {
+      toast.success("Request sent", { description: `${data.company.name} will let you know by email.` });
+      onDone();
+      onClose();
+    },
+  });
+  const choice = (key: string, on: boolean, label: string, pick: () => void) => (
+    <button key={key} type="button" className="hub-choice" data-on={on || undefined} aria-pressed={on} onClick={pick}>{label}</button>
+  );
+  return (
+    <Dialog open onClose={onClose} title={kind === "cancel" ? "Cancel this visit?" : "Reschedule"} description={`${visit.title}, ${formatDate(visit.scheduled_on)}`}>
+      <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); send.mutate(); }}>
+        {kind === "cancel" ? (
+          <label className="field">Why? <span className="optional">(optional)</span>
+            <textarea className="textarea" rows={3} value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} autoFocus />
+          </label>
+        ) : open.isPending ? (
+          <Skeleton height={120} />
+        ) : writing ? (
+          <Field label={open.isSuccess && !days.length ? "We don't have an open time online in the next 3 weeks. Tell us what suits you." : "Tell us what suits you"} requiredMessage="Tell us a day or time that works.">
+            <textarea className="textarea" rows={4} value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} required autoFocus placeholder="Any weekday morning after the 15th" />
+          </Field>
+        ) : (
+          <>
+            <div className="stack-sm">
+              <strong>Day</strong>
+              <div className="hub-choices" role="group" aria-label="Day">{days.map((d) => choice(d, d === shownDay && (!open.data!.anytime || picked?.date === d), slotLabel({ date: d, starts_at: null }, tz), () => { setDay(d); setPicked(open.data!.anytime ? slots.find((s) => s.date === d)! : null); }))}</div>
+            </div>
+            {!open.data!.anytime && (
+              <div className="stack-sm">
+                <strong>{open.data!.window_min ? "Arrival window" : "Time"}</strong>
+                <div className="hub-choices" role="group" aria-label="Time">{slots.filter((s) => s.date === shownDay).map((s) => choice(s.starts_at!, picked?.starts_at === s.starts_at, slotTime(s.starts_at!, tz, open.data!.window_min), () => setPicked(s)))}</div>
+              </div>
+            )}
+            <button type="button" className="hub-link" style={{ justifySelf: "start" }} onClick={() => setOwnWords(true)}>None of these work? Tell us what suits you</button>
+          </>
+        )}
+        <span className="hub-meta">Nothing changes until {data.company.name} confirms.</span>
+        <FormError error={send.error ?? open.error} />
+        <div className="form-actions">
+          <Button onClick={onClose}>{kind === "cancel" ? "Keep it" : "Back"}</Button>
+          <Button type="submit" variant="primary" icon="send" loading={send.isPending} disabled={kind === "reschedule" && !writing && !picked}>
+            {kind === "cancel" ? "Ask to cancel" : "Send request"}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

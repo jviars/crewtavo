@@ -27,6 +27,8 @@ export interface CalendarSource {
   name: string;
   color: string | null;
   crew_id: string | null;
+  /** Whose own calendar it is, if it's one person's: it sits on their row in the schedule's People view. */
+  user_id: string | null;
   show_details: boolean;
   blocks_time: boolean;
   enabled: boolean;
@@ -61,6 +63,16 @@ function useCrews() {
   });
 }
 
+/** The team, for whose own calendar one is (GET /api/team, former members too). */
+function useTeam() {
+  const session = useSession();
+  return useQuery({
+    queryKey: ["team", session.company.id],
+    staleTime: 5 * 60_000,
+    queryFn: () => api.get<Array<{ user_id: string; active: boolean; profile: { full_name: string | null } | null }>>("/team"),
+  });
+}
+
 /** After any change: the calendars, the Apps grid's badges and the schedule. */
 function useRefreshCalendars() {
   const queryClient = useQueryClient();
@@ -75,6 +87,7 @@ function useRefreshCalendars() {
 
 export function CalendarRow({ source }: { source: CalendarSource }) {
   const crews = useCrews();
+  const team = useTeam();
   const refresh = useRefreshCalendars();
   const [editing, setEditing] = useState(false);
   const file = source.kind === "file";
@@ -93,6 +106,7 @@ export function CalendarRow({ source }: { source: CalendarSource }) {
     onSettled: refresh,
   });
   const crew = crews.data?.find((c) => c.id === source.crew_id);
+  const owner = source.user_id && (team.data?.find((m) => m.user_id === source.user_id)?.profile?.full_name || "Someone");
   const where = source.kind === "google" ? "Google" : file ? "From a file" : source.host;
   const when = source.last_synced_at ? `${file ? "uploaded" : "updated"} ${timeAgo(source.last_synced_at)}` : null;
   return (
@@ -103,7 +117,7 @@ export function CalendarRow({ source }: { source: CalendarSource }) {
         <span className="muted small">
           {!source.enabled
             ? "Off"
-            : [crew ? `${crew.name}'s time` : "Whole team", `${source.event_count} ${source.event_count === 1 ? "event" : "events"}`, when, source.show_details ? null : "shown as Busy"]
+            : [owner && `${owner}'s calendar`, crew ? `${crew.name}'s time` : owner ? null : "Whole team", `${source.event_count} ${source.event_count === 1 ? "event" : "events"}`, when, source.show_details ? null : "shown as Busy"]
                 .filter(Boolean)
                 .join(" · ")}
           {where && <span className="cal-host"> · {where}</span>}
@@ -125,7 +139,7 @@ export function CalendarRow({ source }: { source: CalendarSource }) {
         </label>
       ) : source.enabled && <Button size="sm" variant="ghost" icon="refresh" aria-label={`Refresh ${source.name} now`} title="Refresh now" loading={sync.isPending} onClick={() => sync.mutate()} />}
       <Button size="sm" variant="ghost" icon="edit" aria-label={`Change ${source.name}`} title="Change" onClick={() => setEditing(true)} />
-      {editing && <EditCalendarDialog source={source} crews={crews.data ?? []} onClose={() => setEditing(false)} />}
+      {editing && <EditCalendarDialog source={source} crews={crews.data ?? []} team={team.data ?? []} onClose={() => setEditing(false)} />}
     </div>
   );
 }
@@ -151,18 +165,30 @@ function CrewSelect({ value, onChange, crews }: { value: string; onChange: (crew
   );
 }
 
-function EditCalendarDialog({ source, crews, onClose }: { source: CalendarSource; crews: Array<{ id: string; name: string }>; onClose: () => void }) {
+/** Whose own calendar it is: someone on the team (anyone already set stays, even after they leave), or nobody in particular. */
+function OwnerSelect({ value, onChange, team }: { value: string; onChange: (id: string) => void; team: NonNullable<ReturnType<typeof useTeam>["data"]> }) {
+  return (
+    <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Nobody's in particular</option>
+      {team.filter((m) => m.active || m.user_id === value).map((m) => <option key={m.user_id} value={m.user_id}>{m.profile?.full_name || "Team member"}</option>)}
+    </select>
+  );
+}
+const OWNER_HINT = "One person's sits on their row when the schedule shows People, and their busy time counts against them in Find a time.";
+
+function EditCalendarDialog({ source, crews, team, onClose }: { source: CalendarSource; crews: Array<{ id: string; name: string }>; team: NonNullable<ReturnType<typeof useTeam>["data"]>; onClose: () => void }) {
   const refresh = useRefreshCalendars();
   const [name, setName] = useState(source.name);
   const [color, setColor] = useState(source.color);
   const [crewId, setCrewId] = useState(source.crew_id ?? "");
+  const [userId, setUserId] = useState(source.user_id ?? "");
   const [details, setDetails] = useState(source.show_details);
   const [blocks, setBlocks] = useState(source.blocks_time);
   const [enabled, setEnabled] = useState(source.enabled);
   const save = useMutation({
     meta: { inline: true, success: "Calendar saved" },
     mutationFn: () =>
-      api.patch<CalendarSource>(`/calendars/${source.id}`, { name: name.trim(), color, crew_id: crewId || null, show_details: details, blocks_time: blocks, ...(source.kind === "file" ? {} : { enabled }) }),
+      api.patch<CalendarSource>(`/calendars/${source.id}`, { name: name.trim(), color, crew_id: crewId || null, user_id: userId || null, show_details: details, blocks_time: blocks, ...(source.kind === "file" ? {} : { enabled }) }),
     onSuccess: () => {
       refresh();
       onClose();
@@ -183,6 +209,9 @@ function EditCalendarDialog({ source, crews, onClose }: { source: CalendarSource
         <Field label="Color"><ColorPicker value={color} onChange={setColor} /></Field>
         <Field label="Whose time is it?" hint="A crew's calendar sits in that crew's lane and only blocks its time.">
           <CrewSelect value={crewId} onChange={setCrewId} crews={crews} />
+        </Field>
+        <Field label="Whose own calendar is it?" hint={OWNER_HINT}>
+          <OwnerSelect value={userId} onChange={setUserId} team={team} />
         </Field>
         <CalendarSwitches details={details} setDetails={setDetails} blocks={blocks} setBlocks={setBlocks} />
         {source.kind === "file" ? (
@@ -235,15 +264,17 @@ function CalendarSwitches({ details, setDetails, blocks, setBlocks }: { details:
 /** `addOnPaste`: a pasted link is added at once, so the last step is just pasting. */
 export function AddCalendarForm({ app, appName, steps, onAdded, addOnPaste }: { app: string; appName: string; steps?: string[]; onAdded?: () => void; addOnPaste?: boolean }) {
   const crews = useCrews();
+  const team = useTeam();
   const refresh = useRefreshCalendars();
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [crewId, setCrewId] = useState("");
+  const [userId, setUserId] = useState("");
   const [details, setDetails] = useState(true);
   const [blocks, setBlocks] = useState(true);
   const add = useMutation({
     meta: { inline: true, success: (s: CalendarSource) => (s.last_error ? `${s.name} added, but it couldn't be read yet` : `${s.name} added · ${s.event_count} ${s.event_count === 1 ? "event" : "events"}`) },
-    mutationFn: (link: string) => api.post<CalendarSource>("/calendars", { url: link.trim(), app, name: name.trim() || undefined, crew_id: crewId || null, show_details: details, blocks_time: blocks }),
+    mutationFn: (link: string) => api.post<CalendarSource>("/calendars", { url: link.trim(), app, name: name.trim() || undefined, crew_id: crewId || null, user_id: userId || null, show_details: details, blocks_time: blocks }),
     onSuccess: () => {
       setUrl("");
       setName("");
@@ -284,6 +315,7 @@ export function AddCalendarForm({ app, appName, steps, onAdded, addOnPaste }: { 
       <div className="form-grid">
         <Field label="Name" optional><input className="input" value={name} maxLength={80} placeholder="Uses the calendar's own name" onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Whose time is it?"><CrewSelect value={crewId} onChange={setCrewId} crews={crews.data ?? []} /></Field>
+        <Field label="Whose own calendar is it?" hint={OWNER_HINT}><OwnerSelect value={userId} onChange={setUserId} team={team.data ?? []} /></Field>
       </div>
       <CalendarSwitches details={details} setDetails={setDetails} blocks={blocks} setBlocks={setBlocks} />
       <FormError error={add.error} />
@@ -304,8 +336,10 @@ interface Uploaded {
 
 export function UploadCalendarForm() {
   const crews = useCrews();
+  const team = useTeam();
   const refresh = useRefreshCalendars();
   const [crewId, setCrewId] = useState("");
+  const [userId, setUserId] = useState("");
   const [details, setDetails] = useState(true);
   const [blocks, setBlocks] = useState(true);
   const [over, setOver] = useState(false);
@@ -322,6 +356,7 @@ export function UploadCalendarForm() {
             text: file.text,
             file_name: file.fileName,
             crew_id: crewId || null,
+            user_id: userId || null,
             show_details: details,
             blocks_time: blocks,
           });
@@ -352,6 +387,7 @@ export function UploadCalendarForm() {
       </details>
       <div className="form-grid">
         <Field label="Whose time is it?"><CrewSelect value={crewId} onChange={setCrewId} crews={crews.data ?? []} /></Field>
+        <Field label="Whose own calendar is it?" hint={OWNER_HINT}><OwnerSelect value={userId} onChange={setUserId} team={team.data ?? []} /></Field>
       </div>
       <CalendarSwitches details={details} setDetails={setDetails} blocks={blocks} setBlocks={setBlocks} />
       <label

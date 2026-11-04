@@ -259,8 +259,9 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   doesn't move the money.
 - **Every trade:** trade presets ([`packages/core/src/presets`](packages/core/src/presets)) load
   starter services, quote formulas, checklists, booking forms and SOP categories when a company
-  signs up: lawn and exterior maintenance, paving and sitework, roofing and exteriors, or a general
-  starting point for any other trade.
+  signs up: plumbing, HVAC, electrical, cleaning, pool and spa, pest control, handyman,
+  landscaping, lawn and exterior maintenance, paving and sitework, roofing and exteriors, or a
+  general starting point for any other trade.
 
 ## How it fits together
 

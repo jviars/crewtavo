@@ -262,6 +262,7 @@ const NOT_SIGNED_IN_ROUTES = [
   "GET /api/public/paperwork/:token", "POST /api/public/paperwork/:token/uploads", "POST /api/public/paperwork/:token/files",
   "GET /api/hub/:token", "POST /api/hub/:token/approve", "POST /api/hub/:token/request-changes", "POST /api/hub/:token/accept-range", "POST /api/hub/:token/promo",
   "DELETE /api/hub/:token/promo", "POST /api/hub/:token/pay", "POST /api/hub/:token/message", "GET /api/hub/:token/drawings/:file", "GET /api/hub/:token/visits/:file",
+  "GET /api/hub/:token/visits/:id/slots", "POST /api/hub/:token/visits/:id/change",
   "POST /api/hub/:token/request", "POST /api/hub/:token/autopay/setup", "POST /api/hub/:token/autopay/finish", "POST /api/hub/:token/autopay/confirm",
   "POST /api/hub/:token/autopay/off", "POST /api/hub/:token/tip", "POST /api/public/forms/:company/:form/promo", "GET /api/public/forms/:company/:form", "POST /api/public/forms/:company/:form",
   "POST /api/public/forms/:company/:form/files", "GET /api/public/logo/:company/:file", "GET /api/public/letterhead/:company/:file",

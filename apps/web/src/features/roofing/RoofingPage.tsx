@@ -1,5 +1,5 @@
 /**
- * Roofing: a roof estimate from one place, for businesses set up for roofing. Start from an address
+ * Roofing: a roof estimate from one place, once Roofing is installed. Start from an address
  * and a roof package, then each project walks through measuring the roof, the estimate, the price
  * range the homeowner is sent, the site visit, the schedule and the invoice (RoofingProjectPage).
  * The list shows where each one is, and its package (or how many options it offers, priced from the

@@ -2,6 +2,7 @@ import { contractValues, resolveSections, sectionsHash } from "@crewtavo/core/co
 import { TRADE_TERMS, templateSettings } from "@crewtavo/core/documents";
 import { snapshotLines } from "@crewtavo/core/estimates";
 import { chosenTotals } from "@crewtavo/core/money";
+import { addDays, localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { encryptJson } from "../src/lib/crypto";
@@ -88,12 +89,19 @@ vi.mock("../src/lib/supabase", () => {
     from: (table: string) => {
       const filters: Array<(row: Row) => boolean> = [];
       let select: string | null = null;
-      let change: { kind: "update"; values: Row } | null = null;
+      let change: { kind: "update"; values: Row } | { kind: "delete" } | null = null;
       const rows = () => (state.tables[table] ?? []).filter((row) => filters.every((keep) => keep(row)));
       const run = () => {
-        if (change) {
-          for (const row of rows()) Object.assign(row, change.values);
+        if (change?.kind === "delete") {
+          const gone = new Set(rows());
+          state.tables[table] = (state.tables[table] ?? []).filter((row) => !gone.has(row));
           return { data: null, error: null };
+        }
+        if (change) {
+          const changed = rows();
+          for (const row of changed) Object.assign(row, change.values);
+          // An update that asks for its rows back gets them, as the Data API does.
+          return { data: select ? changed.map((row) => project(row, select)) : null, error: null };
         }
         return { data: rows().map((row) => project(row, select)), error: null };
       };
@@ -113,6 +121,7 @@ vi.mock("../src/lib/supabase", () => {
           return Promise.resolve({ data: null, error: null });
         },
         update: (values: Row) => ((change = { kind: "update", values }), builder),
+        delete: () => ((change = { kind: "delete" }), builder),
         maybeSingle: () => Promise.resolve({ data: rows().map((row) => project(row, select))[0] ?? null, error: null }),
         then: (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve(run()).then(resolve, reject),
       };
@@ -145,7 +154,8 @@ vi.mock("../src/integrations/stripe", async (importOriginal) => ({
 }));
 const { app } = await import("../src/app");
 const { addressLines, publicApproval, rangeDetails } = await import("../src/routes/public");
-const { loadContext } = await import("../src/services/automations");
+const { loadContext, withEvent } = await import("../src/services/automations");
+const { answerVisitChange } = await import("../src/services/visitChanges");
 const { adminClient } = await import("../src/lib/supabase");
 const autopay = await import("../src/services/autopay");
 const { stripeCheckout } = await import("../src/integrations/stripe");
@@ -185,7 +195,7 @@ function roofer(quote: Row = {}) {
     companies: [{
       id: ROOFER, name: "Summit Roofing", phone: "555-0100", email: "office@summit.example", website: "summit.example", timezone: "America/Chicago", currency: "USD", trade_preset: "roofing_exteriors",
       address: { line1: "200 Main St", line2: "Suite 4", city: "Springfield", region: "IL", postal_code: "62704" },
-      settings: { branding: { color: "#1f4e79" }, hub_tips: false, roofing: { range_pct: 15, range_round: 50 } },
+      settings: { branding: { color: "#1f4e79" }, hub_tips: false, roofing: { range_pct: 15, range_round: 50 }, roofing_app: { enabled: true } },
     }],
     quotes: [{
       id: QUOTE, company_id: ROOFER, number: 1042, status: "sent", title: "New roof", message: null, subtotal: 18304, discount_amount: 0, tax_rate: 0, tax_amount: 0,
@@ -270,6 +280,7 @@ describe("a price range in the Client Hub", () => {
     // The trade only decides whether a preview shows a range; it's never sent.
     expect(text).not.toContain("trade_preset");
     expect(text).not.toContain("roofing_exteriors");
+    expect(text).not.toContain("roofing_app");
     expect(body.quote.package).toEqual({ name: "Architectural shingle" });
     expect(body.company.address).toEqual(["200 Main St", "Suite 4", "Springfield, IL 62704"]);
     // The quote's own template, with the defaults filled in.
@@ -678,13 +689,14 @@ describe("options in the Client Hub", () => {
     expect(text).not.toContain("Make checks out");
   });
 
-  it("previews a roofing estimate's range from the cheapest option to the priciest, and other trades at their price", async () => {
+  it("previews a roofing estimate's range from the cheapest option to the priciest, and other work at its price", async () => {
     withOptions({ status: "draft", roof_package_id: null });
     const preview = await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json();
     expect(preview.quote.range).toMatchObject({ low: 15000, high: 35950, sent_at: null });
     expect(preview.quote.total).toBeNull();
 
-    state.tables.companies![0]!.trade_preset = "paving";
+    // Roofing uninstalled: the trade alone doesn't make it roof work.
+    (state.tables.companies![0]!.settings as Row).roofing_app = { enabled: false };
     const paving = await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json();
     expect(paving.quote.range).toBeNull();
     expect(paving.quote.total).toBe(15013);
@@ -693,7 +705,7 @@ describe("options in the Client Hub", () => {
 
   it("previews a range for a roof another trade measured, as Roofing sends it one", async () => {
     roofer({ status: "draft", range_low: null, range_high: null, range_sent_at: null });
-    state.tables.companies![0]!.trade_preset = "paving";
+    Object.assign(state.tables.companies![0]!, { trade_preset: "paving", settings: { ...(state.tables.companies![0]!.settings as Row), roofing_app: undefined, paving_app: { enabled: true } } });
     const preview = async () => (await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json()).quote;
     expect(await preview()).toMatchObject({ range: null, total: 18304 });
     state.tables.measurements = [{ id: "m-roof", company_id: ROOFER, quote_id: QUOTE, sections: [{ kind: "Area", value: 2000 }], roof_pitch: "6/12", roofing_squares: 22.4, updated_at: "2026-10-20T00:00:00Z" }];
@@ -701,6 +713,24 @@ describe("options in the Client Hub", () => {
     // A lot measured for paving isn't a roof: the price.
     Object.assign(state.tables.measurements[0]!, { roof_pitch: null, roofing_squares: null });
     expect(await preview()).toMatchObject({ range: null, total: 18304 });
+  });
+
+  it("previews by the estimate's own kind of work when the business has both Roofing and Paving", async () => {
+    roofer({ status: "draft", range_low: null, range_high: null, range_sent_at: null });
+    (state.tables.companies![0]!.settings as Row).paving_app = { enabled: true };
+    const preview = async () => (await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json()).quote;
+    // Made in Paving: its price, though Roofing is installed.
+    state.tables.quotes![0]!.work_kind = "paving";
+    expect(await preview()).toMatchObject({ range: null, total: 18304 });
+    // Made on the Quotes page, its package tells: a paving package has no roof, a roof package has.
+    state.tables.quotes![0]!.work_kind = null;
+    expect(await preview()).toMatchObject({ range: null, total: 18304 });
+    state.tables.roof_packages![0]!.roof_service_id = "roof-service";
+    expect(await preview()).toMatchObject({ range: { low: 18300, high: 21050 }, total: null });
+    // Made in Roofing: the range.
+    Object.assign(state.tables.quotes![0]!, { work_kind: "roofing" });
+    state.tables.roof_packages![0]!.roof_service_id = null;
+    expect(await preview()).toMatchObject({ range: { low: 18300, high: 21050 }, total: null });
   });
 
   it("takes the option they're leaning toward with a yes to the range", async () => {
@@ -1070,6 +1100,34 @@ describe("an invoice in the Client Hub", () => {
     expect(body.promo_line).toBe(true);
     expect(body.invoice.lines.map((l: { name: string }) => l.name)).toEqual(["Mowing", "Promo code WEEKLY25"]);
     expect(JSON.stringify(body.invoice.lines)).not.toContain("discount_quote_id");
+  });
+
+  it("sends only the custom fields marked to print or to show, as they read, never the others", async () => {
+    const field = (record_type: string, key: string, label: string, show_on_pdf: boolean, show_in_portal: boolean, extra: Row = {}) =>
+      ({ company_id: ROOFER, record_type, key, label, type: "text", choices: [], show_on_pdf, show_in_portal, sort: 0, archived_at: null, ...extra });
+    state.tables.custom_field_definitions = [
+      field("invoice", "permit", "Permit number", true, false),
+      field("invoice", "warranty_until", "Warranty until", false, true, { type: "date" }),
+      field("invoice", "gate", "Gate code", false, false),
+      field("invoice", "old", "Old field", true, true, { archived_at: "2026-10-01T00:00:00Z" }),
+      field("quote", "permit", "Permit number", false, true),
+    ];
+    state.tables.invoices = [{
+      id: INVOICE, company_id: ROOFER, number: 79, status: "sent", subject: "Roof", notes: null, issued_on: "2026-10-01", due_on: "2026-10-31",
+      subtotal: 20, discount_amount: 0, tax_amount: 0, total: 20, retainage_amount: 0, amount_paid: 0, balance_due: 20, client_id: CLIENT, promo: null,
+      client: { display_name: "Dana Whitfield", billing_address: null }, job: { property: null }, lines: [], payments: [], credit_amount: 0, credits: [],
+      custom_fields: { permit: "P-1042", warranty_until: "2036-10-01", gate: "4821", old: "gone", source_id: "J-9" },
+    }];
+    const body = await (await hub({ t: "invoice", id: INVOICE })).json();
+    expect(body.invoice.pdf_fields).toEqual([{ label: "Permit number", text: "P-1042" }]);
+    expect(body.invoice.portal_fields).toEqual([{ label: "Warranty until", text: "Oct 1, 2036" }]);
+    const text = JSON.stringify(body);
+    for (const hidden of ["custom_fields", "4821", "gone", "J-9"]) expect(text).not.toContain(hidden);
+
+    state.tables.quotes![0]!.custom_fields = { permit: "P-7", gate: "1111" };
+    const quote = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(quote.quote).toMatchObject({ pdf_fields: [], portal_fields: [{ label: "Permit number", text: "P-7" }] });
+    expect(JSON.stringify(quote)).not.toContain("1111");
   });
 });
 
@@ -1598,7 +1656,7 @@ describe("autopay on the client's home page", () => {
     const card = {
       status: "active" as const, method: { id: CARD, type: "card", label: "Visa ending 4242", exp: "08/28" }, imported: false, since: "2026-10-31T14:05:09Z",
       terms: "We charge the card on file after each visit is done.", terms_version: "2026-10-31T14:05:09", timing: "at the end of the day of each visit",
-      next_charge: "2026-11-01T05:00:00Z", per_visit: 45, per_visit_taxed: false, available: true, card_required: false,
+      next_charge: "2026-11-01T05:00:00Z", per_visit: 45, per_visit_taxed: false, reagree: false, available: true, card_required: false,
     };
     vi.mocked(autopay.hubAutopay).mockResolvedValueOnce(card);
     expect((await (await hub({ t: "client", id: CLIENT })).json()).autopay).toEqual(card);
@@ -1969,5 +2027,340 @@ describe("autopay facts from the business's saved cards and agreements", () => {
     // The same invoice with tips on offers one, to the card that paid.
     state.tables.companies![0]!.settings = { ...(state.tables.companies![0]!.settings as Row), hub_tips: true };
     expect(await invoicePage()).toMatchObject({ tips: true, tip_after: true, tip_method: "Visa ending 4242" });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The deposit, paid as the client approves when the business takes payments online
+// (20261104000500_deposit_percent.sql hub_deposit_invoice), and a quote template, which never
+// reaches the Client Hub.
+// ---------------------------------------------------------------------------------------------
+
+const DEPOSIT = "00000000-0000-4000-8000-0000000000e1";
+
+describe("the deposit, as the client approves", () => {
+  const shared = env as Env & { STRIPE_SECRET_KEY?: string };
+  const approve = () => hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG });
+  const linkOf = async (link: string) => readClientLink(env, link.split("/hub/")[1]!);
+  beforeEach(() => {
+    roofer({ range_low: null, range_high: null, range_sent_at: null });
+    state.rpcs.approve_hub_quote = () => ({ data: true, error: null });
+    state.rpcs.hub_deposit_invoice = () => ({ data: DEPOSIT, error: null });
+    shared.STRIPE_SECRET_KEY = "sk_test_shared";
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    delete shared.STRIPE_SECRET_KEY;
+  });
+
+  it("is paid on Stripe's page for its invoice, once the quote is approved", async () => {
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).deposit_online).toBe(true);
+    const res = await approve();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ status: "approved", deposit: { url: "https://invoice.stripe.test/i/pay" } });
+    // The invoice's own link, the client's as theirs was, to pay it later from.
+    expect(await linkOf(body.deposit.link)).toMatchObject({ c: ROOFER, t: "invoice", id: DEPOSIT, own: 1 });
+    const names = state.calls.map((c) => c.name);
+    expect(names.indexOf("hub_deposit_invoice")).toBeGreaterThan(names.indexOf("approve_hub_quote"));
+    expect(state.calls.find((c) => c.name === "hub_deposit_invoice")!.args).toEqual({ p_company: ROOFER, p_quote: QUOTE });
+    // No tip on a deposit.
+    expect(vi.mocked(stripeCheckout).mock.calls.map((call) => call.slice(2))).toEqual([[ROOFER, DEPOSIT, 0]]);
+  });
+
+  it("leaves the quote approved, with the deposit owed, when paying it can't start", async () => {
+    vi.mocked(stripeCheckout).mockRejectedValueOnce(new StripeError("Stripe is down", 500));
+    const down = await approve();
+    expect(down.status).toBe(200);
+    const body = await down.json();
+    expect(body).toMatchObject({ status: "approved", deposit: { url: null } });
+    expect(await linkOf(body.deposit.link)).toMatchObject({ t: "invoice", id: DEPOSIT });
+    // Too small to pay online, say: the same.
+    vi.mocked(stripeCheckout).mockRejectedValueOnce(new HttpError(409, "What's left on this invoice is too small to pay online. Contact us to pay it."));
+    expect(await (await approve()).json()).toMatchObject({ status: "approved", deposit: { url: null } });
+    // And when its invoice couldn't be made, it's approved as before, and the office bills the deposit.
+    state.rpcs.hub_deposit_invoice = () => ({ data: null, error: { message: "boom" } });
+    const failed = await approve();
+    expect(failed.status).toBe(200);
+    expect(await failed.json()).toEqual({ status: "approved" });
+  });
+
+  it("asks for nothing more when there's no deposit", async () => {
+    state.rpcs.hub_deposit_invoice = () => ({ data: null, error: null });
+    expect(await (await approve()).json()).toEqual({ status: "approved" });
+    expect(stripeCheckout).not.toHaveBeenCalled();
+  });
+
+  it("approves as before when the business doesn't take payments online", async () => {
+    delete shared.STRIPE_SECRET_KEY;
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).deposit_online).toBe(false);
+    const res = await approve();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "approved" });
+    expect(state.calls.some((c) => c.name === "hub_deposit_invoice")).toBe(false);
+    expect(stripeCheckout).not.toHaveBeenCalled();
+  });
+
+  it("sends a percent, so the page asks for it on what they choose", async () => {
+    roofer({ range_low: null, range_high: null, range_sent_at: null, deposit_percent: 10, deposit_amount: 1830.4 });
+    const page = await (await hub({ t: "quote", id: QUOTE })).json();
+    expect(page.quote).toMatchObject({ deposit_percent: 10, deposit_amount: 1830.4 });
+    // The contract's {Deposit} is filled in from it too, on the option and add-ons picked, as the server keeps it.
+    expect(page.contract.facts).toMatchObject({ deposit: 1830.4, depositPercent: 10 });
+    // Never with a range, which would give the price away.
+    roofer({ deposit_percent: 10, deposit_amount: 1830.4 });
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).quote).toMatchObject({ deposit_percent: null, deposit_amount: null });
+  });
+
+  it("shows on the signed quote while it's owed, with its link, and as paid once it is", async () => {
+    roofer({
+      status: "approved", approved_at: "2026-10-25T18:00:00Z", range_low: null, range_high: null, deposit_invoice_id: DEPOSIT,
+      approval: { name: "Dana Whitfield", signature: PNG, signed_at: "2026-10-25T18:00:00Z", total: 18304 },
+    });
+    state.tables.invoices = [{ id: DEPOSIT, company_id: ROOFER, status: "sent", total: 1000, balance_due: 1000 }];
+    const owed = (await (await hub({ t: "quote", id: QUOTE })).json()).deposit;
+    expect(owed).toMatchObject({ amount: 1000, balance_due: 1000 });
+    expect(await linkOf(owed.link)).toMatchObject({ t: "invoice", id: DEPOSIT });
+    Object.assign(state.tables.invoices[0]!, { status: "paid", balance_due: 0 });
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).deposit).toMatchObject({ amount: 1000, balance_due: 0 });
+    // Written off, it isn't owed; voided, there's none; and the office's preview never shows one.
+    Object.assign(state.tables.invoices[0]!, { status: "written_off", balance_due: 1000 });
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).deposit).toMatchObject({ balance_due: 0 });
+    Object.assign(state.tables.invoices[0]!, { status: "void" });
+    expect((await (await hub({ t: "quote", id: QUOTE })).json()).deposit).toBeNull();
+    Object.assign(state.tables.invoices[0]!, { status: "sent", balance_due: 1000 });
+    expect((await (await hub({ t: "quote", id: QUOTE, pv: 1 })).json()).deposit).toBeNull();
+  });
+});
+
+describe("a quote template", () => {
+  it("never reaches the Client Hub, not even as the office's preview", async () => {
+    roofer({ status: "draft", client_id: null, client: null, is_template: true, number: null, range_low: null, range_high: null, range_sent_at: null });
+    expect((await hub({ t: "quote", id: QUOTE, pv: 1 })).status).toBe(404);
+    expect((await hub({ t: "quote", id: QUOTE }, "/approve", { name: "Dana Whitfield", signature: PNG })).status).toBe(409);
+  });
+});
+
+describe("moving or cancelling a visit from the Client Hub", () => {
+  const CHICAGO = "America/Chicago";
+  const today = localDate(new Date(), CHICAGO);
+  const day = addDays(today, 3);
+  const at = (date: string, time: string) => zonedTimeToUtc(date, time, CHICAGO).toISOString();
+  const MINE = "00000000-0000-4000-8000-0000000000e1";
+  const THEIRS = "00000000-0000-4000-8000-0000000000e2";
+  const TODAYS = "00000000-0000-4000-8000-0000000000e3";
+  const NEXT = "00000000-0000-4000-8000-0000000000e4";
+  const visit = (id: string, client: string, date: string, title: string, more: Row = {}) => ({
+    id, company_id: ROOFER, job_id: client === CLIENT ? "job-dana" : "job-other", title, status: "scheduled", scheduled_on: date, starts_at: at(date, "09:00"), ends_at: at(date, "10:00"),
+    completed_at: null, crew_id: "crew-1", property: null, assignees: [], job: { client_id: client }, ...more,
+  });
+  const slotsOf = (path: string) => hub({ t: "client", id: CLIENT }, `/visits/${path}/slots`);
+  const ask = (id: string, body: Row, link: HubLink = { t: "client", id: CLIENT }) => hub(link, `/visits/${id}/change`, body);
+  const office = { db: adminClient(env), companyId: ROOFER, role: "owner" as const, permissions: ["schedule" as const], userId: SALES };
+
+  beforeEach(() => {
+    // Every day a workday, so the dates here (counted from today) are open whatever day today is.
+    Object.assign((state.tables.companies![0]!.settings as Row), { working_hours: { start: "08:00", end: "12:00", days: [0, 1, 2, 3, 4, 5, 6] } });
+    Object.assign(state.tables, {
+      jobs: [{ id: "job-dana", company_id: ROOFER, client_id: CLIENT }, { id: "job-other", company_id: ROOFER, client_id: "someone-else" }],
+      // Dana's weekly visit (made for its date by the recurrence), and next week's; a neighbor's
+      // visit; and Dana's visit today.
+      visits: [
+        visit(MINE, CLIENT, day, "Weekly mowing", { recurrence_key: day }),
+        visit(NEXT, CLIENT, addDays(day, 7), "Weekly mowing", { recurrence_key: addDays(day, 7) }),
+        visit(THEIRS, "someone-else", day, "Neighbor's secret garden"),
+        visit(TODAYS, CLIENT, today, "Hedges"),
+      ],
+      visit_change_requests: [],
+      messages: [],
+    });
+    // The crew is busy 10 to 11 that day (the database says when, never with what).
+    state.rpcs.visit_busy_times = () => ({ data: [{ starts_at: at(day, "10:00"), ends_at: at(day, "11:00") }], error: null });
+  });
+
+  it("offers open times for the client's own visit, around when its people are busy, and never whose", async () => {
+    const res = await slotsOf(MINE);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(state.calls.find((c) => c.name === "visit_busy_times")?.args).toMatchObject({ p_company: ROOFER, p_visit: MINE });
+    // Its own 9:00 isn't offered again; 9:30 would run into the busy hour.
+    expect(body.slots.filter((s: { date: string }) => s.date === day).map((s: { starts_at: string }) => localTime(new Date(s.starts_at), CHICAGO))).toEqual(["08:00", "08:30", "11:00"]);
+    // Never today: the first day is tomorrow.
+    expect(body.slots[0].date).toBe(addDays(today, 1));
+    expect(JSON.stringify(body)).not.toMatch(/secret|Neighbor|e2|crew-1/);
+    expect(Object.keys(body.slots[0]).sort()).toEqual(["date", "ends_at", "starts_at"]);
+  });
+
+  it("never offers a day the business doesn't work", async () => {
+    const off = new Date(`${day}T12:00:00Z`).getUTCDay();
+    Object.assign((state.tables.companies![0]!.settings as Row), { working_hours: { start: "08:00", end: "12:00", days: [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== off) } });
+    const slots = (await (await slotsOf(MINE)).json()).slots as Array<{ date: string; starts_at: string }>;
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots.some((s) => s.date === day || s.date === addDays(day, 7))).toBe(false);
+    expect((await ask(MINE, { kind: "reschedule", starts_at: at(day, "08:00") })).status).toBe(409);
+  });
+
+  it("finds only the client's own visits: another client's isn't there, by any link", async () => {
+    expect((await slotsOf(THEIRS)).status).toBe(404);
+    const res = await ask(THEIRS, { kind: "cancel" });
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(await res.json())).not.toMatch(/secret/i);
+    expect((await hub({ t: "quote", id: QUOTE }, `/visits/${MINE}/slots`)).status).toBe(404);
+    expect(state.tables.visit_change_requests).toEqual([]);
+    // The neighbor's visit isn't on Dana's home either.
+    const home = await (await hub({ t: "client", id: CLIENT })).json();
+    expect(home.visits.map((v: { id: string }) => v.id).sort()).toEqual([MINE, TODAYS, NEXT].sort());
+    expect(JSON.stringify(home)).not.toMatch(/secret/i);
+  });
+
+  it("can't change today's visit online, and says to call", async () => {
+    const res = await slotsOf(TODAYS);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("Call us at 555-0100");
+    expect((await ask(TODAYS, { kind: "cancel" })).status).toBe(409);
+    const home = await (await hub({ t: "client", id: CLIENT })).json();
+    expect(home.visits.find((v: { id: string }) => v.id === TODAYS).can_change).toBe(false);
+    expect(home.visits.find((v: { id: string }) => v.id === MINE).can_change).toBe(true);
+  });
+
+  it("keeps one request waiting per visit: a new one takes the old one's place", async () => {
+    expect((await ask(MINE, { kind: "reschedule", starts_at: at(day, "10:00") })).status).toBe(409);
+    expect((await ask(MINE, { kind: "reschedule" })).status).toBe(400);
+    expect((await ask(MINE, { kind: "reschedule", starts_at: at(day, "11:00") })).status).toBe(201);
+    expect(state.tables.visit_change_requests).toMatchObject([{ company_id: ROOFER, visit_id: MINE, client_id: CLIENT, kind: "reschedule", starts_at: at(day, "11:00"), ends_at: at(day, "12:00"), scheduled_on: day }]);
+    // Waiting, as the database has it by default.
+    const pending = () => state.tables.visit_change_requests!.forEach((r) => (r.status ??= "pending"));
+    pending();
+    expect((await ask(MINE, { kind: "cancel", reason: "Away that week" })).status).toBe(201);
+    expect(state.tables.visit_change_requests).toMatchObject([{ visit_id: MINE, kind: "cancel", reason: "Away that week", starts_at: null }]);
+    expect(state.tables.visit_change_requests).toHaveLength(1);
+    // Nothing on the schedule changed, and the visit says so on their home.
+    expect(state.tables.visits![0]).toMatchObject({ status: "scheduled", starts_at: at(day, "09:00") });
+    pending();
+    const home = await (await hub({ t: "client", id: CLIENT })).json();
+    expect(home.visits.find((v: { id: string }) => v.id === MINE).change_requested).toBe("cancel");
+    expect(home.visits.find((v: { id: string }) => v.id === NEXT).change_requested).toBeNull();
+    expect((await ask(MINE, { kind: "cancel" }, { t: "client", id: CLIENT, pv: 1 })).status).toBe(400);
+  });
+
+  /** Dana's request, as the server writes it, with the visit and client the office's read embeds. */
+  const request = (values: Row) => {
+    const row = { id: "ask-1", company_id: ROOFER, visit_id: MINE, client_id: CLIENT, status: "pending", starts_at: null, ends_at: null, scheduled_on: null, message: null, reason: null,
+      visit: state.tables.visits![0], client: { id: CLIENT, display_name: "Dana Whitfield", email: "dana@example.com" }, ...values };
+    state.tables.visit_change_requests = [row];
+    return row;
+  };
+
+  it("approving moves only that visit to the time asked for, and emails the client", async () => {
+    const sent: Array<{ To: Array<{ Email: string }>; Subject: string; Text: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => (sent.push(JSON.parse(init.body)), new Response(JSON.stringify({ ID: "m1" })))));
+    const row = request({ kind: "reschedule", starts_at: at(day, "11:00"), ends_at: at(day, "12:00"), scheduled_on: day });
+    const result = await answerVisitChange(office, { ...env, MAILPIT_URL: "http://mail.test" }, "ask-1", { approve: true }, null);
+    vi.unstubAllGlobals();
+    expect(result).toEqual({ status: "approved", emailed: true });
+    // The visit keeps its hour's length and the date it was made for, so the recurrence doesn't add it again.
+    expect(state.tables.visits![0]).toMatchObject({ starts_at: at(day, "11:00"), ends_at: at(day, "12:00"), recurrence_key: day, route_order: null });
+    expect(state.tables.visits![1]).toMatchObject({ starts_at: at(addDays(day, 7), "09:00") });
+    expect(row.status).toBe("approved");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.To).toEqual([{ Email: "dana@example.com" }]);
+    expect(sent[0]!.Subject.replace(/\s/g, " ")).toMatch(/^Your visit is now \w{3}, \w{3} \d+, 11:00 AM$/);
+    expect(sent[0]!.Text).toContain("Hi Dana,");
+    expect(state.tables.messages).toMatchObject([{ client_id: CLIENT, channel: "email", direction: "out", related_type: "visit", related_id: MINE }]);
+    // An answer is given once.
+    await expect(answerVisitChange(office, env, "ask-1", { approve: true }, null)).rejects.toThrow(/isn't waiting/);
+  });
+
+  it("approving a cancel cancels only that visit; declining leaves it, with the office's note", async () => {
+    const row = request({ kind: "cancel", reason: "Away" });
+    // Email isn't set up here: the answer stands, and nobody is emailed.
+    expect(await answerVisitChange(office, env, "ask-1", { approve: true }, null)).toEqual({ status: "approved", emailed: false });
+    expect(state.tables.visits!.map((v) => v.status)).toEqual(["cancelled", "scheduled", "scheduled", "scheduled"]);
+    expect(row.status).toBe("approved");
+    expect(state.tables.messages).toEqual([]);
+
+    const next = request({ kind: "reschedule", message: "Any Friday", visit_id: NEXT, visit: state.tables.visits![1] });
+    expect(await answerVisitChange(office, env, "ask-1", { approve: false, note: "  Fridays are full.  " }, null)).toEqual({ status: "declined", emailed: false });
+    expect(next).toMatchObject({ status: "declined", note: "Fridays are full." });
+    expect(state.tables.visits![1]).toMatchObject({ status: "scheduled", starts_at: at(addDays(day, 7), "09:00") });
+  });
+
+  it("gives automations the time asked for and the client's words, from the request itself", async () => {
+    request({ kind: "reschedule", starts_at: at(day, "11:00"), ends_at: at(day, "12:00"), scheduled_on: day, message: "Mornings are best" });
+    state.tables.activity = [{ id: 7, company_id: ROOFER, data: { request_id: "ask-1" } }];
+    const ctx = (await loadContext(adminClient(env), ROOFER, "visit", MINE))!;
+    const change = (await withEvent(adminClient(env), ctx, "visit.reschedule_requested", 7)).vars.change as Row;
+    expect(change).toMatchObject({ message: "Mornings are best", reason: "" });
+    expect(String(change.when).replace(/\s/g, " ")).toMatch(/^\w{3}, \w{3} \d+, 11:00 AM$/);
+  });
+
+  it("won't approve a move for a visit that has started since", async () => {
+    request({ kind: "reschedule", starts_at: at(day, "11:00"), ends_at: at(day, "12:00"), scheduled_on: day });
+    state.tables.visits![0]!.status = "in_progress";
+    await expect(answerVisitChange(office, env, "ask-1", { approve: true }, null)).rejects.toThrow(/started or changed/);
+    expect(state.tables.visit_change_requests![0]).toMatchObject({ status: "pending" });
+  });
+});
+
+describe("checklists in the Client Hub", () => {
+  const INVOICE = "00000000-0000-4000-8000-0000000000e9";
+  const items = [
+    { key: "gutters", label: "Gutters cleared", type: "check", required: true },
+    { key: "after", label: "After photos", type: "photo", required: false },
+    { key: "sign", label: "Homeowner signature", type: "signature", required: true },
+  ];
+  const visit = (id: string, scheduled_on: string, extra: Row = {}) => ({
+    id, company_id: ROOFER, job_id: "job-1", title: "Roof cleanup", scheduled_on, starts_at: null, ends_at: null, status: "completed", completed_at: `${scheduled_on}T20:00:00Z`,
+    invoice_id: null, property: null, assignees: [], ...extra,
+  });
+  const response = (visit_id: string, template_id: string, answers: Row, completed_at: string | null = "2026-10-03T20:00:00Z") =>
+    ({ id: crypto.randomUUID(), company_id: ROOFER, visit_id, template_id, answers, completed_at, created_at: "2026-10-03T19:00:00Z" });
+  beforeEach(() => {
+    Object.assign(state.tables, {
+      jobs: [{ id: "job-1", company_id: ROOFER, client_id: CLIENT }],
+      visits: [visit("v-oct", "2026-10-03"), visit("v-sep", "2026-09-05")],
+      checklist_templates: [
+        { id: "shown", company_id: ROOFER, name: "Cleanup sign-off", items, show_to_client: true },
+        { id: "inside", company_id: ROOFER, name: "Crew safety check", items: [{ key: "code", label: "Lockbox code", type: "text", required: true }], show_to_client: false },
+      ],
+      checklist_responses: [
+        response("v-oct", "shown", { gutters: true, sign: { name: "Dana Whitfield", image: PNG } }),
+        response("v-oct", "inside", { code: "4821" }),
+        // Still being filled in: not the client's to see yet.
+        response("v-sep", "shown", { gutters: false }, null),
+      ],
+    });
+  });
+  const cleanup = { name: "Cleanup sign-off", visit_on: "2026-10-03", answers: [{ label: "Gutters cleared", text: "Yes" }, { label: "Homeowner signature", text: "Dana Whitfield" }] };
+
+  it("shows a done visit's finished checklists that are switched on, and never the internal ones", async () => {
+    const home = await (await hub({ t: "client", id: CLIENT })).json();
+    expect(home.past_visits.map((v: { id: string; checklists: unknown[] }) => [v.id, v.checklists])).toEqual([["v-oct", [cleanup]], ["v-sep", []]]);
+    const text = JSON.stringify(home);
+    for (const hidden of ["4821", "Lockbox", "Crew safety", "After photos", "base64"]) expect(text).not.toContain(hidden);
+  });
+
+  it("prints them with the invoice for the visits it bills, or its job's done visits", async () => {
+    state.tables.invoices = [{
+      id: INVOICE, company_id: ROOFER, number: 80, status: "sent", subject: "Cleanup", notes: null, issued_on: "2026-10-04", due_on: "2026-10-31",
+      subtotal: 300, discount_amount: 0, tax_amount: 0, total: 300, retainage_amount: 0, amount_paid: 0, balance_due: 300, client_id: CLIENT, job_id: "job-1", billing_month: null, promo: null,
+      client: { display_name: "Dana Whitfield", billing_address: null }, job: { property: null }, lines: [], payments: [], credit_amount: 0, credits: [],
+    }];
+    let body = await (await hub({ t: "invoice", id: INVOICE })).json();
+    expect(body.invoice.checklists).toEqual([cleanup]);
+    expect(body.invoice).not.toHaveProperty("job_id");
+    for (const hidden of ["4821", "Lockbox", "Crew safety"]) expect(JSON.stringify(body)).not.toContain(hidden);
+
+    // Billed by the visit: only the September one is on it, and its checklist isn't finished.
+    state.tables.visits![1]!.invoice_id = INVOICE;
+    body = await (await hub({ t: "invoice", id: INVOICE })).json();
+    expect(body.invoice.checklists).toEqual([]);
+  });
+
+  it("shows none once the business switches the checklist off", async () => {
+    state.tables.checklist_templates![0]!.show_to_client = false;
+    const home = await (await hub({ t: "client", id: CLIENT })).json();
+    expect(home.past_visits[0].checklists).toEqual([]);
+    expect(JSON.stringify(home)).not.toContain("Gutters");
   });
 });

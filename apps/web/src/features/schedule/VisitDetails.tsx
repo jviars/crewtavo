@@ -15,6 +15,7 @@ import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatTime } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
+import { usePendingChanges } from "./changeRequests";
 import { lengthLabel } from "./VisitDialog";
 
 const day = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
@@ -38,6 +39,8 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
       ),
   });
   const v = visit.data;
+  // A client's request to move or cancel it: Edit answers it.
+  const asked = usePendingChanges(Boolean(onEdit)).data?.some((r) => r.visit_id === visitId);
   const people = useQuery({
     queryKey: ["visit-details", visitId, "people", v?.assignees.map((a) => a.user_id).join(",")],
     enabled: Boolean(v?.assignees.length),
@@ -72,6 +75,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
               {v.route_order && v.status === "scheduled" && <span className="chip"><Icon name="navigation" size={12} />Stop {v.route_order}</span>}
               {v.time_fixed && v.starts_at && <span className="chip chip-blue"><Icon name="lock" size={12} />Fixed time</span>}
               {v.series_total && v.series_total > 1 && <span className="chip chip-blue">Day {v.series_day} of {v.series_total}</span>}
+              {asked && <span className="chip chip-blue"><Icon name="calendar" size={12} />Change requested</span>}
             </div>
 
             <div className="visit-facts">

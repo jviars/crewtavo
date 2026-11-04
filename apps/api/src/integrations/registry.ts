@@ -8,7 +8,9 @@
  *               website analytics: companies.settings.website_analytics, routes/analytics.ts; website
  *               forms: companies.settings.website_forms, routes/websiteForms.ts; careers:
  *               companies.settings.careers, the same routes; drive: companies.settings.drive,
- *               routes/drive.ts; marketing: companies.settings.marketing, routes/marketing.ts)
+ *               routes/drive.ts; marketing: companies.settings.marketing, routes/marketing.ts;
+ *               paving and roofing: companies.settings.paving_app and .roofing_app, routes/paving.ts
+ *               and routes/roofing.ts)
  *   site      - the company's website editor, by its address (Sveltia CMS: companies.settings.website, integrations/website.ts)
  * ABC Supply is an api_key app with two keys: its own app's Client ID and secret (integrations/abcSupply.ts).
  * Google Business Profile signs in like Google Calendar, with the same Google app, and brings the
@@ -25,7 +27,7 @@ import { DIALOG, GRAPH_VERSION, META_SCOPES } from "./metaConfig";
 export type Provider = "quickbooks" | "zoho_books" | "google_calendar" | "google_business" | "meta" | "stripe" | "twilio" | "anthropic" | "fal" | "railway" | "abc_supply";
 /** Apps whose calendars are added by link. They're also the calendar_sources.app values (with google_calendar). */
 export type LinkApp = "zoho_calendar" | "outlook_calendar" | "apple_calendar" | "ics_calendar";
-export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "website_analytics" | "website_forms" | "careers" | "drive" | "marketing" | "sveltia";
+export type AppId = Provider | LinkApp | "chatgpt" | "team_chat" | "website_analytics" | "website_forms" | "careers" | "drive" | "marketing" | "paving" | "roofing" | "sveltia";
 export type CalendarApp = LinkApp | "google_calendar";
 export const CALENDAR_APPS: readonly CalendarApp[] = ["google_calendar", "zoho_calendar", "outlook_calendar", "apple_calendar", "ics_calendar"];
 
@@ -98,6 +100,24 @@ export const CATALOG: CatalogEntry[] = [
     description: "Ask happy clients for Google reviews with reminders, and for referrals with a credit on their next invoice, and send email campaigns, automated ones too, with opens, clicks and the work they bring in.",
     auth: "builtin",
     docs: "https://crewtavo.com/docs/clients/marketing/",
+    available: () => true,
+  },
+  {
+    id: "paving",
+    name: "Crewtavo - Paving",
+    category: "Team",
+    description: "A Paving section for parking lots and driveways: the takeoff, estimate, proposal, schedule and invoice in one place.",
+    auth: "builtin",
+    docs: "https://crewtavo.com/docs/",
+    available: () => true,
+  },
+  {
+    id: "roofing",
+    name: "Crewtavo - Roofing",
+    category: "Team",
+    description: "A Roofing section for roof estimates: roof tools on the measuring map, Good, Better and Best packages priced by the square, and a price range to send first.",
+    auth: "builtin",
+    docs: "https://crewtavo.com/docs/",
     available: () => true,
   },
   {

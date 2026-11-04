@@ -80,7 +80,8 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
       const picked = roofing ? chosen.map((p) => p.id) : [];
       const db = supabase();
       const street = propertyId ? unwrap(await db.from("properties").select("line1").eq("id", propertyId).maybeSingle())?.line1 : null;
-      const about = { client_id: client!.id, property_id: propertyId, title: title.trim() || (street ? `${words.at} ${street}` : words.untitled) };
+      // The section it's made in says whether it's roof or paving work (quotes.work_kind), for a business with both apps.
+      const about = { client_id: client!.id, property_id: propertyId, title: title.trim() || (street ? `${words.at} ${street}` : words.untitled), work_kind: trade };
       // One package is remembered on the quote; two or three become its options next.
       const one = picked.length === 1 ? { roof_package_id: picked[0] } : {};
       let id = made.current;

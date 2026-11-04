@@ -258,7 +258,7 @@ counted.
     an invoice save: the credit stays earned.
 - **By hand:**
   - **Apply to an invoice…** a chosen open invoice of the referrer, one already in QuickBooks too
-    (the page says to change it there).
+    (the page says the credit goes there too: the books' copy is updated).
   - **Remove** it from an unpaid invoice: it's earned again and goes on their next invoice, never
     back on that one by itself.
   - **Keep off invoices** and **Apply automatically again**.

@@ -68,6 +68,7 @@ export function friendly(message: string) {
   if (/row-level security|permission denied|violates.*policy/i.test(message)) return "You don't have permission to do that in Crewtavo.";
   if (/violates foreign key|not present in table/i.test(message)) return "That record doesn't exist (or you can't see it).";
   if (/duplicate key/i.test(message)) return "There's already one with that name or link.";
+  if (/quotes_template_check/i.test(message)) return "A quote template is never sent, approved or closed. Make a quote from it first (create_quote with template_id).";
   if (/invalid input syntax|violates check constraint/i.test(message)) return "One of the values isn't valid.";
   if (/read-only transaction/i.test(message)) return ASSISTANT_READ_ONLY;
   return message.length > 160 || /relation|column|function|syntax/i.test(message) ? "That didn't work. Try again." : message;

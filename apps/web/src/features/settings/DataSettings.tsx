@@ -1,4 +1,7 @@
-/** Settings → Your data: everything the business keeps here as one .zip, to keep or to take to another app (exportData.ts). Owners only. */
+/**
+ * Settings → Your data: everything the business keeps here as one .zip, to keep or to take to another
+ * app (exportData.ts), and the open work brought over from Jobber (ImportJobberDialog). Owners only.
+ */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -7,10 +10,12 @@ import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/session";
 import { startTask } from "@/lib/tasks";
 import { exportEverything } from "./exportData";
+import { ImportJobberDialog } from "./ImportJobberDialog";
 
 export function DataSettings() {
   const session = useSession();
   const [step, setStep] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   // Reading everything can take a while, so it reports in the task island too, and carries on if you leave the page.
   const download = useMutation({
     meta: { inline: true },
@@ -33,6 +38,18 @@ export function DataSettings() {
 
   return (
     <div className="stack">
+      <div className="card card-pad stack-sm" style={{ gap: 12 }}>
+        <div className="stack-sm" style={{ gap: 2 }}>
+          <strong>Coming from Jobber?</strong>
+          <span className="muted small">
+            Bring over what&apos;s still open there: quotes waiting on clients, unpaid invoices with their balance, and active one-off and recurring jobs. Your clients can come with them. Nothing is sent to clients or charged.
+          </span>
+        </div>
+        <div>
+          <Button variant="primary" icon="upload" onClick={() => setImporting(true)}>Bring in your Jobber work</Button>
+        </div>
+        {importing && <ImportJobberDialog onClose={() => setImporting(false)} />}
+      </div>
       <div className="card card-pad stack-sm" style={{ gap: 12 }}>
         <div className="stack-sm" style={{ gap: 2 }}>
           <strong>Download all your data</strong>

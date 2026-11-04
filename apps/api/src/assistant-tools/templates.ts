@@ -1,6 +1,6 @@
 /**
  * Estimate templates (document_templates: how estimates and invoices look on paper) and the contract
- * sections they print (contract_sections), changed the way Settings → Estimate template and Settings
+ * sections they print (contract_sections), changed the way Settings → Document style and Settings
  * → Contract terms change them. The business's own letterhead pictures are cut from its stationery in
  * Crewtavo itself; an assistant can only choose between them and Crewtavo's.
  */
@@ -20,7 +20,7 @@ async function checkSections(ctx: ToolContext, ids: string[]) {
 export const templateTools = {
   list_document_templates: tool({
     description:
-      "The estimate templates: how estimates and invoices look on paper (letterhead, color, lettering, license and insurer lines, terms, the contract sections printed on every estimate and every invoice, signature lines, footer). The default prints unless a quote names another. None saved means documents print with the defaults shown.",
+      "The estimate templates (in Settings they are called document styles): how estimates and invoices look on paper (letterhead, color, lettering, license and insurer lines, terms, the contract sections printed on every estimate and every invoice, signature lines, footer). The default prints unless a quote names another. None saved means documents print with the defaults shown.",
     input: z.object({ ...companyArg }),
     run: async (ctx) => {
       const templates = await rows(ctx.db.from("document_templates").select("id, name, is_default, settings").eq("company_id", ctx.companyId).order("name"));

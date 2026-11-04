@@ -2,7 +2,9 @@ import { lineTotal, toCents } from "@crewtavo/core";
 import type { Db } from "../lib/supabase";
 /**
  * Accounting sync: push clients, invoices and payments to QuickBooks Online or Zoho Books.
- * Called from the outbox task with the admin client; every query filters by company_id.
+ * Called from the outbox task with the admin client; every query filters by company_id. An invoice
+ * the books have already is sent again when it changes (a late fee, a minimum charge, an edit:
+ * private.enqueue_accounting), through each one's update API, so the books keep up with it.
  *
  * QuickBooks item mapping lives in integrations.settings:
  *   { "environment": "production" | "sandbox", "item_map": { "<service uuid>": "<QBO Item Id>" }, "default_item_id": "1" }
@@ -117,7 +119,7 @@ async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknow
   return json;
 }
 
-async function zoho(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknown) {
+async function zoho(ctx: Ctx, method: "GET" | "POST" | "PUT", path: string, body?: unknown) {
   const { token, secret } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "zoho_books");
   const org = ctx.integration.external_account_id;
   if (!org) throw new IntegrationError("Zoho Books organization ID is missing; reconnect Zoho Books.");
@@ -173,9 +175,10 @@ async function pushClient(ctx: Ctx, clientId: string): Promise<string> {
   return contact.contact_id;
 }
 
-async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
+/** The books' copy of the invoice, sent now if it hasn't been; with `update`, one already sent is changed to match ours. */
+async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise<string> {
   const existing = await linked(ctx, "invoice", invoiceId);
-  if (existing) return existing;
+  if (existing && !update) return existing;
   const invoice = await one(
     ctx.admin
       .from("invoices")
@@ -188,26 +191,16 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
   const customerId = await pushClient(ctx, invoice.client_id);
   const lines = [...(invoice.invoice_line_items ?? [])].sort((a: any, b: any) => a.sort - b.sort);
   // Referral credits come off before tax with the discount, so the books see one discount for both.
-  // A credit put on after the invoice was pushed isn't sent (automatic credits wait for one that
-  // hasn't been: private.referral_credit_room).
+  // One put on after the invoice was pushed goes with its update.
   const discount = Math.round((Number(invoice.discount_amount ?? 0) + Number(invoice.credit_amount ?? 0)) * 100) / 100;
   // The lines' amounts in cents, before the discount and tax: with the date, what tells the one we
   // sent from an invoice of theirs with our number.
   const charged = lines.reduce((sum: number, line: any) => sum + toCents(lineTotal(line.quantity, line.unit_price)), 0);
 
   if (ctx.provider === "quickbooks") {
-    // Sent already: QuickBooks has an invoice with our number for this customer, dated as ours and
-    // with our lines' amounts (not our total: QuickBooks may work the tax out itself).
-    const query = encodeURIComponent(`select * from Invoice where DocNumber = '${String(invoice.number).replace(/'/g, "\\'")}'`);
-    const sent = ((await qbo(ctx, "GET", `query?query=${query}`)).QueryResponse?.Invoice ?? []).find(
-      (i: any) =>
-        i.CustomerRef?.value === customerId &&
-        i.TxnDate === invoice.issued_on &&
-        (i.Line ?? []).filter((l: any) => l.DetailType === "SalesItemLineDetail").reduce((sum: number, l: any) => sum + toCents(l.Amount), 0) === charged,
-    );
     const itemMap = (ctx.integration.settings.item_map ?? {}) as Record<string, string>;
     const defaultItem = String(ctx.integration.settings.default_item_id ?? "1");
-    const created = sent ?? (await qbo(ctx, "POST", "invoice", {
+    const body = {
       CustomerRef: { value: customerId },
       DocNumber: String(invoice.number),
       TxnDate: invoice.issued_on,
@@ -228,18 +221,32 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
         ...(discount > 0 ? [{ DetailType: "DiscountLineDetail", Amount: discount, DiscountLineDetail: { PercentBased: false } }] : []),
       ],
       ApplyTaxAfterDiscount: true,
-      ...(Number(invoice.tax_amount) > 0 ? { TxnTaxDetail: { TotalTax: Number(invoice.tax_amount) } } : {}),
-    })).Invoice;
+      // On an update, a tax gone to nothing is sent too, or QuickBooks keeps the one it had.
+      ...(Number(invoice.tax_amount) > 0 || existing ? { TxnTaxDetail: { TotalTax: Number(invoice.tax_amount) } } : {}),
+    };
+    if (existing) {
+      // A sparse update replaces the lines; it needs the invoice's SyncToken, which any change in the
+      // books moves on (a payment applied, an edit there), so it's read first. Sent again, it's the same change.
+      const current = (await qbo(ctx, "GET", `invoice/${encodeURIComponent(existing)}`)).Invoice;
+      await qbo(ctx, "POST", "invoice", { ...body, Id: existing, SyncToken: current?.SyncToken, sparse: true });
+      return existing;
+    }
+    // Sent already: QuickBooks has an invoice with our number for this customer, dated as ours and
+    // with our lines' amounts (not our total: QuickBooks may work the tax out itself).
+    const query = encodeURIComponent(`select * from Invoice where DocNumber = '${String(invoice.number).replace(/'/g, "\\'")}'`);
+    const sent = ((await qbo(ctx, "GET", `query?query=${query}`)).QueryResponse?.Invoice ?? []).find(
+      (i: any) =>
+        i.CustomerRef?.value === customerId &&
+        i.TxnDate === invoice.issued_on &&
+        (i.Line ?? []).filter((l: any) => l.DetailType === "SalesItemLineDetail").reduce((sum: number, l: any) => sum + toCents(l.Amount), 0) === charged,
+    );
+    const created = sent ?? (await qbo(ctx, "POST", "invoice", body)).Invoice;
     await remember(ctx, "invoice", invoiceId, created.Id, created.SyncToken);
     return created.Id;
   }
 
-  // Sent already: Zoho has an invoice for this customer with our number as its reference, dated as
-  // ours and coming to what we send (no tax goes to Zoho, so the lines less the discount and credits).
   const reference = String(invoice.number);
-  const sent = ((await zoho(ctx, "GET", `invoices?reference_number=${encodeURIComponent(reference)}&customer_id=${encodeURIComponent(customerId)}`)).invoices ?? [])
-    .find((i: any) => i.reference_number === reference && i.customer_id === customerId && i.date === invoice.issued_on && toCents(i.total) === charged - toCents(discount));
-  const created = sent ?? (await zoho(ctx, "POST", "invoices", {
+  const body = {
     customer_id: customerId,
     reference_number: reference,
     date: invoice.issued_on,
@@ -250,8 +257,19 @@ async function pushInvoice(ctx: Ctx, invoiceId: string): Promise<string> {
       rate: Number(line.unit_price),
       quantity: Number(line.quantity),
     })),
-    ...(discount > 0 ? { discount, discount_type: "entity_level", is_discount_before_tax: true } : {}),
-  })).invoice;
+    // On an update, a discount gone to nothing is sent too, or Zoho keeps the one it had.
+    ...(discount > 0 || existing ? { discount, discount_type: "entity_level", is_discount_before_tax: true } : {}),
+  };
+  if (existing) {
+    // The lines sent (without Zoho's line ids) replace the ones it has. Sent again, it's the same change.
+    await zoho(ctx, "PUT", `invoices/${encodeURIComponent(existing)}`, body);
+    return existing;
+  }
+  // Sent already: Zoho has an invoice for this customer with our number as its reference, dated as
+  // ours and coming to what we send (no tax goes to Zoho, so the lines less the discount and credits).
+  const sent = ((await zoho(ctx, "GET", `invoices?reference_number=${encodeURIComponent(reference)}&customer_id=${encodeURIComponent(customerId)}`)).invoices ?? [])
+    .find((i: any) => i.reference_number === reference && i.customer_id === customerId && i.date === invoice.issued_on && toCents(i.total) === charged - toCents(discount));
+  const created = sent ?? (await zoho(ctx, "POST", "invoices", body)).invoice;
   await remember(ctx, "invoice", invoiceId, created.invoice_id);
   return created.invoice_id;
 }
@@ -331,7 +349,8 @@ export async function runAccountingJob(env: Env, admin: Db, row: { company_id: s
     provider: integration.provider as Accounting,
     integration: { external_account_id: integration.external_account_id, settings: (integration.settings ?? {}) as Record<string, unknown> },
   };
-  if (row.topic === "accounting.invoice") await pushInvoice(ctx, row.payload.invoice_id);
+  // Queued when it's sent, and again when it changes after: one the books have is updated.
+  if (row.topic === "accounting.invoice") await pushInvoice(ctx, row.payload.invoice_id, true);
   else if (row.topic === "accounting.payment") await pushPayment(ctx, row.payload.payment_id);
   else throw new IntegrationError(`Unknown topic ${row.topic}`);
 

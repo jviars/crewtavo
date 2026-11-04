@@ -16,12 +16,15 @@
 import {
   actionsForTrigger,
   addDays,
+  arrivalWindowMin,
   autopaySettings,
+  etaWords,
   evaluateConditions,
   isAutopayTrigger,
   localDate,
   memberPermissions,
   renderTemplate,
+  slotLabel,
   STATUS_ACTION_CHOICES,
   statusChoices,
   taskVars,
@@ -47,7 +50,7 @@ import { sendAutopayInvite } from "./autopay";
 import { logoImage } from "./logo";
 import { sendReferralAsk } from "./referrals";
 import { Busy, sendReviewRequest, WaitUntil } from "./reviews";
-import { isRoofWork } from "./roofPackages";
+import { isRoofWork, roofingOn, workKind, type WorkKind } from "./roofPackages";
 import { optionsFrom } from "./sales";
 import { noteRefusedText } from "./textsOff";
 
@@ -114,6 +117,13 @@ export function money(amount: number | string | null | undefined, currency = "US
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(amount ?? 0));
 }
 
+/** A visit's time as a client reads it: " at 9:00 AM", or with the business's arrival window " between 9:00 AM and 11:00 AM". */
+export function visitTime(startsAt: string, timeZone: string, windowMin = 0) {
+  const at = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+  const start = new Date(startsAt).getTime();
+  return windowMin ? ` between ${at(start)} and ${at(start + windowMin * 60_000)}` : ` at ${at(start)}`;
+}
+
 /** A price range as a client reads it: "$18,300 to $21,050" (cents only when an end has them). */
 export function moneyRange(low: number | string | null | undefined, high: number | string | null | undefined, currency = "USD") {
   const ends = [Number(low ?? 0), Number(high ?? 0)];
@@ -128,13 +138,15 @@ type Property = { line1: string; city: string | null; region: string | null } | 
 const addressOf = (p: Property) => (p ? [p.line1, [p.city, p.region].filter(Boolean).join(", ")].filter(Boolean).join(", ") : "");
 
 /**
- * Whether a quote is roof work (roofPackages.ts isRoofWork): the business is a roofer or its newest
- * measurement is a roof, or the quote went out as a price range (only Roofing sends those).
+ * Whether a quote is roof work (roofPackages.ts isRoofWork): its own kind of work with both Roofing
+ * and Paving, else the business has Roofing installed or its newest measurement is a roof, or the
+ * quote went out as a price range (only Roofing sends those).
  */
-async function roofWork(admin: Db, company: CompanyInfo, quoteId: string, sentAsRange: boolean): Promise<boolean> {
-  if (sentAsRange || isRoofWork(company.trade_preset, null)) return true;
+async function roofWork(admin: Db, company: CompanyInfo, quoteId: string, sentAsRange: boolean, kind: WorkKind | null): Promise<boolean> {
+  if (sentAsRange || isRoofWork(roofingOn(company.settings), null, kind)) return true;
+  if (kind) return false;
   const { data } = await admin.from("measurements").select("sections, roof_pitch, roofing_squares").eq("company_id", company.id).eq("quote_id", quoteId).order("updated_at", { ascending: false }).limit(1);
-  return isRoofWork(company.trade_preset, data?.[0] ?? null);
+  return isRoofWork(roofingOn(company.settings), data?.[0] ?? null);
 }
 
 /** When the client's last visit was: their latest completed job visit or assessment, on a job or a request of theirs. */
@@ -217,7 +229,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
       const { data } = await admin
         .from("quotes")
         .select(
-          "number, title, status, total, tax_rate, discount_amount, range_low, range_high, priced_on_site_at, exact_sent_at, roof_package_id, option_id, client_id, property_id, property:properties(line1, city, region), promo:promo_codes(kind, value), lines:quote_line_items(name, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)",
+          "number, title, status, total, tax_rate, discount_amount, range_low, range_high, priced_on_site_at, exact_sent_at, roof_package_id, work_kind, option_id, client_id, property_id, package:roof_packages!quotes_roof_package_fkey(roof_service_id), property:properties(line1, city, region), promo:promo_codes(kind, value), lines:quote_line_items(name, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)",
         )
         .eq("company_id", companyId)
         .eq("id", subjectId)
@@ -244,7 +256,8 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
       label = `Quote #${data.number}`;
       // A roof package's estimate is worked on in Roofing, where the office books the visit. Every
       // trade has packages now, so a package alone doesn't make it a roof.
-      appPath = data.roof_package_id && (await roofWork(admin, co, subjectId, data.range_low !== null)) ? `/roofing/${subjectId}` : `/quotes/${subjectId}`;
+      const kind = workKind(co.settings, data.work_kind, data.package ? [data.package.roof_service_id] : []);
+      appPath = data.roof_package_id && (await roofWork(admin, co, subjectId, data.range_low !== null, kind)) ? `/roofing/${subjectId}` : `/quotes/${subjectId}`;
       break;
     }
     case "job": {
@@ -270,7 +283,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
     case "visit": {
       const { data } = await admin
         .from("visits")
-        .select("title, kind, status, scheduled_on, starts_at, job_id, property_id, property:properties(line1, city, region, client_id), job:jobs(client_id, kind), request:requests(client_id)")
+        .select("title, kind, status, scheduled_on, starts_at, eta_at, job_id, property_id, property:properties(line1, city, region, client_id), job:jobs(client_id, kind), request:requests(client_id)")
         .eq("company_id", companyId)
         .eq("id", subjectId)
         .maybeSingle();
@@ -286,7 +299,8 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
         title: data.title,
         address: addressOf(rel.property),
         date: date ? new Date(date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: data.starts_at ? tz : "UTC" }) : "",
-        time: data.starts_at ? ` at ${new Date(data.starts_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })}` : "",
+        time: data.starts_at ? visitTime(data.starts_at, tz, arrivalWindowMin(co.settings)) : "",
+        eta: etaWords(data.eta_at),
       };
       label = data.title;
       appPath = data.job_id ? `/jobs/${data.job_id}` : "/schedule";
@@ -380,7 +394,9 @@ async function withHomeLink(env: Env, ctx: RunContext, baseUrl: string | null): 
  * {{referral.name}} (the friend's first name), {{referral.credit}} and {{referral.invoice}} (the
  * invoice it went on, if it did). Autopay's give
  * {{autopay.card}} ("Visa ending 4242"), {{autopay.reason}} (why a charge failed) and
- * {{autopay.expires}} ("08/28"), as private.emit wrote them into the activity's data.
+ * {{autopay.expires}} ("08/28"), as private.emit wrote them into the activity's data. A client's ask
+ * to move or cancel a visit gives {{change.when}} (the time asked for, as the Hub showed it),
+ * {{change.message}} and {{change.reason}}, from the request itself: the activity names only which.
  */
 export async function withEvent(admin: Db, ctx: RunContext, trigger: string, activityId: number | null | undefined): Promise<RunContext> {
   if (!triggerDef(trigger)?.variables?.length || activityId == null) return ctx;
@@ -394,6 +410,11 @@ export async function withEvent(admin: Db, ctx: RunContext, trigger: string, act
   }
   if (isAutopayTrigger(trigger)) {
     return { ...ctx, vars: { ...ctx.vars, autopay: { ...autopayVars(ctx.vars), card: text(event.card), reason: text(event.reason), expires: text(event.expires) } } };
+  }
+  if (trigger === "visit.reschedule_requested" || trigger === "visit.cancel_requested") {
+    const { data: ask } = await admin.from("visit_change_requests").select("starts_at, scheduled_on, message, reason").eq("company_id", ctx.company.id).eq("id", text(event.request_id)).maybeSingle();
+    const when = ask?.scheduled_on ? slotLabel({ date: ask.scheduled_on, starts_at: ask.starts_at }, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings)) : "";
+    return { ...ctx, vars: { ...ctx.vars, change: { when, message: text(ask?.message), reason: text(ask?.reason) } } };
   }
   return {
     ...ctx,

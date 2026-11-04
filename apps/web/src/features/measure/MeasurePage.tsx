@@ -16,6 +16,7 @@ import { ROOF_EDGE_COLORS } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useSearchParams } from "react-router-dom";
+import { featureOn } from "@/components/shell/nav";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -38,6 +39,7 @@ import { ImageryPicker } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
 import { useTooLarge } from "../plans/UploadLimit";
+import { isRoofingCompany } from "../roofing/data";
 import { isSavedPlan, LineUpBanner, PlanCard, usePlanOnMap } from "./PlanOnMap";
 import { FindPaving } from "./FindPaving";
 import { formatItemTotal, ItemSelect, PavingItemsCard } from "./PavingItems";
@@ -348,14 +350,15 @@ export function MeasurePage() {
   const cubicYards = depthIn ? (summary.total_area_sqft * (depthIn / 12)) / 27 : 0;
   const asphaltTons = depthIn ? (summary.total_area_sqyd * depthIn * 110) / 2000 : 0;
   const shapesRef = useListAnimation<HTMLDivElement>();
-  // Roofing shows the roof tools on every row; anyone else gets them once they set a pitch or an edge.
-  const roofing = company.trade_preset === "roofing_exteriors" || params.has("roofing") || roofOpen || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
-  // The roof, step by step (RoofSteps.tsx), for roofers and a roof opened from Roofing.
-  const roofSteps = company.trade_preset === "roofing_exteriors" || params.has("roofing");
+  // With Roofing installed the roof tools show on every row; anyone else gets them once they set a pitch or an edge.
+  const roofer = isRoofingCompany(company);
+  const roofing = roofer || params.has("roofing") || roofOpen || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
+  // The roof, step by step (RoofSteps.tsx), with Roofing installed and for a roof opened from Roofing.
+  const roofSteps = roofer || params.has("roofing");
   const mapNames = useMemo(() => Object.fromEntries(shapes.map((s) => [s.id, labels[s.id]?.trim() || names[s.id]])), [shapes, labels, names]);
   const mapValues = useMemo(() => Object.fromEntries(summary.sections.map((s) => [s.feature_id, s.value])), [summary]);
-  // Paving: the items panel shows for paving businesses, a takeoff opened from Paving, or a drawing with items.
-  const paving = company.trade_preset === "paving" || params.has("paving") || Object.keys(items).length > 0;
+  // Paving: the items panel shows with Paving installed, for a takeoff opened from Paving, or a drawing with items.
+  const paving = featureOn(company.settings, "paving_app") || params.has("paving") || Object.keys(items).length > 0;
   // Paving items and roof edges show in their own colors, the ones the legend and the sheet use.
   const mapColors = useMemo(
     () => ({
@@ -1342,7 +1345,7 @@ export function MeasurePage() {
             )}
 
             {pitchError && shapes.length > 0 && <div className="field-error" role="alert">{pitchError}</div>}
-            {company.trade_preset === "roofing_exteriors" ? [roofCard, depthCard] : [depthCard, roofCard]}
+            {roofer ? [roofCard, depthCard] : [depthCard, roofCard]}
         </aside>
         {!panelShown && (
           <button type="button" className="measure-panel-show" onClick={() => showPanel(true)} title="Show the panel: takeoff items, shapes and totals">

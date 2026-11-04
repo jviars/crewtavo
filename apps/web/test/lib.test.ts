@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/lib/api", () => ({ supabase: () => ({}) }));
 const { uploadBody } = await import("../src/lib/files");
-const { dateIn, formatDateTime, formatTime } = await import("../src/lib/format");
+const { dateIn, formatDateTime, formatMoney, formatMoneyCents, formatMoneyCompact, formatTime, moneyCurrency, setCurrency, timeZoneChoices } = await import("../src/lib/format");
 
 describe("dates and times in the company's zone", () => {
   it("gives the date where the company is, not the UTC date", () => {
@@ -15,6 +15,40 @@ describe("dates and times in the company's zone", () => {
     expect(formatTime("2026-10-16T13:00:00Z", "America/New_York")).toBe("9:00 AM");
     expect(formatTime("2026-10-16T13:00:00Z", "America/Los_Angeles")).toBe("6:00 AM");
     expect(formatDateTime("2026-10-17T00:30:00Z", "America/New_York")).toBe("Fri, Oct 16, 8:30 PM");
+  });
+});
+
+describe("money in the business's currency", () => {
+  afterEach(() => setCurrency("USD"));
+
+  it("keeps US number style and changes only the symbol", () => {
+    expect(formatMoneyCents(1234.5)).toBe("$1,234.50");
+    setCurrency("GBP");
+    expect(formatMoney(1234.5)).toBe("£1,235");
+    expect(formatMoneyCents(1234.5)).toBe("£1,234.50");
+    expect(formatMoneyCompact(12_345)).toBe("£12.3K");
+    expect(formatMoneyCompact(711)).toBe("£711");
+    setCurrency("cad");
+    expect(moneyCurrency()).toBe("CAD");
+    expect(formatMoneyCents(20)).toBe("CA$20.00");
+  });
+
+  it("keeps the last currency for a code that isn't one", () => {
+    setCurrency("EUR");
+    setCurrency("dollars");
+    expect(formatMoneyCents(5)).toBe("€5.00");
+    setCurrency(null);
+    expect(formatMoneyCents(5)).toBe("$5.00");
+  });
+});
+
+describe("time zones to pick from", () => {
+  it("lists the business's own first, then the US ones, then every other once", () => {
+    const zones = timeZoneChoices("Europe/Berlin");
+    expect(zones.slice(0, 3)).toEqual(["Europe/Berlin", "America/New_York", "America/Chicago"]);
+    expect(zones).toContain("Asia/Tokyo");
+    expect(new Set(zones).size).toBe(zones.length);
+    expect(timeZoneChoices("America/Chicago")[0]).toBe("America/Chicago");
   });
 });
 

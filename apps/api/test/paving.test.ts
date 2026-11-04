@@ -8,11 +8,11 @@ import { encryptJson } from "../src/lib/crypto";
 // that eq, in and not filter, with insert and upsert adding rows. fal.ai is a fake fetch that keeps
 // what it was sent.
 type Row = Record<string, unknown>;
-const state = vi.hoisted(() => ({ tables: {} as Record<string, Row[]> }));
+const state = vi.hoisted(() => ({ tables: {} as Record<string, Row[]>, rpcs: [] as Array<[string, unknown]> }));
 vi.mock("../src/lib/supabase", () => {
   const client = () => ({
     auth: { getClaims: async () => ({ data: { claims: { sub: "viewer" } }, error: null }) },
-    rpc: async () => ({ data: true, error: null }),
+    rpc: async (name: string, args: unknown) => (state.rpcs.push([name, args]), { data: true, error: null }),
     from: (table: string) => {
       const filters: Array<(row: Row) => boolean> = [];
       const rows = () => (state.tables[table] ?? []).filter((row) => filters.every((keep) => keep(row)));
@@ -63,6 +63,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   state.tables = {};
+  state.rpcs = [];
 });
 
 async function paver({ falKey }: { falKey?: string } = {}) {
@@ -166,5 +167,19 @@ describe("roofing price book", () => {
     expect(state.tables.services.find((s) => s.name === "Tear-off and disposal")).toMatchObject({ formula: "roof_squares" });
     expect(state.tables.services.find((s) => s.name === "Steep roof charge")).toMatchObject({ formula: "steep_squares" });
     expect(state.tables.services.find((s) => s.name === "Pipe boot")).toMatchObject({ formula: null, unit: "ea" });
+  });
+});
+
+describe("Paving and Roofing as apps", () => {
+  it("install and uninstall from Apps, for owners and admins who connect apps", async () => {
+    await paver();
+    expect(await (await send("/roofing/enabled", { enabled: true })).json()).toEqual({ enabled: true });
+    expect(await (await send("/paving/enabled", { enabled: false })).json()).toEqual({ enabled: false });
+    expect(state.rpcs.filter(([name]) => name === "trade_app_set_enabled")).toEqual([
+      ["trade_app_set_enabled", { p_company: PAVER, p_app: "roofing", p_enabled: true }],
+      ["trade_app_set_enabled", { p_company: PAVER, p_app: "paving", p_enabled: false }],
+    ]);
+    state.tables.memberships![0]!.role = "office";
+    expect((await send("/roofing/enabled", { enabled: false })).status).toBe(403);
   });
 });

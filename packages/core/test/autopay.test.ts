@@ -4,6 +4,7 @@ import {
   AUTOPAY_STATUS_TEXT,
   AUTOPAY_TERMS_MAX,
   autopayAllowed,
+  autopayCoversMonthly,
   autopayDueText,
   autopaySettings,
   autopayTimingText,
@@ -17,6 +18,7 @@ import {
   methodExpiry,
   methodLabel,
   pickTemplate,
+  PRESETS,
   starterAutopayTerms,
   taskVars,
   templateSettings,
@@ -29,7 +31,7 @@ import {
   type Action,
 } from "../src";
 
-const LAWN = "We charge the card on file after each visit is done, and for other invoices we send you. You'll get a receipt each time. Turn it off anytime from your client page or by calling us.";
+const LAWN = "We charge the card on file after each visit is done, or once a month for a monthly plan, and for other invoices we send you. You'll get a receipt each time. Turn it off anytime from your client page or by calling us.";
 
 describe("autopay settings", () => {
   it("start from the trade's starter terms, the end of the day, a $500 cap and receipts, with autopay off", () => {
@@ -37,17 +39,23 @@ describe("autopay settings", () => {
       enabled: false, terms: LAWN, terms_version: "starter-lawn_exterior-1", timing: "end_of_day", days: null,
       max_amount: 500, receipts: true, jobs_default: true, card_required: false, changed_at: null, changed_by: null,
     });
-    // Only lawn companies get autopay on for new recurring jobs by default.
-    for (const trade of ["general", "paving", "roofing_exteriors"]) expect(autopaySettings({}, trade).jobs_default).toBe(false);
+    // Only the plan trades (lawn care, cleaning, pool service, pest control) get autopay on for new recurring jobs by default.
+    for (const trade of ["cleaning", "pool_service", "pest_control"]) expect(autopaySettings({}, trade).jobs_default).toBe(true);
+    for (const trade of ["general", "paving", "roofing_exteriors", "plumbing", "hvac", "electrical", "handyman", "landscaping"]) expect(autopaySettings({}, trade).jobs_default).toBe(false);
   });
 
   it("have starter terms for every trade that cover other invoices too (Charge card), and the general ones for a trade they don't know", () => {
     expect(starterAutopayTerms("lawn_exterior")).toBe(LAWN);
-    expect(starterAutopayTerms("general")).toBe("We charge the card on file when each visit or job is done, and for other invoices we send you. You'll get a receipt each time. Turn it off anytime from your client page or by calling us.");
+    expect(starterAutopayTerms("general")).toBe("We charge the card on file when each visit or job is done, or once a month for a monthly plan, and for other invoices we send you. You'll get a receipt each time. Turn it off anytime from your client page or by calling us.");
     const bigJobs = "We charge the card on file when the work on your job is done, and for other invoices we send you. Charges over the amount we agreed wait until we've talked with you. You'll get a receipt each time. Turn it off anytime from your client page or by calling us.";
     expect(starterAutopayTerms("paving")).toBe(bigJobs);
     expect(starterAutopayTerms("roofing_exteriors")).toBe(bigJobs);
     expect(starterAutopayTerms("snow")).toBe(starterAutopayTerms("general"));
+    // The plan trades talk about each visit, like lawn care; the other new trades get the general words.
+    expect(starterAutopayTerms("cleaning")).toBe(LAWN.replace("each visit is done", "each cleaning"));
+    expect(starterAutopayTerms("pool_service")).toBe(LAWN.replace("each visit is done", "each pool service visit"));
+    expect(starterAutopayTerms("pest_control")).toBe(LAWN.replace("each visit is done", "each treatment"));
+    for (const trade of ["plumbing", "hvac", "electrical", "handyman", "landscaping"]) expect(starterAutopayTerms(trade)).toBe(starterAutopayTerms("general"));
     expect(starterAutopayTerms(null)).toBe(starterAutopayTerms("general"));
     expect(autopaySettings(null).terms_version).toBe("starter-general-1");
     expect(autopaySettings(null, "snow")).toMatchObject({ terms: starterAutopayTerms("general"), terms_version: "starter-snow-1" });
@@ -98,6 +106,16 @@ describe("autopay settings", () => {
     for (const [kind, mode] of [["recurring", "on_completion"], ["recurring", "fixed_schedule"], ["one_off", "per_visit"], ["one_off", "progress"], [null, null], [undefined, "per_visit"]] as const) {
       expect(autopayAllowed(kind, mode)).toBe(false);
     }
+  });
+
+  it("are also for monthly plans: recurring, a fixed price, invoiced monthly, whose agreement says so", () => {
+    expect(autopayAllowed("recurring", "fixed_schedule", "fixed", "monthly")).toBe(true);
+    expect(autopayAllowed("recurring", "fixed_schedule", "fixed", "as_needed")).toBe(false);
+    expect(autopayAllowed("recurring", "fixed_schedule", "per_visit", "monthly")).toBe(false);
+    expect(autopayAllowed("one_off", "fixed_schedule", "fixed", "monthly")).toBe(false);
+    for (const trade of ["lawn_exterior", "cleaning", "pool_service", "pest_control", "general", "snow"]) expect(autopayCoversMonthly(starterAutopayTerms(trade))).toBe(true);
+    expect(autopayCoversMonthly(starterAutopayTerms("paving"))).toBe(false);
+    expect(autopayCoversMonthly("We charge the card on file after each visit is done.")).toBe(false);
   });
 });
 
@@ -192,7 +210,8 @@ describe("document terms by trade", () => {
     expect(defaultTerms("roofing_exteriors")).toBe(DEFAULT_TERMS);
     expect(defaultTerms("snow")).toBe(DEFAULT_TERMS);
     expect(defaultTerms(null)).toBe(DEFAULT_TERMS);
-    expect(Object.keys(TRADE_TERMS).sort()).toEqual(["general", "lawn_exterior", "paving", "roofing_exteriors"]);
+    // Every trade has its own, so none falls back to the deposit wording by accident.
+    expect(Object.keys(TRADE_TERMS).sort()).toEqual(Object.keys(PRESETS).sort());
     expect(DEFAULT_TERMS).toBe("Payment: a deposit to get on the schedule, and the rest when the work is done.\nChanges: anything not listed here is extra, and only with your OK.\nWarranty: we stand behind our workmanship, plus the manufacturer's warranty on materials.");
   });
 

@@ -1,0 +1,338 @@
+{
+  "id": "electrical",
+  "name": "Electrical",
+  "description": "Service calls, outlets and wiring, lighting, panel upgrades, EV chargers and generator hookups.",
+  "services": [
+    {
+      "name": "Service call",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 99
+    },
+    {
+      "name": "Labor",
+      "category": "Service and labor",
+      "unit": "hr",
+      "unit_price": 115
+    },
+    {
+      "name": "After-hours call fee",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 150
+    },
+    {
+      "name": "Electrical permit",
+      "category": "Service and labor",
+      "unit": "ea",
+      "unit_price": 150
+    },
+    {
+      "name": "Outlet or switch replacement",
+      "category": "Outlets and wiring",
+      "unit": "ea",
+      "unit_price": 125
+    },
+    {
+      "name": "GFCI outlet install",
+      "category": "Outlets and wiring",
+      "unit": "ea",
+      "unit_price": 165
+    },
+    {
+      "name": "New 20-amp circuit",
+      "category": "Outlets and wiring",
+      "unit": "ea",
+      "unit_price": 425
+    },
+    {
+      "name": "Underground wire run",
+      "category": "Outlets and wiring",
+      "unit": "ft",
+      "unit_price": 22
+    },
+    {
+      "name": "Smoke and CO detector install",
+      "category": "Outlets and wiring",
+      "unit": "ea",
+      "unit_price": 95
+    },
+    {
+      "name": "Light fixture install",
+      "category": "Lighting and fans",
+      "unit": "ea",
+      "unit_price": 165
+    },
+    {
+      "name": "Recessed light install",
+      "category": "Lighting and fans",
+      "unit": "ea",
+      "unit_price": 195
+    },
+    {
+      "name": "Ceiling fan install",
+      "category": "Lighting and fans",
+      "unit": "ea",
+      "unit_price": 225
+    },
+    {
+      "name": "Panel upgrade, 200 amp",
+      "category": "Panels and systems",
+      "unit": "ea",
+      "unit_price": 2850,
+      "unit_cost": 900
+    },
+    {
+      "name": "Whole-home surge protector",
+      "category": "Panels and systems",
+      "unit": "ea",
+      "unit_price": 395,
+      "unit_cost": 120
+    },
+    {
+      "name": "EV charger install, Level 2",
+      "category": "Panels and systems",
+      "unit": "ea",
+      "unit_price": 1150,
+      "unit_cost": 250
+    },
+    {
+      "name": "Generator inlet and interlock",
+      "category": "Panels and systems",
+      "unit": "ea",
+      "unit_price": 850,
+      "unit_cost": 220
+    },
+    {
+      "name": "Home electrical safety inspection",
+      "category": "Panels and systems",
+      "unit": "visit",
+      "unit_price": 175
+    }
+  ],
+  "formulas": [],
+  "checklists": [
+    {
+      "name": "Panel upgrade",
+      "services": [
+        "Panel upgrade, 200 amp",
+        "Whole-home surge protector"
+      ],
+      "items": [
+        {
+          "key": "permit_number",
+          "label": "Permit number",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "utility_disconnect_coordinated",
+          "label": "Utility disconnect coordinated",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "grounding_and_bonding_checked",
+          "label": "Grounding and bonding checked",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "lugs_torqued_to_spec",
+          "label": "Lugs torqued to spec",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "circuits_labeled",
+          "label": "Circuits labeled on the panel directory",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "voltage_at_panel",
+          "label": "Voltage at the panel (V)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "panel_photos",
+          "label": "Panel photos, cover off and on",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "inspection",
+          "label": "Inspection",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Passed",
+            "Scheduled",
+            "Not required"
+          ]
+        },
+        {
+          "key": "customer_signature",
+          "label": "Customer signature",
+          "type": "signature",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "EV charger install",
+      "services": [
+        "EV charger install, Level 2"
+      ],
+      "items": [
+        {
+          "key": "load_calculation_done",
+          "label": "Load calculation done",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "breaker_size_amps",
+          "label": "Breaker size (amps)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "wire_size",
+          "label": "Wire size used",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "charger_tested",
+          "label": "Charger tested with the car or a tester",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "app_set_up",
+          "label": "Charger app or Wi-Fi set up",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "photo_of_charger_and_breaker",
+          "label": "Photo of the charger and breaker",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "customer_signature",
+          "label": "Customer signature",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Electrical service call",
+      "services": [
+        "Service call",
+        "After-hours call fee",
+        "Outlet or switch replacement",
+        "GFCI outlet install",
+        "Light fixture install"
+      ],
+      "items": [
+        {
+          "key": "problem_found",
+          "label": "Problem found",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "work_done",
+          "label": "Work done",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "tested_with_a_meter",
+          "label": "Circuits tested with a meter",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photo",
+          "required": false
+        },
+        {
+          "key": "customer_signature",
+          "label": "Customer signature",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Request electrical service",
+      "slug": "request-electrical-service",
+      "kind": "request",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Service address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "issue",
+          "label": "What do you need?",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Outlets or switches",
+            "Lights or fans",
+            "Panel or breakers",
+            "EV charger",
+            "Power out in part of the building",
+            "Something else"
+          ]
+        },
+        {
+          "key": "burning_smell_or_sparks",
+          "label": "Any burning smell, sparks or hot outlets?",
+          "type": "yes_no",
+          "required": true
+        },
+        {
+          "key": "year_built",
+          "label": "Year the building was built",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "details",
+          "label": "Tell us more",
+          "type": "long_text",
+          "required": false
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [],
+  "sop_categories": [
+    "Safety and lockout",
+    "Service calls",
+    "Panels and wiring",
+    "Permits and inspections"
+  ]
+}

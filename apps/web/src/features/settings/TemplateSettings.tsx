@@ -1,5 +1,5 @@
 /**
- * Settings → Estimate template: how a business's estimates, proposals and invoices look, in every
+ * Settings → Document style: how a business's estimates, proposals and invoices look, in every
  * trade. The letterhead (Crewtavo's in a style, color and lettering, or the business's own, uploaded),
  * the license and insurer, the contract (the terms printed above the signatures, and which of the
  * business's contract sections every estimate and every invoice prints, from Settings → Contract
@@ -45,13 +45,28 @@ type SectionId = "letterhead" | "details" | "contract" | "signatures" | "footer"
 /** Before the contract sections load (or when there are none). */
 const NO_SECTIONS: LibrarySection[] = [];
 
+/** The tagline's placeholder, in the trade's words (companies.trade_preset). */
+const TAGLINES: Record<string, string> = {
+  roofing_exteriors: "Roofing · Siding · Gutters",
+  lawn_exterior: "Mowing · Cleanups · Snow removal",
+  paving: "Paving · Sealcoating · Striping",
+  landscaping: "Design · Planting · Patios",
+  plumbing: "Repairs · Drains · Water heaters",
+  hvac: "Heating · Cooling · Maintenance plans",
+  electrical: "Repairs · Panels · EV chargers",
+  handyman: "Repairs · Installs · Odd jobs",
+  cleaning: "Homes · Offices · Move-outs",
+  pool_service: "Weekly service · Openings · Repairs",
+  pest_control: "Pest plans · Termites · Rodents",
+};
+
 export function TemplateSettings() {
   const templates = useTemplates();
   const [selected, setSelected] = useState<string | null>(null);
 
   if (templates.isPending) {
     return (
-      <Loading label="Loading your estimate template">
+      <Loading label="Loading your document style">
         <div className="stack">
           <CardSkeleton lines={2} />
           <div className="two-col">
@@ -99,7 +114,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   const save = useMutation({
     // The button says it saved, except after the first save: the editor starts again on the new
     // template then, so a toast says it instead.
-    meta: { inline: true, success: (r: { first: boolean }) => (r.first ? "Template saved" : null) },
+    meta: { inline: true, success: (r: { first: boolean }) => (r.first ? "Document style saved" : null) },
     mutationFn: async () => {
       const settings = templateSettings(t, trade);
       if (row) {
@@ -133,7 +148,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   });
 
   const rename = useMutation({
-    meta: { inline: true, success: "Template renamed" },
+    meta: { inline: true, success: "Document style renamed" },
     mutationFn: async (name: string) => unwrap(await supabase().from("document_templates").update({ name }).eq("id", row!.id)),
     onSuccess: () => {
       setNaming(null);
@@ -159,7 +174,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   // Gone at once, with Undo. Quotes that use it print with the default template once it's deleted for real.
   const deleteTemplate = (doomed: TemplateRow) =>
     undoable({
-      title: "Template deleted",
+      title: "Document style deleted",
       hide: () => {
         void queryClient.cancelQueries({ queryKey: templatesKey(company.id) });
         queryClient.setQueryData<TemplateRow[]>(templatesKey(company.id), (old) => old?.filter((r) => r.id !== doomed.id));
@@ -174,7 +189,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   const justSaved = useJustDone(save);
 
   /** Leaving a template with changes that aren't saved asks first. */
-  const leave = async () => !dirty || confirm({ title: "Discard your changes?", body: "The changes you made to this template aren't saved.", confirmLabel: "Discard changes", danger: true });
+  const leave = async () => !dirty || confirm({ title: "Discard your changes?", body: "The changes you made to this style aren't saved.", confirmLabel: "Discard changes", danger: true });
 
   // If the business's details can't load, the page still shows what the session knows.
   const doc = letterhead.data ?? documentCompany(company);
@@ -210,12 +225,12 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
     <div className={styles.wrap}>
       <div className={`card card-pad ${styles.bar}`}>
         <div className={styles.intro}>
-          <h2>Estimate template</h2>
+          <h2>Document style</h2>
           <p>How your estimates, proposals and invoices look. Change anything below and the page follows.</p>
         </div>
         <div className={styles.tools}>
           <label className={styles.picker}>
-            Template
+            Style
             <select
               className="select"
               value={row?.id ?? ""}
@@ -227,15 +242,15 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
               {rows.length ? rows.map((r) => <option key={r.id} value={r.id}>{r.name}{r.is_default ? " (default)" : ""}</option>) : <option value="">Standard (default)</option>}
             </select>
           </label>
-          <Button icon="plus" onClick={async () => (await leave()) && setNaming("new")}>New template</Button>
+          <Button icon="plus" onClick={async () => (await leave()) && setNaming("new")}>New style</Button>
           <Menu
-            label="More for this template"
+            label="More for this style"
             items={[
               { label: "Rename", icon: "edit", hidden: !row, onSelect: () => setNaming("rename") },
               { label: "Make it the default", icon: "check", hidden: !row || isDefault, onSelect: () => makeDefault.mutate() },
               { separator: true, hidden: !row || isDefault },
               {
-                label: "Delete template",
+                label: "Delete style",
                 icon: "trash",
                 danger: true,
                 hidden: !row || isDefault,
@@ -246,7 +261,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
           <span className={styles.spacer} />
           {dirty && <span className={styles.dirty}>Not saved yet</span>}
           <Button icon="printer" onClick={() => void printDocument()}>Print a sample</Button>
-          <Button variant="primary" icon="check" loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved} onClick={() => save.mutate()}>Save template</Button>
+          <Button variant="primary" icon="check" loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved} onClick={() => save.mutate()}>Save style</Button>
         </div>
         <span className={styles.which}>
           {isDefault ? "Used for every estimate and invoice, unless a quote picks another." : "Used on the quotes that pick it. Pick it on a quote, beside its totals."}
@@ -337,7 +352,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
               {isAdmin ? <Link to="/settings?tab=company">Change in Settings → Company</Link> : <span className="small">An admin can change these in Settings → Company.</span>}
             </div>
             <Field label="Under the name" optional hint="A few words on what you do.">
-              <input className="input" value={t.tagline} maxLength={TEMPLATE_LIMITS.tagline} placeholder={company.trade_preset === "roofing_exteriors" ? "Roofing · Siding · Gutters" : "What you do, in a few words"} onChange={(e) => set("tagline", e.target.value)} />
+              <input className="input" value={t.tagline} maxLength={TEMPLATE_LIMITS.tagline} placeholder={(company.trade_preset && TAGLINES[company.trade_preset]) || "What you do, in a few words"} onChange={(e) => set("tagline", e.target.value)} />
             </Field>
             <div className={styles.pair}>
               <Field label="License number" optional>
@@ -445,9 +460,9 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
       <PrintableDocument template={preview.template} company={doc} data={preview.data} />
       {naming === "new" && (
         <NameDialog
-          title="New template"
+          title="New style"
           description={`It starts as a copy of “${name}”.`}
-          confirmLabel="Make the template"
+          confirmLabel="Make the style"
           pending={create.isPending}
           error={create.error}
           taken={rows.map((r) => r.name)}
@@ -457,7 +472,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
       )}
       {naming === "rename" && row && (
         <NameDialog
-          title="Rename template"
+          title="Rename style"
           initial={row.name}
           confirmLabel="Save name"
           pending={rename.isPending}
@@ -580,7 +595,7 @@ function NameDialog({ title, description, initial = "", confirmLabel, pending, e
           if (clean && !duplicate) onSave(clean);
         }}
       >
-        <Field label="Name" error={duplicate ? "You already have a template with that name." : null} hint="Like “Storm and insurance work”.">
+        <Field label="Name" error={duplicate ? "You already have a style with that name." : null} hint="Like “Storm and insurance work”.">
           <input className="input" value={value} maxLength={TEMPLATE_LIMITS.name} required onChange={(e) => setValue(e.target.value)} />
         </Field>
         <FormError error={error} />

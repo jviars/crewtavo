@@ -143,10 +143,10 @@ commit;
 
 -- ===== The terms clients agree to ==============================================================
 
-select tmanual.check(private.autopay_starter_terms('lawn_exterior') = 'We charge the card on file after each visit is done, and for other invoices we send you. You''ll get a receipt each time. Turn it off anytime from your client page or by calling us.'
+select tmanual.check(private.autopay_starter_terms('lawn_exterior') = 'We charge the card on file after each visit is done, or once a month for a monthly plan, and for other invoices we send you. You''ll get a receipt each time. Turn it off anytime from your client page or by calling us.'
     and private.autopay_starter_terms('paving') = 'We charge the card on file when the work on your job is done, and for other invoices we send you. Charges over the amount we agreed wait until we''ve talked with you. You''ll get a receipt each time. Turn it off anytime from your client page or by calling us.'
     and private.autopay_starter_terms('roofing_exteriors') = private.autopay_starter_terms('paving')
-    and private.autopay_starter_terms('general') = 'We charge the card on file when each visit or job is done, and for other invoices we send you. You''ll get a receipt each time. Turn it off anytime from your client page or by calling us.'
+    and private.autopay_starter_terms('general') = 'We charge the card on file when each visit or job is done, or once a month for a monthly plan, and for other invoices we send you. You''ll get a receipt each time. Turn it off anytime from your client page or by calling us.'
     and private.autopay_starter_terms('snow') = private.autopay_starter_terms('general'),
   'the starter terms say the card is charged for other invoices we send too, for every trade (as core starterAutopayTerms)');
 select tmanual.check(private.autopay_terms_shown(:'other') = private.autopay_starter_terms('paving') || E'\n\nWe charge at the end of the day of each visit.',

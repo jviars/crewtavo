@@ -1925,7 +1925,7 @@ select tautopay.check(tautopay.error_of(format('update public.jobs set autopay =
 select tautopay.as_user(:'otto');
 select tautopay.check(tautopay.error_of(format('update public.jobs set autopay = false where id = %L', :'j_pat')) like '42501:%', 'nor can the office without the invoices area');
 select tautopay.as_user(:'opal');
-select tautopay.check(tautopay.error_of(format('update public.jobs set autopay = true where id = %L', :'j_fixed')) = '22023: Autopay works with recurring jobs billed per visit, or one-off jobs billed when the work is done',
+select tautopay.check(tautopay.error_of(format('update public.jobs set autopay = true where id = %L', :'j_reconly')) = '22023: Autopay works with recurring jobs billed per visit or at a fixed price monthly, or one-off jobs billed when the work is done',
   'a job autopay doesn''t charge can''t be put on it');
 commit;
 select tautopay.check((select not autopay from public.jobs where id = :'j_eve'), 'an estimator making a job can''t choose autopay for it');

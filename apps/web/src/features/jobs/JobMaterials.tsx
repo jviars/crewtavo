@@ -5,6 +5,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { featureOn } from "@/components/shell/nav";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
@@ -138,7 +139,8 @@ export function MaterialDialog({ jobId, visitId, onClose, onSaved }: { jobId: st
   const [serviceId, setServiceId] = useState("");
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
-  const [unit, setUnit] = useState("ton");
+  // Tons are paving's; everyone else counts each.
+  const [unit, setUnit] = useState(() => (featureOn(session.company.settings, "paving_app") ? "ton" : "ea"));
   const [ticket, setTicket] = useState("");
   const [supplier, setSupplier] = useState("");
   const [file, setFile] = useState<File | null>(null);

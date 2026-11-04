@@ -4,8 +4,12 @@
  * stripeConnection.test.ts) and email and texts caught. The database functions answer from `rpc`
  * handlers here; what they do is tested in supabase/tests/autopay_test.sql.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { starterAutopayTerms } from "@crewtavo/core/autopay";
+import { autopayCoversMonthly, starterAutopayTerms } from "@crewtavo/core/autopay";
+import { PRESETS } from "@crewtavo/core/presets";
 import type { Env } from "../src/env";
 import { readClientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
@@ -292,6 +296,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("the starter terms", () => {
+  it("say the same as the database's for every trade (private.autopay_starter_terms)", () => {
+    // The newest private.autopay_starter_terms, read from the migrations.
+    const dir = fileURLToPath(new URL("../../../supabase/migrations", import.meta.url));
+    const sql = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort().map((f) => readFileSync(join(dir, f), "utf8")).filter((s) => s.includes("function private.autopay_starter_terms(")).at(-1)!;
+    const fn = sql.slice(sql.lastIndexOf("function private.autopay_starter_terms("));
+    const body = fn.slice(0, fn.indexOf("$$;"));
+    const unquote = (s: string) => s.replaceAll("''", "'");
+    const words: Record<string, string> = {};
+    for (const [, one, many, text] of body.matchAll(/when p_trade (?:= '(\w+)'|in \(([^)]*)\)) then\s+'((?:[^']|'')*)'/g)) {
+      for (const trade of one ? [one] : many!.split(",").map((t) => t.trim().slice(1, -1))) words[trade] = unquote(text!);
+    }
+    const general = unquote(/else\s+'((?:[^']|'')*)'/.exec(body)![1]!);
+    expect(Object.keys(words)).toEqual(expect.arrayContaining(["lawn_exterior", "cleaning", "pool_service", "pest_control", "paving", "roofing_exteriors"]));
+    for (const trade of [...Object.keys(PRESETS), "snow"]) expect(starterAutopayTerms(trade)).toBe(words[trade] ?? general);
+  });
+
+  it("cover a monthly plan's charge where the database says they do (private.autopay_covers_monthly)", () => {
+    const dir = fileURLToPath(new URL("../../../supabase/migrations", import.meta.url));
+    const sql = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort().map((f) => readFileSync(join(dir, f), "utf8")).filter((s) => s.includes("function private.autopay_covers_monthly(")).at(-1)!;
+    const fn = sql.slice(sql.lastIndexOf("create function private.autopay_covers_monthly("));
+    const phrase = /p_terms ~\* '([^']+)'/.exec(fn.slice(0, fn.indexOf("$$;")))![1]!;
+    const sqlCovers = (terms: string) => new RegExp(phrase, "i").test(terms);
+    // Every plan trade's words cover a monthly plan (20261104000900_monthly_plan_autopay.sql); paving's and roofing's don't sell one.
+    for (const trade of [...Object.keys(PRESETS), "snow"]) {
+      expect(autopayCoversMonthly(starterAutopayTerms(trade))).toBe(sqlCovers(starterAutopayTerms(trade)));
+      expect(autopayCoversMonthly(starterAutopayTerms(trade))).toBe(!["paving", "roofing_exteriors"].includes(trade));
+    }
+    expect(autopayCoversMonthly(TERMS)).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------
 // The task
 // ---------------------------------------------------------------------------------------------
@@ -335,6 +371,17 @@ describe("charging what's due", () => {
     // chargeInvoiceAutomatically sent ours before booking the credit (and finish sends a draft): not again here.
     expect(db.called("autopay_mark_sent")).toEqual([]);
     expect(db.called("finish_autopay_charge")).toEqual([{ p_id: CHARGE, p_outcome: "paid", p_token: TOKEN, p_amount: 0 }]);
+  });
+
+  it("charges a monthly plan's month the same way: the database bills it, Stripe charges it, it finishes paid", async () => {
+    const db = due([claimed({ bill: "month", billing_month: "2027-01-01" })], { ...billed, balance_due: 120 });
+    m.chargeInvoiceAutomatically.mockImplementation(async (_env, _admin, _company, input) => {
+      expect(await input.markSent(12000)).toBe(true);
+      return { outcome: "paid", amountCents: 12000 };
+    });
+    expect(await chargeDueAutopay(env, db.db)).toMatchObject({ claimed: 1, charged: 1, lost: 0, retry: 0 });
+    expect(db.called("autopay_mark_sent")).toEqual([{ p_charge: CHARGE, p_token: TOKEN, p_amount_cents: 12000 }]);
+    expect(db.called("finish_autopay_charge")).toEqual([{ p_id: CHARGE, p_outcome: "paid", p_token: TOKEN, p_amount: 120 }]);
   });
 
   it("takes one company's charges when asked (Approve charge)", async () => {
@@ -915,6 +962,7 @@ describe("the Client Hub's autopay", () => {
       next_charge: "2026-11-08T05:00:00Z",
       per_visit: 45,
       per_visit_taxed: false,
+      reagree: false,
       available: true,
       card_required: false,
     });
@@ -946,6 +994,35 @@ describe("the Client Hub's autopay", () => {
     expect(await taxed([{ taxable: true }], { rate: 0.08, quote: { tax_rate: null } })).toMatchObject({ per_visit_taxed: true });
     // No price, nothing to say tax about.
     expect(await taxed([], { rate: 0.08 })).toMatchObject({ per_visit: null, per_visit_taxed: false });
+  });
+
+  it("says no tax goes on top for a client who is tax exempt", async () => {
+    const db = world({ settings: { default_tax_rate: 0.08 }, tables: { job_line_items: [{ company_id: CO, job_id: JOB, quantity: 1, unit_price: 45, taxable: true }] } });
+    expect(await hubAutopay(env, db.db, CO, PAT)).toMatchObject({ per_visit: 45, per_visit_taxed: true });
+    db.tables.clients!.find((c) => c.id === PAT)!.tax_exempt = true;
+    expect(await hubAutopay(env, db.db, CO, PAT)).toMatchObject({ per_visit: 45, per_visit_taxed: false });
+  });
+
+  it("asks a client to agree again when their words don't mention the monthly plan they have on autopay and today's do", async () => {
+    const MONTHLY = "We charge the card on file after each visit is done, or once a month for a monthly plan. Turn it off anytime from your client page or by calling us.";
+    const plan = { id: id(61), company_id: CO, client_id: PAT, title: "Lawn plan", kind: "recurring", billing_mode: "fixed_schedule", pricing: "fixed", invoice_schedule: "monthly", status: "active", autopay: true };
+    const ask = (over: { settings?: Row; plan?: Row | null; agreement?: Row; method?: Row } = {}, trust?: "client" | "office") => {
+      const db = world({ settings: { autopay: autopaySetting({ terms: MONTHLY }), ...over.settings } });
+      if (over.plan !== null) db.tables.jobs!.push({ ...plan, ...over.plan });
+      Object.assign(db.tables.autopay_authorizations![0]!, over.agreement);
+      Object.assign(db.tables.client_payment_methods![0]!, over.method);
+      return hubAutopay(env, db.db, CO, PAT, { trust });
+    };
+    expect(await ask()).toMatchObject({ status: "active", method: { id: CARD }, reagree: true, terms: MONTHLY });
+    // Nothing changes for anyone else.
+    expect((await ask({ plan: null }))!.reagree).toBe(false);
+    expect((await ask({ plan: { autopay: false } }))!.reagree).toBe(false);
+    expect((await ask({ agreement: { terms: `${MONTHLY} We charge at the end of the day of each visit.` } }))!.reagree).toBe(false);
+    expect((await ask({ settings: { autopay: autopaySetting() } }))!.reagree).toBe(false);
+    // Not while paused, while the card can't be charged, or on a link that can't say yes to the card.
+    expect((await ask({ agreement: { paused_at: "2026-11-02T12:00:00Z" } }))!.reagree).toBe(false);
+    expect((await ask({ method: { status: "needs_update" } }))!.reagree).toBe(false);
+    expect((await ask({}, "office"))!.reagree).toBe(false);
   });
 
   it("tells paused, a bank account being checked, and a card that needs updating apart", async () => {

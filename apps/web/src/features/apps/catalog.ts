@@ -363,6 +363,44 @@ export const APP_INFO: Record<string, AppInfo> = {
     website: "https://crewtavo.com/docs/clients/marketing/",
     open: "/marketing",
   },
+  paving: {
+    developer: "Crewtavo",
+    tagline: "Parking lots and driveways, from takeoff to invoice",
+    about:
+      "Adds Paving to the sidebar. Start from an address, measure the lot on the aerial map, and each project goes from the takeoff to the estimate, the proposal, the schedule and the invoice in one place. The measuring map gets paving items, like asphalt, sealcoat, crack seal and stall rows, each in its own color. Your trade in Settings → Company only picks your starter prices and terms, so you can have Roofing too.",
+    highlights: [
+      { icon: "paving", title: "A Paving section", text: "Every project in one place, from the takeoff to the invoice." },
+      { icon: "area", title: "Takeoffs on the map", text: "Asphalt, sealcoat, crack seal, stalls and striping, measured on the aerial." },
+      { icon: "quote", title: "Estimate to proposal", text: "The takeoff's quantities price the estimate, then go out as a proposal." },
+    ],
+    access: [
+      "Show Paving in the menu to owners, admins, office staff and estimators with the sales area",
+      "Show paving items on the measuring map",
+      "Uninstalling hides Paving and keeps every takeoff and estimate",
+    ],
+    connectsWith: "Crewtavo",
+    website: "https://crewtavo.com/docs/",
+    open: "/paving",
+  },
+  roofing: {
+    developer: "Crewtavo",
+    tagline: "Roof estimates, from measuring to invoice",
+    about:
+      "Adds Roofing to the sidebar. Start from an address and a roof package, measure the roof on the map with its pitch and edges, and each project goes from the estimate to the price range the homeowner is sent first, the site visit, the schedule and the invoice. Packages become roofs priced by the square, with Good, Better and Best options, and roof tools show on every measurement. Your trade in Settings → Company only picks your starter prices and terms, so you can have Paving too.",
+    highlights: [
+      { icon: "roofing", title: "A Roofing section", text: "Every roof estimate in one place, from measuring to the invoice." },
+      { icon: "package", title: "Roof packages", text: "Good, Better and Best, priced by the square from the measured roof." },
+      { icon: "dollar", title: "A price range first", text: "Send the homeowner a range, then set the exact price on site." },
+    ],
+    access: [
+      "Show Roofing in the menu to owners, admins, office staff and estimators with the sales area",
+      "Show roof tools on every measurement, and price packages as roofs",
+      "Uninstalling hides Roofing and keeps every estimate, package and price range",
+    ],
+    connectsWith: "Crewtavo",
+    website: "https://crewtavo.com/docs/",
+    open: "/roofing",
+  },
   google_business: {
     developer: "Google",
     tagline: "Your Google reviews in Crewtavo",
@@ -544,11 +582,11 @@ export const APP_INFO: Record<string, AppInfo> = {
     about:
       "When QuickBooks Online is your book of record, Crewtavo sends clients, invoices and payments there as they happen. Your bookkeeper works in QuickBooks; your team works in Crewtavo.",
     highlights: [
-      { icon: "invoice", title: "Invoices", text: "Sent invoices arrive with their lines, discounts and tax." },
+      { icon: "invoice", title: "Invoices", text: "Sent invoices arrive with their lines, discounts and tax, and keep up when they change." },
       { icon: "dollar", title: "Payments", text: "Each payment is recorded against the right invoice." },
       { icon: "users", title: "Customers", text: "Clients are matched by name, or added." },
     ],
-    access: ["Read your company's name", "Add customers, invoices and payments"],
+    access: ["Read your company's name", "Add customers, invoices and payments, and update the invoices it added"],
     connectsWith: "Intuit sign-in",
     website: "https://quickbooks.intuit.com/",
     open: "https://qbo.intuit.com/",
@@ -559,11 +597,11 @@ export const APP_INFO: Record<string, AppInfo> = {
     about:
       "When Zoho Books is your book of record, Crewtavo sends clients, invoices and payments there as they happen, in whichever Zoho data center your account lives.",
     highlights: [
-      { icon: "invoice", title: "Invoices", text: "Sent invoices arrive with their lines and discounts." },
+      { icon: "invoice", title: "Invoices", text: "Sent invoices arrive with their lines and discounts, and keep up when they change." },
       { icon: "dollar", title: "Payments", text: "Each payment is recorded against the right invoice." },
       { icon: "users", title: "Contacts", text: "Clients are added as customers." },
     ],
-    access: ["Read your organization's name", "Add contacts, invoices and payments"],
+    access: ["Read your organization's name", "Add contacts, invoices and payments, and update the invoices it added"],
     connectsWith: "Zoho sign-in",
     website: "https://www.zoho.com/books/",
     open: "https://books.zoho.com/",

@@ -16,15 +16,13 @@ import { asJson, dbError, HttpError, must } from "../lib/http";
 import type { Db } from "../lib/supabase";
 import { measurementVariables } from "./measurements";
 import {
-  companyTrade,
   EDITABLE,
-  isRoofWork,
   loadPackages,
   lockedMessage,
   measureFirst,
+  packageWork,
   pricedLines,
   putQuotePackage,
-  quoteMeasurement,
   saveFollowedPrices,
   showMeasurement,
   type PackageLine,
@@ -73,7 +71,7 @@ async function depositAfter(db: Db, companyId: string, quoteId: string) {
 }
 
 const QUOTE_FIELDS =
-  "id, status, option_id, roof_package_id, promo_code_id, tax_rate, discount_amount, priced_on_site_at, range_accepted_at, promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, name, service_id, formula, quantity, unit_price, taxable, optional, selected, sort), options:quote_options!quote_options_quote_fkey(id, name, tier, sort, package_id)";
+  "id, status, work_kind, option_id, roof_package_id, promo_code_id, tax_rate, discount_amount, priced_on_site_at, range_accepted_at, promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, name, service_id, formula, quantity, unit_price, taxable, optional, selected, sort), options:quote_options!quote_options_quote_fkey(id, name, tier, sort, package_id)";
 
 const QUOTE_NOT_FOUND = "That estimate wasn't found.";
 const CHANGED = "Lines were added to this estimate meanwhile. Look it over, then add the package again.";
@@ -154,8 +152,7 @@ export async function addOptions(
   if (!ids.length) throw new HttpError(400, "That package is already on this estimate. Pick another one to offer.");
   if (existing.length + Number(convert) + ids.length > 3) throw new HttpError(400, "A quote offers up to 3 options.");
 
-  const [trade, measurement] = await Promise.all([companyTrade(db, companyId), quoteMeasurement(db, companyId, quoteId)]);
-  const roofing = isRoofWork(trade, measurement);
+  const { roofing, measurement } = await packageWork(db, companyId, quote, ids);
   const packages = await loadPackages(db, companyId, ids, roofing);
   // Only a roof's options wait for the measurement: Roofing fills them in once the roof is measured.
   const waits = (p: PricedPackage) => p.measured && !measurement;
@@ -258,8 +255,7 @@ export async function fillOptions(db: Db, companyId: string, quoteId: string): P
   const skipped: SkippedLine[] = empty.filter((o) => !o.package_id).map((o) => ({ package: o.name, name: o.name, reason: "Its package was deleted, so add its lines by hand." }));
   const filling = empty.filter((o) => o.package_id);
 
-  const [trade, measurement] = await Promise.all([companyTrade(db, companyId), quoteMeasurement(db, companyId, quoteId)]);
-  const roofing = isRoofWork(trade, measurement);
+  const { roofing, measurement } = await packageWork(db, companyId, quote, filling.map((o) => o.package_id!));
   const packages = await loadPackages(db, companyId, filling.map((o) => o.package_id!), roofing);
   if (packages.some((p) => p.measured) && !measurement) throw new HttpError(409, measureFirst(roofing));
   const vars = measurement ? measurementVariables(measurement) : null;
@@ -285,8 +281,7 @@ export async function fillOptions(db: Db, companyId: string, quoteId: string): P
  */
 async function fillPackage(db: Db, companyId: string, quote: Awaited<ReturnType<typeof openQuote>>): Promise<OptionsResult> {
   if (!quote.roof_package_id || quote.lines.length) return { options: [], skipped: [] };
-  const [trade, measurement] = await Promise.all([companyTrade(db, companyId), quoteMeasurement(db, companyId, quote.id)]);
-  const roofing = isRoofWork(trade, measurement);
+  const { roofing, measurement } = await packageWork(db, companyId, quote, [quote.roof_package_id]);
   const p = (await loadPackages(db, companyId, [quote.roof_package_id], roofing))[0]!;
   if (p.measured && !measurement) throw new HttpError(409, measureFirst(roofing));
   const built = pricedLines(p, measurement ? measurementVariables(measurement) : null, roofing);

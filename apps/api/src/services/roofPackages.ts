@@ -126,6 +126,8 @@ export interface PackageService {
 export interface PackageLine {
   service_id: string;
   name: string;
+  /** A line kept from the estimate has its own (a trip charge's); a package's has none. */
+  description?: string | null;
   unit: string;
   unit_price: number;
   unit_cost: number | null;
@@ -232,20 +234,50 @@ export async function quoteMeasurement(db: Db, companyId: string, quoteId: strin
 }
 
 /**
- * Whether a quote is roof work, which is priced in Roofing: the business is a roofer, or what's
- * measured for it is a roof (squares, a pitch, or lines marked as roof edges). Roof work words its
- * steps for a roof, and its packages need their roof.
+ * Whether a quote is roof work, which is priced in Roofing: its own kind of work when it has one
+ * (workKind), else the business has Roofing installed, or what's measured for it is a roof (squares,
+ * a pitch, or lines marked as roof edges). Roof work words its steps for a roof, and its packages
+ * need their roof.
  */
-export function isRoofWork(tradePreset: string | null | undefined, measurement: Pick<QuoteMeasurement, "sections" | "roof_pitch" | "roofing_squares"> | null | undefined): boolean {
-  if (tradePreset === "roofing_exteriors") return true;
+export function isRoofWork(roofer: boolean, measurement: Pick<QuoteMeasurement, "sections" | "roof_pitch" | "roofing_squares"> | null | undefined, kind: WorkKind | null = null): boolean {
+  if (kind) return kind === "roofing";
+  if (roofer) return true;
   if (!measurement) return false;
   return measurement.roofing_squares != null || isRoofDrawing((Array.isArray(measurement.sections) ? measurement.sections : []) as Section[], measurement.roof_pitch);
 }
 
-/** The business's trade (companies.trade_preset). */
-export async function companyTrade(db: Db, companyId: string): Promise<string | null> {
-  const company = must(await db.from("companies").select("trade_preset").eq("id", companyId).maybeSingle(), "Company not found.");
-  return company.trade_preset ?? null;
+/** Roofing is installed (Apps): settings.roofing_app, since settings.roofing holds the price ranges. */
+export const roofingOn = (settings: unknown) => (settings as { roofing_app?: { enabled?: unknown } } | null | undefined)?.roofing_app?.enabled === true;
+
+/** Paving is installed (Apps): settings.paving_app. */
+export const pavingOn = (settings: unknown) => (settings as { paving_app?: { enabled?: unknown } } | null | undefined)?.paving_app?.enabled === true;
+
+export type WorkKind = "roofing" | "paving";
+
+/**
+ * A package estimate's own kind of work, for a business with both Roofing and Paving installed:
+ * where it was made (quotes.work_kind, from the Roofing or Paving section), else its packages (a
+ * roof package has its roof). Null with one app or neither, or no package to tell by, so
+ * isRoofWork goes on as it always has.
+ */
+export function workKind(settings: unknown, made: string | null | undefined, roofServiceIds: ReadonlyArray<string | null>): WorkKind | null {
+  if (!roofingOn(settings) || !pavingOn(settings)) return null;
+  if (made === "roofing" || made === "paving") return made;
+  if (!roofServiceIds.length) return null;
+  return roofServiceIds.some(Boolean) ? "roofing" : "paving";
+}
+
+/**
+ * Whether the packages going on a quote are priced as roof work (isRoofWork), and the measurement
+ * they're priced from.
+ */
+export async function packageWork(db: Db, companyId: string, quote: { id: string; work_kind: string | null }, packageIds: readonly string[]) {
+  const [company, measurement] = await Promise.all([db.from("companies").select("settings").eq("id", companyId).maybeSingle(), quoteMeasurement(db, companyId, quote.id)]);
+  const { settings } = must(company, "Company not found.");
+  // Only a business with both apps and an estimate made outside their sections asks its packages.
+  const asks = roofingOn(settings) && pavingOn(settings) && !quote.work_kind && packageIds.length > 0;
+  const roofs = asks ? must(await db.from("roof_packages").select("roof_service_id").eq("company_id", companyId).in("id", [...packageIds])).map((p) => p.roof_service_id) : [];
+  return { measurement, roofing: isRoofWork(roofingOn(settings), measurement, workKind(settings, quote.work_kind, roofs)) };
 }
 
 /** What to do before a package's measured lines can be priced. */
@@ -344,7 +376,7 @@ export async function applyPackage(db: Db, companyId: string, quoteId: string, p
   const quote = must(
     await db
       .from("quotes")
-      .select("id, status, lines:quote_line_items(id), options:quote_options!quote_options_quote_fkey(id)")
+      .select("id, status, work_kind, lines:quote_line_items(id, service_id, name, description, quantity, unit, unit_price, unit_cost, taxable, formula), options:quote_options!quote_options_quote_fkey(id)")
       .eq("id", quoteId)
       .eq("company_id", companyId)
       .maybeSingle(),
@@ -361,8 +393,7 @@ export async function applyPackage(db: Db, companyId: string, quoteId: string, p
     return { applied: false as const };
   }
 
-  const [trade, measurement] = await Promise.all([companyTrade(db, companyId), quoteMeasurement(db, companyId, quoteId)]);
-  const roofing = isRoofWork(trade, measurement);
+  const { roofing, measurement } = await packageWork(db, companyId, quote, [pkg.id]);
   const [priced] = await loadPackages(db, companyId, [pkg.id], roofing);
   if (priced!.measured && !measurement) {
     // Its lines come once the roof is measured (fillOptions).
@@ -374,10 +405,25 @@ export async function applyPackage(db: Db, companyId: string, quoteId: string, p
   // Starting over starts the price over too: a price set on site (its discount included) or the
   // exact price sent instead of the range was for the old lines. A promo code keeps its discount.
   // Lines added meanwhile on another screen stay, and the package's don't go on.
-  if (!(await putQuotePackage(db, quoteId, pkg.id, built.lines, replace))) return { applied: false as const };
+  const lines = replace ? [...built.lines, ...(await everyJobLines(db, companyId, quote.lines, built.lines))] : built.lines;
+  if (!(await putQuotePackage(db, quoteId, pkg.id, lines, replace))) return { applied: false as const };
   await saveFollowedPrices(db, companyId, [priced!]);
   if (priced!.measured && measurement) await showMeasurement(db, companyId, quoteId, measurement.id);
   return { applied: true as const, lines: built.lines.length, skipped: built.skipped };
+}
+
+/**
+ * The estimate's "Add to every job" lines (a trip charge), kept when it starts over from a package,
+ * after the package's: the database only adds them to a quote's first lines. Not one the package has.
+ */
+async function everyJobLines(db: Db, companyId: string, lines: ReadonlyArray<Omit<PackageLine, "service_id" | "sort"> & { service_id: string | null; description: string | null }>, built: readonly PackageLine[]): Promise<PackageLine[]> {
+  const ids = lines.flatMap((l) => (l.service_id && !built.some((b) => b.service_id === l.service_id) ? [l.service_id] : []));
+  if (!ids.length) return [];
+  const every = new Set(must(await db.from("services").select("id").eq("company_id", companyId).eq("add_to_every_job", true).in("id", ids)).map((s) => s.id));
+  const sort = Math.max(-1, ...built.map((l) => l.sort));
+  return lines
+    .filter((l) => l.service_id && every.has(l.service_id))
+    .map((l, i) => ({ service_id: l.service_id!, name: l.name, description: l.description, quantity: Number(l.quantity), unit: l.unit, unit_price: Number(l.unit_price), unit_cost: l.unit_cost === null ? null : Number(l.unit_cost), taxable: l.taxable, formula: l.formula, sort: sort + 1 + i }));
 }
 
 /**
@@ -392,7 +438,7 @@ export async function putQuotePackage(db: Db, quoteId: string, packageId: string
   const { data, error } = await db.rpc("put_quote_package", {
     p_quote: quoteId,
     p_package: packageId,
-    p_lines: asJson(lines.map((l) => ({ service_id: l.service_id, name: l.name, quantity: l.quantity, unit: l.unit, unit_price: l.unit_price, unit_cost: l.unit_cost, taxable: l.taxable, formula: l.formula, sort: l.sort }))),
+    p_lines: asJson(lines.map((l) => ({ service_id: l.service_id, name: l.name, ...(l.description !== undefined && { description: l.description }), quantity: l.quantity, unit: l.unit, unit_price: l.unit_price, unit_cost: l.unit_cost, taxable: l.taxable, formula: l.formula, sort: l.sort }))),
     p_replace: replace,
   });
   if (error) throw dbError(error);

@@ -10,7 +10,7 @@ import type { AppEnv } from "../env";
 import { DETECT_TARGETS, detect, type DetectTarget } from "../integrations/fal";
 import { loadSecret } from "../integrations/tokens";
 import { requireCompany, requireUser } from "../lib/auth";
-import { HttpError, readJson } from "../lib/http";
+import { dbError, HttpError, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
 import { adminClient } from "../lib/supabase";
 import { addMissingServices } from "../services/presetServices";
@@ -34,6 +34,14 @@ paving.post("/paving/detect", requireUser, requireCompany([...SALES, "crew_lead"
   if (!secret?.api_key) throw new HttpError(400, "Find paving needs fal.ai. An owner or admin can install it on the Apps page.");
   const results = await detect(secret.api_key, body.image, [...new Set(body.targets)]);
   return c.json({ results });
+});
+
+/** Paving on its Apps page: Install and Uninstall (public.trade_app_set_enabled). */
+paving.post("/paving/enabled", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const body = await readJson(c, z.object({ enabled: z.boolean() }));
+  const { error } = await c.var.db.rpc("trade_app_set_enabled", { p_company: c.var.companyId, p_app: "paving", p_enabled: body.enabled });
+  if (error) throw dbError(error);
+  return c.json({ enabled: body.enabled });
 });
 
 /** The paving services a price list is missing (matched by name), added from the paving preset. */

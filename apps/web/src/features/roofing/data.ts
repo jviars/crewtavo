@@ -10,6 +10,7 @@ import { STARTER_NOTE } from "@crewtavo/core/contracts";
 import { formulaVariables } from "@crewtavo/core/formulas";
 import { isExampleWarranty, PACKAGE_LIMITS } from "@crewtavo/core/presets";
 import { ROOFING_VARIABLE_NAMES, isRoofDrawing } from "@crewtavo/core/roofing";
+import { featureOn } from "@/components/shell/nav";
 import { statusText } from "@/components/ui/StatusPill";
 import { invoicesSettled, sectionsOf, type FlowStep, type TakeoffRow } from "../paving/data";
 
@@ -177,11 +178,11 @@ export const TIER_WORDS = ["Good", "Better", "Best"] as const;
 /** A quote offers up to 3 options (quote_options). */
 export const MAX_OPTIONS = 3;
 
-/** Whether the business is a roofer: packages are roofs, priced by the square, with ranges and ABC Supply. */
-export const isRoofingCompany = (company: { trade_preset?: string | null }) => company.trade_preset === "roofing_exteriors";
+/** Whether the business has Roofing installed (Apps): packages are roofs, priced by the square, with ranges and ABC Supply. */
+export const isRoofingCompany = (company: { settings?: Record<string, unknown> | null }) => featureOn(company.settings, "roofing_app");
 
-/** Where the business edits its packages: Roofing → Packages for a roofer, else its own page. */
-export const packagesPath = (company: { trade_preset?: string | null }) => (isRoofingCompany(company) ? "/roofing/packages" : "/packages");
+/** Where the business edits its packages: Roofing → Packages with Roofing installed, else its own page. */
+export const packagesPath = (company: { settings?: Record<string, unknown> | null }) => (isRoofingCompany(company) ? "/roofing/packages" : "/packages");
 
 /**
  * What a tap on a package card picks. A tap picks that package instead of the one picked, as it

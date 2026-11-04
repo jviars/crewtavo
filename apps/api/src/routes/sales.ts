@@ -21,12 +21,12 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
-import { appUrl, asJson, dbError, HttpError, must, param, readJson, requireEnv, uuid } from "../lib/http";
+import { appUrl, asJson, dbError, HttpError, isoDate, must, param, readJson, requireEnv, uuid } from "../lib/http";
 import { clientLink } from "../lib/links";
 import { roofSegments } from "../services/external";
 import { applyMeasurement } from "../services/measurements";
 import { SITE_PRICE_SET, sitePriceSet } from "../services/roofPackages";
-import { convertQuote, invoiceJobs, quoteFromRequest, remindInvoices, sendInvoice, sendQuote, sendSchema, type SalesScope } from "../services/sales";
+import { convertQuote, invoiceJobs, quoteFromRequest, remindInvoices, sendInvoice, sendQuote, sendSchema, TEMPLATE_NOT_SENT, type SalesScope } from "../services/sales";
 
 export const sales = new Hono<AppEnv>();
 
@@ -73,7 +73,8 @@ sales.get("/:kind{quotes|invoices}/:id/link", requireUser, requireCompany(SALES)
   const kind = c.req.param("kind") === "quotes" ? "quote" : "invoice";
   const id = param(c, "id");
   const table = kind === "quote" ? "quotes" : "invoices";
-  must(await c.var.db.from(table).select("id").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), `${kind === "quote" ? "Quote" : "Invoice"} not found.`);
+  const record = must(await c.var.db.from(table).select("id, client_id").eq("id", id).eq("company_id", c.var.companyId).maybeSingle(), `${kind === "quote" ? "Quote" : "Invoice"} not found.`);
+  if (!record.client_id) throw new HttpError(400, TEMPLATE_NOT_SENT);
   // A one-day preview link that also works while the document is still a draft.
   return c.json({ link: await clientLink(c.env, appUrl(c), { c: c.var.companyId, t: kind, id, pv: 1 }, 1) });
 });
@@ -82,18 +83,20 @@ sales.get("/:kind{quotes|invoices}/:id/link", requireUser, requireCompany(SALES)
 // Jobs and invoices
 // ---------------------------------------------------------------------------------------------
 
+// month (its first day): a monthly job's invoice for that month, once.
 sales.post("/jobs/:id/invoice", requireUser, requireCompany(OFFICE, "invoices"), async (c) => {
-  const body = await readJson(c, z.object({ kind: z.enum(["standard", "deposit", "progress", "visits", "retainage"]).default("standard"), amount: z.number().positive().max(100_000_000).optional() }));
-  const { data, error } = await c.var.db.rpc("create_invoice_for_job", { p_job: param(c, "id"), p_kind: body.kind, ...(body.amount ? { p_amount: body.amount } : {}) });
+  const body = await readJson(c, z.object({ kind: z.enum(["standard", "deposit", "progress", "visits", "retainage"]).default("standard"), amount: z.number().positive().max(100_000_000).optional(), month: isoDate.optional() }));
+  const { data, error } = await c.var.db.rpc("create_invoice_for_job", { p_job: param(c, "id"), p_kind: body.kind, ...(body.amount ? { p_amount: body.amount } : {}), ...(body.month ? { p_month: body.month } : {}) });
   if (error) throw dbError(error);
   return c.json({ invoice_id: data }, 201);
 });
 
-// Batch invoicing: one invoice per finished job (completed visits for per-visit jobs), and
+// Batch invoicing: one invoice per finished job (completed visits for per-visit jobs, and each month
+// a monthly job is due), optionally with each job's logged hours (at rate_id) and materials, and
 // optionally email each one. Each job succeeds or fails on its own.
 sales.post("/invoices/batch", requireUser, requireCompany(OFFICE, "invoices"), async (c) => {
-  const body = await readJson(c, z.object({ job_ids: z.array(uuid).min(1).max(50), send: z.boolean().default(false) }));
-  return c.json(await invoiceJobs(scope(c), body.job_ids, body.send));
+  const body = await readJson(c, z.object({ job_ids: z.array(uuid).min(1).max(50), send: z.boolean().default(false), logged_work: z.boolean().default(false), rate_id: uuid.optional() }));
+  return c.json(await invoiceJobs(scope(c), body.job_ids, body.send, body.logged_work ? { rateId: body.rate_id } : undefined));
 });
 
 // Friendly reminders for unpaid invoices, by email.

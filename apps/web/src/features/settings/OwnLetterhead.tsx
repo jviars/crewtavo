@@ -1,5 +1,5 @@
 /**
- * The business's own letterhead on an estimate template (Settings → Estimate template, Letterhead →
+ * The business's own letterhead on an estimate template (Settings → Document style, Letterhead →
  * Your own): the pictures it prints, and uploading a PDF or picture of the stationery. Crewtavo
  * finds where its printed top and bottom are, the person moves the lines if they like, and the two
  * bands go on the template (features/documents/letterhead.ts), to be kept when the template is saved.

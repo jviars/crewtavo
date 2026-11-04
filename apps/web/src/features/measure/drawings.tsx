@@ -93,7 +93,7 @@ export function ShareDrawing({
     queryKey: ["drawing-targets", clientId],
     queryFn: async () => {
       const db = supabase();
-      let quotes = db.from("quotes").select("id, number, title, status, client:clients(display_name)").not("status", "in", "(lost,archived)").order("created_at", { ascending: false }).limit(40);
+      let quotes = db.from("quotes").select("id, number, title, status, client:clients(display_name)").not("status", "in", "(lost,archived)").eq("is_template", false).order("created_at", { ascending: false }).limit(40);
       let invoices = db.from("invoices").select("id, number, subject, status, client:clients(display_name)").neq("status", "void").order("created_at", { ascending: false }).limit(40);
       if (clientId) {
         quotes = quotes.eq("client_id", clientId);

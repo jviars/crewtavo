@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { SITE_ADJUSTMENT_NAME, siteAdjustmentLines, siteSubtotal, sitePriceAdjustment, snapshotLines } from "@crewtavo/core/estimates";
 import { discountSplit, optionTotals, quoteTotals, toCents } from "@crewtavo/core/money";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -527,5 +529,23 @@ describe("pictures of the price list", () => {
     expect(pictureFor("Architectural shingle roof")).toBe("house");
     expect(pictureFor("Composite deck")).toBe("house");
     expect(pictureFor("Vinyl siding")).toBe("house");
+  });
+});
+
+// The visit, signing and signed pages and the project's Print or save PDF print the business's
+// fields marked to print, as the quote's own PDF does (documents/build.ts quoteDocument pdf_fields).
+describe("a roof estimate's custom fields on its document", () => {
+  const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+
+  it("prints the ones marked to print on every roofing page that makes the document", () => {
+    for (const page of ["visit/VisitPage.tsx", "visit/SignPage.tsx", "visit/SignedPage.tsx"]) {
+      const code = source(`../src/features/roofing/${page}`);
+      expect(code).toContain(`const fields = useCustomFields("quote");`);
+      expect(code).toContain(`pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),`);
+    }
+    expect(source("../src/features/roofing/flow/SignedEstimate.tsx")).toContain(`pdf_fields: shownCustomFields(fields, extras.custom_fields, "pdf")`);
+    // Read with the estimate's details and the project's.
+    expect(source("../src/features/roofing/visit/data.ts")).toMatch(/section_ids, custom_fields, package:/);
+    expect(source("../src/features/roofing/flow/data.ts")).toMatch(/created_at, custom_fields, promo:/);
   });
 });

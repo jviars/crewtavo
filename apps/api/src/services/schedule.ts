@@ -5,13 +5,13 @@
  * both with the person's own client, so the database decides which crews and people they may
  * schedule (private.schedules_crew).
  */
-import { addDays, DISPATCH, localDate, localTime, scheduleSettings, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
+import { addDays, DISPATCH, localDate, localTime, scheduleSettings, weekday, workdays, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
 import { z } from "zod";
 import type { Env } from "../env";
 import { dbError, HttpError, isoDate, must, uuid } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { materializeJob, recurringJob } from "../tasks";
-import { fitQuietly } from "./routes";
+import { arrivalTime, fitQuietly } from "./routes";
 
 /** Who's asking, as requireCompany works it out. */
 export interface Scope {
@@ -152,6 +152,8 @@ export const visitChangeInput = z.object({
    * when the work was done). One that can't be read is ignored, like one out of bounds (tapTime).
    */
   completed_at: z.iso.datetime({ offset: true }).optional().catch(undefined),
+  /** Where the phone was when a crew tapped On my way, to time the drive for the client's text. Not kept. */
+  from: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).optional().catch(undefined),
 });
 
 /** How far back a Complete tap's own time is believed: a phone that was offline for days, at most. */
@@ -174,7 +176,7 @@ export function tapTime(status: string | undefined, completedAt: string | undefi
 const CREW_STEPS: Record<string, number> = { unscheduled: 0, scheduled: 0, en_route: 1, in_progress: 2, completed: 3 };
 
 /** What a sub changes on their own visit (the database holds them to it: private.visit_sub_guard). */
-const SUB_FIELDS = ["status", "notes", "forward_only", "completed_at"];
+const SUB_FIELDS = ["status", "notes", "forward_only", "completed_at", "from"];
 const SUB_STATUSES = ["scheduled", "en_route", "in_progress", "completed"];
 
 export async function updateVisit(s: Scope, id: string, body: z.infer<typeof visitChangeInput>) {
@@ -182,7 +184,7 @@ export async function updateVisit(s: Scope, id: string, body: z.infer<typeof vis
     if (Object.keys(body).some((k) => !SUB_FIELDS.includes(k))) throw new HttpError(403, "You can change a visit's status and notes. Ask the office about anything else.");
     if (body.status && !SUB_STATUSES.includes(body.status)) throw new HttpError(403, "Ask the office to cancel or move this visit.");
   }
-  const { assignee_ids, equipment_ids, shift_series, forward_only, completed_at, ...fields } = body;
+  const { assignee_ids, equipment_ids, shift_series, forward_only, completed_at, from, ...fields } = body;
   const tapped = tapTime(fields.status, completed_at);
   const current =
     (forward_only && fields.status) || tapped
@@ -217,10 +219,12 @@ export async function updateVisit(s: Scope, id: string, body: z.infer<typeof vis
       ("crew_id" in fields && (fields.crew_id ?? null) !== before.crew_id) ||
       ("starts_at" in fields && (fields.starts_at ? !before.starts_at || Date.parse(fields.starts_at) !== Date.parse(before.starts_at) : before.starts_at !== null)));
   const routeFields = { ...(moved && { route_order: null }), ...("starts_at" in fields && !fields.starts_at && { time_fixed: false }) };
+  // On the way: when they should get there, for the client's text ({{eta}}), worked out each time.
+  const eta = fields.status === "en_route" ? { eta_at: await arrivalTime(s.db, s.companyId, id, from ?? null, s.userId) } : {};
   if (Object.keys(fields).length) {
     const { data, error } = await s.db
       .from("visits")
-      .update({ ...fields, ...routeFields, ...stamp })
+      .update({ ...fields, ...routeFields, ...stamp, ...eta })
       .eq("id", id)
       .eq("company_id", s.companyId)
       .select("id, scheduled_on, starts_at, crew_id, status");
@@ -272,7 +276,8 @@ type CalendarEventRow = {
   starts_on: string;
   ends_on: string;
   busy: boolean;
-  source: { id: string; name: string; color: string | null; crew_id: string | null; blocks_time: boolean } | null;
+  /** user_id: whose own calendar it is, when it's one person's (their row in the People view). */
+  source: { id: string; name: string; color: string | null; crew_id: string | null; user_id: string | null; blocks_time: boolean } | null;
 };
 
 /**
@@ -282,7 +287,7 @@ type CalendarEventRow = {
 export async function calendarEvents(s: Scope, from: string, to: string, crew?: string) {
   const { data, error } = await s.db
     .from("calendar_events")
-    .select("id, title, location, description, url, all_day, starts_at, ends_at, starts_on, ends_on, busy, source:calendar_sources(id, name, color, crew_id, blocks_time)")
+    .select("id, title, location, description, url, all_day, starts_at, ends_at, starts_on, ends_on, busy, source:calendar_sources(id, name, color, crew_id, user_id, blocks_time)")
     .eq("company_id", s.companyId)
     .lte("starts_on", to)
     .gte("ends_on", from)
@@ -350,10 +355,11 @@ export async function shiftDay(s: Scope, body: { from_date: string; to_date: str
  */
 export { MAX_ROUTE_STOPS, previewRoute, saveRoute, undoRoute } from "./routes";
 
-/** Suggest open slots in working hours (company settings.working_hours, default 7:00-18:00). */
+/** Suggest open slots in working hours (company settings.working_hours, default 7:00-18:00), on the days the business works. */
 export async function findTime(s: Scope, body: { date_from: string; days: number; duration_min: number; crew_id?: string }) {
   const { tz, settings } = await companyZone(s);
   const hours = { start: settings.working_hours?.start ?? "07:00", end: settings.working_hours?.end ?? "18:00" };
+  const open = workdays(settings);
   const dateTo = addDays(body.date_from, body.days - 1);
 
   let query = s.db
@@ -366,9 +372,13 @@ export async function findTime(s: Scope, body: { date_from: string; days: number
     .not("status", "eq", "cancelled");
   if (body.crew_id) query = query.eq("crew_id", body.crew_id);
   const busy = must(await query).map((v) => ({ start: new Date(v.starts_at).getTime(), end: new Date(v.ends_at ?? v.starts_at).getTime() }));
-  // Busy time on other calendars counts too (a crew's own calendars, and the whole team's).
+  // A crew's people (its lead and members): their own calendars count against it, other people's don't.
+  const crew = body.crew_id ? must(await s.db.from("crews").select("lead_user_id, crew_members(user_id)").eq("id", body.crew_id))[0] : undefined;
+  const people = body.crew_id ? new Set([crew?.lead_user_id, ...(crew?.crew_members ?? []).map((m) => m.user_id)]) : null;
+  // Busy time on other calendars counts too (a crew's own calendars, its people's, and the whole team's).
   for (const e of await calendarEvents(s, body.date_from, dateTo, body.crew_id)) {
     if (!e.busy || !e.source?.blocks_time) continue;
+    if (people && e.source.user_id && !e.source.crew_id && !people.has(e.source.user_id)) continue;
     if (e.starts_at && e.ends_at) busy.push({ start: Date.parse(e.starts_at), end: Date.parse(e.ends_at) });
     else busy.push({ start: zonedTimeToUtc(e.starts_on, "00:00", tz).getTime(), end: zonedTimeToUtc(addDays(e.ends_on, 1), "00:00", tz).getTime() });
   }
@@ -379,6 +389,7 @@ export async function findTime(s: Scope, body: { date_from: string; days: number
   const step = Math.max(5, scheduleSettings(settings).timeStep) * 60_000;
   const now = Math.ceil(Date.now() / step) * step;
   for (let day = body.date_from; day <= dateTo && slots.length < 10; day = addDays(day, 1)) {
+    if (!open.includes(weekday(day))) continue;
     const dayStart = Math.max(zonedTimeToUtc(day, hours.start, tz).getTime(), now);
     const dayEnd = zonedTimeToUtc(day, hours.end, tz).getTime();
     const blocks = busy.filter((b) => b.end > dayStart && b.start < dayEnd).sort((a, b) => a.start - b.start);
@@ -413,18 +424,19 @@ export async function bulkVisits(s: Scope, body: { job_ids: string[]; date: stri
 
 /**
  * After a recurring job's schedule changes: create its upcoming visits now, and drop ones it no
- * longer has. It's done with the server's key (the visits are the job's, not a crew's), so who may
- * ask is checked here: a dispatcher with "Schedule the whole team".
+ * longer has; with `refresh`, the ones already made take its new title, crew and time too. It's done
+ * with the server's key (the visits are the job's, not a crew's), so who may ask is checked here: a
+ * dispatcher with "Schedule the whole team".
  */
-export async function generateVisits(s: Scope, env: Env, jobId: string): Promise<{ created: number; removed: number }> {
+export async function generateVisits(s: Scope, env: Env, jobId: string, refresh = false): Promise<{ created: number; removed: number; updated: number }> {
   if (!DISPATCH.includes(s.role) || !s.permissions.includes("schedule")) throw new HttpError(403, "Your role can't schedule the whole team, so a recurring job's visits can't be made for it. Ask the office.");
   const owned = must(await s.db.from("jobs").select("id, kind, status").eq("id", jobId).eq("company_id", s.companyId).maybeSingle(), "Job not found.");
-  if (owned.kind !== "recurring" || owned.status !== "active") return { created: 0, removed: 0 };
+  if (owned.kind !== "recurring" || owned.status !== "active") return { created: 0, removed: 0, updated: 0 };
   const admin = adminClient(env);
   const job = await recurringJob(admin, jobId);
   if (!job) throw new HttpError(404, "Job not found.");
   try {
-    return await materializeJob(admin, job, true);
+    return await materializeJob(admin, job, true, refresh);
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "Couldn't schedule the visits.");
   }

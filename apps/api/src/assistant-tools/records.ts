@@ -1,5 +1,6 @@
 /** Clients, requests, notes, the schedule, guides and equipment: looking things up, logging requests and notes. */
 import { z } from "zod";
+import { fieldValues } from "./customFields";
 import { companyArg, friendly, rows, tool } from "./tool";
 
 export const recordTools = {
@@ -19,20 +20,20 @@ export const recordTools = {
     },
   }),
   get_client: tool({
-    description: "A client's details, contacts, properties (with access codes if your role sees them), and recent requests, quotes and jobs.",
+    description: "A client's details (tax_exempt, and payment_terms_days in place of the company's when set), contacts, properties (with access codes if your role sees them), and recent requests, quotes and jobs. The client's and each property's custom_fields are by key (list_custom_fields).",
     input: z.object({ client_id: z.uuid(), ...companyArg }),
     run: async (ctx, a) => {
       const [client, contacts, properties, requests, quotes, jobs] = await Promise.all([
-        rows(ctx.db.from("clients").select("id, display_name, company_name, email, phone, status, tags, notes, lead_source, billing_address, marketing_opt_out, review_opt_out, sms_opt_out_at, custom_fields").eq("id", a.client_id).eq("company_id", ctx.companyId)),
+        rows(ctx.db.from("clients").select("id, display_name, company_name, email, phone, status, tags, notes, lead_source, billing_address, marketing_opt_out, review_opt_out, sms_opt_out_at, tax_exempt, tax_exempt_note, payment_terms_days, custom_fields").eq("id", a.client_id).eq("company_id", ctx.companyId)),
         rows(ctx.db.from("client_contacts").select("id, name, email, phone, role, is_primary, notify_email, notify_sms").eq("client_id", a.client_id)),
-        rows(ctx.db.from("properties").select("id, label, line1, line2, city, region, postal_code, lat, lng, lot_size_sqft, notes, tags, access:property_access(gate_code, lockbox_code, alarm_code, instructions)").eq("client_id", a.client_id)),
+        rows(ctx.db.from("properties").select("id, label, line1, line2, city, region, postal_code, lat, lng, lot_size_sqft, notes, tags, custom_fields, access:property_access(gate_code, lockbox_code, alarm_code, instructions)").eq("client_id", a.client_id)),
         rows(ctx.db.from("requests").select("id, number, title, status, created_at").eq("client_id", a.client_id).order("created_at", { ascending: false }).limit(5)),
         rows(ctx.db.from("quotes").select("id, number, title, status, total, sent_at").eq("client_id", a.client_id).order("created_at", { ascending: false }).limit(5)),
         rows(ctx.db.from("jobs").select("id, number, title, status, kind").eq("client_id", a.client_id).order("created_at", { ascending: false }).limit(5)),
       ]);
       if (!client.length) throw new Error("Client not found");
       const { custom_fields, ...details } = client[0];
-      return { client: { ...details, source_id: ((custom_fields ?? {}) as { source_id?: string }).source_id ?? null }, contacts, properties, requests, quotes, jobs };
+      return { client: { ...details, source_id: ((custom_fields ?? {}) as { source_id?: string }).source_id ?? null, custom_fields: fieldValues(custom_fields) }, contacts, properties, requests, quotes, jobs };
     },
   }),
   list_requests: tool({

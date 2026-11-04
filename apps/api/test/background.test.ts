@@ -1,4 +1,4 @@
-import { addDays } from "@crewtavo/core";
+import { addDays, driveBetween, etaWords } from "@crewtavo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -7,7 +7,9 @@ import { accessToken } from "../src/integrations/tokens";
 import { encryptJson } from "../src/lib/crypto";
 import { readClientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
-import { processAutomations } from "../src/services/automations";
+import { processAutomations, visitTime } from "../src/services/automations";
+import { arrivalTime } from "../src/services/routes";
+import { updateVisit } from "../src/services/schedule";
 import { materializeJob, runTask } from "../src/tasks";
 
 // The background tasks and the routes here make their own clients; they get the test's fake instead.
@@ -141,6 +143,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("a visit's time in a message", () => {
+  it("is the start, or the business's arrival window when it gives one", () => {
+    expect(visitTime("2026-10-20T14:00:00Z", "America/Chicago")).toBe(" at 9:00 AM");
+    expect(visitTime("2026-10-20T14:00:00Z", "America/Chicago", 120)).toBe(" between 9:00 AM and 11:00 AM");
+  });
+});
+
 describe("recurring visits", () => {
   it("don't come back after someone deletes one", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
@@ -161,7 +170,7 @@ describe("recurring visits", () => {
   it("create nothing when every upcoming date was deleted", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
     const { db, queries } = fakeDb((q) => (q.table === "recurrence_skips" ? { data: [{ recurrence_key: "2026-10-20" }] } : { data: [] }));
-    expect(await materializeJob(db, { ...recurringJob("job-1", "FREQ=DAILY", "2026-10-20"), ends_on: "2026-10-20" })).toEqual({ created: 0, removed: 0 });
+    expect(await materializeJob(db, { ...recurringJob("job-1", "FREQ=DAILY", "2026-10-20"), ends_on: "2026-10-20" })).toEqual({ created: 0, removed: 0, updated: 0 });
     expect(queries.some((q) => verb(q) === "upsert")).toBe(false);
   });
 
@@ -181,6 +190,25 @@ describe("recurring visits", () => {
     expect(removed.calls).toContainEqual(["in", "id", ["v-wed"]]);
   });
 
+  it("give the visits already made the job's new title, crew and time only when asked, keeping a moved visit's day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    // Monday's visit was moved to Tuesday by hand; it's still waiting, so it takes the job's crew and time on its own day.
+    const { db, queries } = fakeDb((q) =>
+      q.table === "visits" && verb(q) === "select" ? { data: [{ id: "v-1", recurrence_key: "2026-10-19", scheduled_on: "2026-10-20" }] } : { data: [] },
+    );
+    const job = { ...recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO", "2026-10-19"), title: "Mowing", default_crew_id: "crew-2", visit_start_time: "09:00" };
+
+    expect(await materializeJob(db, job, true)).toMatchObject({ updated: 0 });
+    expect(queries.some((q) => q.table === "visits" && verb(q) === "update")).toBe(false);
+
+    expect(await materializeJob(db, job, true, true)).toMatchObject({ updated: 1 });
+    const waiting = queries.find((q) => q.table === "visits" && call(q, "select")?.[1] === "id, scheduled_on")!;
+    expect(waiting.calls).toContainEqual(["eq", "status", "scheduled"]);
+    const update = queries.find((q) => q.table === "visits" && verb(q) === "update")!;
+    expect(call(update, "update")![1]).toEqual({ title: "Mowing", crew_id: "crew-2", starts_at: "2026-10-20T09:00:00.000Z", ends_at: "2026-10-20T10:00:00.000Z", time_fixed: false });
+    expect(update.calls).toContainEqual(["eq", "id", "v-1"]);
+  });
+
   it("say so when removing stale visits fails, instead of counting them removed", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
     const { db } = fakeDb((q) =>
@@ -188,6 +216,78 @@ describe("recurring visits", () => {
         : q.table === "visits" && verb(q) === "delete" ? { error: { message: "This pay's work is done, so the visits it covers stay as they are." } } : { data: [] },
     );
     await expect(materializeJob(db, recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO", "2026-10-19"), true)).rejects.toThrow("visits it covers stay");
+  });
+
+  it("make none while the job is paused, and take off the waiting ones that have no work logged", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    // Both Mondays are still on the schedule; time was logged on the second.
+    const { db, queries } = fakeDb((q) =>
+      q.table === "visits" && verb(q) === "select" ? { data: [{ id: "v-19", recurrence_key: "2026-10-19" }, { id: "v-26", recurrence_key: "2026-10-26" }] }
+        : q.table === "time_entries" ? { data: [{ visit_id: "v-26" }] } : { data: [] },
+    );
+    const job = { ...recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO", "2026-10-19"), paused_at: "2026-10-16T20:00:00Z", resume_on: "2026-11-02" };
+
+    expect(await materializeJob(db, job)).toEqual({ created: 0, removed: 1, updated: 0 });
+    expect(queries.some((q) => verb(q) === "upsert")).toBe(false);
+    const removed = queries.find((q) => q.table === "visits" && verb(q) === "delete")!;
+    expect(removed.calls).toContainEqual(["in", "id", ["v-19"]]);
+    for (const table of ["job_pay_visits", "time_entries", "job_materials", "checklist_responses"]) {
+      expect(queries.find((q) => q.table === table)!.calls).toContainEqual(["in", "visit_id", ["v-19", "v-26"]]);
+    }
+    expect(queries.some((q) => q.table === "jobs")).toBe(false);
+  });
+
+  it("resume on the resume date, making visits again from that day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    const { db, queries } = fakeDb(() => ({ data: [] }));
+    await materializeJob(db, { ...recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO", "2026-10-05"), paused_at: "2026-10-01T20:00:00Z", resume_on: "2026-10-17" });
+
+    const resumed = queries.find((q) => q.table === "jobs" && verb(q) === "update")!;
+    expect(call(resumed, "update")![1]).toEqual({ paused_at: null });
+    expect(resumed.calls).toContainEqual(["eq", "id", "job-1"]);
+    const upsert = queries.find((q) => verb(q) === "upsert")!;
+    expect((call(upsert, "upsert")![1] as Array<{ recurrence_key: string }>).map((r) => r.recurrence_key).slice(0, 2)).toEqual(["2026-10-19", "2026-10-26"]);
+  });
+
+  it("end after a number of visits counted from the first date, keeping the job's end at the last", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    const { db, queries } = fakeDb(() => ({ data: [] }));
+    // Four Mondays from Oct 5: two are done already, so Oct 19 and 26 are left.
+    await materializeJob(db, recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO;COUNT=4", "2026-10-05"));
+
+    const upsert = queries.find((q) => verb(q) === "upsert")!;
+    expect((call(upsert, "upsert")![1] as Array<{ recurrence_key: string }>).map((r) => r.recurrence_key)).toEqual(["2026-10-19", "2026-10-26"]);
+    const ends = queries.find((q) => q.table === "jobs" && verb(q) === "update")!;
+    expect(call(ends, "update")![1]).toEqual({ ends_on: "2026-10-26" });
+  });
+
+  it("don't count the days a job was paused toward the visits it ends after", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    const { db, queries } = fakeDb(() => ({ data: [] }));
+    // Four Mondays from Oct 5, paused the week of Oct 12: Oct 5, 19, 26 and Nov 2.
+    await materializeJob(db, { ...recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO;COUNT=4", "2026-10-05"), pauses: [{ from: "2026-10-12", until: "2026-10-19" }] });
+
+    const upsert = queries.find((q) => verb(q) === "upsert")!;
+    expect((call(upsert, "upsert")![1] as Array<{ recurrence_key: string }>).map((r) => r.recurrence_key)).toEqual(["2026-10-19", "2026-10-26", "2026-11-02"]);
+    expect(call(queries.find((q) => q.table === "jobs" && verb(q) === "update")!, "update")![1]).toEqual({ ends_on: "2026-11-02" });
+  });
+
+  it("count a job still paused as back on its resume date, and one resuming by the stretch the database kept", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-17T15:00:00Z") });
+    const job = { ...recurringJob("job-1", "FREQ=WEEKLY;BYDAY=MO;COUNT=4", "2026-10-05"), ends_on: "2026-10-26" };
+    let { db, queries } = fakeDb(() => ({ data: [] }));
+    // Paused on Oct 10 until Oct 27: Oct 12, 19 and 26 don't count.
+    await materializeJob(db, { ...job, paused_at: "2026-10-10T15:00:00Z", resume_on: "2026-10-27" });
+    expect(call(queries.find((q) => q.table === "jobs" && verb(q) === "update")!, "update")![1]).toEqual({ ends_on: "2026-11-16" });
+    expect(queries.some((q) => verb(q) === "upsert")).toBe(false);
+
+    // Resumed on Oct 17 by the nightly run: the database kept Oct 10 to 17.
+    ({ db, queries } = fakeDb((q) => (q.table === "jobs" ? { data: { pauses: [{ from: "2026-10-10", until: "2026-10-17" }] } } : { data: [] })));
+    await materializeJob(db, { ...job, paused_at: "2026-10-10T15:00:00Z", resume_on: "2026-10-17" });
+    const updates = queries.filter((q) => q.table === "jobs" && verb(q) === "update").map((q) => call(q, "update")![1]);
+    expect(updates).toEqual([{ paused_at: null }, { ends_on: "2026-11-02" }]);
+    const upsert = queries.find((q) => verb(q) === "upsert")!;
+    expect((call(upsert, "upsert")![1] as Array<{ recurrence_key: string }>).map((r) => r.recurrence_key)).toEqual(["2026-10-19", "2026-10-26", "2026-11-02"]);
   });
 });
 
@@ -608,6 +708,54 @@ describe("accounting sync", () => {
       expect(books.posts).toHaveLength(1);
       expect(links.get("payment")).toBe("made-1");
     });
+
+    // An invoice the books have, changed since (here a $25 late fee went on): queued again, it's updated.
+    const changed = { ...invoice, invoice_line_items: [...invoice.invoice_line_items, { name: "Late fee", description: null, quantity: 1, unit_price: 25, taxable: false, service_id: null, sort: 1 }] };
+    /** The provider's answers, by method and path; every request is kept. */
+    function books(answer: (method: string, url: URL) => unknown) {
+      const calls: Array<{ method: string; url: URL; body: any }> = [];
+      vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+        const url = new URL(input);
+        const method = init?.method ?? "GET";
+        calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null });
+        return Response.json(answer(method, url));
+      });
+      return calls;
+    }
+
+    it("updates an invoice QuickBooks has, with the SyncToken it has now", async () => {
+      const { db, links } = await ours("quickbooks", { client: "cust-1", invoice: "qbo-inv-1" }, [], changed);
+      const calls = books((method) => ({ Invoice: { Id: "qbo-inv-1", SyncToken: method === "GET" ? "3" : "4" } }));
+      await runAccountingJob(env, db, invoiceJob);
+      expect(calls.map((c) => [c.method, c.url.pathname.split("/").at(-1)])).toEqual([["GET", "qbo-inv-1"], ["POST", "invoice"]]);
+      const sent = calls[1]!.body;
+      expect(sent).toMatchObject({ Id: "qbo-inv-1", SyncToken: "3", sparse: true, DocNumber: "1042", CustomerRef: { value: "cust-1" }, TxnTaxDetail: { TotalTax: 0 } });
+      // The lines replace QuickBooks' own; with no discount, no discount line.
+      expect(sent.Line.map((l: any) => [l.DetailType, l.Amount])).toEqual([["SalesItemLineDetail", 45], ["SalesItemLineDetail", 25]]);
+      expect(links.get("invoice")).toBe("qbo-inv-1");
+    });
+
+    it("updates an invoice Zoho Books has, its lines and discount replacing Zoho's", async () => {
+      const { db, links } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" }, [], changed);
+      const calls = books(() => ({ code: 0, invoice: { invoice_id: "zoho-inv-1" } }));
+      await runAccountingJob(env, db, invoiceJob);
+      expect(calls.map((c) => [c.method, c.url.pathname.split("/").slice(-2).join("/")])).toEqual([["PUT", "invoices/zoho-inv-1"]]);
+      expect(calls[0]!.body).toMatchObject({ customer_id: "contact-1", reference_number: "1042", discount: 0, line_items: [{ name: "Mowing", rate: 45 }, { name: "Late fee", rate: 25 }] });
+      expect(links.get("invoice")).toBe("zoho-inv-1");
+    });
+
+    it("fails an update the books refuse, for the outbox to try again", async () => {
+      const { db } = await ours("quickbooks", { client: "cust-1", invoice: "qbo-inv-1" }, [], changed);
+      vi.stubGlobal("fetch", async () => Response.json({ Fault: { Error: [{ Message: "Stale Object Error" }] } }, { status: 400 }));
+      await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("Stale Object Error");
+    });
+
+    it("leaves the invoice as it is when a payment needs it", async () => {
+      const { db } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" }, [], changed);
+      const calls = books(() => ({ code: 0, customerpayments: [], payment: { payment_id: "zoho-pay-1" } }));
+      await runAccountingJob(env, db, paymentJob);
+      expect(calls.map((c) => [c.method, c.url.pathname.split("/").at(-1)])).toEqual([["GET", "customerpayments"], ["POST", "customerpayments"]]);
+    });
   });
 });
 
@@ -1016,5 +1164,102 @@ describe("automation runs", () => {
       { type: "add_note", ok: false, detail: "This action doesn't fit what starts this rule." },
       expect.objectContaining({ type: "create_task", ok: true }),
     ]);
+  });
+});
+
+describe("the on my way text", () => {
+  const STARTER = "Hi {{client.first_name}}, this is {{company.name}}. Our crew is on the way to {{address}} now{{eta}}.";
+  /** A visit.en_route run for the on_my_way starter, its visit due `etaAt` (null: not known). */
+  const enRoute = (etaAt: string | null) => {
+    const rows: Record<string, unknown> = {
+      automation_rules: { id: "rule-1", name: "Text the client when the crew is on the way", trigger: "visit.en_route", enabled: true, conditions: [], run_count: 0, actions: [{ type: "send_sms", body: STARTER }] },
+      companies: { id: COMPANY, name: "Radford Lawn Care", timezone: "America/New_York", currency: "USD", trade_preset: "lawn_exterior", settings: {}, address: {} },
+      visits: {
+        title: "Weekly mow", kind: "job", status: "en_route", scheduled_on: "2026-10-17", starts_at: null, eta_at: etaAt, job_id: "job-1", property_id: "property-1",
+        property: { line1: "12 Oak St", city: "Radford", region: "VA", client_id: "client-1" }, job: { client_id: "client-1", kind: "one_off" }, request: null,
+      },
+      clients: { id: "client-1", display_name: "Pat Lee", email: null, phone: "+15405550111", tags: [], status: "active", lead_source: null },
+    };
+    return fakeDb(
+      (q) => ({ data: verb(q) === "select" ? (rows[q.table] ?? null) : null }),
+      (fn) =>
+        fn === "claim_automation_runs"
+          ? { data: [{ id: 1, company_id: COMPANY, rule_id: "rule-1", subject_type: "visit", subject_id: "visit-1", result: [], status: "running", attempts: 1, locked_until: "2026-10-17T15:05:00Z", claim_token: "claim-1" }] }
+          : fn === "start_automation_run" || fn === "renew_automation_run" || fn === "finish_automation_run" ? { data: true } : {},
+    );
+  };
+  const textOf = async (etaAt: string | null) => {
+    const texts: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("twilio")) texts.push(new URLSearchParams(String(init!.body)).get("Body")!);
+      return Response.json({ sid: "SM1" });
+    });
+    enRoute(etaAt);
+    const texting = { ...env, TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "t", TWILIO_FROM_NUMBER: "+15405550000" };
+    expect(await processAutomations(texting, { limit: 50, baseUrl: "https://app.test" })).toMatchObject({ done: 1 });
+    return texts[0];
+  };
+
+  it("says when the crew should get there, and reads just as well when that isn't known", async () => {
+    const soon = new Date(Date.now() + 20.5 * 60_000).toISOString();
+    expect(await textOf(soon)).toBe("Hi Pat, this is Radford Lawn Care. Our crew is on the way to 12 Oak St, Radford, VA now and should arrive in about 20 minutes.");
+    expect(await textOf(null)).toBe("Hi Pat, this is Radford Lawn Care. Our crew is on the way to 12 Oak St, Radford, VA now.");
+    // A time already gone (the text waited) says nothing rather than something wrong.
+    expect(await textOf(new Date(Date.now() - 60_000).toISOString())).toBe("Hi Pat, this is Radford Lawn Care. Our crew is on the way to 12 Oak St, Radford, VA now.");
+  });
+});
+
+describe("when a crew on its way should arrive", () => {
+  const NOW = Date.parse("2026-10-17T15:00:00Z");
+  const home = { lat: 37.13, lng: -80.41 };
+  const visit = { scheduled_on: "2026-10-17", crew_id: "crew-1", property: home };
+  /** The visit, the company (25 mph) and the crew's last finished visit that day (`previous`). */
+  const world = (previous: unknown, own: object = visit) =>
+    fakeDb((q) => {
+      if (verb(q) === "update") return { data: [{ id: "visit-1", scheduled_on: "2026-10-17", starts_at: null, crew_id: "crew-1", status: "en_route" }] };
+      if (q.table === "companies") return { data: { settings: { schedule: { speed_mph: 25 } } } };
+      return { data: call(q, "neq") ? previous : { status: "scheduled", completed_at: null, ...own } };
+    });
+  const minutesTo = (at: string | null) => (at ? (Date.parse(at) - NOW) / 60_000 : null);
+
+  it("is the drive from where the phone was, timed as routes time drives", async () => {
+    const { db, queries } = world(null);
+    const phone = { lat: 37.18, lng: -80.41 };
+    const at = await arrivalTime(db, COMPANY, "visit-1", phone, "u1", NOW);
+    expect(minutesTo(at)).toBeCloseTo(driveBetween(phone, home, 25).minutes, 3);
+    expect(etaWords(at, NOW)).toBe(" and should arrive in about 10 minutes");
+    expect(queries.some((q) => call(q, "neq"))).toBe(false);
+  });
+
+  it("without the phone's place, is the drive from the crew's last visit finished that day", async () => {
+    const last = { lat: 37.1, lng: -80.5 };
+    const { db, queries } = world({ property: last });
+    const at = await arrivalTime(db, COMPANY, "visit-1", null, "u1", NOW);
+    expect(minutesTo(at)).toBeCloseTo(driveBetween(last, home, 25).minutes, 3);
+    const asked = queries.find((q) => call(q, "neq"))!;
+    expect(asked.calls).toEqual(expect.arrayContaining([["eq", "scheduled_on", "2026-10-17"], ["eq", "status", "completed"], ["neq", "id", "visit-1"], ["eq", "crew_id", "crew-1"], ["order", "completed_at", { ascending: false }]]));
+    // A visit with no crew goes by the person's own last visit.
+    const solo = world({ property: last }, { ...visit, crew_id: null });
+    await arrivalTime(solo.db, COMPANY, "visit-1", null, "u1", NOW);
+    expect(solo.queries.find((q) => call(q, "neq"))!.calls).toContainEqual(["eq", "completed_by", "u1"]);
+  });
+
+  it("isn't known with neither, or when the visit's place isn't on the map", async () => {
+    expect(await arrivalTime(world(null).db, COMPANY, "visit-1", null, "u1", NOW)).toBeNull();
+    expect(await arrivalTime(world({ property: { lat: null, lng: null } }).db, COMPANY, "visit-1", null, "u1", NOW)).toBeNull();
+    expect(await arrivalTime(world(null, { ...visit, property: { lat: null, lng: null } }).db, COMPANY, "visit-1", { lat: 37.18, lng: -80.41 }, "u1", NOW)).toBeNull();
+    expect(etaWords(null)).toBe("");
+  });
+
+  it("is saved with On my way, and where the phone was isn't", async () => {
+    const { db, queries } = world(null);
+    await updateVisit({ db, companyId: COMPANY, role: "field_crew", permissions: ["schedule"], userId: "u1" }, "visit-1", { status: "en_route", forward_only: true, from: { lat: 37.18, lng: -80.41 } });
+    const saved = call(queries.find((q) => verb(q) === "update")!, "update")![1] as Record<string, unknown>;
+    expect(saved).toEqual({ status: "en_route", eta_at: expect.any(String) });
+    expect(Date.parse(saved.eta_at as string)).toBeGreaterThan(Date.now());
+    // Any other status leaves it alone.
+    const other = world(null);
+    await updateVisit({ db: other.db, companyId: COMPANY, role: "field_crew", permissions: ["schedule"], userId: "u1" }, "visit-1", { status: "in_progress", forward_only: true });
+    expect(call(other.queries.find((q) => verb(q) === "update")!, "update")![1]).toEqual({ status: "in_progress" });
   });
 });

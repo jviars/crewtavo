@@ -60,7 +60,7 @@ export function ReferralCredits({
     },
   });
   const apply = useMutation({
-    meta: { success: (put: number) => `${creditMoney(put)} referral credit applied`, tone: "invoice" },
+    meta: { success: (put: number) => `${creditMoney(put, session.company.currency)} referral credit applied`, tone: "invoice" },
     mutationFn: async (referral: string) => Number(unwrap(await supabase().rpc("apply_referral_credit", { p_referral: referral, p_invoice: invoice.id }))),
     onSuccess: () => {
       onChanged();
@@ -106,7 +106,7 @@ export function ReferralCredits({
             triggerClassName="btn btn-sm btn-ghost"
             label="Apply referral credit"
             align="start"
-            items={left.map((r) => ({ label: `${r.friend}'s referral · ${creditMoney(Number(r.credit_left))} left`, icon: "gift" as const, onSelect: () => apply.mutate(r.referral_id) }))}
+            items={left.map((r) => ({ label: `${r.friend}'s referral · ${creditMoney(Number(r.credit_left), session.company.currency)} left`, icon: "gift" as const, onSelect: () => apply.mutate(r.referral_id) }))}
           />
         </div>
       )}

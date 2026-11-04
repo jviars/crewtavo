@@ -22,7 +22,8 @@ export interface JobDiscount {
 /** A sentence in parts, so a screen can link each invoice ("#12"). */
 export type Words = Array<string | { invoice: { id: string; number: number | null } }>;
 
-const money = (amount: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+/** "$15.00" in the business's currency (companies.currency), or "$25" with no cents. */
+const money = (amount: number, currency = "USD", digits = 2) => new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount);
 const cents = (amount: number | string | null | undefined) => Math.round(Number(amount ?? 0) * 100);
 
 /** After the code on a quote: what it comes to on work that repeats. */
@@ -48,19 +49,19 @@ export function promoCodeOf(name: string): string | null {
 }
 
 /** "a $25 code" with the code's own value, or $25 (10% for a percent code) until one is typed. */
-function valueWords(kind: string, value: number | string | null | undefined): string {
+function valueWords(kind: string, value: number | string | null | undefined, currency: string): string {
   const n = Number(value);
   if (kind === "percent") return n > 0 && n <= 100 ? `${Number(n.toFixed(2))}%` : "10%";
-  if (!(n > 0)) return "$25";
-  return Number.isInteger(n) ? `$${n.toLocaleString("en-US")}` : money(n);
+  if (!(n > 0)) return money(25, currency, 0);
+  return money(n, currency, Number.isInteger(n) ? 0 : 2);
 }
 
 /**
  * Under Marketing → Promo codes' switch: what each choice does, with the code's own value, so the form
  * says both whichever way the switch is.
  */
-export function repeatChoices(kind: string, value: number | string | null | undefined): { once: string; everyVisit: string } {
-  const v = valueWords(kind, value);
+export function repeatChoices(kind: string, value: number | string | null | undefined, currency = "USD"): { once: string; everyVisit: string } {
+  const v = valueWords(kind, value, currency);
   return {
     once: `Comes off once per job. On weekly mowing, a ${v} code takes ${v} off the first mowing's invoice, and later mowings are full price.`,
     everyVisit: `Comes off every visit's invoice. On weekly mowing, a ${v} code takes ${v} off every mowing.`,
@@ -84,7 +85,7 @@ function invoiceList(invoices: ReadonlyArray<{ id: string; number: number | null
  * once-per-job code on more invoices than it comes to was put there while it came off every visit
  * (before codes were once per job, or before the code or the job was switched), which it says.
  */
-export function jobDiscountWords(d: JobDiscount): { rule: string; where: Words | null } {
+export function jobDiscountWords(d: JobDiscount, currency = "USD"): { rule: string; where: Words | null } {
   if (d.billing === "every_visit") return { rule: "comes off every visit.", where: null };
   const rule = "comes off the first invoice only.";
   if (d.placed === null || d.invoices === null) return { rule, where: null };
@@ -97,9 +98,9 @@ export function jobDiscountWords(d: JobDiscount): { rule: string; where: Words |
   const where: Words = [];
   invoices.forEach((inv, i) => {
     if (i > 0) where.push(i === invoices.length - 1 && left <= 0 ? " and " : ", ");
-    where.push(`${money(cents(inv.amount) / 100)} ${i === 0 ? "is " : ""}on invoice `, { invoice: { id: inv.id, number: inv.number } });
+    where.push(`${money(cents(inv.amount) / 100, currency)} ${i === 0 ? "is " : ""}on invoice `, { invoice: { id: inv.id, number: inv.number } });
   });
-  where.push(left > 0 ? `, and ${money(left / 100)} goes on the next invoice.` : end);
+  where.push(left > 0 ? `, and ${money(left / 100, currency)} goes on the next invoice.` : end);
   return { rule, where };
 }
 

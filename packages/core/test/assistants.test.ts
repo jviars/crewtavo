@@ -24,6 +24,8 @@ import {
   memberPermissions,
   normalizeChecklist,
   normalizeIntakeForm,
+  inServiceArea,
+  isPostalCode,
   toAssistantAccess,
 } from "../src";
 
@@ -79,7 +81,7 @@ describe("booking forms", () => {
   it("makes the link, keys and ZIP codes", () => {
     const form = normalizeIntakeForm({
       name: " Spring cleanup ",
-      zips: ["24141", " 24141", "24073"],
+      zips: ["24141", " 24141", "24073", "m5v", "SW1A 1AA"],
       questions: [
         { type: "address", label: "Address", required: true },
         { label: " Yard size ", type: "choice", required: true, options: [" Small", "", "Large "] },
@@ -89,7 +91,7 @@ describe("booking forms", () => {
     expect(form).toEqual({
       name: "Spring cleanup",
       slug: "spring-cleanup",
-      service_area_zips: ["24141", "24073"],
+      service_area_zips: ["24141", "24073", "M5V", "SW1A 1AA"],
       questions: [
         { key: "yard_size", label: "Yard size", type: "choice", required: true, options: ["Small", "Large"] },
         { key: "yard_size_2", label: "Yard size", type: "text", required: false, options: undefined },
@@ -101,9 +103,28 @@ describe("booking forms", () => {
     const base = { name: "Quote", zips: [], questions: [] };
     expect(() => normalizeIntakeForm({ ...base, name: " " })).toThrow("Name the form.");
     expect(() => normalizeIntakeForm(base, ["quote"])).toThrow("Another form already uses that link.");
-    expect(() => normalizeIntakeForm({ ...base, zips: ["2414"] })).toThrow("ZIP codes should be 5 digits: 2414");
+    expect(() => normalizeIntakeForm({ ...base, zips: ["24141", "M5V#", "12345678901"] })).toThrow("Not a ZIP or postal code: M5V#, 12345678901");
     expect(() => normalizeIntakeForm({ ...base, questions: [{ label: "Pick", type: "choice" }] })).toThrow("Choice questions need options.");
     expect(() => normalizeIntakeForm({ ...base, questions: [{ label: "Pick", type: "dropdown" }] })).toThrow("Question types are");
+  });
+});
+
+describe("postal codes", () => {
+  it("takes any country's: letters, digits, spaces and dashes, up to 10", () => {
+    for (const ok of ["24141", "24141-1234", "M5V 2T6", "SW1A 1AA", "2000", "D02 X285"]) expect(isPostalCode(ok)).toBe(true);
+    for (const bad of ["", " ", "-24141", "M5V#2T6", "12345678901"]) expect(isPostalCode(bad)).toBe(false);
+  });
+
+  it("matches a service area by how the postal code starts, ignoring case and spaces", () => {
+    expect(inServiceArea("24141", ["24141"])).toBe(true);
+    expect(inServiceArea("24141-1234", ["24141"])).toBe(true);
+    expect(inServiceArea("24142", ["24141", "24073"])).toBe(false);
+    expect(inServiceArea("m5v 2t6", ["M5V"])).toBe(true);
+    expect(inServiceArea("M5V2T6", ["m5v 2"])).toBe(true);
+    expect(inServiceArea("M4V 2T6", ["M5V"])).toBe(false);
+    expect(inServiceArea(undefined, ["24141"])).toBe(false);
+    // No areas: anywhere.
+    expect(inServiceArea(undefined, [])).toBe(true);
   });
 });
 
@@ -111,7 +132,6 @@ describe("checklists", () => {
   it("keeps keys unique and tidies items", () => {
     const list = normalizeChecklist({
       name: " Mower check ",
-      job_type: " ",
       items: [
         { label: "Blades sharp", type: "check", required: true },
         { key: "blades_sharp", label: "Blades sharp (deck 2)", type: "check" },
@@ -119,7 +139,6 @@ describe("checklists", () => {
       ],
     });
     expect(list.name).toBe("Mower check");
-    expect(list.job_type).toBeNull();
     expect(list.items.map((i) => i.key)).toEqual(["blades_sharp", "blades_sharp_deck_2", "oil_level"]);
     expect(list.items[2].options).toEqual(["Full"]);
   });
@@ -179,6 +198,27 @@ describe("importing clients", () => {
     expect(skipped.map((s) => s.row)).toEqual([4, 5]);
     expect(clientStatus("Prospect")).toBe("lead");
     expect(clientStatus("whatever")).toBeNull();
+  });
+
+  it("takes custom field values by key, checked against the business's fields", () => {
+    const fields = [
+      { key: "gate_code", label: "Gate code", type: "text", choices: [], archived_at: null },
+      { key: "dog", label: "Dog on site", type: "yes_no", choices: [], archived_at: null },
+      { key: "old", label: "Old field", type: "text", choices: [], archived_at: "2026-10-01T00:00:00Z" },
+    ];
+    const { clients, skipped } = recordsToClients(
+      [
+        { source_id: "J-1", name: "Ana Diaz", custom_fields: { gate_code: " 4410 ", dog: "yes" } },
+        // The same client again: the first record's value stays, a new one is added.
+        { source_id: "J-1", name: "Ana Diaz", custom_fields: { gate_code: "9999", dog: null } },
+        { name: "Bo Kent", custom_fields: { dog: "maybe" } },
+        { name: "Cy Lane", custom_fields: { old: "x" } },
+        { name: "Dee Fox" },
+      ],
+      fields,
+    );
+    expect(clients.map((c) => [c.display_name, c.custom_fields])).toEqual([["Ana Diaz", { gate_code: "4410", dog: true }], ["Dee Fox", {}]]);
+    expect(skipped).toEqual([{ row: 2, reason: "Dog on site is yes or no." }, { row: 3, reason: `There's no custom field "old".` }]);
   });
 
   it("finds clients already here by old-system ID, then email, then name, and changes only what's new", () => {
@@ -315,5 +355,7 @@ describe("time and pay", () => {
     expect(paymentProblem(100.004, 100)).toBeNull();
     expect(paymentProblem(0, 100)).toBe("Enter an amount greater than zero.");
     expect(paymentProblem(150, 100)).toBe("That's more than the $100.00 balance.");
+    expect(paymentProblem(150, 100, "CAD")).toBe("That's more than the CA$100.00 balance.");
+    expect(paymentProblem(150, 100, "EUR")).toBe("That's more than the €100.00 balance.");
   });
 });

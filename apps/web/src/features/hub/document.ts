@@ -6,8 +6,9 @@
  * agreement, sign), the contract filled in for the option picked, and the words the price range
  * page shows. No React here, so it's tested on its own.
  */
-import type { ContractInput, LibrarySection } from "@crewtavo/core/contracts";
+import { depositFor, type ContractInput, type LibrarySection } from "@crewtavo/core/contracts";
 import { documentColor, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
+import type { ClientChecklist } from "@crewtavo/core/forms";
 import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { normalizePitch, pitchFactor } from "@crewtavo/core/geo";
 import { chosenTotals, lineTotal, optionLabels, toCents, type Amount } from "@crewtavo/core/money";
@@ -118,7 +119,7 @@ export interface HubOption {
  * The fill-in facts that don't depend on the option, as the server will fill in the signed copy.
  * Without options, {Option} and {Warranty} say the package it was priced from (optionName, warranty).
  */
-export type HubContractFacts = Pick<ContractInput, "customerName" | "businessName" | "businessPhone" | "license" | "estimateNumber" | "date" | "timeZone" | "deposit" | "optionName" | "warranty"> & {
+export type HubContractFacts = Pick<ContractInput, "customerName" | "businessName" | "businessPhone" | "license" | "estimateNumber" | "date" | "timeZone" | "deposit" | "depositPercent" | "optionName" | "warranty"> & {
   customerAddress: string[];
   jobAddress: string[];
 };
@@ -139,6 +140,10 @@ export interface QuoteView {
   autopay_offer?: boolean;
   /** The business needs a card on file: signing goes straight on to adding one, with no Approve without it. */
   card_required?: boolean;
+  /** Open: the deposit is paid online as they approve (the business takes payments online). */
+  deposit_online?: boolean;
+  /** Signed: the deposit's invoice made as they approved, what's left on it, and its link to pay it. */
+  deposit?: { amount: number; balance_due: number; link: string } | null;
   /** The estimate template (core documents.ts); read through templateSettings(). */
   template?: unknown;
   /** Null with a price range (it would say the price), and from servers before contracts. */
@@ -158,6 +163,8 @@ export interface QuoteView {
     tax_amount?: number | null;
     total?: number | null;
     deposit_amount: number | null;
+    /** The deposit as a percent of what they choose; null for an amount (and left out by older servers). */
+    deposit_percent?: number | null;
     valid_until: string | null;
     /** How often, for recurring work (its totals are per visit); null, or left out by older servers, for one time. */
     recurrence_rule?: string | null;
@@ -165,7 +172,8 @@ export interface QuoteView {
     sent_at?: string | null;
     created_at?: string | null;
     approved_at: string | null;
-    client: { display_name: string } | null;
+    /** tax_exempt: the totals say "Tax exempt" (left out by older servers). */
+    client: { display_name: string; tax_exempt?: boolean; tax_exempt_note?: string | null } | null;
     property: { line1: string; city: string | null; region?: string | null; postal_code?: string | null } | null;
     package?: { name: string } | null;
     approval?: HubApproval | null;
@@ -178,7 +186,15 @@ export interface QuoteView {
     /** The options it offers, in order; none without options. */
     options?: HubOption[];
     lines: HubLine[];
-  };
+  } & HubFields;
+}
+/**
+ * The business's own fields on a quote or invoice: the ones it prints (pdf_fields) and the ones it
+ * shows on its page here (portal_fields), as they read. Older servers send neither.
+ */
+export interface HubFields {
+  pdf_fields?: Array<{ label: string; text: string }>;
+  portal_fields?: Array<{ label: string; text: string }>;
 }
 /**
  * The client's autopay, for the home page's card and the autopay view (?view=autopay). Null when
@@ -208,8 +224,13 @@ export interface HubAutopay {
   next_charge: string | null;
   /** What each visit costs, when they have one recurring job on autopay. */
   per_visit: number | null;
-  /** Tax goes on top of `per_visit` (a taxable line, and a rate above 0). Servers that don't send it don't say. */
+  /** Tax goes on top of `per_visit` (a taxable line, a rate above 0, and they aren't tax exempt). Servers that don't send it don't say. */
   per_visit_taxed?: boolean;
+  /**
+   * They agreed before the terms covered monthly plans and have one on autopay: its charges wait for
+   * the business until they agree to today's terms, with `method`. Servers that don't send it don't ask.
+   */
+  reagree?: boolean;
   /**
    * False while the business can't take autopay (switched off, or its Stripe key can't): the
    * agreement in force still shows, with Turn off, and nothing to set up or change. Servers that
@@ -271,10 +292,13 @@ export interface InvoiceView {
     amount_paid: number;
     balance_due: number;
     promo: HubPromoInfo;
-    client: { display_name: string } | null;
+    /** tax_exempt: the totals say "Tax exempt" (left out by older servers). */
+    client: { display_name: string; tax_exempt?: boolean; tax_exempt_note?: string | null } | null;
     lines: HubLine[];
     payments: Array<{ amount: number; tip_amount: number; received_at: string }>;
-  };
+    /** The checklists it prints (Show to client). Older servers send none. */
+    checklists?: ClientChecklist[];
+  } & HubFields;
 }
 
 /** The template a Hub page prints with: the business's, or the built-in look from an older server. */
@@ -401,8 +425,11 @@ export function promoShortfall(promo: HubPromoInfo, lines: ReadonlyArray<Pick<Hu
   return charges < toCents(minimum) ? minimum : null;
 }
 
-/** The deposit to book, never more than what they're choosing comes to (a cheaper option can come to less). */
-export const depositToBook = (deposit: Amount | null | undefined, total: Amount) => Math.max(0, Math.min(Number(deposit ?? 0), Number(total)));
+/**
+ * The deposit to book on what they're choosing: a percent of it (core depositFor), else the amount,
+ * never more than it comes to (a cheaper option can come to less).
+ */
+export const depositToBook = (deposit: Amount | null | undefined, total: Amount, percent?: Amount | null) => Math.max(0, Number(depositFor(deposit ?? 0, total, percent)));
 
 /** The "Good", "Better" and "Best" chips on the add-on groups, but not when the quote offers options (their tiers are the options'). */
 export const groupTiers = (view: QuoteView) => ((view.quote.options?.length ?? 0) > 0 ? new Map<string, string>() : optionLabels(view.quote.lines));

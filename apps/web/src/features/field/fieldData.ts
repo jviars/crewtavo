@@ -49,8 +49,9 @@ export const clocksOn = (status: string) => status === "in_progress" || status =
 /**
  * What a status tap saves, as it was made: the time is when it was tapped, and whether it clocks
  * this person in and out (not a sub without a clock), which stays with it if it has to wait for
- * signal. `locate`: the phone's place goes with it, for a tap that starts or stops the clock where
- * the company keeps where people clock in.
+ * signal. `locate`: the phone's place goes with it, where the company keeps where people clock in,
+ * for a tap that starts or stops the clock, and for On my way, to tell the client when the crew
+ * should get there (only that time is kept).
  */
 export function statusChange(
   session: Pick<Session, "role" | "subcontractor" | "userId"> & { company: Pick<Company, "id" | "settings"> },
@@ -60,21 +61,21 @@ export function statusChange(
 ): { change: VisitStatusChange; locate: boolean } {
   const clock = keepsTime(session);
   const change: VisitStatusChange = { companyId: session.company.id, userId: session.userId, visitId: visit.id, jobId: visit.jobId, status, at, clock, ...(isSub(session) && { sub: true }) };
-  return { change, locate: clock && clocksOn(status) && recordsPlaces(session.company) };
+  return { change, locate: ((clock && clocksOn(status)) || status === "en_route") && recordsPlaces(session.company) };
 }
 
 /**
- * Status taps on a visit, with where the phone was when the tap starts or stops the clock. Finds
- * the place first (`locating` is the visit it's for, so its button can show it's busy), then saves
- * the tap as statusChange() made it.
+ * Status taps on a visit, with where the phone was when the tap starts or stops the clock or is On
+ * my way. Finds the place first (`locating` is the visit and status it's for, so that button can show
+ * it's busy), then saves the tap as statusChange() made it.
  */
 export function useStatusTap(send: (change: VisitStatusChange) => void) {
   const session = useSession();
-  const [locating, setLocating] = useState<string | null>(null);
+  const [locating, setLocating] = useState<{ id: string; status: string } | null>(null);
   const tap = async (visit: { id: string; jobId: string | null }, status: string) => {
     const { change, locate: withPlace } = statusChange(session, visit, status);
     if (withPlace) {
-      setLocating(visit.id);
+      setLocating({ id: visit.id, status });
       change.place = await locate();
       setLocating(null);
     }

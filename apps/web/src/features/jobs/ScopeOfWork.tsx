@@ -1,16 +1,25 @@
 /** What the crew is doing on a job, from its line items: names, notes and quantities, never prices. */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
+import { pendingJobLines, waitingScopeLine } from "../field/fieldActions";
 
 const qty = (n: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(n);
 
+export const scopeKey = (jobId: string | null | undefined) => ["job", jobId, "scope"];
+
 export function useJobScope(jobId: string | null | undefined) {
+  const queryClient = useQueryClient();
   return useQuery({
-    queryKey: ["job", jobId, "scope"],
+    queryKey: scopeKey(jobId),
     enabled: Boolean(jobId),
     meta: { silent: true },
-    queryFn: async () => unwrap(await supabase().rpc("job_scope", { p_job: jobId! })),
+    queryFn: async () => {
+      const lines = unwrap(await supabase().rpc("job_scope", { p_job: jobId! }));
+      // Work added on this phone that hasn't gone yet is newer than what the server has.
+      const waiting = pendingJobLines(queryClient, jobId!).filter((w) => !lines.some((l) => l.id === w.lineId));
+      return [...lines, ...waiting.map(waitingScopeLine)];
+    },
   });
 }
 

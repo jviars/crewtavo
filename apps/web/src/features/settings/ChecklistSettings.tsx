@@ -22,10 +22,14 @@ interface Item {
 interface Template {
   id: string;
   name: string;
-  job_type: string | null;
   items: Item[];
   active: boolean;
+  /** Its finished answers show on the client's past visit and print on the job's invoice. */
+  show_to_client: boolean;
+  /** The price list items it goes with: it comes up by itself on jobs with any of them. None: any job. */
+  service_ids: string[];
 }
+interface Service { id: string; name: string; category: string | null; active: boolean }
 
 const TYPES: Array<[Item["type"], string]> = [["check", "Checkbox"], ["text", "Text"], ["number", "Number"], ["choice", "Choice"], ["photo", "Photo"], ["signature", "Signature"]];
 
@@ -37,7 +41,14 @@ export function ChecklistSettings() {
   const key = ["checklist-templates", session.company.id];
   const templates = useQuery({
     queryKey: key,
-    queryFn: async () => unwrap(await supabase().from("checklist_templates").select("id, name, job_type, items, active").eq("company_id", session.company.id).order("name")) as unknown as Template[],
+    queryFn: async () =>
+      unwrap(await supabase().from("checklist_templates").select("id, name, items, active, show_to_client, services:checklist_template_services(service_id)").eq("company_id", session.company.id).order("name")).map(
+        ({ services, ...t }) => ({ ...t, service_ids: services.map((s) => s.service_id) }) as unknown as Template,
+      ),
+  });
+  const services = useQuery({
+    queryKey: ["services", session.company.id, "checklists"],
+    queryFn: async () => unwrap(await supabase().from("services").select("id, name, category, active").eq("company_id", session.company.id).order("sort").order("name")) as Service[],
   });
   useEffect(() => {
     if (!selected && templates.data?.length) setSelected(templates.data[0].id);
@@ -89,12 +100,12 @@ export function ChecklistSettings() {
         </div>
         <Button icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New checklist</Button>
       </aside>
-      <div className="wide">{current ? <TemplateEditor key={current.id} template={current} onDelete={() => deleteTemplate(current)} /> : null}</div>
+      <div className="wide">{current ? <TemplateEditor key={current.id} template={current} services={services.data ?? []} onDelete={() => deleteTemplate(current)} /> : null}</div>
     </div>
   );
 }
 
-function TemplateEditor({ template, onDelete }: { template: Template; onDelete: () => void }) {
+function TemplateEditor({ template, services, onDelete }: { template: Template; services: Service[]; onDelete: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const [t, setT] = useState(template);
@@ -105,7 +116,8 @@ function TemplateEditor({ template, onDelete }: { template: Template; onDelete: 
     mutationFn: async () => {
       // Checked and tidied the way an AI assistant's are too (packages/core/src/forms.ts).
       const clean = normalizeChecklist(t);
-      unwrap(await supabase().from("checklist_templates").update({ ...clean, items: clean.items as never, active: t.active }).eq("id", t.id));
+      unwrap(await supabase().from("checklist_templates").update({ ...clean, items: clean.items as never, active: t.active, show_to_client: t.show_to_client }).eq("id", t.id));
+      unwrap(await supabase().rpc("set_checklist_services", { p_template: t.id, p_services: t.service_ids }));
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklist-templates", session.company.id] }),
   });
@@ -119,11 +131,16 @@ function TemplateEditor({ template, onDelete }: { template: Template; onDelete: 
 
   return (
     <div className="card card-pad stack">
-      <div className="form-grid">
-        <Field label="Checklist name"><input className="input" value={t.name} maxLength={120} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
-        <Field label="Job type" optional><input className="input" value={t.job_type ?? ""} maxLength={60} onChange={(e) => setT({ ...t, job_type: e.target.value })} /></Field>
-      </div>
+      <Field label="Checklist name"><input className="input" value={t.name} maxLength={120} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
+      <ServicesPicker value={t.service_ids} services={services} onChange={(service_ids) => setT({ ...t, service_ids })} />
       <label className="switch-row"><input type="checkbox" className="switch" checked={t.active} onChange={(e) => setT({ ...t, active: e.target.checked })} />Crews can use this checklist</label>
+      <label className="switch-row">
+        <input type="checkbox" className="switch" checked={t.show_to_client} onChange={(e) => setT({ ...t, show_to_client: e.target.checked })} />
+        <span>
+          Show to client
+          <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Finished answers show on their past visit in the Client Hub and print on the invoice. Photos aren't included.</span>
+        </span>
+      </label>
       <div className="stack-sm" ref={itemsRef}>
         {t.items.map((item, i) => (
           <div key={item.key} className="card" style={{ padding: 12, boxShadow: "none", background: "var(--fill)", display: "grid", gap: 8 }}>
@@ -154,5 +171,34 @@ function TemplateEditor({ template, onDelete }: { template: Template; onDelete: 
         <Button variant="primary" loading={save.isPending} done={saved} disabled={!dirty && !saved} onClick={() => save.mutate()}>Save checklist</Button>
       </div>
     </div>
+  );
+}
+
+/** "Use on jobs with": the price list items a checklist goes with, each removable, and a list to add more. */
+function ServicesPicker({ value, services, onChange }: { value: string[]; services: Service[]; onChange: (ids: string[]) => void }) {
+  const chosen = value.map((id) => services.find((s) => s.id === id)).filter((s): s is Service => Boolean(s));
+  const addable = services.filter((s) => s.active && !value.includes(s.id));
+  const categories = [...new Set(addable.map((s) => s.category?.trim() || "Other"))];
+  return (
+    <Field label="Use on jobs with" optional hint={value.length ? "It comes up by itself on visits for jobs with any of these." : "With none, crews can pick it on any job."}>
+      {chosen.length > 0 && (
+        <div className="row wrap" style={{ gap: 6 }}>
+          {chosen.map((s) => (
+            <span key={s.id} className="tag">
+              {s.name}
+              <button type="button" aria-label={`Remove ${s.name}`} onClick={() => onChange(value.filter((id) => id !== s.id))}><Icon name="x" size={12} strokeWidth={2} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      <select className="select" value="" disabled={!addable.length} onChange={(e) => e.target.value && onChange([...value, e.target.value])}>
+        <option value="">{services.length ? "Add from your price list…" : "Your price list is empty"}</option>
+        {categories.map((c) => (
+          <optgroup key={c} label={c}>
+            {addable.filter((s) => (s.category?.trim() || "Other") === c).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </optgroup>
+        ))}
+      </select>
+    </Field>
   );
 }

@@ -11,6 +11,8 @@
  * as a signature on the Client Hub or the iPad does. The option math is core money.ts; options.ts has
  * the option records.
  */
+import { depositFor } from "@crewtavo/core/contracts";
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import type { Json, TablesUpdate } from "@crewtavo/core/database";
 import type { TemplateSettings } from "@crewtavo/core/documents";
 import { inRangeMode, sitePriceSet } from "@crewtavo/core/estimates";
@@ -76,6 +78,7 @@ import { SignaturePad } from "../field/SignaturePad";
 import { RecurrenceEditor, type Recurrence } from "../jobs/RecurrenceEditor";
 import { scheduleText } from "../jobs/repeatText";
 import { DrawingsCard } from "../measure/drawings";
+import { CustomFieldsCard, useCustomFields } from "../customFields/CustomFields";
 import { PlansCard } from "../plans/PlansCard";
 import { dayText } from "../roofing/flow/model";
 import { QuotePrint, useQuotePrint } from "../roofing/flow/QuotePrint";
@@ -111,7 +114,7 @@ async function loadQuoteRow(id: string) {
   return unwrapOne(
     await supabase()
       .from("quotes")
-      .select("id, number, title, status, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, valid_until, recurrence_rule, active_months, starts_on, ends_on, sent_at, approved_at, approval, lost_reason, request_id, created_at, template_id, option_id, section_ids, roof_package_id, promo_code_id, promo_every_visit, promo:promo_codes(code, kind, value, description, every_visit), request:requests(promo_code, website_form_id, rejected_promo_code, promo_problem), client:clients(id, display_name, email, phone, billing_address, sms_opt_out_at), property:properties(id, line1, city, region, postal_code, lat, lng), lines:quote_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, option_id, formula, sort, service_id), jobs!jobs_company_id_quote_id_fkey(id, number), change_order_for, change_job:jobs!quotes_change_order_fkey(id, number, title), package:roof_packages!quotes_roof_package_fkey(name, warranty), range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at")
+      .select("id, number, title, status, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, deposit_percent, valid_until, recurrence_rule, active_months, starts_on, ends_on, sent_at, approved_at, approval, lost_reason, request_id, created_at, template_id, option_id, section_ids, roof_package_id, promo_code_id, promo_every_visit, promo:promo_codes(code, kind, value, description, every_visit), request:requests(promo_code, website_form_id, rejected_promo_code, promo_problem), client:clients(id, display_name, email, phone, billing_address, sms_opt_out_at, tax_exempt, tax_exempt_note), property:properties(id, line1, city, region, postal_code, lat, lng), lines:quote_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, option_id, formula, sort, service_id), jobs!jobs_company_id_quote_id_fkey(id, number), change_order_for, change_job:jobs!quotes_change_order_fkey(id, number, title), package:roof_packages!quotes_roof_package_fkey(name, warranty), range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at, custom_fields, is_template")
       .eq("id", id)
       .order("sort", { referencedTable: "quote_line_items" })
       .maybeSingle(),
@@ -198,6 +201,13 @@ export function depositCap(q: TabQuote, lines: readonly OptionLine[], options: R
   return { amount: lowest.total, name: lowest.name };
 }
 
+/**
+ * The deposit as a percent of the total, for switching a deposit typed as an amount to a percent:
+ * the percent that asks for the same, at most 100 (none on a quote with no total yet).
+ */
+export const depositAsPercent = (amount: Amount, total: Amount) =>
+  Number(total) > 0 ? Math.min(100, Math.round((Number(amount) / Number(total)) * 10_000) / 100) : 0;
+
 /** An option in "Which option did they choose?": its card, and whether it can be chosen (it has lines of its own, so a price). */
 export interface OptionChoice {
   option: QuoteOptionRow;
@@ -250,7 +260,7 @@ export function contractFor(
   tier: string | null = null,
 ): QuoteContractInput {
   return {
-    quote: { status: q.status, number: q.number, sent_at: q.sent_at, created_at: q.created_at, deposit_amount: q.deposit_amount, section_ids: q.section_ids, approval: q.approval },
+    quote: { status: q.status, number: q.number, sent_at: q.sent_at, created_at: q.created_at, deposit_amount: q.deposit_amount, deposit_percent: q.deposit_percent, section_ids: q.section_ids, approval: q.approval },
     template,
     // The option's card as the customer sees it: the tier word on it (optionTiers), and its highlights.
     option: option && { name: option.name, warranty: option.warranty, section_ids: option.section_ids, tier: tier ?? option.tier ?? null, highlights: option.highlights },
@@ -362,7 +372,7 @@ export function QuotePage() {
   const session = useSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [dialog, setDialog] = useState<null | "send" | "exact" | "lost">(null);
+  const [dialog, setDialog] = useState<null | "send" | "exact" | "lost" | "template">(null);
   // "Which option did they choose?", before marking it approved or making it a job.
   const [choosing, setChoosing] = useState<null | "approve" | "convert">(null);
   // The option being looked at (local: the customer sees nothing change), and how: as lines or as paper.
@@ -383,8 +393,8 @@ export function QuotePage() {
   const templates = useTemplates();
   // The look it prints with: the template it was signed on once it's signed, else the one it's set to.
   const { template } = useQuoteTemplate(q ?? NO_QUOTE);
-  useDocumentTitle(q ? `Quote #${q.number}` : "Quote");
-  useRememberRecent(session.company.id, q ? { kind: "quote", id: q.id, title: q.title, subtitle: `Quote #${q.number} · ${q.client?.display_name ?? ""}`, path: `/quotes/${q.id}` } : null);
+  useDocumentTitle(q ? (q.is_template ? q.title : `Quote #${q.number}`) : "Quote");
+  useRememberRecent(session.company.id, q ? { kind: "quote", id: q.id, title: q.title, subtitle: q.is_template ? "Quote template" : `Quote #${q.number} · ${q.client?.display_name ?? ""}`, path: `/quotes/${q.id}` } : null);
 
   const history = useQuery({
     queryKey: ["quote", id, "history"],
@@ -487,12 +497,22 @@ export function QuotePage() {
       navigate(`/quotes/${res.id}`);
     },
   });
+  // "Save as template": a copy without the client, named by the office, that new quotes start from.
+  const saveTemplate = useMutation({
+    meta: { inline: true },
+    mutationFn: async (name: string) => unwrap(await supabase().rpc("duplicate_quote", { p_quote: id, p_template_name: name })),
+    onSuccess: (templateId) => {
+      setDialog(null);
+      queryClient.invalidateQueries({ queryKey: ["quotes", session.company.id] });
+      toast.success("Saved as a quote template", { description: "New quotes can start from it.", action: { label: "Open it", onClick: () => navigate(`/quotes/${templateId}`) } });
+    },
+  });
   const remove = useMutation({
-    meta: { success: "Quote deleted", tone: "quote" },
+    meta: { success: () => (quote.data?.is_template ? "Quote template deleted" : "Quote deleted"), tone: "quote" },
     mutationFn: async () => unwrap(await supabase().from("quotes").delete().eq("id", id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["quotes", session.company.id] });
-      navigate("/quotes", { replace: true });
+      navigate(quote.data?.is_template ? "/quotes?status=templates" : "/quotes", { replace: true });
     },
   });
   const openClientView = useMutation({
@@ -507,8 +527,12 @@ export function QuotePage() {
   if (quote.error || !q || optionRows.error) {
     return <PageError error={quote.error ?? optionRows.error} onRetry={() => void Promise.all([quote.refetch(), optionRows.refetch()])} back={<BackLink to="/quotes">Quotes</BackLink>} />;
   }
+  // A quote template: its contents are edited here as a quote's are, but it's never sent, so
+  // nothing about a client, sending or what comes after shows.
+  const isTemplate = q.is_template;
 
   const editable = canSell && EDITABLE.includes(q.status);
+  const taxExempt = Boolean(q.client?.tax_exempt) && Number(q.tax_rate) === 0;
   const signed = isSignedQuote(q.status);
   // A roof estimate out as a price range: the client hasn't seen this exact price yet.
   const ranged = inRangeMode(q);
@@ -540,6 +564,9 @@ export function QuotePage() {
   const cost = lineSums(visibleLines(q.lines, viewed), { optionId: viewed, shownOptionId: q.option_id, withOptions: true }).cost;
   const priceForMargin = tab.subtotal - tab.discount;
   const cap = depositCap(q, q.lines, options);
+  // A percent deposit is of the total of the option looked at, as the client is asked for it.
+  const percentDeposit = q.deposit_percent !== null;
+  const deposit = Number(depositFor(q.deposit_amount, tab.total, q.deposit_percent));
   const choose = needsChoice(q.status, offers);
   // The quote and its options are read again apart: until both are in, which option they chose waits.
   const settling = choose && (quote.isFetching || optionRows.isFetching);
@@ -550,10 +577,27 @@ export function QuotePage() {
 
   return (
     <>
-      <BackLink to="/quotes">Quotes</BackLink>
+      {isTemplate ? <BackLink to="/quotes?status=templates">Quote templates</BackLink> : <BackLink to="/quotes">Quotes</BackLink>}
       <div className="page-header">
         <h1 className="page-title">{editable ? <TitleInput value={q.title} onEdit={save.edited} onUnchanged={unchanged} onSave={(title) => saveField({ title })} /> : q.title}</h1>
-        {canSell && (
+        {canSell && isTemplate && (
+          <div className="page-actions">
+            <Button icon="plus" onClick={() => navigate(`/quotes?new=1&template=${q.id}`)}>New quote from it</Button>
+            <Menu
+              items={[
+                {
+                  label: "Delete template",
+                  icon: "trash",
+                  danger: true,
+                  onSelect: async () => {
+                    if (await confirm({ title: `Delete the template ${q.title}?`, body: "Quotes made from it stay as they are. This can't be undone.", confirmLabel: "Delete template", danger: true })) remove.mutate();
+                  },
+                },
+              ]}
+            />
+          </div>
+        )}
+        {canSell && !isTemplate && (
           <div className="page-actions">
             {/* One solid green button: the next step. Sending while it's a draft (or again once they asked for changes), making the job once it's approved. */}
             {EDITABLE.includes(q.status) &&
@@ -570,6 +614,7 @@ export function QuotePage() {
                 { label: "Preview as client", icon: "eye", onSelect: () => openClientView.mutate() },
                 { label: "Print or save PDF", icon: "printer", onSelect: () => printer.print() },
                 { label: "Copy as new draft", icon: "copy", disabled: copy.isPending, onSelect: () => copy.mutate() },
+                { label: "Save as template", icon: "quote", onSelect: () => setDialog("template") },
                 { separator: true },
                 { label: "Mark approved", icon: "check", hidden: !["sent", "changes_requested", "draft"].includes(q.status), disabled: approve.isPending || settling, onSelect: startApprove },
                 { label: convertLabel, icon: "job", hidden: q.status !== "draft", disabled: settling, onSelect: startConvert },
@@ -591,8 +636,14 @@ export function QuotePage() {
         )}
       </div>
       <div className="page-meta">
-        <span className="muted">Quote #{q.number}</span>
-        <EntityStatus kind="quote" status={q.status} />
+        {isTemplate ? (
+          <span className="muted">Quote template · new quotes start from it, and it's never sent</span>
+        ) : (
+          <>
+            <span className="muted">Quote #{q.number}</span>
+            <EntityStatus kind="quote" status={q.status} />
+          </>
+        )}
         <SaveStatus status={save.status} />
         {q.client && <Link to={`/clients/${q.client.id}`} className="strong">{q.client.display_name}</Link>}
         {q.property && <span className="muted">{addressLine(q.property)}</span>}
@@ -686,7 +737,7 @@ export function QuotePage() {
             </div>
           </div>
           <MessageCard value={q.message} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(message) => saveField({ message })} />
-          {canSell && <PlansCard scope={{ kind: "quote", id: q.id, propertyId: q.property?.id ?? null }} />}
+          {canSell && !isTemplate && <PlansCard scope={{ kind: "quote", id: q.id, propertyId: q.property?.id ?? null }} />}
         </div>
         <aside className="narrow stack">
           <div className="card card-pad totals">
@@ -700,7 +751,7 @@ export function QuotePage() {
               discount={q.promo ? tab.discount : Number(q.discount_amount)}
               subtotal={tab.subtotal}
               canEditDiscount={editable}
-              canChangePromo={editable && !sitePriced}
+              canChangePromo={editable && !sitePriced && !isTemplate}
               suggestedCode={sitePriced ? null : q.request?.promo_code}
               suggestedFrom={q.request?.website_form_id ? "website" : "booking"}
               rejected={!sitePriced && q.request?.rejected_promo_code ? { code: q.request.rejected_promo_code, problem: q.request.promo_problem } : null}
@@ -712,11 +763,12 @@ export function QuotePage() {
             {offers && (editable || Number(q.discount_amount) > 0) && (
               <p className={styles.note}>{q.promo ? "The promo code is worked out on whichever option they choose." : "The discount comes off whichever option they choose."}</p>
             )}
+            {/* A tax-exempt client's quote is kept at 0% by the database, so there's no rate to type. */}
             <div className="line">
-              <span>Tax {editable ? "" : `(${formatTaxRate(q.tax_rate)})`}</span>
-              {editable ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />}
+              <span>{taxExempt ? `Tax exempt${q.client?.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}` : `Tax ${editable ? "" : `(${formatTaxRate(q.tax_rate)})`}`}</span>
+              {editable && !taxExempt ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />}
             </div>
-            {editable && <div className="line"><span>Tax amount</span><AnimatedNumber value={tab.tax} format={MONEY_CENTS} /></div>}
+            {editable && !taxExempt && <div className="line"><span>Tax amount</span><AnimatedNumber value={tab.tax} format={MONEY_CENTS} /></div>}
             <div className="line grand"><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><AnimatedNumber value={tab.total} format={MONEY_CENTS} /></div>
             {!q.change_order_for && (
               <div className={cx("line", styles.howOftenRow)}>
@@ -726,19 +778,41 @@ export function QuotePage() {
             )}
             <div className="line">
               <span>Deposit required</span>
-              {editable ? <MoneyInput label="Deposit" value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => saveField({ deposit_amount: v })} onEdit={save.edited} onUnchanged={unchanged} /> : <span>{formatMoneyCents(q.deposit_amount)}</span>}
+              {editable ? (
+                <span className={styles.deposit}>
+                  {/* A percent follows the total as lines change, and the option and add-ons the client picks. */}
+                  <span className="segmented" role="group" aria-label="Deposit as">
+                    <button type="button" aria-pressed={!percentDeposit} title="An amount" onClick={() => percentDeposit && void saveField({ deposit_percent: null })}>$</button>
+                    <button type="button" aria-pressed={percentDeposit} title="A percent of the total" onClick={() => !percentDeposit && void saveField({ deposit_percent: depositAsPercent(q.deposit_amount, q.total) })}>%</button>
+                  </span>
+                  {percentDeposit ? (
+                    <MoneyInput percent label="Deposit percent" width={96} value={Number(q.deposit_percent)} max={100} onSave={(v) => saveField({ deposit_percent: v })} onEdit={save.edited} onUnchanged={unchanged} />
+                  ) : (
+                    <MoneyInput label="Deposit" width={96} value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => saveField({ deposit_amount: v })} onEdit={save.edited} onUnchanged={unchanged} />
+                  )}
+                </span>
+              ) : (
+                <span>{formatMoneyCents(deposit)}{percentDeposit ? ` (${Number(q.deposit_percent)}%)` : ""}</span>
+              )}
             </div>
-            {cap.name && editable && Number(q.deposit_amount) > cap.amount && (
+            {percentDeposit && editable && <div className="line"><span>Deposit amount</span><AnimatedNumber value={deposit} format={MONEY_CENTS} /></div>}
+            {!percentDeposit && cap.name && editable && Number(q.deposit_amount) > cap.amount && (
               <p className={styles.warn}>That's more than {cap.name} comes to ({formatMoneyCents(cap.amount)}). Lower it so it fits whichever option they choose.</p>
             )}
-            <div className="line">
-              <span>Valid until</span>
-              <ValidUntil value={q.valid_until} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(validUntil) => saveField({ valid_until: validUntil })} />
-            </div>
+            {/* A quote made from a template is valid for the usual days from then. */}
+            {!isTemplate && (
+              <div className="line">
+                <span>Valid until</span>
+                <ValidUntil value={q.valid_until} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(validUntil) => saveField({ valid_until: validUntil })} />
+              </div>
+            )}
           </div>
-          {canSell && templateRows.length > 1 && (
+          {/* Filled in after it's signed too: a permit number often comes later. */}
+          <CustomFieldsCard record="quote" values={q.custom_fields} editable={canSell} onSave={async (values) => { unwrap(await supabase().from("quotes").update({ custom_fields: values }).eq("id", q.id)); refresh(); }} />
+          {/* The paper's look is picked on each quote, so a quote template doesn't have one. */}
+          {canSell && !isTemplate && templateRows.length > 1 && (
             <div className="card card-pad stack-sm">
-              <label htmlFor="quote-template"><strong>Template</strong></label>
+              <label htmlFor="quote-template"><strong>Document style</strong></label>
               <select
                 id="quote-template"
                 className="select"
@@ -771,8 +845,8 @@ export function QuotePage() {
               </div>
             </div>
           )}
-          {canSell && <MeasurementsCard quoteId={q.id} propertyId={q.property?.id ?? null} lat={q.property?.lat ?? null} lng={q.property?.lng ?? null} editable={editable} onApplied={refresh} />}
-          {canSell && !!history.data?.activity.length && (
+          {canSell && !isTemplate && <MeasurementsCard quoteId={q.id} propertyId={q.property?.id ?? null} lat={q.property?.lat ?? null} lng={q.property?.lng ?? null} editable={editable} onApplied={refresh} />}
+          {canSell && !isTemplate && !!history.data?.activity.length && (
             <div className="card">
               <div className="card-head"><strong>History</strong></div>
               <div className="timeline">
@@ -801,6 +875,7 @@ export function QuotePage() {
         ))}
       {/* They said yes to the range: the exact price goes out instead, the way the roofing project offers it. */}
       {dialog === "exact" && <SendEstimateDialog quote={quoteToSend(q, options)} mode="exact" onClose={() => setDialog(null)} onSent={refresh} />}
+      {dialog === "template" && <SaveTemplateDialog title={q.title} pending={saveTemplate.isPending} error={saveTemplate.error} onClose={() => setDialog(null)} onSave={(name) => saveTemplate.mutate(name)} />}
       {dialog === "lost" && <LostDialog onClose={() => setDialog(null)} onSave={(reason) => update.mutateAsync({ status: "lost", lost_reason: reason }).then(() => setDialog(null))} />}
       {offering && (
         <AddOptionsDialog
@@ -864,6 +939,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
   const isPending = look.isPending;
   const letterhead = useLetterhead();
   const company = letterhead.data ?? documentCompany(session.company);
+  const fields = useCustomFields("quote");
 
   const printed = printedOption(q, viewed);
   const option = options.find((o) => o.id === printed) ?? null;
@@ -877,7 +953,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
     () =>
       ready
         ? paperDocument({
-            quote: q,
+            quote: { ...q, pdf_fields: shownCustomFields(fields, q.custom_fields, "pdf") },
             lines: q.lines,
             options,
             viewed,
@@ -886,7 +962,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
             contract,
           })
         : null,
-    [ready, q, options, viewed, tz, contract],
+    [ready, q, options, viewed, tz, contract, fields],
   );
   const paperTemplate = useMemo(() => contractTemplate(template, contract), [template, contract]);
   // While another option's contract loads, the pages stay as they were rather than blinking out.
@@ -1081,6 +1157,30 @@ function CountersignDialog({ companyName, pending, error, onClose, onSign }: { c
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" icon="signature" loading={pending} disabled={!signature}>Sign for {companyName}</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** "Save as template": the office names it; its lines, options, sections and message go with it, not the client. */
+function SaveTemplateDialog({ title, pending, error, onClose, onSave }: { title: string; pending: boolean; error: unknown; onClose: () => void; onSave: (name: string) => void }) {
+  const [name, setName] = useState(title);
+  return (
+    <Dialog open onClose={onClose} title="Save as quote template" description="New quotes can start from it, with its lines, options, contract sections and message. The client and dates stay on this quote." size="sm">
+      <form
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (name.trim()) onSave(name.trim());
+        }}
+      >
+        <Field label="Template name" requiredMessage="Give it a name, like Spring cleanup.">
+          <input className="input" value={name} onChange={(e) => setName(e.target.value.trimStart())} required maxLength={200} autoFocus />
+        </Field>
+        <FormError error={error} />
+        <div className="form-actions">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={pending}>Save template</Button>
         </div>
       </form>
     </Dialog>

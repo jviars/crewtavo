@@ -1,7 +1,7 @@
 import { autopaySettings } from "@crewtavo/core/autopay";
 import { isPlaceholderEmail } from "@crewtavo/core/email";
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { useDeferredValue, useEffect, useState, type FormEvent } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useDeferredValue, useEffect, useId, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -10,10 +10,12 @@ import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { archiveWithUndo, SelectAllCell, SelectCell, SelectionBar, useSelection } from "@/components/ui/Selection";
 import { ListPageSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, searchTerm, supabase, unwrap } from "@/lib/api";
+import { inChunks, reportBulk } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -49,10 +51,14 @@ export function ClientsPage() {
   const [search, setSearch] = useState(params.get("q") ?? "");
   const [importing, setImporting] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [tagging, setTagging] = useState<"add" | "remove" | null>(null);
+  const queryClient = useQueryClient();
   const term = useDeferredValue(searchTerm(search));
   const creating = params.get("new") === "1";
   const setCreating = (on: boolean) => setParams(on ? { new: "1" } : {}, { replace: true });
   const canEdit = hasRole(session, "admin", "office", "estimator");
+  // Archiving and restoring are the office's, as on a client's page.
+  const isOffice = hasRole(session, "admin", "office");
   // Autopay invites are for the people who look after money, once the company has autopay on and can send.
   const invites = money && autopay.enabled && (session.config.features.email || session.config.features.sms);
   const tags = useClientTags();
@@ -75,8 +81,9 @@ export function ClientsPage() {
     },
   });
 
+  const listKey = ["clients", session.company.id, filter, term, tag, sort, limit];
   const clients = useQuery({
-    queryKey: ["clients", session.company.id, filter, term, tag, sort, limit],
+    queryKey: listKey,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase()
@@ -134,6 +141,37 @@ export function ClientsPage() {
 
   const data = clients.data;
   const isFiltered = Boolean(term || tag || filter !== "all");
+  const rows = data?.rows ?? [];
+  const selection = useSelection(rows.map((c) => c.id), `${filter}|${term}|${tag}|${sort}`);
+  const picked = rows.filter((c) => selection.has(c.id));
+  const words = (verb: string) => {
+    const names = new Map(rows.map((c) => [c.id, c.display_name]));
+    return { verb, one: "client", many: "clients", name: (id: string) => names.get(id) ?? "A client" };
+  };
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["clients", session.company.id] });
+  const archive = async () => {
+    const ids = selection.ids;
+    if (!(await confirm({ title: `Archive ${plural(ids.length, "client")}?`, body: "Archiving hides them from lists and keeps their records.", confirmLabel: "Archive" }))) return;
+    selection.clear();
+    archiveWithUndo<{ rows: typeof rows; total: number }>({
+      key: listKey,
+      ids,
+      title: `${plural(ids.length, "client")} archived`,
+      // No list but Archived shows archived clients, and Archive isn't offered there.
+      hide: (d, gone) => ({ rows: d.rows.filter((c) => !gone.has(c.id)), total: d.total - d.rows.filter((c) => gone.has(c.id)).length }),
+      write: async (chunk) => unwrap(await supabase().from("clients").update({ status: "archived" }).in("id", chunk).neq("status", "archived").select("id")).map((c) => c.id),
+      words: words("archived"),
+      refresh,
+    });
+  };
+  const restore = useMutation({
+    mutationFn: (ids: string[]) => inChunks(ids, async (chunk) => unwrap(await supabase().from("clients").update({ status: "active" }).in("id", chunk).eq("status", "archived").select("id")).map((c) => c.id)),
+    onSuccess: (result) => {
+      reportBulk(result, words("restored"));
+      selection.clear();
+      void refresh();
+    },
+  });
 
   if (clients.isPending && !data) return <ListPageSkeleton columns={5} tabs={4} />;
 
@@ -145,11 +183,13 @@ export function ClientsPage() {
           canEdit && (
             <>
               <Menu
-                label={invites ? "More actions" : "Import and export"}
+                label={money ? "More actions" : "Import and export"}
                 items={[
                   { label: "Import from a spreadsheet", icon: "upload", onSelect: () => setImporting(true) },
                   { label: exportCsv.isPending ? "Exporting…" : "Download as spreadsheet", icon: "download", onSelect: () => exportCsv.mutate(), disabled: exportCsv.isPending },
-                  { separator: true, hidden: !invites },
+                  // Merging moves invoices and payments, so it's for the people who look after money.
+                  { separator: true, hidden: !money },
+                  { label: "Possible duplicates", icon: "users", onSelect: () => navigate("/clients/duplicates"), hidden: !money },
                   { label: "Send autopay invites", icon: "card", onSelect: () => setInviting(true), hidden: !invites },
                 ]}
               />
@@ -205,13 +245,34 @@ export function ClientsPage() {
       ) : (
         data && (
           <div className={`card${clients.isPlaceholderData ? " is-stale" : ""}`}>
+            {canEdit && (
+              <SelectionBar selection={selection} noun="clients">
+                <Button size="sm" icon="tag" onClick={() => setTagging("add")}>Add tag</Button>
+                <Button size="sm" icon="tag" disabled={!picked.some((c) => c.tags.length)} onClick={() => setTagging("remove")}>Remove tag</Button>
+                {isOffice && filter === "archived" && (
+                  <Button
+                    size="sm"
+                    icon="restore"
+                    loading={restore.isPending}
+                    onClick={async () => {
+                      const ids = selection.ids;
+                      if (await confirm({ title: `Restore ${plural(ids.length, "client")}?`, body: "They show in your lists again, as active clients.", confirmLabel: "Restore" })) restore.mutate(ids);
+                    }}
+                  >
+                    Restore
+                  </Button>
+                )}
+                {isOffice && filter !== "archived" && <Button size="sm" icon="archive" onClick={() => void archive()}>Archive</Button>}
+              </SelectionBar>
+            )}
             <table className="table table-stack">
               <thead>
-                <tr><th>Name</th><th>Contact</th><th>Service address</th><th>Tags</th><th>Status</th></tr>
+                <tr>{canEdit && <SelectAllCell selection={selection} label="Select all clients on this page" />}<th>Name</th><th>Contact</th><th>Service address</th><th>Tags</th><th>Status</th></tr>
               </thead>
               <tbody>
                 {data.rows.map((c) => (
-                  <tr key={c.id} className="row-link" onClick={() => navigate(`/clients/${c.id}`)}>
+                  <tr key={c.id} className="row-link" data-selected={selection.has(c.id) || undefined} onClick={() => navigate(`/clients/${c.id}`)}>
+                    {canEdit && <SelectCell selection={selection} id={c.id} label={`Select ${c.display_name}`} />}
                     <td>
                       <Link className="cell-link" to={`/clients/${c.id}`} onClick={(e) => e.stopPropagation()}>{c.display_name}</Link>
                       {c.company_name && c.company_name !== c.display_name && <div className="muted small">{c.company_name}</div>}
@@ -250,6 +311,19 @@ export function ClientsPage() {
       <NewClientDialog open={creating} initialName={search.trim()} onClose={() => setCreating(false)} onCreated={(id) => navigate(`/clients/${id}`)} />
       {importing && <ImportClientsDialog onClose={() => setImporting(false)} />}
       {inviting && <AutopayInvitesDialog onClose={() => setInviting(false)} />}
+      {tagging && (
+        <TagClientsDialog
+          mode={tagging}
+          clients={picked}
+          onClose={() => setTagging(null)}
+          onDone={() => {
+            setTagging(null);
+            selection.clear();
+            void refresh();
+            void queryClient.invalidateQueries({ queryKey: ["client-tags", session.company.id] });
+          }}
+        />
+      )}
     </>
   );
 }
@@ -350,6 +424,66 @@ function AutopayInvitesDialog({ onClose }: { onClose: () => void }) {
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" icon="send" loading={send.isPending} disabled={who.isPending || !reachable.length}>
             {reachable.length ? `Send ${plural(reachable.length, "invite")}` : "Send invites"}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/**
+ * Add a tag to the picked clients, or take one off. Only those it changes are sent: one that has
+ * the tag already (or hasn't it, to take off) stays as it is. change_client_tags changes each
+ * client's tags as they are in the database, so a tag added meanwhile isn't lost.
+ */
+function TagClientsDialog({ mode, clients, onClose, onDone }: { mode: "add" | "remove"; clients: Array<{ id: string; display_name: string; tags: string[] }>; onClose: () => void; onDone: () => void }) {
+  const known = useClientTags();
+  const listId = useId();
+  const present = [...new Set(clients.flatMap((c) => c.tags))].sort((a, b) => a.localeCompare(b));
+  const [tag, setTag] = useState(mode === "remove" ? (present[0] ?? "") : "");
+  const name = tag.trim();
+  // Tags match whatever their case, as the tag field does.
+  const has = (c: { tags: string[] }, t: string) => c.tags.some((x) => x.toLowerCase() === t.toLowerCase());
+  const changing = name ? clients.filter((c) => has(c, name) === (mode === "remove")) : [];
+  const save = useMutation({
+    meta: { inline: true },
+    mutationFn: () =>
+      inChunks(
+        changing.map((c) => c.id),
+        async (chunk) => unwrap(await supabase().rpc("change_client_tags", mode === "add" ? { p_clients: chunk, p_add: name } : { p_clients: chunk, p_remove: name })),
+      ),
+    onSuccess: (result) => {
+      const names = new Map(clients.map((c) => [c.id, c.display_name]));
+      reportBulk(result, { verb: `${mode === "add" ? "tagged" : "untagged"} ${name}`, one: "client", many: "clients", name: (id) => names.get(id) ?? "A client" });
+      onDone();
+    },
+  });
+  const left = clients.length - changing.length;
+  return (
+    <Dialog open onClose={onClose} title={mode === "add" ? "Add a tag" : "Remove a tag"} description={`For the ${plural(clients.length, "client")} picked.`}>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (changing.length) save.mutate(); }}>
+        <Field label="Tag">
+          {mode === "add" ? (
+            <>
+              <input className="input" list={listId} value={tag} onChange={(e) => setTag(e.target.value)} maxLength={40} required placeholder="VIP, Spring cleanup…" autoComplete="off" />
+              <datalist id={listId}>{known.data?.map((t) => <option key={t} value={t} />)}</datalist>
+            </>
+          ) : (
+            <select className="select" value={tag} onChange={(e) => setTag(e.target.value)}>
+              {present.map((t) => <option key={t} value={t}>{t} · {plural(clients.filter((c) => has(c, t)).length, "client")}</option>)}
+            </select>
+          )}
+        </Field>
+        {name && left > 0 && (
+          <span className="muted small" role="status">
+            {mode === "add" ? `${plural(left, "client")} ${left === 1 ? "has" : "have"} it already.` : `${plural(left, "client")} ${left === 1 ? "doesn't have" : "don't have"} it.`}
+          </span>
+        )}
+        <FormError error={save.error} />
+        <div className="form-actions">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" icon="tag" loading={save.isPending} disabled={!changing.length}>
+            {!changing.length ? (mode === "add" ? "Add tag" : "Remove tag") : mode === "add" ? `Add to ${plural(changing.length, "client")}` : `Take off ${plural(changing.length, "client")}`}
           </Button>
         </div>
       </form>

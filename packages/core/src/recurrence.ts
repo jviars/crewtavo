@@ -11,6 +11,8 @@ export interface RecurringJob {
   ends_on?: string | null;        // YYYY-MM-DD, inclusive
   recurrence_rule: string;
   active_months?: number[] | null; // 1-12; null = all year
+  /** Stretches it was paused, `from` up to (not including) `until`: their dates aren't visits and don't count toward COUNT. */
+  paused?: ReadonlyArray<{ from: string; until: string }> | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -110,11 +112,25 @@ export function occurrenceDates(job: RecurringJob, from: string, to: string): st
     const day = new Date(t);
     if (rule.until && day > rule.until) break;
     if (!occursOn(rule, day)) continue;
-    if (limit !== null && ++count > limit) break;
+    // "Ends after 12 visits" counts visits, so a date out of season doesn't count.
+    if (months && !months.has(day.getUTCMonth() + 1)) continue;
     const date = day.toISOString().slice(0, 10);
-    if (date >= start && (!months || months.has(day.getUTCMonth() + 1))) dates.push(date);
+    // Nor does one while it was paused, so a paused job still gets its 12.
+    if (job.paused?.some((p) => date >= p.from && date < p.until)) continue;
+    if (limit !== null && ++count > limit) break;
+    if (date >= start) dates.push(date);
   }
   return dates;
+}
+
+/**
+ * The day of the last visit of a rule that ends after a number of visits (COUNT), counted from the
+ * job's first date, past the stretches it was paused; null for a rule without COUNT. The job's ends_on is kept at it (tasks.ts
+ * materializeJob), so what reads ends_on (monthly invoices, exports) knows when the job ends.
+ */
+export function lastDate(job: RecurringJob): string | null {
+  if (!/(^|;)COUNT=/.test(parseRule(job.recurrence_rule))) return null;
+  return occurrenceDates({ ...job, ends_on: null }, job.starts_on, `${Number(job.starts_on.slice(0, 4)) + 100}-12-31`).at(-1) ?? null;
 }
 
 /** Human summary for the UI, e.g. "every 2 weeks on Tuesday". */
@@ -126,36 +142,119 @@ export function describeRule(rule: string): string {
   }
 }
 
-/** The repeats the job screen offers: weekly on some days, or monthly on a day of the month. */
+/**
+ * The repeats the job screen offers: every N days, weekly on some days, or monthly on a day of the
+ * month or a weekday in it ("the last Friday"); and an end after a number of visits.
+ */
 export interface SimpleRepeat {
-  freq: "WEEKLY" | "MONTHLY";
+  freq: "DAILY" | "WEEKLY" | "MONTHLY";
   interval: number;
   /** MO, TU, WE, TH, FR, SA, SU (weekly). */
   days: string[];
-  /** 1-28 (monthly). */
+  /** 1-28 (monthly by date). */
   monthDay: number;
+  /** Monthly on a weekday instead: the week (1-4, or -1 for the last) and the day, "the first Monday". */
+  weekday?: { week: number; day: string } | null;
+  /** Ends after this many visits, counted from the first (COUNT); null keeps going. */
+  count?: number | null;
 }
 
 const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
 
 /** A rule the job screen's editor can show (anything else reads as weekly on Monday there). */
 export function parseSimpleRule(rule: string): SimpleRepeat {
-  const parts = Object.fromEntries(rule.split(";").map((p) => p.split("=")));
+  const parts = Object.fromEntries(rule.replace(/^RRULE:/i, "").split(";").map((p) => p.split("=")));
+  const nth = parts.FREQ === "MONTHLY" ? /^([1-4]|-1)(MO|TU|WE|TH|FR|SA|SU)$/.exec(parts.BYDAY ?? "") : null;
   return {
-    freq: parts.FREQ === "MONTHLY" ? "MONTHLY" : "WEEKLY",
+    freq: parts.FREQ === "MONTHLY" ? "MONTHLY" : parts.FREQ === "DAILY" && !parts.BYDAY ? "DAILY" : "WEEKLY",
     interval: Math.max(1, Number(parts.INTERVAL ?? 1) || 1),
-    days: parts.BYDAY ? String(parts.BYDAY).split(",").filter((d) => WEEKDAYS.includes(d)) : ["MO"],
+    days: parts.BYDAY && !nth ? String(parts.BYDAY).split(",").filter((d) => WEEKDAYS.includes(d)) : ["MO"],
     monthDay: Math.min(28, Math.max(1, Number(parts.BYMONTHDAY ?? 1) || 1)),
+    weekday: nth ? { week: Number(nth[1]), day: nth[2]! } : null,
+    count: parts.COUNT ? Math.max(1, Number(parts.COUNT) || 1) : null,
   };
 }
 
 /** "Every 2 weeks on Tuesday" as a rule; weekly with no days means Monday. */
 export function buildSimpleRule(p: SimpleRepeat): string {
-  if (p.freq === "MONTHLY") return `FREQ=MONTHLY;INTERVAL=${p.interval};BYMONTHDAY=${p.monthDay}`;
-  return `FREQ=WEEKLY;INTERVAL=${p.interval};BYDAY=${(p.days.length ? p.days : ["MO"]).join(",")}`;
+  const end = p.count ? `;COUNT=${p.count}` : "";
+  if (p.freq === "DAILY") return `FREQ=DAILY;INTERVAL=${p.interval}${end}`;
+  if (p.freq === "MONTHLY") return `FREQ=MONTHLY;INTERVAL=${p.interval};${p.weekday ? `BYDAY=${p.weekday.week}${p.weekday.day}` : `BYMONTHDAY=${p.monthDay}`}${end}`;
+  return `FREQ=WEEKLY;INTERVAL=${p.interval};BYDAY=${(p.days.length ? p.days : ["MO"]).join(",")}${end}`;
 }
 
 /** The weekday of a date (YYYY-MM-DD) as a rule's day: "TU". */
 export function ruleDay(date: string): string {
   return WEEKDAYS[(utcMidnight(date).getUTCDay() + 6) % 7];
+}
+
+const DAY_NAMES: Record<string, string> = { MO: "Monday", TU: "Tuesday", WE: "Wednesday", TH: "Thursday", FR: "Friday", SA: "Saturday", SU: "Sunday" };
+const NTH: Record<string, string> = { "1": "first", "2": "second", "3": "third", "4": "fourth", "5": "fifth", "-1": "last" };
+
+const ordinal = (n: number) => {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+  return `${n}${suffix}`;
+};
+const joined = (items: string[]) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** How often a rule repeats, in its parts, or null for one only RRule can word. */
+function cadenceText(parts: Record<string, string | undefined>): string | null {
+  const interval = Math.max(1, Number(parts.INTERVAL ?? 1) || 1);
+  const every = (unit: string, once: string) => (interval === 1 ? once : `Every ${interval} ${unit}s`);
+  const days = parts.BYDAY ? parts.BYDAY.split(",") : [];
+  const plainDays = days.every((d) => WEEKDAYS.includes(d));
+
+  if (parts.BYMONTH || parts.BYHOUR) return null;
+  if (parts.FREQ === "DAILY" && !days.length) return every("day", "Daily");
+  if (parts.FREQ === "WEEKLY" && plainDays) {
+    const ordered = WEEKDAYS.filter((d) => days.includes(d));
+    if (interval === 1 && ordered.join() === "MO,TU,WE,TH,FR") return "Every weekday";
+    return [every("week", "Weekly"), joined(ordered.map((d) => DAY_NAMES[d]!))].filter(Boolean).join(", ");
+  }
+  if (parts.FREQ === "MONTHLY") {
+    const head = every("month", "Monthly");
+    if (!days.length && !parts.BYMONTHDAY) return head;
+    if (!days.length && !parts.BYSETPOS) {
+      const day = Number(parts.BYMONTHDAY);
+      if (Number.isInteger(day) && day >= 1 && day <= 31) return `${head}, the ${ordinal(day)}`;
+      if (day === -1) return `${head}, the last day`;
+    }
+    // "1MO", or "MO" with BYSETPOS=1: the first Monday.
+    const nth = days.length === 1 && !parts.BYMONTHDAY ? /^([+-]?\d)?([A-Z]{2})$/.exec(days[0]!) : null;
+    const position = nth ? String(Number(nth[1] ?? parts.BYSETPOS)) : "";
+    if (nth && DAY_NAMES[nth[2]!] && NTH[position]) return `${head}, ${NTH[position]} ${DAY_NAMES[nth[2]!]}`;
+  }
+  if (parts.FREQ === "YEARLY" && !days.length && !parts.BYMONTHDAY) return every("year", "Yearly");
+  return null;
+}
+
+/**
+ * How a recurring job's repeat reads on the job page, in sentence case: "Weekly, Monday and Thursday",
+ * "Every 2 weeks, Tuesday, 12 visits", "Monthly, first Monday", "Monthly, the 15th", "Every 3 days".
+ * RRule's own wording ("every month on the 1st Monday") is for rules this doesn't know, capitalized.
+ */
+export function repeatText(rule: string): string {
+  const parts: Record<string, string | undefined> = Object.fromEntries(rule.replace(/^RRULE:/i, "").split(";").map((p) => p.split("=")));
+  const text = cadenceText(parts);
+  if (text === null) return capitalized(describeRule(rule));
+  const count = Number(parts.COUNT);
+  return parts.COUNT !== undefined && Number.isInteger(count) ? `${text}, ${count} ${count === 1 ? "visit" : "visits"}` : text;
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** A season as it reads: "April to October" for months in a row, else "June, July and December"; null for all year. */
+export function seasonText(months: readonly number[] | null | undefined): string | null {
+  const sorted = [...new Set(months ?? [])].sort((a, b) => a - b);
+  if (!sorted.length || sorted.length === 12) return null;
+  const inRow = sorted.every((m, i) => i === 0 || m === sorted[i - 1]! + 1);
+  if (inRow && sorted.length > 2) return `${MONTH_NAMES[sorted[0]! - 1]} to ${MONTH_NAMES[sorted.at(-1)! - 1]}`;
+  return joined(sorted.map((m) => MONTH_NAMES[m - 1]!));
+}
+
+/** How often recurring work is done, as a quote tells the client: "Every 2 weeks, Tuesday, April to October". */
+export function scheduleText(rule: string, months?: readonly number[] | null): string {
+  return [repeatText(rule), seasonText(months)].filter(Boolean).join(", ");
 }

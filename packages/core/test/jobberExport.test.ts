@@ -184,6 +184,33 @@ describe("moving to Jobber", () => {
     expect(byNumber(12)["Instructions"]).toBe("Back gate.\n\nRepeats every 3 weeks on Thursday in Crewtavo.\n\nIn season Apr, May, Jun, Jul, Aug, Sep, Oct.");
   });
 
+  it("asks Jobber's two billing questions as a recurring job answers them", () => {
+    const weekly = { client_id: "c3", property_id: "p3", kind: "recurring", status: "active", starts_on: "2026-04-07", recurrence_rule: "FREQ=WEEKLY;INTERVAL=1;BYDAY=TU", lines: [line("Pool service", 1, 120)] };
+    const rows = jobberExport({
+      ...INPUT,
+      jobs: [
+        job({ ...weekly, number: 31, billing_mode: "fixed_schedule", pricing: "fixed", invoice_schedule: "monthly", invoice_day: 15 }),
+        job({ ...weekly, number: 32, billing_mode: "fixed_schedule", pricing: "per_visit", invoice_schedule: "as_needed" }),
+        job({ ...weekly, number: 33, billing_mode: "fixed_schedule" }),
+        job({ ...weekly, number: 34, billing_mode: "fixed_schedule", pricing: "per_visit", invoice_schedule: "monthly", invoice_day: null }),
+      ],
+    }).files.find((f) => f.name.startsWith("3-jobs"))!.rows;
+    const byNumber = (n: number) => rows.find((r) => r["Job Number"] === n)!;
+    expect(byNumber(31)).toMatchObject({ "How do you want to invoice?": "One price", "When do you want to invoice?": "Periodic", "Instructions": "Invoiced monthly on the 15th in Crewtavo." });
+    expect(byNumber(32)).toMatchObject({ "How do you want to invoice?": "Per visit", "When do you want to invoice?": "Never" });
+    // Saved before the questions: a fixed schedule is a fixed price, monthly.
+    expect(byNumber(33)).toMatchObject({ "How do you want to invoice?": "One price", "When do you want to invoice?": "Periodic", "Instructions": "" });
+    expect(byNumber(34)).toMatchObject({ "How do you want to invoice?": "Per visit", "When do you want to invoice?": "Periodic", "Instructions": "" });
+  });
+
+  it("starts a paused job from its resume date, and one paused until resumed as stopped", () => {
+    const weekly = { client_id: "c3", property_id: "p3", kind: "recurring", status: "active", starts_on: "2026-04-07", recurrence_rule: "FREQ=WEEKLY;INTERVAL=1;BYDAY=TU", billing_mode: "per_visit", paused_at: "2026-10-20T14:00:00Z" };
+    const rows = jobberExport({ ...INPUT, jobs: [job({ ...weekly, number: 41, resume_on: "2026-11-09" }), job({ ...weekly, number: 42, resume_on: null })] }).files.find((f) => f.name.startsWith("3-jobs"))!.rows;
+    const byNumber = (n: number) => rows.find((r) => r["Job Number"] === n)!;
+    expect(byNumber(41)).toMatchObject({ "Start Date": "Nov 10, 2026", "Repeating": "Weekly", "When do you want to invoice?": "Per visit", "Instructions": "Paused in Crewtavo until Nov 9, 2026." });
+    expect(byNumber(42)).toMatchObject({ "Start Date": "Apr 7, 2026", "When do you want to invoice?": "Never", "Instructions": "Paused in Crewtavo." });
+  });
+
   it("writes invoices with their lines' totals, and payments as a note", () => {
     const rows = file("4-invoices").rows;
     expect(rows.map((r) => r["Invoice Number"])).toEqual([20, 21]);
@@ -204,6 +231,22 @@ describe("moving to Jobber", () => {
     });
   });
 
+  it("puts client and property custom fields in the clients file, a column each, after Jobber's own", () => {
+    const custom = jobberExport({
+      ...INPUT,
+      clients: INPUT.clients.map((c) => ({ ...c, custom: [["Pets on site", c.id === "c1" ? "Yes" : ""], ["Tags", c.id === "c1" ? "VIP" : ""]] as const })),
+      properties: INPUT.properties.map((p) => ({ ...p, custom: [["Gate code", p.id === "p2" ? "4821" : ""]] as const })),
+    });
+    const clients = custom.files.find((f) => f.name === "1-clients.csv")!;
+    expect(clients.columns.slice(JOBBER_COLUMNS.clients.length)).toEqual(["Pets on site", "Tags (custom field)", "Gate code"]);
+    expect(clients.rows.filter((r) => r["Client Full Name (Display Only)"] === "Mary Ann Smith").map((r) => [r["Pets on site"], r["Tags (custom field)"], r["Tags"], r["Gate code"]])).toEqual([
+      ["Yes", "VIP", "Weekly", ""], ["Yes", "VIP", "Weekly", "4821"],
+    ]);
+    expect(custom.notes.join("\n")).toContain("Your custom fields are in the clients file");
+    expect(file("1-clients").columns).toEqual(JOBBER_COLUMNS.clients);
+    expect(result.notes.join("\n")).not.toContain("custom fields");
+  });
+
   it("says what stays out or comes in differently", () => {
     expect(result.counts).toEqual({ clients: 3, properties: 3, quotes: 2, jobs: 5, invoices: 2 });
     const notes = result.notes.join("\n");
@@ -220,6 +263,13 @@ describe("moving to Jobber", () => {
     expect(readme).toContain("1. Clients and properties (3 clients, 3 properties): 1-clients.csv");
     expect(readme).toContain("4. Invoices (2 invoices): 4-invoices.csv");
     expect(readme).toContain("- Jobber's invoice import has no payments. Paid invoices come in as paid. 1 partly paid invoice");
+  });
+
+  it("says tax-exempt clients come in like any other: Jobber's client import has no column for it", () => {
+    expect(result.notes.join("\n")).not.toContain("tax-exempt");
+    const exempt = jobberExport({ ...INPUT, clients: INPUT.clients.map((c) => (c.id === "c1" ? { ...c, tax_exempt: true } : c)) });
+    expect(exempt.notes).toContain("1 tax-exempt client comes in like any other: Jobber's client import has no column for it. Their quotes and invoices come in with no tax; mark them exempt in Jobber.");
+    expect(exempt.files.find((f) => f.name.startsWith("1-clients"))).toEqual(file("1-clients"));
   });
 
   it("splits a file at Jobber's limit", () => {

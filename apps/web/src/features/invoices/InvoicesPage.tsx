@@ -3,16 +3,20 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useDeferredValue, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
+import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SelectAllCell, SelectCell, SelectionBar, useSelection } from "@/components/ui/Selection";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
-import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { api, searchTerm, supabase, unwrap } from "@/lib/api";
+import { BULK_CHUNK, inChunks, reportBulk, type BulkResult } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { errorMessage } from "@/lib/errors";
 import { addDaysIso, formatDate, formatMoney, todayIn } from "@/lib/format";
 import { useStatusCounts } from "@/lib/listing";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -29,6 +33,44 @@ const FILTERS = [
   { key: "void", label: statusText("invoice", "void"), statuses: ["void"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+/** Sent and still owed: what a payment reminder is for (services/sales.ts remindInvoices). */
+const OWED = ["sent", "partially_paid", "overdue"];
+
+type Remindable = { id: string; number: number | null; status: string; balance_due: number };
+
+/**
+ * Payment reminders for the picked invoices, BULK_CHUNK at a time (POST /invoices/remind). Only ones
+ * still owed are sent, as the server does. The server says which it skipped and why; one it leaves
+ * out without a word (paid since the list loaded) is looked up with `stillOwed`. A chunk that fails
+ * says so for each in it and isn't tried again, since some of its emails may have gone.
+ */
+export async function remindInChunks(
+  rows: readonly Remindable[],
+  post: (ids: string[]) => Promise<{ sent: number; skipped: Array<{ number: number | null; reason: string }> }>,
+  stillOwed: (ids: string[]) => Promise<string[]>,
+): Promise<BulkResult> {
+  const due = rows.filter((i) => OWED.includes(i.status) && Number(i.balance_due) > 0);
+  const result: BulkResult = { done: [], failed: rows.filter((i) => !due.includes(i)).map((i) => ({ id: i.id, reason: i.status === "draft" ? "Not sent yet" : "Nothing owed on it" })) };
+  for (let k = 0; k < due.length; k += BULK_CHUNK) {
+    const chunk = due.slice(k, k + BULK_CHUNK);
+    try {
+      const r = await post(chunk.map((i) => i.id));
+      const refused = new Map(r.skipped.map((x) => [x.number, x.reason]));
+      result.failed.push(...chunk.filter((i) => refused.has(i.number)).map((i) => ({ id: i.id, reason: refused.get(i.number)! })));
+      let rest = chunk.filter((i) => !refused.has(i.number));
+      if (rest.length > r.sent) {
+        const owed = new Set(await stillOwed(rest.map((i) => i.id)));
+        result.failed.push(...rest.filter((i) => !owed.has(i.id)).map((i) => ({ id: i.id, reason: "Nothing owed on it any more" })));
+        rest = rest.filter((i) => owed.has(i.id));
+      }
+      result.done.push(...rest.map((i) => i.id));
+    } catch (error) {
+      result.failed.push(...chunk.map((i) => ({ id: i.id, reason: errorMessage(error) })));
+    }
+  }
+  return result;
+}
 
 export function InvoicesPage() {
   const session = useSession();
@@ -53,6 +95,10 @@ function InvoicesPageScreen() {
   const settled = filter === "paid" || filter === "written_off" || filter === "void";
   const counts = useStatusCounts("invoices", company.id, Object.fromEntries(FILTERS.map((f) => [f.key, f.statuses])));
   const today = todayIn(company.timezone);
+  const queryClient = useQueryClient();
+  // Picking several: reminders for ones still owed (by email, as Remind all), and drafts marked as sent.
+  const remindable = (filter === "open" || filter === "overdue") && session.config.features.email;
+  const selectable = remindable || filter === "draft";
 
   const invoices = useQuery({
     queryKey: ["invoices", company.id, filter, term],
@@ -74,6 +120,46 @@ function InvoicesPageScreen() {
         }
       }
       return unwrap(await q);
+    },
+  });
+
+  const selection = useSelection(selectable ? (invoices.data ?? []).map((i) => i.id) : [], `${filter}|${term}`);
+  const words = (verb: string, one = "invoice") => {
+    const numbers = new Map((invoices.data ?? []).map((i) => [i.id, i.number]));
+    return { verb, one, many: `${one}s`, name: (id: string) => `#${numbers.get(id) ?? "?"}` };
+  };
+  const remind = useMutation({
+    mutationFn: (picked: Remindable[]) =>
+      remindInChunks(
+        picked,
+        (ids) => api.post("/invoices/remind", { invoice_ids: ids }),
+        async (ids) => unwrap(await supabase().from("invoices").select("id").in("id", ids).in("status", OWED).gt("balance_due", 0)).map((i) => i.id),
+      ),
+    onSuccess: (result) => {
+      reportBulk(result, words("sent", "reminder"), { tone: "invoice" });
+      selection.clear();
+    },
+  });
+  // As on an invoice's page: a draft is marked as sent once it has a line, and the database refuses one being charged.
+  const markSent = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const lined = new Set<string>();
+      for (let k = 0; k < ids.length; k += BULK_CHUNK) {
+        const found = unwrap(await supabase().from("invoices").select("id, invoice_line_items!inner(id)").in("id", ids.slice(k, k + BULK_CHUNK)).limit(1, { referencedTable: "invoice_line_items" }));
+        for (const i of found) lined.add(i.id);
+      }
+      const empty: BulkResult = { done: [], failed: ids.filter((id) => !lined.has(id)).map((id) => ({ id, reason: "No line items yet" })) };
+      const sent = await inChunks(
+        ids.filter((id) => lined.has(id)),
+        async (chunk) => unwrap(await supabase().from("invoices").update({ status: "sent" }).in("id", chunk).eq("status", "draft").select("id")).map((i) => i.id),
+      );
+      return { done: sent.done, failed: [...empty.failed, ...sent.failed] };
+    },
+    onSuccess: (result) => {
+      reportBulk(result, words("marked as sent"), { tone: "invoice" });
+      selection.clear();
+      void queryClient.invalidateQueries({ queryKey: ["invoices", company.id] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 
@@ -151,13 +237,46 @@ function InvoicesPageScreen() {
         </div>
       ) : (
         <div className={`card${invoices.isPlaceholderData ? " is-stale" : ""}`}>
+          {selectable && (
+            <SelectionBar selection={selection} noun="invoices">
+              {filter === "draft" ? (
+                <Button
+                  size="sm"
+                  icon="check"
+                  loading={markSent.isPending}
+                  onClick={async () => {
+                    const ids = selection.ids;
+                    if (await confirm({ title: `Mark ${plural(ids.length, "draft")} as sent?`, body: "They count as sent and owed. Nothing is emailed to the clients.", confirmLabel: "Mark as sent" })) markSent.mutate(ids);
+                  }}
+                >
+                  Mark as sent
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  icon="send"
+                  loading={remind.isPending}
+                  onClick={async () => {
+                    const picked = rows.filter((i) => selection.has(i.id));
+                    const n = picked.filter((i) => Number(i.balance_due) > 0).length;
+                    // None owed: nothing is sent, and the toast says why.
+                    if (!n) return remind.mutate(picked);
+                    if (await confirm({ title: `Email ${plural(n, "payment reminder")}?`, body: "Each client gets a friendly note with a link to view and pay.", confirmLabel: "Send reminders" })) remind.mutate(picked);
+                  }}
+                >
+                  Send reminders
+                </Button>
+              )}
+            </SelectionBar>
+          )}
           <table className="table table-stack">
-            <thead><tr><th>#</th><th>Client</th><th>Due</th><th className="num">Total</th><th className="num">Balance</th><th>Status</th></tr></thead>
+            <thead><tr>{selectable && <SelectAllCell selection={selection} label="Select all invoices on this page" />}<th>#</th><th>Client</th><th>Due</th><th className="num">Total</th><th className="num">Balance</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((i) => {
                 const late = i.due_on && Number(i.balance_due) > 0 && i.status !== "draft" && i.status !== "written_off" && i.due_on < today;
                 return (
-                  <tr key={i.id} className="row-link" onClick={() => navigate(`/invoices/${i.id}`)}>
+                  <tr key={i.id} className="row-link" data-selected={selection.has(i.id) || undefined} onClick={() => navigate(`/invoices/${i.id}`)}>
+                    {selectable && <SelectCell selection={selection} id={i.id} label={`Select invoice #${i.number}`} />}
                     <td className="muted tabular" style={{ width: 56 }}>#{i.number}</td>
                     <td>
                       <Link className="cell-link" to={`/invoices/${i.id}`} onClick={(e) => e.stopPropagation()}>{i.client?.display_name}</Link>

@@ -382,9 +382,10 @@ describe("calendar files", () => {
     const tables = await world();
     fakeDb(tables);
     const text = file([call]).replace("X-WR-CALNAME:Mowing\r\n", "").replace("Google Inc//Google Calendar", "Apple Inc.//macOS 15.1");
-    const res = await request("POST", "/calendars/file", { text, file_name: "Days off.ics", show_details: false });
+    // Whose own calendar it is can be set as it's added, not only afterwards.
+    const res = await request("POST", "/calendars/file", { text, file_name: "Days off.ics", show_details: false, user_id: USER });
     expect(res.status).toBe(201);
-    expect(await res.json()).toMatchObject({ name: "Days off", app: "apple_calendar", show_details: false });
+    expect(await res.json()).toMatchObject({ name: "Days off", app: "apple_calendar", show_details: false, user_id: USER });
     expect(details(tables)).toEqual([BUSY]);
   });
 

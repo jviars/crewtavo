@@ -6,6 +6,7 @@
 import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core";
 import { z } from "zod";
 import { bulkVisits, createVisits, findTime, previewRoute, saveRoute, scheduleRange, shiftDay, updateVisit } from "../services/schedule";
+import { answerVisitChange, pendingVisitChanges } from "../services/visitChanges";
 import { changed, companyArg, one, scopeOf, tool } from "./tool";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.");
@@ -14,16 +15,19 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use 24-hour HH:MM.")
 export const scheduleTools = {
   get_schedule: tool({
     description:
-      "What's on the schedule from one date to another (default just today; at most two months), in the company's time zone: visits with client, address, crew, people and status, plus the unscheduled visits waiting for a date, the crews, and other calendars' events. Filter by crew.",
-    input: z.object({ from: date.optional(), to: date.optional(), crew_id: z.uuid().optional(), ...companyArg }),
+      "What's on the schedule from one date to another (default just today; at most two months), in the company's time zone: visits with client, address, crew, people and status, plus the unscheduled visits waiting for a date, the crews, and other calendars' events. Filter by crew, or by person (user_id from list_team) for the visits they're on.",
+    input: z.object({ from: date.optional(), to: date.optional(), crew_id: z.uuid().optional(), user_id: z.uuid().optional().describe("Only the visits this person is on."), ...companyArg }),
     run: async (ctx, a) => {
       const from = a.from ?? localDate(new Date(), ctx.timezone);
       const result = await scheduleRange(scopeOf(ctx), from, a.to ?? from, a.crew_id);
       const local = (iso: string | null) => (iso ? localTime(new Date(iso), ctx.timezone) : null);
+      // Who's on a visit is its assignees, as on the schedule's People view, not its crew.
+      const theirs = (visits: Array<Record<string, any>>) => (a.user_id ? visits.filter((v) => v.assignees?.some((p: { user_id: string }) => p.user_id === a.user_id)) : visits);
       return {
         timezone: ctx.timezone,
         ...result,
-        visits: (result.visits as Array<Record<string, any>>).map((v) => ({ ...v, start_time: local(v.starts_at), end_time: local(v.ends_at) })),
+        visits: theirs(result.visits).map((v) => ({ ...v, start_time: local(v.starts_at), end_time: local(v.ends_at) })),
+        unscheduled: theirs(result.unscheduled),
       };
     },
   }),
@@ -156,5 +160,32 @@ export const scheduleTools = {
     input: z.object({ job_ids: z.array(z.uuid()).min(1).max(500), date, crew_id: z.uuid().optional(), ...companyArg }),
     area: "schedule",
     run: (ctx, a) => bulkVisits(scopeOf(ctx), a),
+  }),
+  list_change_requests: tool({
+    description:
+      "Clients' requests from the Client Hub to move or cancel a visit, waiting for an answer: the visit, what they asked (reschedule to a time or a whole day, or in their own words; or cancel, with a reason), in the company's time zone. Answer with answer_change_request.",
+    input: z.object({ ...companyArg }),
+    run: async (ctx) => {
+      const local = (iso: string | null) => (iso ? { date: localDate(new Date(iso), ctx.timezone), time: localTime(new Date(iso), ctx.timezone) } : null);
+      return {
+        timezone: ctx.timezone,
+        requests: (await pendingVisitChanges(scopeOf(ctx))).map((r) => {
+          const visit = r.visit as unknown as { id: string; title: string; scheduled_on: string | null; starts_at: string | null } | null;
+          return {
+            request_id: r.id, kind: r.kind, client: (r.client as unknown as { display_name: string } | null)?.display_name ?? null,
+            visit: visit && { visit_id: visit.id, title: visit.title, date: visit.scheduled_on, start_time: local(visit.starts_at)?.time ?? null },
+            asked_for: r.scheduled_on ? { date: r.scheduled_on, start_time: local(r.starts_at)?.time ?? null } : null,
+            message: r.message, reason: r.reason, asked_at: r.created_at,
+          };
+        }),
+      };
+    },
+  }),
+  answer_change_request: tool({
+    description:
+      "Approve or decline a client's request to move or cancel a visit (list_change_requests). Approving moves the visit to the time they asked for, or cancels it; for a recurring job, only that visit. A request in their own words, with no time, is approved after moving the visit with update_visit. Declining leaves the visit as it is; note is said to the client. The client is emailed either way, when email is set up.",
+    input: z.object({ request_id: z.uuid(), approve: z.boolean(), note: z.string().trim().max(2000).optional().describe("For a decline: what to tell the client."), ...companyArg }),
+    area: "schedule",
+    run: (ctx, a) => answerVisitChange(scopeOf(ctx), ctx.env, a.request_id, { approve: a.approve, note: a.note }, ctx.origin || null),
   }),
 };

@@ -3,9 +3,10 @@
  * the Clients screens save them (apps/web/src/features/clients), and imported with the same rules
  * as Clients → Import (packages/core/src/clientImport.ts).
  */
-import { CLIENT_STATUSES, planImport, recordsToClients, type ExistingClient } from "@crewtavo/core";
+import { CLIENT_STATUSES, customValues, planImport, recordsToClients, type ExistingClient } from "@crewtavo/core";
 import { z } from "zod";
 import { geocodeLater, geocodeProperty } from "../services/properties";
+import { customFieldsArg, customFieldsPatch, fieldValues } from "./customFields";
 import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
 
 const text = (max: number) => z.string().trim().max(max);
@@ -24,6 +25,10 @@ const clientFields = {
   billing_address: address.nullable().optional(),
   marketing_opt_out: z.boolean().optional().describe("True: no marketing emails or texts, and no review requests."),
   review_opt_out: z.boolean().optional().describe("True: don't ask them for reviews."),
+  tax_exempt: z.boolean().optional().describe("True: no tax on their quotes and invoices; their PDFs say Tax exempt."),
+  tax_exempt_note: optional(200).describe("Their exemption certificate number or a note, printed with Tax exempt."),
+  payment_terms_days: z.number().int().min(0).max(365).nullable().optional().describe("Days until their invoices are due, in place of the company's payment terms (0: due on receipt). Null: the company's."),
+  ...customFieldsArg,
 };
 
 const propertyFields = {
@@ -40,6 +45,7 @@ const propertyFields = {
     .object({ gate_code: optional(80), lockbox_code: optional(80), alarm_code: optional(80), instructions: optional(1000) })
     .optional()
     .describe("Gate, lockbox and alarm codes and access instructions. Office and up only."),
+  ...customFieldsArg,
 };
 
 /** A client's row from the fields given; undefined fields are left as they are. */
@@ -56,15 +62,18 @@ function clientRow(a: z.infer<z.ZodObject<typeof clientFields>>) {
     ...(a.billing_address !== undefined && { billing_address: (a.billing_address ?? {}) as never }),
     ...(a.marketing_opt_out !== undefined && { marketing_opt_out: a.marketing_opt_out }),
     ...(a.review_opt_out !== undefined && { review_opt_out: a.review_opt_out }),
+    ...(a.tax_exempt !== undefined && { tax_exempt: a.tax_exempt }),
+    ...(a.tax_exempt_note !== undefined && { tax_exempt_note: a.tax_exempt_note || null }),
+    ...(a.payment_terms_days !== undefined && { payment_terms_days: a.payment_terms_days }),
   };
 }
 
-/** Every client in the company, for matching an import (in pages, like the import screen). */
-async function existingClients(ctx: ToolContext): Promise<ExistingClient[]> {
-  const all: ExistingClient[] = [];
+/** Every client in the company, with their custom field values, for matching an import (in pages, like the import screen). */
+async function existingClients(ctx: ToolContext): Promise<Array<ExistingClient & { values: Record<string, unknown> }>> {
+  const all: Array<ExistingClient & { values: Record<string, unknown> }> = [];
   for (let from = 0; ; from += 1000) {
     const page = await rows(ctx.db.from("clients").select("id, email, display_name, status, custom_fields").eq("company_id", ctx.companyId).order("created_at").range(from, from + 999));
-    all.push(...page.map((c) => ({ id: c.id, display_name: c.display_name, email: c.email, status: c.status, source_id: ((c.custom_fields ?? {}) as { source_id?: string }).source_id ?? null })));
+    all.push(...page.map((c) => ({ id: c.id, display_name: c.display_name, email: c.email, status: c.status, source_id: ((c.custom_fields ?? {}) as { source_id?: string }).source_id ?? null, values: customValues(c.custom_fields) })));
     if (page.length < 1000) return all;
   }
 }
@@ -94,6 +103,9 @@ const importRecord = z.object({
     .array(z.object({ label: optional(80), line1: text(200).min(1), line2: optional(100), city: optional(100), region: optional(100), postal_code: optional(20), notes: optional(2000) }))
     .max(50)
     .optional(),
+  custom_fields: customFieldsArg.custom_fields.describe(
+    "Its custom fields (list_custom_fields), by key (a date as YYYY-MM-DD, yes/no as true or false). A client already here gets only the ones it has no value for. A value that doesn't fit skips the client, with why.",
+  ),
 });
 
 export const clientTools = {
@@ -123,7 +135,7 @@ export const clientTools = {
       }
       const { data, error, count } = await q.order("display_name").range(a.offset, a.offset + a.limit - 1);
       if (error) throw new Error(friendly(error.message));
-      const clients = (data ?? []).map(({ custom_fields, ...c }) => ({ ...c, source_id: ((custom_fields ?? {}) as { source_id?: string }).source_id ?? null }));
+      const clients = (data ?? []).map(({ custom_fields, ...c }) => ({ ...c, source_id: ((custom_fields ?? {}) as { source_id?: string }).source_id ?? null, custom_fields: fieldValues(custom_fields) }));
       const next = a.offset + clients.length;
       return { total: count ?? clients.length, clients, next_offset: count !== null && next < count ? next : null };
     },
@@ -142,7 +154,11 @@ export const clientTools = {
       const client = await one(
         ctx.db
           .from("clients")
-          .insert({ company_id: ctx.companyId, ...clientRow(a), display_name: a.name, ...(a.source_id && { custom_fields: { source_id: a.source_id } as never }) })
+          .insert({
+            company_id: ctx.companyId, ...clientRow(a), display_name: a.name,
+            ...(a.source_id && { custom_fields: { source_id: a.source_id } }),
+            ...(await customFieldsPatch(ctx, "client", { values: a.source_id ? { source_id: a.source_id } : {} }, a.custom_fields)),
+          })
           .select("id, display_name, status")
           .single(),
         "The client",
@@ -156,7 +172,7 @@ export const clientTools = {
     input: z.object({ client_id: z.uuid(), ...clientFields, ...companyArg }),
     area: "clients",
     run: async (ctx, { client_id, company_id: _, ...a }) => {
-      const patch = clientRow(a);
+      const patch = { ...clientRow(a), ...(await customFieldsPatch(ctx, "client", { id: client_id }, a.custom_fields)) };
       if (!Object.keys(patch).length) throw new Error("Nothing to change: send at least one field.");
       await changed(ctx.db.from("clients").update(patch).eq("id", client_id).eq("company_id", ctx.companyId).select("id"), "That client");
       return { saved: true };
@@ -254,11 +270,15 @@ export const clientTools = {
   }),
   import_clients: tool({
     description:
-      "Bring clients and their properties in from another system or a spreadsheet, up to 2,000 at once. Run it with mode \"preview\" first: it says which clients are new, which are already here (found by source_id, then email, then name), whose status changes, and which properties get added, without changing anything. Then run the same clients with mode \"commit\". Rows for the same client (same source_id or email) are combined. Running it again adds nothing twice.",
+      "Bring clients, their custom fields and their properties in from another system or a spreadsheet, up to 2,000 at once. Run it with mode \"preview\" first: it says which clients are new, which are already here (found by source_id, then email, then name), whose status changes, and which properties get added, without changing anything. Then run the same clients with mode \"commit\". Rows for the same client (same source_id or email) are combined. Running it again adds nothing twice.",
     input: z.object({ mode: z.enum(["preview", "commit"]), clients: z.array(importRecord).min(1).max(2000), ...companyArg }),
     area: "clients",
     run: async (ctx, a) => {
-      const { clients, skipped } = recordsToClients(a.clients);
+      // The business's client fields, which each client's values are checked against (as create_client checks them).
+      const fields = a.clients.some((c) => c.custom_fields && Object.keys(c.custom_fields).length)
+        ? await rows(ctx.db.from("custom_field_definitions").select("key, label, type, choices, archived_at").eq("company_id", ctx.companyId).eq("record_type", "client"))
+        : [];
+      const { clients, skipped } = recordsToClients(a.clients, fields);
       const existing = await existingClients(ctx);
       const found = [...new Set(planImport(clients, existing, new Map()).decisions.flatMap((d) => (d.client_id ? [d.client_id] : [])))];
       const plan = planImport(clients, existing, await streetsOf(ctx, found));
@@ -285,11 +305,20 @@ export const clientTools = {
             return {
               id: ids.get(d.key)!, company_id: ctx.companyId, display_name: c.display_name, company_name: c.company_name, email: c.email, phone: c.phone,
               lead_source: c.lead_source, tags: c.tags, notes: c.notes, billing_address: (c.billing ?? {}) as never, status: d.status ?? "active",
-              custom_fields: (c.source_id ? { source_id: c.source_id } : {}) as never,
+              custom_fields: { ...c.custom_fields, ...(c.source_id ? { source_id: c.source_id } : {}) } as never,
             };
           }),
         );
         if (error) throw new Error(`${friendly(error.message)} Nothing after the first ${i} new clients was added; run the import again to finish it.`);
+      }
+      // Clients already here get the values only where they have none, as Clients → Import does.
+      const valuesOf = new Map(existing.map((c) => [c.id, c.values]));
+      for (const d of plan.decisions) {
+        const before = d.client_id ? valuesOf.get(d.client_id) : undefined;
+        const given = byKey.get(d.key)?.custom_fields ?? {};
+        if (!before || !Object.keys(given).some((k) => !(k in before))) continue;
+        const { error } = await ctx.db.from("clients").update({ custom_fields: { ...given, ...before } as never }).eq("id", d.client_id!).eq("company_id", ctx.companyId);
+        if (error) throw new Error(friendly(error.message));
       }
       for (const status of CLIENT_STATUSES) {
         const changing = plan.decisions.filter((d) => d.status_change?.to === status).map((d) => d.client_id!);
@@ -317,6 +346,20 @@ export const clientTools = {
       };
     },
   }),
+  list_duplicate_clients: tool({
+    description:
+      "Clients who may be on file twice: pairs who share an email, a phone, or a property street with the same postal code, newest first, each with why they matched. Pairs the office marked as not duplicates are left out. Owners, admins and the office with invoices only.",
+    input: z.object({ limit: z.number().int().min(1).max(200).default(50), ...companyArg }),
+    run: async (ctx, a) => ({ pairs: (await rows(ctx.db.rpc("client_duplicates", { p_company: ctx.companyId, p_limit: a.limit }))).map((p) => ({ clients: p.clients, reasons: p.reasons })) }),
+  }),
+  merge_clients: tool({
+    description:
+      "Merge two clients who are the same person. Everything on merge_id (properties, requests, quotes, jobs, invoices, payments, notes, files, cards, reviews, referrals and the rest) moves to keep_id; keep_id gets the email, phone, company and custom field values it lacks and both clients' tags; merge_id is then deleted. Invoice totals and payments don't change. It can't be undone: first tell the person which client is kept, which one goes, and what moves, and only merge once they confirm.",
+    input: z.object({ keep_id: z.uuid().describe("The client to keep."), merge_id: z.uuid().describe("The client merged into it, then deleted."), ...companyArg }),
+    area: "invoices",
+    destructive: true,
+    run: async (ctx, a) => one(ctx.db.rpc("merge_clients", { p_company: ctx.companyId, p_keep: a.keep_id, p_merge: a.merge_id }), "That client"),
+  }),
 };
 
 /** Adds or changes a property, its access codes (office only), and finds a new address on the map. */
@@ -331,6 +374,7 @@ async function savePropertyRow(ctx: ToolContext, a: { property_id?: string; clie
     ...(a.notes !== undefined && { notes: a.notes || null }),
     ...(a.lot_size_sqft !== undefined && { lot_size_sqft: a.lot_size_sqft }),
     ...(a.tags !== undefined && { tags: a.tags }),
+    ...(await customFieldsPatch(ctx, "property", a.property_id ? { id: a.property_id } : { values: {} }, a.custom_fields)),
   };
   const moved = ["line1", "line2", "city", "region", "postal_code"].some((k) => k in fields);
   let id = a.property_id;

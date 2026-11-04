@@ -137,8 +137,10 @@ data:
 | Permits, warranties | Job fields plus automations | `jobs.permit_number`, `jobs.warranty_until` |
 | SOPs and new-hire training | Our own SOP module with acknowledgements | Section 8 |
 
-**Trade presets** (`packages/core/src/presets/*.json`) are chosen during sign-up: General,
-Lawn & Exterior Maintenance, Paving & Sitework, Roofing & Exteriors. Applying one inserts services,
+**Trade presets** (`packages/core/src/presets/*.json`) are chosen during sign-up: General / Other,
+Cleaning & Janitorial, Electrical, Handyman & Home Repair, HVAC, Landscaping & Hardscaping,
+Lawn & Exterior Maintenance, Paving & Sitework, Pest Control, Plumbing, Pool & Spa Service,
+Roofing & Exteriors. Applying one inserts services,
 checklist templates, intake forms and SOP categories for the new company. Adding a trade means
 adding a JSON file.
 
@@ -317,7 +319,8 @@ key** restricted to the Solar API.
   fees, bank payments in progress, refunds, disputes and payouts (`stripe_invoices`, `payouts`).
 - **QuickBooks Online, Zoho Books (and later Xero)** are the books. When an invoice is sent or a
   payment recorded, a trigger adds an outbox row; a task pushes the customer, invoice or payment
-  and remembers the external ID in `sync_links`.
+  and remembers the external ID in `sync_links`. A sent invoice that changes after (a late fee, an
+  edit sent again, a new due date) is queued again, and the task updates the copy the books have.
 - No general ledger, chart of accounts or payroll. Timesheets export to payroll tools.
 
 ---

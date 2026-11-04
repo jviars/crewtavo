@@ -124,13 +124,15 @@ if (!res.ok) throw new Error(`onboarding failed: ${res.status} ${await res.text(
 const { id: company } = await res.json();
 const c = (row) => ({ company_id: company, ...row });
 
+// Merged into what sign-up saved (the Paving app, the preset's formulas and weather rules), not replacing it.
+const { data: signedUp } = await db.from("companies").select("settings").eq("id", company).single();
 await must(
   db.from("companies").update({
     phone: "(540) 483-0000",
     email: "office@acmepaving.test",
     address: { line1: "100 Industrial Dr", city: "Rocky Mount", region: "VA", postal_code: "24151" },
     settings: {
-      job_types: ["Driveway replacement", "Overlay", "Sealcoat and striping", "Parking lot", "Municipal work order", "GC subcontract"],
+      ...(signedUp?.settings ?? {}),
       payment_terms_days: 30,
       default_tax_rate: 0.053,
       depot: { lat: 36.9976, lng: -79.8920 },

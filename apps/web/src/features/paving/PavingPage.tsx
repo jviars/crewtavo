@@ -1,5 +1,5 @@
 /**
- * Paving: the whole job from one place, for businesses set up for paving. Start a takeoff from an
+ * Paving: the whole job from one place, once Paving is installed. Start a takeoff from an
  * address, then each project walks through takeoff, estimate, proposal, schedule and invoice
  * (PavingProjectPage). The list prices a project that offers options from its cheapest until it's
  * signed. The price book card adds the standard paving services to a price list that doesn't have

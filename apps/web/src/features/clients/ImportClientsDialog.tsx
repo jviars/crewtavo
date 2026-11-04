@@ -1,22 +1,32 @@
 /**
  * Import clients and properties from a spreadsheet, including Jobber's Clients and Properties
- * exports. See importClients.ts for how columns are matched and rows grouped. A big file keeps
- * importing if the dialog closes: the task island shows how far along it is.
+ * exports. See importClients.ts for how columns are matched and rows grouped. Columns named like a
+ * custom field fill it, and the office can keep the rest as new ones. A big file keeps importing if
+ * the dialog closes: the task island shows how far along it is.
  */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { parseCsv } from "@/lib/csv";
-import { useSession } from "@/lib/session";
+import { can, hasRole, useSession } from "@/lib/session";
 import { cancelTask, taskFraction, useTasks } from "@/lib/tasks";
 import { toast } from "@/lib/toast";
-import { guessMapping, importClients, TARGETS, toClients, type ImportResult, type Mapping } from "./importClients";
+import { customFieldsKey, useCustomFields } from "../customFields/CustomFields";
+import { addColumnFields, customColumns, guessMapping, importClients, TARGETS, toClients, type ImportResult, type Mapping } from "./importClients";
 
 export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
-  const { company } = useSession();
+  const session = useSession();
+  const { company } = session;
+  const queryClient = useQueryClient();
+  // New fields are the office's with Settings, as in Settings → Custom fields.
+  const addsFields = hasRole(session, "admin", "office") && can(session, "settings");
+  const [keepOthers, setKeepOthers] = useState(false);
+  const clientFields = useCustomFields("client");
+  const propertyFields = useCustomFields("property");
   const fileInput = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<string[][]>([]);
@@ -47,12 +57,21 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
     setMapping(guessMapping(parsed[0]!));
   };
 
-  const clients = useMemo(() => toClients(body, mapping), [body, mapping]);
+  const columns = useMemo(() => customColumns(headers, mapping, { client: clientFields, property: propertyFields }), [headers, mapping, clientFields, propertyFields]);
+  const clients = useMemo(() => toClients(body, mapping, columns.matched), [body, mapping, columns]);
   const propertyCount = clients.reduce((n, c) => n + c.properties.length, 0);
 
   const run = useMutation({
     meta: { inline: true },
-    mutationFn: () => importClients(company.id, clients, { fileName, onTask: setTaskId }),
+    mutationFn: async () => {
+      let rows = clients;
+      if (addsFields && keepOthers && columns.others.length) {
+        const made = await addColumnFields(company.id, headers, columns.others, body, clientFields);
+        void queryClient.invalidateQueries({ queryKey: customFieldsKey(company.id) });
+        rows = toClients(body, mapping, [...columns.matched, ...made]);
+      }
+      return importClients(company.id, rows, { fileName, onTask: setTaskId });
+    },
     onSuccess: (r: ImportResult) => {
       if (!stillOpen.current) return;
       if (r.stopped) toast.info(`Import stopped after ${r.created} new ${r.created === 1 ? "client" : "clients"}`, { description: "Import the file again to add the rest. Clients already in aren't added twice." });
@@ -90,6 +109,7 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
               <div className="grow small" style={{ fontWeight: 400 }}>
                 <div style={{ fontWeight: 700 }}>Coming from Jobber?</div>
                 In Jobber, open Clients, choose Export and download the CSV; import it here. Then export Properties the same way and import that file too: each property is added to its client. Clients already here aren't duplicated.
+                {session.role === "owner" && <> Open quotes, unpaid invoices and active jobs come over in <Link to="/settings?tab=data">Settings → Your data</Link>.</>}
               </div>
             </div>
           </>
@@ -111,6 +131,16 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
               ))}
             </div>
             {!showAll && <Button size="sm" variant="ghost" style={{ justifySelf: "start" }} onClick={() => setShowAll(true)}>Match more columns</Button>}
+            {columns.matched.length > 0 && <p className="muted small" style={{ margin: 0 }}>Fills your custom fields {columns.matched.map((c) => c.field.label).join(", ")}.</p>}
+            {addsFields && columns.others.length > 0 && (
+              <div className="stack-sm" style={{ gap: 2 }}>
+                <label className="checkbox small">
+                  <input type="checkbox" checked={keepOthers} onChange={(e) => setKeepOthers(e.target.checked)} />
+                  Keep the other columns as custom fields
+                </label>
+                <span className="muted small">Text fields on clients, for the ones with something in them: {columns.others.map((i) => headers[i]).join(", ")}</span>
+              </div>
+            )}
             <div className="card" style={{ overflow: "auto", boxShadow: "none" }}>
               <table className="table" style={{ fontSize: 13 }}>
                 <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Properties</th></tr></thead>

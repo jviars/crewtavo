@@ -1,0 +1,412 @@
+{
+  "id": "hvac",
+  "name": "HVAC",
+  "description": "Heating and air conditioning: tune-ups, repairs, system installs, ductwork and maintenance plans.",
+  "services": [
+    {
+      "name": "Service call and diagnostic",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 109
+    },
+    {
+      "name": "Labor",
+      "category": "Service and labor",
+      "unit": "hr",
+      "unit_price": 135
+    },
+    {
+      "name": "After-hours call fee",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 150
+    },
+    {
+      "name": "AC tune-up",
+      "category": "Maintenance",
+      "unit": "visit",
+      "unit_price": 129
+    },
+    {
+      "name": "Furnace tune-up",
+      "category": "Maintenance",
+      "unit": "visit",
+      "unit_price": 119
+    },
+    {
+      "name": "Comfort maintenance plan",
+      "category": "Maintenance",
+      "unit": "month",
+      "unit_price": 19
+    },
+    {
+      "name": "Filter change",
+      "category": "Maintenance",
+      "unit": "ea",
+      "unit_price": 35
+    },
+    {
+      "name": "Condensate drain cleaning",
+      "category": "Maintenance",
+      "unit": "ea",
+      "unit_price": 125
+    },
+    {
+      "name": "Refrigerant recharge",
+      "category": "Repairs",
+      "unit": "lb",
+      "unit_price": 95
+    },
+    {
+      "name": "Capacitor replacement",
+      "category": "Repairs",
+      "unit": "ea",
+      "unit_price": 225,
+      "unit_cost": 25
+    },
+    {
+      "name": "Contactor replacement",
+      "category": "Repairs",
+      "unit": "ea",
+      "unit_price": 245,
+      "unit_cost": 30
+    },
+    {
+      "name": "Blower motor replacement",
+      "category": "Repairs",
+      "unit": "ea",
+      "unit_price": 750,
+      "unit_cost": 250
+    },
+    {
+      "name": "Smart thermostat install",
+      "category": "Repairs",
+      "unit": "ea",
+      "unit_price": 325,
+      "unit_cost": 150
+    },
+    {
+      "name": "Duct cleaning",
+      "category": "Repairs",
+      "unit": "visit",
+      "unit_price": 450
+    },
+    {
+      "name": "New duct run",
+      "category": "Installs",
+      "unit": "ea",
+      "unit_price": 425
+    },
+    {
+      "name": "Central AC install, 3 ton",
+      "category": "Installs",
+      "unit": "ea",
+      "unit_price": 6500,
+      "unit_cost": 3200
+    },
+    {
+      "name": "Gas furnace install, 80k BTU",
+      "category": "Installs",
+      "unit": "ea",
+      "unit_price": 5200,
+      "unit_cost": 2200
+    },
+    {
+      "name": "Heat pump install, 3 ton",
+      "category": "Installs",
+      "unit": "ea",
+      "unit_price": 8200,
+      "unit_cost": 4000
+    },
+    {
+      "name": "Ductless mini-split install, one zone",
+      "category": "Installs",
+      "unit": "ea",
+      "unit_price": 4200,
+      "unit_cost": 1700
+    }
+  ],
+  "formulas": [],
+  "checklists": [
+    {
+      "name": "AC and furnace tune-up",
+      "services": [
+        "AC tune-up",
+        "Furnace tune-up",
+        "Comfort maintenance plan"
+      ],
+      "items": [
+        {
+          "key": "filter",
+          "label": "Filter",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Replaced",
+            "Clean",
+            "Customer to replace"
+          ]
+        },
+        {
+          "key": "thermostat_tested",
+          "label": "Thermostat tested",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "supply_air_temp_f",
+          "label": "Supply air temperature (°F)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "return_air_temp_f",
+          "label": "Return air temperature (°F)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "suction_pressure_psi",
+          "label": "Suction pressure (psi)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "head_pressure_psi",
+          "label": "Head pressure (psi)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "capacitor_reading_uf",
+          "label": "Capacitor reading (µF)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "condenser_coil_rinsed",
+          "label": "Condenser coil rinsed",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "condensate_drain_clear",
+          "label": "Condensate drain clear",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "burners_and_heat_exchanger",
+          "label": "Burners and heat exchanger",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "Good",
+            "Needs cleaning",
+            "Cracked or unsafe"
+          ]
+        },
+        {
+          "key": "co_reading_ppm",
+          "label": "CO reading (ppm)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "equipment_photos",
+          "label": "Equipment photos",
+          "type": "photo",
+          "required": false
+        },
+        {
+          "key": "recommendations",
+          "label": "Recommendations",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "System install",
+      "services": [
+        "Central AC install, 3 ton",
+        "Gas furnace install, 80k BTU",
+        "Heat pump install, 3 ton",
+        "Ductless mini-split install, one zone"
+      ],
+      "items": [
+        {
+          "key": "permit_number",
+          "label": "Permit number",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "old_equipment_hauled_away",
+          "label": "Old equipment removed and hauled away",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "line_set_pressure_tested",
+          "label": "Line set pressure-tested and evacuated",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "vacuum_microns",
+          "label": "Vacuum reached (microns)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "refrigerant_charge_verified",
+          "label": "Refrigerant charge verified",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "temperature_split_f",
+          "label": "Temperature split (°F)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "thermostat_set_up",
+          "label": "Thermostat set up and shown to the customer",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "model_and_serial_photos",
+          "label": "Model and serial number photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "customer_signature",
+          "label": "Customer signature",
+          "type": "signature",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "HVAC repair call",
+      "services": [
+        "Service call and diagnostic",
+        "After-hours call fee",
+        "Capacitor replacement",
+        "Contactor replacement",
+        "Blower motor replacement"
+      ],
+      "items": [
+        {
+          "key": "customer_complaint",
+          "label": "Customer's complaint",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "what_we_found",
+          "label": "What we found",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "parts_replaced",
+          "label": "Parts replaced",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "system_running",
+          "label": "System running and heating or cooling",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photo",
+          "required": false
+        },
+        {
+          "key": "customer_signature",
+          "label": "Customer signature",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Request heating or cooling service",
+      "slug": "request-heating-or-cooling-service",
+      "kind": "request",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Service address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "issue",
+          "label": "What do you need?",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "No cooling",
+            "No heat",
+            "Tune-up",
+            "Quote on a new system",
+            "Noise or smell",
+            "Something else"
+          ]
+        },
+        {
+          "key": "system_type",
+          "label": "What kind of system?",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "Central air and furnace",
+            "Heat pump",
+            "Ductless mini-split",
+            "Boiler",
+            "Not sure"
+          ]
+        },
+        {
+          "key": "system_age",
+          "label": "System age (years)",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "details",
+          "label": "Anything else we should know?",
+          "type": "long_text",
+          "required": false
+        },
+        {
+          "key": "photos",
+          "label": "Photos of the equipment label",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [],
+  "sop_categories": [
+    "Safety",
+    "Tune-ups and maintenance",
+    "Installs",
+    "Refrigerant handling"
+  ]
+}

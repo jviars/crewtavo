@@ -106,6 +106,27 @@ describe("importing clients", () => {
     expect(db.clients).toHaveLength(2);
     expect(db.properties).toHaveLength(2);
   });
+
+  it("takes custom field values by key, checked against the business's fields, and fills only empty ones on a client already here", async () => {
+    const { db } = supabase();
+    db.custom_field_definitions = [
+      { key: "gate_code", label: "Gate code", type: "text", choices: [], archived_at: null },
+      { key: "dog", label: "Dog on site", type: "yes_no", choices: [], archived_at: null },
+    ];
+    const preview = await call("full", "import_clients", {
+      mode: "preview",
+      clients: [{ source_id: "J-1", name: "Ana Diaz", custom_fields: { gate_code: "4410", dog: "yes" } }, { name: "Bo Kent", custom_fields: { dog: "maybe" } }],
+    });
+    expect(preview.skipped).toEqual([{ row: 1, reason: "Dog on site is yes or no." }]);
+
+    await call("full", "import_clients", { mode: "commit", clients: [{ source_id: "J-1", name: "Ana Diaz", custom_fields: { gate_code: "4410" } }] });
+    expect(db.clients[0]!.custom_fields).toEqual({ gate_code: "4410", source_id: "J-1" });
+
+    // Again, with another gate code and her dog: the code she has stays, the dog is added.
+    await call("full", "import_clients", { mode: "commit", clients: [{ source_id: "J-1", name: "Ana Diaz", custom_fields: { gate_code: "9999", dog: true } }] });
+    expect(db.clients).toHaveLength(1);
+    expect(db.clients[0]!.custom_fields).toEqual({ gate_code: "4410", dog: true, source_id: "J-1" });
+  });
 });
 
 describe("importing a schedule", () => {
@@ -206,6 +227,52 @@ describe("tools", () => {
     expect(added.body[0]).not.toHaveProperty("discount_billing");
   });
 
+  it("list jobs with the state their visits give them, and by it", async () => {
+    const { sent } = supabase();
+    await call("full", "list_jobs", { status: "late" });
+    await call("full", "list_jobs", { status: "completed" });
+    await call("full", "list_jobs", {});
+    const [late, completed, active] = sent.filter((s) => s.table === "jobs").map((s) => s.query!);
+    expect(late.get("select")).toContain("job_state");
+    expect(late.get("job_state")).toBe("eq.late");
+    // job_state is the status for a job that isn't active (20261103000400_job_states.sql).
+    expect(completed.get("job_state")).toBe("eq.completed");
+    expect([active.get("status"), active.get("job_state")]).toEqual(["eq.active", null]);
+  });
+
+  it("ask a recurring job's two billing questions, and say how each job is billed", async () => {
+    const { db, sent } = supabase();
+    const JOB = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a98";
+    db.jobs = [{ id: JOB, company_id: "company-1", kind: "recurring", starts_on: "2026-06-01", recurrence_rule: "FREQ=WEEKLY;BYDAY=MO", billing_mode: "per_visit", pricing: "per_visit", invoice_schedule: "after_visit", invoice_day: null }];
+    expect(await call("full", "update_job", { job_id: JOB, pricing: "fixed", invoice_schedule: "monthly", invoice_day: 15 })).toEqual({ saved: true });
+    // billing_mode is the database's to keep in step (20261104000800_recurring_billing.sql).
+    expect(sent.find((s) => s.method === "PATCH" && s.table === "jobs")!.body).toEqual({ pricing: "fixed", invoice_schedule: "monthly", invoice_day: 15 });
+    db.jobs[0]!.billing_mode = "fixed_schedule";
+    const listed = await call("full", "list_jobs", {});
+    expect(listed.jobs[0].billing).toBe("Fixed price, monthly on the 15th");
+    expect(sent.filter((s) => s.table === "jobs" && s.method === "GET").at(-1)!.query!.get("select")).toContain("pricing,invoice_schedule,invoice_day");
+    expect((await call("full", "update_job", { job_id: JOB, invoice_day: 31 })).error).toMatch(/^Invalid arguments\. /);
+  });
+
+  it("pause and resume a recurring job, and repeat it in the new ways", async () => {
+    const { db, sent } = supabase();
+    const JOB = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a97";
+    const ONE_OFF = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a96";
+    db.jobs = [{ id: JOB, company_id: "company-1", kind: "recurring", starts_on: "2026-06-01", recurrence_rule: "FREQ=WEEKLY;BYDAY=MO" }];
+    expect(await call("full", "update_job", { job_id: JOB, paused: true, resume_on: "2026-12-01" })).toMatchObject({ saved: true });
+    const paused = sent.filter((s) => s.method === "PATCH" && s.table === "jobs").at(-1)!.body;
+    expect(paused).toEqual({ paused_at: expect.any(String), resume_on: "2026-12-01" });
+    expect(await call("full", "update_job", { job_id: JOB, paused: false })).toMatchObject({ saved: true });
+    expect(sent.filter((s) => s.method === "PATCH" && s.table === "jobs").at(-1)!.body).toEqual({ paused_at: null });
+    await call("full", "update_job", { job_id: JOB, repeat: { every_months: 1, on_weekday: { week: "last", day: "FR" }, times: 6 } });
+    expect(sent.filter((s) => s.method === "PATCH" && s.table === "jobs").at(-1)!.body).toMatchObject({ recurrence_rule: "FREQ=MONTHLY;INTERVAL=1;BYDAY=-1FR;COUNT=6" });
+    await call("full", "update_job", { job_id: JOB, repeat: { every_days: 10 } });
+    expect(sent.filter((s) => s.method === "PATCH" && s.table === "jobs").at(-1)!.body).toMatchObject({ recurrence_rule: "FREQ=DAILY;INTERVAL=10" });
+
+    db.jobs = [{ id: ONE_OFF, company_id: "company-1", kind: "one_off", starts_on: null, recurrence_rule: null }];
+    expect((await call("full", "update_job", { job_id: ONE_OFF, paused: true })).error).toContain("Only a recurring job can be paused");
+  });
+
   it("invite people without handing the assistant their link", async () => {
     supabase();
     const result = await call("full", "invite_person", { email: "new@example.com", role: "office" });
@@ -266,12 +333,44 @@ describe("routes", () => {
     expect(sent.find((r) => r.method === "POST" && r.table === "routes")?.body).toMatchObject({ route_date: "2099-06-03", by_hand: false, organized_by: "user-1" });
   });
 
+  it("lists one person's visits: the ones they're on, whatever the crew", async () => {
+    const { db } = supabase();
+    const ANA = "00000000-0000-4000-8000-0000000000a1";
+    db.companies = [company];
+    db.visits = [
+      { id: "theirs", title: "Mow", status: "scheduled", scheduled_on: "2099-06-03", starts_at: null, ends_at: null, crew_id: "crew-1", assignees: [{ user_id: ANA }, { user_id: "user-2" }] },
+      { id: "crews", title: "Edge", status: "scheduled", scheduled_on: "2099-06-03", starts_at: null, ends_at: null, crew_id: "crew-1", assignees: [] },
+    ];
+    const result = await call("full", "get_schedule", { from: "2099-06-03", user_id: ANA });
+    expect(result.visits.map((v: { id: string }) => v.id)).toEqual(["theirs"]);
+    expect((await call("full", "get_schedule", { from: "2099-06-03" })).visits).toHaveLength(2);
+  });
+
   it("books a visit of any length", async () => {
     const { db, sent } = supabase();
     db.companies = [company];
     await call("full", "create_visit", { title: "Mow 4 Elm St", kind: "task", date: "2099-06-03", start_time: "09:03", duration_min: 50, time_fixed: true });
     const visit = sent.find((r) => r.method === "POST" && r.table === "visits")!.body[0];
     expect([visit.starts_at, visit.ends_at, visit.time_fixed]).toEqual(["2099-06-03T13:03:00.000Z", "2099-06-03T13:53:00.000Z", true]);
+  });
+
+  it("finds open time only on the days the business works, around its people's own calendars", async () => {
+    const ANA = "00000000-0000-4000-8000-0000000000a1";
+    const CREW = "00000000-0000-4000-8000-0000000000c1";
+    const { db } = supabase();
+    // Mondays and Wednesdays, 8 to 10. Ana's own calendar has her busy at 8 on Monday, June 1.
+    db.companies = [{ ...company, settings: { ...company.settings, working_hours: { start: "08:00", end: "10:00", days: [1, 3] } } }];
+    db.calendar_events = [
+      { id: "e1", title: "Dentist", all_day: false, starts_at: "2099-06-01T12:00:00Z", ends_at: "2099-06-01T13:00:00Z", starts_on: "2099-06-01", ends_on: "2099-06-01", busy: true, source: { id: "s1", name: "Ana's", color: null, crew_id: null, user_id: ANA, blocks_time: true } },
+    ];
+    const find = async (crew_id?: string) => (await call("full", "find_time", { date_from: "2099-06-01", days: 7, duration_min: 60, crew_id })).slots.map((s: { date: string; start_time: string }) => `${s.date} ${s.start_time}`);
+    // The whole team: anyone's busy time counts.
+    expect(await find()).toEqual(["2099-06-01 09:00", "2099-06-03 08:00"]);
+    // A crew Ana is on is busy when she is; one she isn't on isn't.
+    db.crews = [{ id: CREW, lead_user_id: "user-1", crew_members: [{ user_id: ANA }] }];
+    expect(await find(CREW)).toEqual(["2099-06-01 09:00", "2099-06-03 08:00"]);
+    db.crews = [{ id: CREW, lead_user_id: "user-1", crew_members: [] }];
+    expect(await find(CREW)).toEqual(["2099-06-01 08:00", "2099-06-03 08:00"]);
   });
 });
 
@@ -518,7 +617,7 @@ describe("estimate templates", () => {
   it("are an area of their own", async () => {
     const { sent } = supabase();
     expect((await call("jobsonly", "save_contract_section", { title: "Payment" })).error).toBe(assistantRefusal("templates"));
-    expect((await call("jobsonly", "save_document_template", { footer: "Thanks" })).error).toMatch(/can't change estimate templates and contract terms/);
+    expect((await call("jobsonly", "save_document_template", { footer: "Thanks" })).error).toMatch(/can't change document styles and contract terms/);
     expect(sent.filter((s) => ["document_templates", "contract_sections"].includes(s.table))).toEqual([]);
   });
 });
@@ -545,5 +644,84 @@ describe("marketing", () => {
     supabase("field_crew");
     expect((await call("full", "save_campaign", { subject: "Hi" })).error).toMatch(/Your role in Crewtavo doesn't allow that/);
     expect((await call("full", "reply_to_review", { review_id: CAMPAIGN, comment: "Thank you!" })).error).toMatch(/Your role in Crewtavo doesn't allow that/);
+  });
+});
+
+describe("custom fields", () => {
+  it("sets a client's values by key, checked against its fields, keeping the import's source_id, and reads them back", async () => {
+    const { db } = supabase();
+    db.custom_field_definitions = [
+      { key: "pets", record_type: "client", label: "Pets on site", type: "yes_no", choices: [], archived_at: null },
+      { key: "unit", record_type: "client", label: "Unit", type: "choice", choices: ["Heat pump", "Furnace"], archived_at: null },
+    ];
+    db.clients.push({ id: "00000000-0000-4000-8000-0000000000c1", company_id: "company-1", display_name: "Ana Diaz", custom_fields: { source_id: "J-1", unit: "Furnace" } });
+    expect(await call("full", "update_client", { client_id: "00000000-0000-4000-8000-0000000000c1", custom_fields: { pets: "yes", unit: null } })).toEqual({ saved: true });
+    expect(db.clients[0]!.custom_fields).toEqual({ source_id: "J-1", pets: true });
+    expect((await call("full", "update_client", { client_id: "00000000-0000-4000-8000-0000000000c1", custom_fields: { unit: "Boiler" } })).error).toContain("Unit is one of: Heat pump, Furnace.");
+    expect((await call("full", "update_client", { client_id: "00000000-0000-4000-8000-0000000000c1", custom_fields: { source_id: "J-2" } })).error).toContain('no custom field "source_id"');
+    expect(db.clients[0]!.custom_fields).toEqual({ source_id: "J-1", pets: true });
+    const listed = await call("full", "list_clients", {});
+    expect(listed.clients[0]).toMatchObject({ source_id: "J-1", custom_fields: { pets: true } });
+    expect((await call("full", "list_custom_fields", {})).map((f: Row) => f.key)).toEqual(["pets", "unit"]);
+  });
+});
+
+describe("quote templates and deposits", () => {
+  const QUOTE = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a87";
+  const TEMPLATE = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a88";
+  const CLIENT = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a89";
+  const quote = (extra: Row = {}) => ({
+    id: QUOTE, number: 7, status: "draft", is_template: false, subtotal: 1000, discount_amount: 0, tax_amount: 0, total: 1000, deposit_amount: 0, deposit_percent: null, tax_rate: 0, promo: null, lines: [], options: [], ...extra,
+  });
+
+  it("list templates apart from quotes", async () => {
+    const { sent } = supabase();
+    await call("full", "list_quotes", {});
+    await call("full", "list_quotes", { templates: true });
+    expect(sent.filter((s) => s.table === "quotes").map((s) => s.query!.get("is_template"))).toEqual(["eq.false", "eq.true"]);
+  });
+
+  it("set the deposit as a percent, or as an amount, which stops it being one", async () => {
+    const { db, sent } = supabase();
+    db.quotes = [quote()];
+    await call("full", "update_quote", { quote_id: QUOTE, deposit_percent: 25 });
+    await call("full", "update_quote", { quote_id: QUOTE, deposit_amount: 300 });
+    expect(sent.filter((s) => s.method === "PATCH" && s.table === "quotes").map((s) => s.body)).toEqual([{ deposit_percent: 25 }, { deposit_amount: 300, deposit_percent: null }]);
+    expect(await call("full", "update_quote", { quote_id: QUOTE, deposit_amount: 300, deposit_percent: 25 })).toEqual({ error: "Give the deposit as an amount or as a percent, not both." });
+    expect((await call("full", "update_quote", { quote_id: QUOTE, deposit_percent: 101 })).error).toMatch(/deposit_percent/);
+  });
+
+  it("make a quote from a template for a client, as New from template does", async () => {
+    const { db, sent } = supabase();
+    db.companies = [{ id: "company-1", settings: {} }];
+    db.quotes = [quote({ id: TEMPLATE, is_template: true, number: null })];
+    await call("full", "create_quote", { template_id: TEMPLATE, client_id: CLIENT, title: "Cleanup for Bo" });
+    expect(sent.filter((s) => s.table === "rpc/duplicate_quote").map((s) => s.body)).toEqual([{ p_quote: TEMPLATE, p_client: CLIENT, p_title: "Cleanup for Bo" }]);
+    // Never a quote passed off as a template, nor one without its client.
+    db.quotes = [quote()];
+    expect(await call("full", "create_quote", { template_id: QUOTE, client_id: CLIENT })).toEqual({ error: "That's a quote, not a quote template. list_quotes with templates lists them." });
+    expect((await call("full", "create_quote", { template_id: TEMPLATE, title: "No client" })).error).toMatch(/give template_id and client_id/);
+    expect(sent.filter((s) => s.table === "rpc/duplicate_quote")).toHaveLength(1);
+  });
+});
+
+describe("duplicate clients", () => {
+  const KEEP = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a90";
+  const MERGE = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a91";
+
+  it("are listed with who they are and why they matched", async () => {
+    const clients = [{ id: KEEP, display_name: "Kay Keep" }, { id: MERGE, display_name: "Kay K." }];
+    supabase("owner", { "rpc/client_duplicates": [{ client_id: KEEP, other_id: MERGE, reasons: [{ kind: "email", value: "kay@example.com" }], clients }] });
+    const listed = await call("full", "list_duplicate_clients", {});
+    expect(listed.pairs).toEqual([{ clients, reasons: [{ kind: "email", value: "kay@example.com" }] }]);
+  });
+
+  it("are merged only with full access, since one is deleted and invoices move", async () => {
+    const { sent } = supabase();
+    expect((await call("jobsonly", "merge_clients", { keep_id: KEEP, merge_id: MERGE })).error).toBe(assistantRefusal("invoices", true, { level: "areas", areas: ["jobs", "clients"] }));
+    expect((await call("nomoney", "merge_clients", { keep_id: KEEP, merge_id: MERGE })).error).toMatch(/^This assistant can't change money/);
+    expect(sent.filter((s) => s.table === "rpc/merge_clients")).toEqual([]);
+    await call("full", "merge_clients", { keep_id: KEEP, merge_id: MERGE });
+    expect(sent.filter((s) => s.table === "rpc/merge_clients").map((s) => s.body)).toEqual([{ p_company: "company-1", p_keep: KEEP, p_merge: MERGE }]);
   });
 });

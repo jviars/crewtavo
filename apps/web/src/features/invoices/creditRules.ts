@@ -28,7 +28,7 @@ export const creditRoom = (inv: { subtotal: number | string; discount_amount: nu
   return Math.max(Math.round(room * 100) / 100, 0);
 };
 
-/** "QuickBooks" for an invoice already in an accounting app, which a credit put on by hand doesn't reach. */
+/** "QuickBooks" for an invoice already in an accounting app, whose copy there a credit put on by hand updates. */
 export const BOOKS: Record<string, string> = { quickbooks: "QuickBooks", zoho_books: "Zoho Books" };
 
 /**

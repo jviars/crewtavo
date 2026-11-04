@@ -7,7 +7,7 @@ import { OFFLINE_MUTATIONS } from "@/lib/offline";
 /** Whether there's signal, as the app knows it: no signal, or requests that don't get through. */
 export const useSignal = () => useSyncExternalStore(onlineManager.subscribe.bind(onlineManager), () => onlineManager.isOnline());
 
-/** Saves made as the crew goes: each one has the whole checklist or all the notes, so a visit's count once. */
+/** Saves made as the crew goes: each one has the whole checklist or all the notes, so each checklist and a visit's notes count once. */
 const WHOLE = new Set(["checklist-save", "visit-notes"]);
 
 /** With signal, how long updates wait before it says they're sending: one waiting its turn behind another goes in a moment. */
@@ -19,7 +19,8 @@ export function OfflineNote() {
     filters: { predicate: (m) => m.state.isPaused && OFFLINE_MUTATIONS.has(String(m.options.mutationKey?.[0])) },
     select: (m) => {
       const key = String(m.options.mutationKey?.[0]);
-      return { id: WHOLE.has(key) ? `${key}:${(m.state.variables as { visitId?: string } | undefined)?.visitId}` : String(m.mutationId), at: m.state.submittedAt };
+      const v = m.state.variables as { visitId?: string; responseId?: string } | undefined;
+      return { id: WHOLE.has(key) ? `${key}:${v?.visitId}:${v?.responseId ?? ""}` : String(m.mutationId), at: m.state.submittedAt };
     },
   });
   const waiting = new Set(paused.map((p) => p.id)).size;

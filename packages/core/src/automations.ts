@@ -89,6 +89,16 @@ export const TRIGGERS: TriggerDef[] = [
   { verb: "visit.en_route", label: "A crew is on the way", group: "Visits", subject: "visit", delayable: false },
   { verb: "visit.started", label: "A visit starts", group: "Visits", subject: "visit", delayable: false },
   { verb: "visit.completed", label: "A visit is completed", group: "Visits", subject: "visit", delayable: true },
+  // From the Client Hub (20261105000600_visit_change_requests.sql): nothing moves until the office
+  // approves. The client's own words go in notices and emails, never in a task the crew sees.
+  {
+    verb: "visit.reschedule_requested", label: "A client asks to reschedule", group: "Visits", subject: "visit", delayable: false,
+    variables: [{ token: "change.when", label: "Time they asked for" }, { token: "change.message", label: "What suits them", officeOnly: true }],
+  },
+  {
+    verb: "visit.cancel_requested", label: "A client asks to cancel", group: "Visits", subject: "visit", delayable: false,
+    variables: [{ token: "change.reason", label: "Their reason", officeOnly: true }],
+  },
   { verb: "invoice.sent", label: "An invoice is sent", group: "Invoices", subject: "invoice", delayable: true },
   { verb: "invoice.overdue", label: "An invoice becomes past due", group: "Invoices", subject: "invoice", delayable: true },
   { verb: "invoice.paid", label: "An invoice is paid in full", group: "Invoices", subject: "invoice", delayable: true },
@@ -372,8 +382,25 @@ export const TEMPLATE_VARIABLES: Array<{ token: string; label: string; subjects:
   { token: "last_visit", label: "Last visit date", subjects: ["client"] },
   { token: "date", label: "Visit date", subjects: ["visit"] },
   { token: "time", label: "Visit time", subjects: ["visit"] },
+  // While a crew is on the way: " and should arrive in about 20 minutes", or nothing when that isn't known (etaWords).
+  { token: "eta", label: "Arrival time", subjects: ["visit"] },
   { token: "address", label: "Address", subjects: ["visit", "request", "quote", "job"] },
 ];
+
+/**
+ * The {{eta}} words, to follow "on the way to {{address}} now": " and should arrive in about 20
+ * minutes", from when the crew should get there (visits.eta_at). Empty when that isn't known, has
+ * passed, or is more than 4 hours off (a phone's place gone wrong), so the sentence reads well either way.
+ */
+export function etaWords(etaAt: string | null | undefined, now = Date.now()): string {
+  const minutes = etaAt ? (Date.parse(etaAt) - now) / 60_000 : NaN;
+  if (!(minutes > 0 && minutes <= 240)) return "";
+  const rounded = Math.max(5, Math.round(minutes / 5) * 5);
+  const hours = Math.floor(rounded / 60);
+  const rest = rounded % 60;
+  const span = hours ? `${hours} hour${hours > 1 ? "s" : ""}${rest ? ` ${rest} minutes` : ""}` : `${rounded} minutes`;
+  return ` and should arrive in about ${span}`;
+}
 
 export const variablesFor = (subject: SubjectKind) => TEMPLATE_VARIABLES.filter((v) => v.subjects === "all" || v.subjects.includes(subject));
 

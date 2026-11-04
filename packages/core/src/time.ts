@@ -94,6 +94,15 @@ export function localTime(instant: Date, timeZone: string): string {
   return `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
 }
 
+/**
+ * How long after a visit's start the crew may arrive, in minutes (Settings → Company → Arrival
+ * window): clients read "between 9:00 AM and 11:00 AM". 0 when the business gives none.
+ */
+export function arrivalWindowMin(settings: unknown): number {
+  const min = Number((settings as { arrival_window_min?: unknown } | null)?.arrival_window_min);
+  return Number.isFinite(min) && min > 0 ? Math.min(Math.round(min), 12 * 60) : 0;
+}
+
 /** Date arithmetic on YYYY-MM-DD strings (no time zone involved). */
 export function addDays(date: string, days: number): string {
   const [y, m, d] = date.split("-").map(Number);

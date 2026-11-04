@@ -26,6 +26,7 @@ import {
   hipFactor,
   normalizePitch,
   pitchProblem,
+  etaWords,
   evaluateConditions,
   renderTemplate,
   validateRule,
@@ -42,6 +43,7 @@ import {
   isIsoDate,
   isTimeZoneName,
   jobWeatherRules,
+  namedWeatherRules,
   lineLengthM,
   localDate,
   localTime,
@@ -61,6 +63,7 @@ import {
   summarizeFeatureCollection,
   validateFormula,
   weatherRisks,
+  weatherRuleSummary,
   zonedTimeToUtc,
 } from "../src";
 
@@ -288,6 +291,15 @@ describe("presets", () => {
     for (const s of preset.services) if (s.formula_name) expect(formulaNames.has(s.formula_name), s.name).toBe(true);
     for (const form of preset.intake_forms) expect(form.slug).toMatch(/^[a-z0-9][a-z0-9-]{1,62}$/);
     expect(preset.sop_categories.length).toBeGreaterThan(0);
+    // The installer finds a checklist's price list items by name (account.ts applyPreset).
+    const serviceNames = new Set(preset.services.map((s) => s.name));
+    expect(new Set(preset.checklists.map((c) => c.name)).size).toBe(preset.checklists.length);
+    for (const c of preset.checklists) {
+      for (const name of c.services ?? []) expect(serviceNames.has(name), `${c.name}: ${name}`).toBe(true);
+      expect(new Set(c.items.map((i) => i.key)).size, c.name).toBe(c.items.length);
+      expect(c).not.toHaveProperty("job_type");
+    }
+    expect(preset).not.toHaveProperty("job_types");
     // What roof_packages allows for a package's card.
     for (const p of preset.packages ?? []) {
       expect(p.name.trim().length, p.name).toBeGreaterThanOrEqual(1);
@@ -297,6 +309,14 @@ describe("presets", () => {
       expect(p.highlights?.length ?? 0, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.highlights);
       expect((p.highlights ?? []).join("").length, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.highlightChars);
       expect(p.warranty?.length ?? 0, p.name).toBeLessThanOrEqual(PACKAGE_LIMITS.warranty);
+    }
+  });
+
+  it.each(Object.values(PRESETS))("$name has a checklist for its services, and a service call or trip charge", (preset) => {
+    expect(preset.checklists.some((c) => c.services?.length)).toBe(true);
+    // Lawn and roofing price by the visit and the square, with no call-out fee to speak of.
+    if (preset.id !== "lawn_exterior" && preset.id !== "roofing_exteriors") {
+      expect(preset.services.some((s) => /service call|trip|mobilization/i.test(s.name))).toBe(true);
     }
   });
 
@@ -590,6 +610,55 @@ describe("weather rules", () => {
     // Hand-edited settings that aren't a list of rules are ignored.
     expect(jobWeatherRules(null, { applies_to: "Sealcoat" }, ["Sealcoat"])).toEqual([]);
     expect(jobWeatherRules([], [null, "rain", { applies_to: "Sealcoat", min_temp_f: 50 }], ["Sealcoat"])).toEqual([{ applies_to: "Sealcoat", min_temp_f: 50 }]);
+  });
+
+  it("matches a rule's price list item by its id first, so renaming the item keeps the rule", () => {
+    const company = [{ service_id: "svc-seal", applies_to: "Sealcoat", requires_dry_hours: 24 }, { applies_to: "Crack fill", min_temp_f: 40 }];
+    // Renamed since the rule was saved: found by id, and called what it's called now.
+    expect(jobWeatherRules([], company, ["Sealcoating"], new Map([["svc-seal", "Sealcoating"]]))).toEqual([{ service_id: "svc-seal", applies_to: "Sealcoating", requires_dry_hours: 24 }]);
+    // A rule from before ids still goes by name, and another item of the old name isn't this one by id.
+    expect(jobWeatherRules([], company, ["crack fill"], new Map([["svc-other", "Crack fill"]]))).toEqual([company[1]]);
+    expect(jobWeatherRules([], company, ["Driveway"], new Map([["svc-drive", "Driveway"]]))).toEqual([]);
+    expect(namedWeatherRules(company, new Map([["svc-seal", "Sealcoating"]])).map(weatherRuleSummary)).toEqual(["Sealcoating: 24 dry hours after", "Crack fill: at least 40°F"]);
+  });
+
+  it("flags hot and windy days", () => {
+    const outlook = [{ date: "2026-07-01", temp_min_f: 70, temp_max_f: 96, rain_chance_pct: 0, wind_max_mph: 24.4 }];
+    expect(weatherRisks([{ applies_to: "Shingle roof", max_temp_f: 90, max_wind_mph: 20 }], "2026-07-01", outlook)).toEqual([
+      "Shingle roof: high of 96°F is above 90°F",
+      "Shingle roof: wind up to 24 mph",
+    ]);
+    // A forecast without wind (or a calm one) passes.
+    expect(weatherRisks([{ max_wind_mph: 20 }], "2026-07-01", [{ ...outlook[0]!, wind_max_mph: null }])).toEqual([]);
+  });
+
+  it("says each rule in one line", () => {
+    expect(weatherRuleSummary({ applies_to: "Paver patio", max_rain_pct: 50, requires_dry_hours: 24 })).toBe("Paver patio: at most 50% rain, 24 dry hours after");
+    expect(weatherRuleSummary({ min_temp_f: 40, max_temp_f: 90, max_wind_mph: 15 })).toBe("Every job: 40°F to 90°F, wind at most 15 mph");
+    expect(weatherRuleSummary({ applies_to: "Hot-mix asphalt surface", min_temp_f: 50 })).toBe("Hot-mix asphalt surface: at least 50°F");
+    expect(weatherRuleSummary({ max_temp_f: 0, max_rain_pct: 0 })).toBe("Every job: at most 0% rain, at most 0°F");
+  });
+});
+
+describe("the arrival time in an on-my-way text", () => {
+  const now = Date.parse("2026-10-17T15:00:00Z");
+  const inMinutes = (m: number) => new Date(now + m * 60_000).toISOString();
+
+  it("follows \"on the way now\" with about how long, to the nearest 5 minutes", () => {
+    expect(etaWords(inMinutes(21), now)).toBe(" and should arrive in about 20 minutes");
+    expect(etaWords(inMinutes(2), now)).toBe(" and should arrive in about 5 minutes");
+    expect(etaWords(inMinutes(60), now)).toBe(" and should arrive in about 1 hour");
+    expect(etaWords(inMinutes(97), now)).toBe(" and should arrive in about 1 hour 35 minutes");
+    expect(etaWords(inMinutes(150), now)).toBe(" and should arrive in about 2 hours 30 minutes");
+  });
+
+  it("is nothing when it isn't known, has passed or can't be right, so the sentence still reads well", () => {
+    // No place from the phone and no visit before it that day: no time at all.
+    expect(etaWords(null, now)).toBe("");
+    expect(etaWords(undefined, now)).toBe("");
+    expect(etaWords(inMinutes(-1), now)).toBe("");
+    expect(etaWords(inMinutes(300), now)).toBe("");
+    expect(etaWords("not a time", now)).toBe("");
   });
 });
 

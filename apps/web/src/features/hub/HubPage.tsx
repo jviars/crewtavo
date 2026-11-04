@@ -39,7 +39,7 @@ import { DocumentSheet, PrintableDocument } from "@/features/documents/EstimateD
 import { nextFrames, paperSettled } from "@/features/documents/paper";
 import type { DocumentSection } from "@/features/documents/types";
 import { ApiError } from "@/lib/api";
-import { dateIn, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { dateIn, formatDate, formatMoney, formatMoneyCents, setCurrency, todayIn } from "@/lib/format";
 import { sanitizeContractHtml } from "@/lib/html";
 import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
 import { CARD_REQUIRED } from "./HubAutopay";
@@ -207,6 +207,8 @@ export function HubPage() {
   }, [view.data, printing, print]);
 
   const d = view.data;
+  // The Hub has no session: its money shows in the business's currency from the page itself.
+  if (d) setCurrency((d.company as { currency?: string | null }).currency);
   const brand = d?.company.branding?.color || "#3b7d23";
   const onBrand = inkOn(brand);
   const preview = Boolean(d && "preview" in d && d.preview);
@@ -321,6 +323,21 @@ function HubDrawings({ token, drawings }: { token: string; drawings?: HubDrawing
         );
       })}
     </>
+  );
+}
+
+/** The business's own fields it shows here (portal_fields), as a details list. Nothing without any. */
+function HubFieldList({ fields }: { fields?: ReadonlyArray<{ label: string; text: string }> }) {
+  if (!fields?.length) return null;
+  return (
+    <dl className="kv" style={{ margin: "8px 0 0" }}>
+      {fields.map((f) => (
+        <Fragment key={f.label}>
+          <dt>{f.label}</dt>
+          <dd className="pre-wrap">{f.text}</dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 }
 
@@ -534,7 +551,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
             <span className={styles.eyebrow}>{words.kind} · No. {q.number}</span>
             <h1>{words.heading}</h1>
           </div>
-          {(clientName || place || dates.sent || dates.goodUntil) && (
+          {(clientName || place || dates.sent || dates.goodUntil || (q.portal_fields?.length ?? 0) > 0) && (
             <div className={styles.meta}>
               {(clientName || place) && (
                 <div>
@@ -550,6 +567,12 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                   {dates.sent && dates.goodUntil && <span>{dates.expired ? "Was good until" : "Good until"} {dates.goodUntil}</span>}
                 </div>
               )}
+              {q.portal_fields?.map((f) => (
+                <div key={f.label}>
+                  <span className={styles.metaLabel}>{f.label}</span>
+                  <strong>{f.text}</strong>
+                </div>
+              ))}
             </div>
           )}
         </section>
@@ -763,19 +786,28 @@ function SignedQuote({ token, data, printing, onPrint }: { token: string; data: 
   const doc = { template: contractTemplate(hubTemplate(data), contract), company: hubLetterhead(data.company), data: quoteDocument(data, contract ? { contract } : {}) };
   const when = q.approval?.signed_at ?? q.approved_at;
   const signed = Boolean(q.approval?.signature) && q.approval?.method !== "manual";
+  // The deposit asked for as they approved, still to pay (its invoice's own page pays it).
+  const owed = (data.deposit?.balance_due ?? 0) > 0;
   return (
     <>
       <Done
         title={`${signed ? "Signed" : "Approved"}${when ? ` on ${formatDate(dateIn(when, tz))}` : ""}`}
-        action={<Button icon="printer" onClick={onPrint}>Print or save PDF</Button>}
+        action={
+          <div className="row wrap" style={{ gap: 8, justifyContent: "center" }}>
+            {owed && <a className="hub-btn hub-btn-brand" href={data.deposit!.link}>Pay the {formatMoneyCents(data.deposit!.balance_due)} deposit</a>}
+            <Button icon="printer" onClick={onPrint}>Print or save PDF</Button>
+          </div>
+        }
       >
-        Thank you. {data.company.name} will be in touch to schedule the work.{Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}
+        Thank you. {data.company.name} will be in touch to schedule the work.
+        {data.deposit ? (owed ? " Your deposit is still due: pay it to hold your place on the schedule." : " Your deposit is paid.") : Number(q.deposit_amount) > 0 ? " You'll receive an invoice for the deposit." : ""}
       </Done>
       {data.autopay_offer && data.home && <AutopayOffer home={data.home} required={data.card_required === true} />}
       <section className="hub-document" aria-label={`${signed ? "Signed estimate" : "Estimate"} #${q.number}`}>
         <DocumentSheet {...doc} headingLevel={3} />
       </section>
       {contract && <TermsToRead contract={contract} />}
+      {(q.portal_fields?.length ?? 0) > 0 && <section className="card card-pad"><HubFieldList fields={q.portal_fields} /></section>}
       <HubDrawings token={token} drawings={data.drawings} />
       {printing && <PrintableDocument {...doc} />}
     </>
@@ -856,11 +888,16 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
   // Until an option with a price is picked there's no copy to sign, so the page prints as it is (the options side by side).
   const printable = !offers || Boolean(optionId);
 
+  // Paid as they approve, when the business takes payments online: Stripe's page opens after.
+  const depositDue = data.deposit_online ? depositToBook(q.deposit_amount, totals.total, q.deposit_percent) : 0;
+  // Approve goes on to the deposit whenever one's due (Approve and set up autopay goes to the card instead).
+  const approveLabel = depositDue > 0 ? "Approve and pay deposit" : q.change_order_for ? "Approve change order" : "Approve quote";
+  const depositNote = depositDue > 0 && <p className="muted small" style={{ margin: 0 }}>The {formatMoneyCents(depositDue)} deposit is paid next, by card or bank, on Stripe's secure page.</p>;
   // `withAutopay`: "Approve and set up autopay" was pressed, so it goes on to saving a card.
   const approve = useMutation({
     meta: { inline: true },
     mutationFn: (_withAutopay: boolean) =>
-      hubFetch(`${token}/approve`, {
+      hubFetch<{ status: string; deposit?: { url: string | null; link: string } }>(`${token}/approve`, {
         name: name.trim(),
         selected_line_ids: chosen,
         signature: signature ?? undefined,
@@ -869,8 +906,10 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
         ...(contract?.hash ? { sections_hash: contract.hash } : {}),
         ...(initials && asking.length ? { initials } : {}),
       }),
-    onSuccess: (_result, withAutopay) => {
+    // Approved either way: a deposit whose page couldn't open is paid from the signed quote.
+    onSuccess: (result, withAutopay) => {
       if (withAutopay && data.home) window.location.assign(`${data.home}?view=autopay`);
+      else if (result.deposit?.url) window.location.assign(result.deposit.url);
       else onChanged();
     },
     // The quote changed since the page loaded (the price, the options or the terms), or it's been
@@ -956,6 +995,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
         <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{q.title}</h1>
         {q.property && <span className="muted">{q.property.line1}{q.property.city ? `, ${q.property.city}` : ""}</span>}
         {q.message && <p className="pre-wrap" style={{ margin: "8px 0 0" }}>{q.message}</p>}
+        <HubFieldList fields={q.portal_fields} />
       </section>
 
       <HubDrawings token={token} drawings={data.drawings} />
@@ -1110,12 +1150,18 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
                     </>
                   ) : data.autopay_offer ? (
                     // Work charged by the visit: approving can go straight on to saving a card for it.
-                    <div className="hub-step-actions">
-                      <Button type="submit" variant="primary" size="lg" icon="check" loading={approve.isPending && !approve.variables} disabled={!ready || approve.isPending}>{q.change_order_for ? "Approve change order" : "Approve quote"}</Button>
-                      <Button type="submit" data-autopay="1" size="lg" icon="card" loading={approve.isPending && approve.variables === true} disabled={!ready || approve.isPending}>Approve and set up autopay</Button>
-                    </div>
+                    <>
+                      {depositNote}
+                      <div className="hub-step-actions">
+                        <Button type="submit" variant="primary" size="lg" icon={depositDue > 0 ? "card" : "check"} loading={approve.isPending && !approve.variables} disabled={!ready || approve.isPending}>{approveLabel}</Button>
+                        <Button type="submit" data-autopay="1" size="lg" icon="card" loading={approve.isPending && approve.variables === true} disabled={!ready || approve.isPending}>Approve and set up autopay</Button>
+                      </div>
+                    </>
                   ) : (
-                    <Button type="submit" variant="primary" size="lg" icon="check" loading={approve.isPending} disabled={!ready}>{q.change_order_for ? "Approve change order" : "Approve quote"}</Button>
+                    <>
+                      {depositNote}
+                      <Button type="submit" variant="primary" size="lg" icon={depositDue > 0 ? "card" : "check"} loading={approve.isPending} disabled={!ready}>{approveLabel}</Button>
+                    </>
                   )}
                 </form>
               )}
@@ -1184,7 +1230,7 @@ function LinesCard({ token, data, lines, optionId, chosen, onChoose, editable, t
   // A price set on site below the estimate is two lines, shown as one.
   const listed = listedLines(lines);
   const firstOf = (l: HubLine, i: number) => groupOf(l) !== null && !listed.slice(0, i).some((x) => groupOf(x) === groupOf(l));
-  const deposit = depositToBook(q.deposit_amount, totals.total);
+  const deposit = depositToBook(q.deposit_amount, totals.total, q.deposit_percent);
   // The add-ons ticked among these lines: what the code's minimum order is checked against, as it will be when they approve.
   const ticked = chosen.filter((id) => lines.some((l) => l.id === id));
   const short = promoShortfall(q.promo, lines, ticked);
@@ -1227,6 +1273,7 @@ function LinesCard({ token, data, lines, optionId, chosen, onChoose, editable, t
           </div>
         )}
         {totals.tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(totals.tax)}</span></div>}
+        {q.client?.tax_exempt && totals.tax === 0 && <div className="line"><span>Tax exempt{q.client.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
         <div className="line grand" style={{ fontSize: 24 }}><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><span>{formatMoneyCents(totals.total)}</span></div>
         {q.recurrence_rule && <div className="line"><span>How often</span><span style={{ textAlign: "right" }}>{scheduleText(q.recurrence_rule, q.active_months)}</span></div>}
         {deposit > 0 && <div className="line"><span>Deposit to book</span><span>{formatMoneyCents(deposit)}</span></div>}
@@ -1414,6 +1461,7 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
         <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{balance > 0 ? `${formatMoneyCents(balance)} due` : writtenOff ? "Nothing due" : "Paid in full"}</h1>
         <span className={late ? "text-danger strong" : "muted"}>Issued {formatDate(inv.issued_on)}{inv.due_on ? ` · due ${formatDate(inv.due_on)}` : " · due on receipt"}</span>
         {autopayLine && <span className="muted" role={autopay?.status === "paid" ? undefined : "status"}>{autopayLine}</span>}
+        <HubFieldList fields={inv.portal_fields} />
       </section>
       {offerSave && (
         <section className="card card-pad stack-sm no-print" aria-labelledby="hub-save-card">
@@ -1449,6 +1497,7 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
           />
           {(doc.data.credits ?? []).map((c, i) => <div key={i} className="line"><span>{c.label}</span><span className="nowrap">−{formatMoneyCents(c.amount)}</span></div>)}
           {Number(inv.tax_amount) > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
+          {inv.client?.tax_exempt && Number(inv.tax_amount) === 0 && <div className="line"><span>Tax exempt{inv.client.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
           <div className="line"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
           {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage (billed later)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}
           {inv.payments.map((p, i) =>

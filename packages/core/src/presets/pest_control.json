@@ -1,0 +1,393 @@
+{
+  "id": "pest_control",
+  "name": "Pest Control",
+  "description": "Monthly and quarterly pest plans, one-time treatments, termites, rodents, mosquitoes and wildlife.",
+  "services": [
+    {
+      "name": "Service call",
+      "category": "Service and labor",
+      "unit": "visit",
+      "unit_price": 125
+    },
+    {
+      "name": "Labor",
+      "category": "Service and labor",
+      "unit": "hr",
+      "unit_price": 85
+    },
+    {
+      "name": "Initial treatment",
+      "category": "Pest plans and treatments",
+      "unit": "visit",
+      "unit_price": 199
+    },
+    {
+      "name": "Quarterly pest plan",
+      "category": "Pest plans and treatments",
+      "unit": "month",
+      "unit_price": 45
+    },
+    {
+      "name": "Monthly pest plan",
+      "category": "Pest plans and treatments",
+      "unit": "month",
+      "unit_price": 69
+    },
+    {
+      "name": "One-time pest treatment",
+      "category": "Pest plans and treatments",
+      "unit": "visit",
+      "unit_price": 225
+    },
+    {
+      "name": "Mosquito yard treatment",
+      "category": "Pest plans and treatments",
+      "unit": "visit",
+      "unit_price": 85
+    },
+    {
+      "name": "Bed bug treatment, per room",
+      "category": "Pest plans and treatments",
+      "unit": "ea",
+      "unit_price": 375
+    },
+    {
+      "name": "Wasp and hornet nest removal",
+      "category": "Pest plans and treatments",
+      "unit": "ea",
+      "unit_price": 150
+    },
+    {
+      "name": "Termite inspection",
+      "category": "Termites",
+      "unit": "visit",
+      "unit_price": 95
+    },
+    {
+      "name": "Liquid termite treatment",
+      "category": "Termites",
+      "unit": "ft",
+      "unit_price": 12
+    },
+    {
+      "name": "Termite bait system install",
+      "category": "Termites",
+      "unit": "ea",
+      "unit_price": 1350,
+      "unit_cost": 450
+    },
+    {
+      "name": "Termite monitoring plan",
+      "category": "Termites",
+      "unit": "month",
+      "unit_price": 35
+    },
+    {
+      "name": "Rodent bait station",
+      "category": "Rodents and wildlife",
+      "unit": "ea",
+      "unit_price": 45,
+      "unit_cost": 12
+    },
+    {
+      "name": "Rodent exclusion",
+      "category": "Rodents and wildlife",
+      "unit": "hr",
+      "unit_price": 95
+    },
+    {
+      "name": "Wildlife trapping and removal",
+      "category": "Rodents and wildlife",
+      "unit": "visit",
+      "unit_price": 275
+    }
+  ],
+  "formulas": [],
+  "checklists": [
+    {
+      "name": "Pest treatment record",
+      "services": [
+        "Initial treatment",
+        "Quarterly pest plan",
+        "Monthly pest plan",
+        "One-time pest treatment",
+        "Mosquito yard treatment",
+        "Bed bug treatment, per room",
+        "Wasp and hornet nest removal",
+        "Liquid termite treatment"
+      ],
+      "items": [
+        {
+          "key": "target_pests",
+          "label": "Target pests",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "areas_treated",
+          "label": "Areas treated",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "Outside only",
+            "Inside and outside",
+            "Inside only"
+          ]
+        },
+        {
+          "key": "products_used",
+          "label": "Products used, with EPA registration numbers",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "amount_applied",
+          "label": "Amount and mix rate applied",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "applicator_license",
+          "label": "Applicator license number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "wind_and_temperature",
+          "label": "Wind and temperature at application",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "pest_activity",
+          "label": "Pest activity",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "None seen",
+            "Light",
+            "Moderate",
+            "Heavy"
+          ]
+        },
+        {
+          "key": "customer_told_reentry",
+          "label": "Customer told what was applied and when it's safe to go back in",
+          "type": "check",
+          "required": true
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photo",
+          "required": false
+        },
+        {
+          "key": "customer_signature",
+          "label": "Customer signature",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Termite inspection",
+      "services": [
+        "Termite inspection",
+        "Termite monitoring plan",
+        "Termite bait system install"
+      ],
+      "items": [
+        {
+          "key": "areas_inspected",
+          "label": "Areas inspected",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "areas_we_could_not_reach",
+          "label": "Areas we couldn't reach",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "termite_activity",
+          "label": "Termite activity",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "None found",
+            "Signs of past activity",
+            "Active termites"
+          ]
+        },
+        {
+          "key": "damage",
+          "label": "Damage",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "None seen",
+            "Minor",
+            "Needs repair"
+          ]
+        },
+        {
+          "key": "conducive_conditions",
+          "label": "Moisture or wood touching soil",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "bait_stations_checked",
+          "label": "Bait stations checked",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photo",
+          "required": true
+        },
+        {
+          "key": "customer_signature",
+          "label": "Customer signature",
+          "type": "signature",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Rodent and wildlife visit",
+      "services": [
+        "Rodent bait station",
+        "Rodent exclusion",
+        "Wildlife trapping and removal"
+      ],
+      "items": [
+        {
+          "key": "entry_points_found",
+          "label": "Entry points found",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "entry_points_sealed",
+          "label": "Entry points sealed",
+          "type": "check",
+          "required": false
+        },
+        {
+          "key": "stations_or_traps_set",
+          "label": "Stations or traps set",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "stations_or_traps_checked",
+          "label": "Stations or traps checked",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "activity",
+          "label": "Activity",
+          "type": "choice",
+          "required": true,
+          "options": [
+            "None",
+            "Feeding or droppings",
+            "Caught"
+          ]
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photo",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "intake_forms": [
+    {
+      "name": "Request pest control",
+      "slug": "request-pest-control",
+      "kind": "request",
+      "requires_approval": false,
+      "lead_time_days": 1,
+      "questions": [
+        {
+          "key": "address",
+          "label": "Service address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "pests",
+          "label": "What are you seeing?",
+          "type": "multi_choice",
+          "required": true,
+          "options": [
+            "Ants",
+            "Roaches",
+            "Spiders",
+            "Mice or rats",
+            "Termites",
+            "Mosquitoes",
+            "Bed bugs",
+            "Wasps or bees",
+            "Something else"
+          ]
+        },
+        {
+          "key": "where",
+          "label": "Where?",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "Inside",
+            "Outside",
+            "Both"
+          ]
+        },
+        {
+          "key": "property_type",
+          "label": "Property type",
+          "type": "choice",
+          "required": false,
+          "options": [
+            "Home",
+            "Apartment or condo",
+            "Business"
+          ]
+        },
+        {
+          "key": "kids_or_pets",
+          "label": "Kids or pets at home?",
+          "type": "yes_no",
+          "required": false
+        },
+        {
+          "key": "photos",
+          "label": "Photos",
+          "type": "photos",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "weather_rules": [
+    {
+      "applies_to": "Mosquito yard treatment",
+      "max_rain_pct": 50
+    }
+  ],
+  "sop_categories": [
+    "Safety and labels",
+    "Treatment records",
+    "General pest",
+    "Termites and rodents"
+  ]
+}

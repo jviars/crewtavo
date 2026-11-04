@@ -6,7 +6,11 @@
  * The visit's next step (On my way, Start visit, Complete visit) is the one thing to tap: on a phone
  * it sits in a bar above the tab bar, in thumb reach. The checklist and the notes save as the crew
  * goes, and Complete visit says how many required checklist items are left.
+ *
+ * The team adds work to the job from the price list, never seeing a price; once the visit is done,
+ * the office on site makes its invoice, sends it and records cash or check (FieldBilling.tsx).
  */
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import { onlineManager, useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import { useParams } from "react-router-dom";
@@ -33,25 +37,30 @@ import { toast } from "@/lib/toast";
 import { IN_TRASH } from "../drive/trash";
 import { ShareToggle, shareToggleState } from "../marketing/ShareToggle";
 import { undoable } from "@/lib/undo";
+import { CustomFieldList, useCustomFields } from "../customFields/CustomFields";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
 import { FieldPlans } from "../plans/FieldPlans";
+import { PropertyEquipment } from "../clients/PropertyEquipment";
 import { contactLinks, visitContact, type VisitContact } from "./contact";
-import { pendingVisitSave, pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitNotesSave, type VisitStatusChange } from "./fieldActions";
+import { pendingChecklistSaves, pendingVisitSave, pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitNotesSave, type VisitStatusChange } from "./fieldActions";
 import { formatDuration, useStatusTap } from "./fieldData";
 import { OfflineNote, useSignal } from "./OfflineNote";
 import { SignaturePad } from "./SignaturePad";
+import { visitChecklists, type VisitChecklist } from "./visitChecklists";
+import { AddWork, VisitInvoice } from "./FieldBilling";
+import { addsWork, fieldInvoiceKind, takesMoney, takesWork } from "./fieldMoney";
 import { YourPrice } from "./YourPrice";
 
 interface ChecklistItem { key: string; label: string; type: "check" | "number" | "text" | "choice" | "photo" | "signature"; required: boolean; options?: string[] }
 
-/** What's still required on the visit's checklist, for Complete visit. Null when nothing holds it up. */
+/** What's still required on the visit's checklists, for Complete visit. Null when nothing holds it up. */
 interface ChecklistProgress { required: number; missing: Array<{ key: string; label: string }> }
 
 interface ChecklistHandle {
-  /** With the visit's completion: saves the checklist as done, or (completed anyway) as it is. */
-  finish: (done: boolean) => void;
+  /** With the visit's completion: saves a checklist with nothing required missing as done, any other (completed anyway) as it is. */
+  finish: () => void;
   /** Brings the first required item still missing to the middle of the screen, lit up for a moment. */
   showMissing: () => void;
 }
@@ -70,6 +79,7 @@ export function FieldVisitPage() {
   const [progress, setProgress] = useState<ChecklistProgress | null | undefined>(undefined);
   // The required item an early Complete visit last pointed at: tapped again, it offers to go without.
   const pointedAt = useRef<string | null>(null);
+  const online = useSignal();
 
   const visit = useQuery({
     queryKey: ["field-visit", id],
@@ -77,7 +87,7 @@ export function FieldVisitPage() {
       const row = unwrapOne(
         await supabase()
           .from("visits")
-          .select("id, title, kind, status, starts_at, ends_at, scheduled_on, notes, hold_reason, completed_at, series_day, series_total, equipment:visit_equipment(equipment:equipment(id, name, kind)), job:jobs(id, number, title, instructions, property_id, client:clients(display_name, phone, social_photos_opt_out)), request:requests(id, title, details, client:clients(display_name, phone, social_photos_opt_out)), property:properties(id, line1, city, region, postal_code, lat, lng, notes)")
+          .select("id, title, kind, status, starts_at, ends_at, scheduled_on, notes, hold_reason, completed_at, series_day, series_total, equipment:visit_equipment(equipment:equipment(id, name, kind)), job:jobs(id, number, title, instructions, property_id, custom_fields, kind, status, pricing, client:clients(display_name, phone, social_photos_opt_out)), request:requests(id, title, details, client:clients(display_name, phone, social_photos_opt_out)), property:properties(id, line1, city, region, postal_code, lat, lng, notes, custom_fields)")
           .eq("id", id)
           .maybeSingle(),
         "This visit",
@@ -88,6 +98,9 @@ export function FieldVisitPage() {
   });
   const v = visit.data;
   useDocumentTitle(v?.title ?? "Visit");
+  // The job's and property's own fields, to read (a sub reads none: they're the business's).
+  const jobFields = useCustomFields("job");
+  const propertyFields = useCustomFields("property");
   const access = useQuery({
     queryKey: ["field-visit", id, "access"],
     enabled: Boolean(v?.property),
@@ -117,7 +130,8 @@ export function FieldVisitPage() {
     queryFn: async () => unwrap(await supabase().from("time_entries").select("started_at, ended_at").eq("visit_id", id).eq("user_id", session.userId)),
   });
   const refresh = () => {
-    for (const k of [["field-visit", id], ["field"], ["schedule"], ["running-timer"], ["dashboard"], ["checklist", id]]) queryClient.invalidateQueries({ queryKey: k });
+    // The Jobs list and job pages say Late, Today, Upcoming or Unscheduled from the visits (public.job_state).
+    for (const k of [["field-visit", id], ["field"], ["schedule"], ["job"], ["jobs"], ["running-timer"], ["dashboard"], ["checklist", id]]) queryClient.invalidateQueries({ queryKey: k });
   };
   // These work offline: saved on the phone and sent, in order, when there's signal. Each is sent by
   // the action registered for it (fieldActions.ts), not a mutationFn here: lib/offline.ts notes when
@@ -135,7 +149,7 @@ export function FieldVisitPage() {
   const statusTap = useStatusTap((change) => statusMutation.mutate(change));
   const setStatus = (status: string) => statusTap.tap({ id, jobId: v?.job?.id ?? null }, status);
   // Which step is on its way: finding the phone's place comes first for one that clocks.
-  const going = statusTap.locating === id ? "locating" : statusMutation.isPending && !statusMutation.isPaused ? (statusMutation.variables?.status ?? null) : null;
+  const going = statusTap.locating?.id === id ? statusTap.locating.status : statusMutation.isPending && !statusMutation.isPaused ? (statusMutation.variables?.status ?? null) : null;
 
   // Notes save a moment after the crew stops typing, and when they leave the box.
   const showing = useShowing();
@@ -176,6 +190,7 @@ export function FieldVisitPage() {
   const codes = access.data;
   const minutes = (myTime.data ?? []).reduce((s, t) => s + ((t.ended_at ? Date.parse(t.ended_at) : Date.now()) - Date.parse(t.started_at)), 0);
   const left = progress?.missing.length ?? 0;
+  const invoiceKind = v.job ? fieldInvoiceKind(v.job) : null;
   const complete = async () => {
     const first = progress?.missing[0];
     if (progress && first) {
@@ -188,14 +203,14 @@ export function FieldVisitPage() {
       const anyway = await confirm({ title: "The checklist isn't done", body: `Still needed: ${names}. The office will see the checklist is unfinished.`, confirmLabel: "Complete anyway", cancelLabel: "Keep working" });
       if (!anyway) return checklist.current?.showMissing();
     }
-    checklist.current?.finish(!first);
+    checklist.current?.finish();
     setStatus("completed");
   };
   const commit =
     v.status === "scheduled" ? (
       <>
         <Button icon="navigation" className="big-action" loading={going === "en_route"} onClick={() => setStatus("en_route")}>On my way</Button>
-        <Button variant="primary" icon="play" className="big-action" loading={going === "in_progress" || going === "locating"} onClick={() => setStatus("in_progress")}>Start visit</Button>
+        <Button variant="primary" icon="play" className="big-action" loading={going === "in_progress"} onClick={() => setStatus("in_progress")}>Start visit</Button>
       </>
     ) : v.status === "en_route" ? (
       <Button variant="primary" icon="play" className="big-action" loading={going !== null} onClick={() => setStatus("in_progress")}>Start visit</Button>
@@ -228,6 +243,8 @@ export function FieldVisitPage() {
       </div>
       <OfflineNote />
       {v.status === "completed" && v.completed_at && <div className="callout callout-good"><Icon name="check" size={20} /><div className="grow">Completed {timeAgo(v.completed_at)}.</div></div>}
+      {/* Autopay bills the visit itself; with no signal, whether it does may not be on the phone. */}
+      {v.status === "completed" && v.job && invoiceKind && takesMoney(session) && (autopay.isSuccess ? !autopay.data : !online) && <VisitInvoice visitId={v.id} jobId={v.job.id} kind={invoiceKind} />}
 
       <div className="field-actions">
         {commit && <div className="field-commit">{commit}</div>}
@@ -259,7 +276,21 @@ export function FieldVisitPage() {
           {v.request?.details && <p className="pre-wrap" style={{ margin: 0 }}>{v.request.details}</p>}
         </section>
       )}
-      {v.job && <section className="card card-pad"><ScopeOfWork jobId={v.job.id} title="The work" bare /></section>}
+      {(shownCustomFields(jobFields, v.job?.custom_fields).length > 0 || shownCustomFields(propertyFields, v.property?.custom_fields).length > 0) && (
+        <section className="card card-pad stack-sm">
+          <strong>Details</strong>
+          <dl className="kv">
+            <CustomFieldList fields={jobFields} values={v.job?.custom_fields} />
+            <CustomFieldList fields={propertyFields} values={v.property?.custom_fields} />
+          </dl>
+        </section>
+      )}
+      {v.job && (
+        <section className="card card-pad stack-sm">
+          <ScopeOfWork jobId={v.job.id} title="The work" bare />
+          {addsWork(session) && takesWork(v.job) && v.status !== "cancelled" && <AddWork visitId={v.id} jobId={v.job.id} />}
+        </section>
+      )}
       {sub && <YourPrice visitId={v.id} />}
       <FieldPlans visitId={v.id} jobId={v.job?.id ?? null} propertyId={v.property?.id ?? v.job?.property_id ?? null} />
       {v.equipment.length > 0 && (
@@ -270,8 +301,10 @@ export function FieldVisitPage() {
           </div>
         </section>
       )}
+      {/* The client's own equipment here is the team's to see, not a sub's. */}
+      {!sub && <PropertyEquipment propertyId={v.property?.id ?? v.job?.property_id ?? null} visitId={v.id} />}
 
-      <VisitWork visitId={v.id} visitStatus={v.status} checklist={checklist} onProgress={setProgress} jobId={v.job && !sub ? v.job.id : null}
+      <VisitWork visitId={v.id} visitStatus={v.status} checklist={checklist} onProgress={setProgress} jobId={v.job?.id ?? null} materials={!sub}
         clientOptOut={Boolean(v.job?.client?.social_photos_opt_out ?? v.request?.client?.social_photos_opt_out)} />
 
       <section className="card card-pad stack-sm">
@@ -302,13 +335,13 @@ export function FieldVisitPage() {
   );
 }
 
-/** The checklist, materials and photos, sharing the visit's photos (a checklist item can ask for them). */
-function VisitWork({ visitId, visitStatus, checklist, onProgress, jobId, clientOptOut }: { visitId: string; visitStatus: string; checklist: RefObject<ChecklistHandle>; onProgress: (p: ChecklistProgress | null | undefined) => void; jobId: string | null; clientOptOut: boolean }) {
+/** The checklists, materials (not a sub's) and photos, sharing the visit's photos (a checklist item can ask for them). */
+function VisitWork({ visitId, visitStatus, checklist, onProgress, jobId, materials, clientOptOut }: { visitId: string; visitStatus: string; checklist: RefObject<ChecklistHandle>; onProgress: (p: ChecklistProgress | null | undefined) => void; jobId: string | null; materials: boolean; clientOptOut: boolean }) {
   const photos = useVisitPhotos(visitId);
   return (
     <>
-      <Checklist ref={checklist} visitId={visitId} visitStatus={visitStatus} photos={photos} onProgress={onProgress} />
-      {jobId && <MaterialsCard jobId={jobId} visitId={visitId} compact />}
+      <Checklists ref={checklist} visitId={visitId} jobId={jobId} visitStatus={visitStatus} photos={photos} onProgress={onProgress} />
+      {jobId && materials && <MaterialsCard jobId={jobId} visitId={visitId} compact />}
       <Photos photos={photos} clientOptOut={clientOptOut} />
     </>
   );
@@ -418,33 +451,118 @@ function Required() {
   );
 }
 
-const Checklist = forwardRef<ChecklistHandle, { visitId: string; visitStatus: string; photos: VisitPhotos; onProgress: (p: ChecklistProgress | null | undefined) => void }>(function Checklist({ visitId, visitStatus, photos, onProgress }, ref) {
+interface ChecklistTemplate { id: string; name: string; items: unknown }
+interface ChecklistResponse { id: string; template_id: string | null; answers: unknown; completed_at: string | null; completed_by: string | null }
+interface ChecklistData { templates: ChecklistTemplate[]; matched: string[]; responses: ChecklistResponse[] }
+
+// A key of its own: a phone may still keep the one-checklist shape saved under ["checklist", id].
+const checklistsKey = (visitId: string) => ["checklist", visitId, "cards"];
+
+/** A save still waiting on this phone, as the response it will be (the saved answers too, when it only marks it done). */
+const waitingResponse = (v: ChecklistSave, saved: ChecklistResponse | undefined): ChecklistResponse => ({
+  id: v.responseId,
+  template_id: v.templateId,
+  answers: v.answers ?? saved?.answers ?? {},
+  completed_at: v.completedAt,
+  completed_by: null,
+});
+
+/**
+ * The visit's checklists (visitChecklists.ts): each one its job's price list items go with, ready to
+ * fill in, and one more to pick from the rest. Complete visit counts what's required on all of them.
+ */
+const Checklists = forwardRef<ChecklistHandle, { visitId: string; jobId: string | null; visitStatus: string; photos: VisitPhotos; onProgress: (p: ChecklistProgress | null | undefined) => void }>(function Checklists({ visitId, jobId, visitStatus, photos, onProgress }, ref) {
+  const { company } = useSession();
+  const queryClient = useQueryClient();
+  const data = useQuery({
+    queryKey: checklistsKey(visitId),
+    queryFn: async (): Promise<ChecklistData> => {
+      const [templates, responses, matched] = await Promise.all([
+        supabase().from("checklist_templates").select("id, name, items").eq("company_id", company.id).eq("active", true).order("name"),
+        supabase().from("checklist_responses").select("id, template_id, answers, completed_at, completed_by").eq("visit_id", visitId).order("created_at"),
+        // The crew can't read the job's lines (they have prices): the database says which checklists they bring up.
+        jobId ? supabase().rpc("job_checklists", { p_job: jobId }) : null,
+      ]);
+      // Saves still waiting on this phone are newer than what the server has.
+      const saved: ChecklistResponse[] = unwrap(responses);
+      const queued = pendingChecklistSaves(queryClient, visitId);
+      const merged = saved.map((r) => (queued.has(r.id) ? waitingResponse(queued.get(r.id)!, r) : r));
+      for (const v of queued.values()) if (!saved.some((r) => r.id === v.responseId)) merged.push(waitingResponse(v, undefined));
+      return { templates: unwrap(templates), matched: matched ? unwrap(matched) : [], responses: merged };
+    },
+  });
+  // The one to pick saves with this, so saving twice with no signal updates one checklist instead of adding two.
+  const [newId] = useState(() => crypto.randomUUID());
+  const { cards, others } = data.data?.templates.length ? visitChecklists(data.data.templates, data.data.matched, data.data.responses, newId) : { cards: [], others: [] };
+  const handles = useRef(new Map<string, ChecklistHandle>());
+  const [progressBy, setProgressBy] = useState<Record<string, ChecklistProgress | null>>({});
+  const report = useCallback(
+    (key: string, p: ChecklistProgress | null | undefined) =>
+      setProgressBy((all) => {
+        const next = { ...all };
+        if (p === undefined) delete next[key];
+        else next[key] = p;
+        return next;
+      }),
+    [],
+  );
+
+  // Complete visit says what's left on all of them, and points at the first.
+  const each = cards.map((c) => progressBy[c.key]);
+  const required = each.reduce((n, p) => n + (p?.required ?? 0), 0);
+  const total = data.isPending || cards.some((c) => !(c.key in progressBy)) ? undefined : required ? { required, missing: cards.flatMap((c) => (progressBy[c.key]?.missing ?? []).map((m) => ({ key: `${c.key}:${m.key}`, label: m.label }))) } : null;
+  const summary = JSON.stringify(total ?? String(total));
+  useEffect(() => onProgress(total), [summary]);
+  useEffect(() => () => onProgress(null), [onProgress]);
+
+  useImperativeHandle(ref, () => ({
+    finish: () => cards.forEach((c) => handles.current.get(c.key)?.finish()),
+    showMissing: () => {
+      const first = cards.find((c) => progressBy[c.key]?.missing.length);
+      if (first) handles.current.get(first.key)?.showMissing();
+    },
+  }));
+
+  if (data.isPending) return <section className="card card-pad"><Skeleton width="30%" /><div style={{ height: 10 }} /><Skeleton height={80} /></section>;
+  const another = cards.some((c) => c.fixed);
+  return cards.map((card) => (
+    <Checklist
+      key={card.key}
+      ref={(handle) => {
+        if (handle) handles.current.set(card.key, handle);
+        else handles.current.delete(card.key);
+      }}
+      card={card}
+      templates={data.data?.templates ?? []}
+      others={others}
+      another={another}
+      visitId={visitId}
+      visitStatus={visitStatus}
+      photos={photos}
+      report={report}
+    />
+  ));
+});
+
+/** One checklist on the visit: brought up by the job's items, or picked (`another` when some were brought up). */
+const Checklist = forwardRef<
+  ChecklistHandle,
+  { card: VisitChecklist<ChecklistResponse>; templates: ChecklistTemplate[]; others: ChecklistTemplate[]; another: boolean; visitId: string; visitStatus: string; photos: VisitPhotos; report: (key: string, p: ChecklistProgress | null | undefined) => void }
+>(function Checklist({ card, templates, others, another, visitId, visitStatus, photos, report }, ref) {
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
   const root = useRef<HTMLElement>(null);
   const flashing = useRef<number | undefined>(undefined);
   const showing = useShowing();
-  const data = useQuery({
-    queryKey: ["checklist", visitId],
-    queryFn: async () => {
-      const [templates, responses] = await Promise.all([
-        supabase().from("checklist_templates").select("id, name, items").eq("company_id", company.id).eq("active", true).order("name"),
-        supabase().from("checklist_responses").select("id, template_id, answers, completed_at, completed_by").eq("visit_id", visitId).limit(1),
-      ]);
-      // A save still waiting on this phone is newer than what the server has (its answers too, unless it only marks the checklist done).
-      const queued = pendingVisitSave<ChecklistSave>(queryClient, "checklist-save", visitId);
-      const saved = unwrap(responses)[0] ?? null;
-      const response = queued ? { id: queued.responseId, template_id: queued.templateId, answers: (queued.answers ?? saved?.answers ?? {}) as never, completed_at: queued.completedAt, completed_by: null } : saved;
-      return { templates: unwrap(templates), response };
-    },
-  });
+  const response = card.response;
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [templateId, setTemplateId] = useState("");
   const answersNow = useRef(answers);
   answersNow.current = answers;
-  // Made here so saving twice with no signal updates one checklist instead of adding two.
-  const [newId] = useState(() => crypto.randomUUID());
+  // Made here so saving twice with no signal updates one checklist instead of adding two (the one to pick has its card's).
+  const [newId] = useState(() => (card.fixed ? crypto.randomUUID() : card.key));
+  const responseId = response?.id ?? newId;
 
   // Sent by the action registered for it, like the visit's own (no mutationFn here).
   const saveMutation = useMutation({
@@ -452,30 +570,32 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; visitStatus: st
     scope: FIELD_SCOPE,
     meta: { inline: true },
     onMutate: (v: ChecklistSave) => {
-      queryClient.setQueryData<typeof data.data>(["checklist", visitId], (old) =>
-        old && { ...old, response: { id: v.responseId, template_id: v.templateId, answers: (v.answers ?? old.response?.answers ?? {}) as never, completed_at: v.completedAt, completed_by: null } },
-      );
+      queryClient.setQueryData<ChecklistData>(checklistsKey(visitId), (old) => {
+        if (!old) return old;
+        const saved = old.responses.find((r) => r.id === v.responseId);
+        const next = waitingResponse(v, saved);
+        return { ...old, responses: saved ? old.responses.map((r) => (r.id === v.responseId ? next : r)) : [...old.responses, next] };
+      });
     },
     onError: toastIfGone(showing),
     // Not waited on: the next field action in line goes without waiting for this reload.
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["checklist", visitId] }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: checklistsKey(visitId) }),
   });
   const autosave = useAutoSave((v: ChecklistSave) => saveMutation.mutateAsync(v), 500);
-  const sending = useIsMutating({ mutationKey: ["checklist-save"], predicate: (m) => (m.state.variables as ChecklistSave | undefined)?.visitId === visitId });
+  const sending = useIsMutating({ mutationKey: ["checklist-save"], predicate: (m) => (m.state.variables as ChecklistSave | undefined)?.responseId === responseId });
   const loaded = useRef(false);
   // What's saved comes in (the first load, another phone, the checklist reopened) unless something
   // changed here is still on its way.
   useEffect(() => {
-    if (!data.data) return;
     if (loaded.current && (sending > 0 || autosave.waiting())) return;
     loaded.current = true;
-    if (data.data.response) {
-      setAnswers((data.data.response.answers ?? {}) as Record<string, unknown>);
-      setTemplateId(data.data.response.template_id ?? "");
-    } else if (data.data.templates.length === 1) setTemplateId(data.data.templates[0].id);
-  }, [data.data, sending]);
+    if (response) {
+      setAnswers((response.answers ?? {}) as Record<string, unknown>);
+      setTemplateId(response.template_id ?? "");
+    } else if (card.templateId) setTemplateId(card.templateId);
+  }, [response, sending]);
 
-  const template = data.data?.templates.find((t) => t.id === templateId);
+  const template = templates.find((t) => t.id === templateId);
   const items = (template?.items ?? []) as unknown as ChecklistItem[];
   const answered = (i: ChecklistItem) => {
     const a = answers[i.key];
@@ -488,20 +608,19 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; visitStatus: st
   const required = items.filter((i) => i.required && i.type !== "photo").length;
   const doneCount = items.filter((i) => i.type !== "photo" && answered(i)).length;
   const countable = items.filter((i) => i.type !== "photo").length;
-  const done = Boolean(data.data?.response?.completed_at);
+  const done = Boolean(response?.completed_at);
 
   // Complete visit says what's left, and points at it.
   const missingKeys = missing.map((m) => m.key).join("\n");
   useEffect(() => {
-    if (data.isPending) return onProgress(undefined);
-    onProgress(template && !done && required ? { required, missing: missing.map(({ key, label }) => ({ key, label })) } : null);
-  }, [data.isPending, template?.id, done, required, missingKeys]);
-  useEffect(() => () => onProgress(null), [onProgress]);
+    report(card.key, template && !done && required ? { required, missing: missing.map(({ key, label }) => ({ key, label })) } : null);
+  }, [template?.id, done, required, missingKeys]);
+  useEffect(() => () => report(card.key, undefined), [report, card.key]);
 
   const variables = (next: Record<string, unknown> | undefined, chosen: string, completedAt: string | null = null): ChecklistSave => ({
     companyId: company.id,
     visitId,
-    responseId: data.data?.response?.id ?? newId,
+    responseId,
     templateId: chosen || null,
     ...(next && { answers: next }),
     completedAt,
@@ -525,9 +644,9 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; visitStatus: st
   };
 
   useImperativeHandle(ref, () => ({
-    finish: (complete) => {
-      // Done: marked done. Completed anyway: what's in goes as it is, unfinished.
-      if (complete && template && !done) return markDone();
+    finish: () => {
+      // Nothing required missing: marked done. Completed anyway: what's in goes as it is, unfinished.
+      if (template && !done && !missing.length) return markDone();
       autosave.flush();
     },
     showMissing: () => {
@@ -548,26 +667,24 @@ const Checklist = forwardRef<ChecklistHandle, { visitId: string; visitStatus: st
   }));
 
   const reopen = useMutation({
-    mutationFn: async () => unwrap(await supabase().from("checklist_responses").update({ completed_at: null }).eq("id", data.data!.response!.id)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklist", visitId] }),
+    mutationFn: async () => unwrap(await supabase().from("checklist_responses").update({ completed_at: null }).eq("id", response!.id)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: checklistsKey(visitId) }),
   });
 
-  if (data.isPending) return <section className="card card-pad"><Skeleton width="30%" /><div style={{ height: 10 }} /><Skeleton height={80} /></section>;
-  if (!data.data?.templates.length) return null;
   return (
     <section ref={root} className="card card-pad stack-sm">
       <div className="row-between">
-        <strong>Checklist</strong>
+        <strong>{card.fixed ? (template?.name ?? "Checklist") : another ? "Another checklist" : "Checklist"}</strong>
         <span className="row" style={{ gap: 12 }}>
           <AutoSaveStatus status={autosave.status} waiting={sending > 0} />
           {done ? <StatusPill label="Done" tone="good" /> : template && <span className="muted small tabular"><AnimatedNumber value={doneCount} /> of {countable}</span>}
         </span>
       </div>
       {template && !done && <div className="progress"><span style={{ width: `${countable ? (doneCount / countable) * 100 : 0}%` }} /></div>}
-      {(!data.data.response || !done) && data.data.templates.length > 1 && (
-        <select className="select" value={templateId} onChange={(e) => choose(e.target.value)} aria-label="Choose a checklist" disabled={done}>
+      {!card.fixed && !done && (others.length > 1 || another) && (
+        <select className="select" value={templateId} onChange={(e) => choose(e.target.value)} aria-label="Choose a checklist">
           <option value="">Choose a checklist…</option>
-          {data.data.templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {others.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       )}
       <div>

@@ -1,4 +1,5 @@
 import { autopaySettings } from "@crewtavo/core/autopay";
+import { shownCustomFields } from "@crewtavo/core/customFields";
 import { askChannels, askRefusal, creditMoney, marketingOn, notAsked, reachOf, referralAskRefusal, referralsReady, textsOff, type AskChannel } from "@crewtavo/core/marketing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -27,10 +28,13 @@ import { AutopayCard, useAutopayInvite } from "./AutopayCard";
 import { EditClientDialog } from "./ClientForm";
 import { AddContact, ContactsCard, useClientContacts } from "./ContactsCard";
 import { PropertyDialog, type AccessRow, type PropertyRow } from "./PropertyDialog";
+import { PropertyEquipment } from "./PropertyEquipment";
+import { MergeClientsDialog } from "./MergeClientsDialog";
 import { Timeline } from "./Timeline";
 import { PhotosCard } from "../files/PhotosCard";
 import { socialKey } from "../marketing/socialData";
 import { askToastKind, type AskResult } from "../marketing/askForm";
+import { CustomFieldList, useCustomFields } from "../customFields/CustomFields";
 
 type WorkTab = "requests" | "quotes" | "jobs" | "invoices";
 type ClientPatch = { status?: "lead" | "active" | "archived"; marketing_opt_out?: boolean; review_opt_out?: boolean; social_photos_opt_out?: boolean };
@@ -45,7 +49,7 @@ export function ClientPage() {
   // Null until someone picks a tab: until then it opens on the first kind of work the client has.
   const [picked, setPicked] = useState<WorkTab | null>(null);
   const workRef = useRef<HTMLElement>(null);
-  const [dialog, setDialog] = useState<null | "edit" | "request" | "quote">(null);
+  const [dialog, setDialog] = useState<null | "edit" | "request" | "quote" | "merge">(null);
   const [property, setProperty] = useState<{ row?: PropertyRow; access?: AccessRow | null } | null>(null);
   const isOffice = hasRole(session, "admin", "office");
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
@@ -53,6 +57,8 @@ export function ClientPage() {
   const seesMoney = isOffice && can(session, "invoices");
   const autopayOn = autopaySettings(session.company.settings, session.company.trade_preset).enabled;
   const contacts = useClientContacts(id);
+  const clientFields = useCustomFields("client");
+  const propertyFields = useCustomFields("property");
   const autopayInvite = useAutopayInvite(id);
 
   const client = useQuery({
@@ -61,7 +67,7 @@ export function ClientPage() {
       unwrapOne(
         await supabase()
           .from("clients")
-          .select("id, display_name, company_name, email, phone, status, tags, lead_source, notes, created_at, billing_address, marketing_opt_out, review_opt_out, social_photos_opt_out, sms_opt_out_at, reviewed_at, referred_by, properties(id, label, line1, line2, city, region, postal_code, lat, lng, notes)")
+          .select("id, display_name, company_name, email, phone, status, tags, lead_source, notes, created_at, billing_address, marketing_opt_out, review_opt_out, social_photos_opt_out, sms_opt_out_at, reviewed_at, referred_by, custom_fields, tax_exempt, tax_exempt_note, payment_terms_days, properties(id, label, line1, line2, city, region, postal_code, lat, lng, notes, tags, lot_size_sqft, custom_fields)")
           .eq("id", id)
           .maybeSingle(),
         "This client",
@@ -263,6 +269,7 @@ export function ClientPage() {
                   { label: "Copy referral link", icon: "link", onSelect: () => referralLink.mutate(), hidden: !marketing },
                   { separator: true, hidden: !isOffice },
                   { label: c.status === "archived" ? "Restore client" : "Archive client", icon: c.status === "archived" ? "undo" : "archive", onSelect: () => update.mutate({ status: c.status === "archived" ? "active" : "archived" }), hidden: !isOffice },
+                  { label: "Merge into another client", icon: "users", onSelect: () => setDialog("merge"), hidden: !seesMoney },
                   { label: "Delete client", icon: "trash", danger: true, onSelect: deleteClient, hidden: !isOffice },
                 ]}
               />
@@ -339,6 +346,14 @@ export function ClientPage() {
                       )}
                       {codes?.instructions && <span className="muted small pre-wrap">{codes.instructions}</span>}
                       {p.notes && <span className="muted small pre-wrap">{p.notes}</span>}
+                      {(p.tags.length > 0 || p.lot_size_sqft != null) && (
+                        <div className="row wrap" style={{ gap: 6 }}>
+                          {p.lot_size_sqft != null && <span className="muted small">Lot {Number(p.lot_size_sqft).toLocaleString("en-US")} sq ft</span>}
+                          {p.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                        </div>
+                      )}
+                      {shownCustomFields(propertyFields, p.custom_fields).length > 0 && <dl className="kv small" style={{ margin: 0 }}><CustomFieldList fields={propertyFields} values={p.custom_fields} /></dl>}
+                      <PropertyEquipment propertyId={p.id} inCard />
                       <div className="row wrap" style={{ marginTop: 4 }}>
                         <MapsLink className="btn btn-sm" place={p}><Icon name="navigation" size={14} />Directions</MapsLink>
                         {p.lat == null && <span className="muted small" title="Routing and weather checks need a map location">Not on the map yet</span>}
@@ -420,6 +435,7 @@ export function ClientPage() {
               )}
               {writtenOff > 0 && <><dt>Written off</dt><dd className="tabular">{formatMoney(writtenOff)}</dd></>}
               <dt>Lead source</dt><dd>{c.lead_source ?? "—"}</dd>
+              <CustomFieldList fields={clientFields} values={c.custom_fields} />
               {referrer && <><dt>Referred by</dt><dd><Link to={`/clients/${referrer.id}`}>{referrer.display_name}</Link></dd></>}
               {credits.data?.some((r) => Number(r.credit_left) > 0) && (
                 <>
@@ -427,7 +443,7 @@ export function ClientPage() {
                   <dd className="stack-sm" style={{ gap: 2 }}>
                     {credits.data.filter((r) => Number(r.credit_left) > 0).map((r) => (
                       <span key={r.referral_id}>
-                        {creditMoney(Number(r.credit_left))} for referring {r.friend_name}. {r.auto_apply ? "Goes on their next invoice." : "Kept off invoices."}
+                        {creditMoney(Number(r.credit_left), session.company.currency)} for referring {r.friend_name}. {r.auto_apply ? "Goes on their next invoice." : "Kept off invoices."}
                       </span>
                     ))}
                   </dd>
@@ -435,6 +451,8 @@ export function ClientPage() {
               )}
               <dt>Client since</dt><dd>{formatDate(c.created_at)}</dd>
               {billing?.line1 && <><dt>Billing</dt><dd>{addressLine(billing)}</dd></>}
+              {c.payment_terms_days != null && <><dt>Payment terms</dt><dd>{c.payment_terms_days === 0 ? "Due on receipt" : `Due in ${c.payment_terms_days} days`}</dd></>}
+              {c.tax_exempt && <><dt>Tax</dt><dd>Tax exempt{c.tax_exempt_note ? ` · ${c.tax_exempt_note}` : ""}</dd></>}
               {isOffice && (
                 <>
                   <dt>Marketing</dt>
@@ -476,6 +494,7 @@ export function ClientPage() {
       </div>
 
       {dialog === "edit" && <EditClientDialog open onClose={() => setDialog(null)} client={c} />}
+      {dialog === "merge" && <MergeClientsDialog client={c} onClose={() => setDialog(null)} />}
       {property && <PropertyDialog clientId={c.id} property={property.row} access={property.access} onClose={() => setProperty(null)} />}
       {dialog === "request" && <NewRequestDialog open onClose={() => setDialog(null)} initialClient={{ id: c.id, display_name: c.display_name }} onCreated={(rid) => navigate(`/requests/${rid}`)} />}
       {dialog === "quote" && <NewQuoteDialog open onClose={() => setDialog(null)} initialClient={{ id: c.id, display_name: c.display_name }} onCreated={(qid) => navigate(`/quotes/${qid}`)} />}

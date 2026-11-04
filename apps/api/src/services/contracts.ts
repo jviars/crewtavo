@@ -177,6 +177,8 @@ export function contractFacts(input: ContractInput) {
     date: input.date ?? null,
     timeZone: input.timeZone ?? null,
     deposit: input.deposit === null || input.deposit === undefined ? null : Number(input.deposit),
+    // Only for a deposit asked for as a percent: the page works it out on the option picked.
+    ...(input.depositPercent === null || input.depositPercent === undefined ? {} : { depositPercent: Number(input.depositPercent) }),
     optionName: input.optionName ?? null,
     warranty: input.warranty ?? null,
   };

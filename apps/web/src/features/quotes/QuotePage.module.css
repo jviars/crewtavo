@@ -15,6 +15,9 @@
 .howOften { height: auto; min-height: var(--control-sm); white-space: normal; text-align: right; }
 .howOftenRow > :first-child { white-space: nowrap; }
 
+/* "Deposit required": as an amount or a percent, then the field for it. */
+.deposit { display: inline-flex; align-items: center; gap: 6px; }
+
 /* Which option did they choose? */
 .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 12px; }
 .choice {

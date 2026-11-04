@@ -9,7 +9,7 @@ import { isLivePay, isSquareUnit, jobPayMethodLabel, jobPayStatusLabel, payLineA
 import { toUnits } from "@crewtavo/core/money";
 import { PAPERWORK_REQUIREMENTS } from "@crewtavo/core/subs";
 import type { Tone } from "@/components/ui/StatusPill";
-import { addDaysIso, dateIn, formatDate, formatMoneyCents } from "@/lib/format";
+import { addDaysIso, dateIn, formatDate, formatMoneyCents, moneyCurrency } from "@/lib/format";
 import type { PaperworkRow } from "./paperwork";
 
 // ---------------------------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import type { PaperworkRow } from "./paperwork";
 /** "$75.00", or "$0.4500" for a rate kept to 4 places (per square foot of sealcoat). */
 export function formatRate(rate: number | string): string {
   const n = Number(rate);
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  return n.toLocaleString("en-US", { style: "currency", currency: moneyCurrency(), minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
 /** "per square", "per day", "per job", "each", "per lf". */

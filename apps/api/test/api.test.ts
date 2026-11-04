@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { greetingName, LEVEL_PERMISSIONS, memberPermissions, TERMS_VERSION } from "@crewtavo/core";
+import { getPreset, greetingName, LEVEL_PERMISSIONS, memberPermissions, TERMS_VERSION } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -182,7 +182,77 @@ describe("setting up a business", () => {
     const settings = writes.find((w) => w.path === "/rest/v1/companies")!.body.settings;
     expect(settings.marketing).toEqual({ enabled: true });
     expect(settings.payment_terms_days).toBe(30);
-    expect(Array.isArray(settings.job_types)).toBe(true);
+    expect(settings).not.toHaveProperty("job_types");
+  });
+
+  it("installs Paving or Roofing for a business signing up in that trade, and neither for others", async () => {
+    const signUp = async (trade_preset: string) => {
+      let settings: any = null;
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/auth/v1/user") return Response.json({ id: "user-1", aud: "authenticated", role: "authenticated" });
+        if (url.pathname === "/rest/v1/companies" && init?.method === "PATCH") settings = JSON.parse(String(init.body)).settings;
+        if (url.pathname === "/rest/v1/companies" && (init?.method ?? "GET") === "GET") return Response.json([{ settings: { marketing: { enabled: true } } }]);
+        return Response.json(url.pathname === "/rest/v1/rpc/create_company" ? "company-1" : []);
+      });
+      const body = { name: "Summit Exteriors", trade_preset, timezone: "America/Chicago", terms_version: TERMS_VERSION };
+      const res = await request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      expect(res.status).toBe(201);
+      return settings;
+    };
+    expect(await signUp("paving")).toMatchObject({ paving_app: { enabled: true }, marketing: { enabled: true } });
+    const roofer = await signUp("roofing_exteriors");
+    expect(roofer).toMatchObject({ roofing_app: { enabled: true } });
+    expect(roofer).not.toHaveProperty("paving_app");
+    const lawn = await signUp("lawn_exterior");
+    expect(lawn).not.toHaveProperty("paving_app");
+    expect(lawn).not.toHaveProperty("roofing_app");
+  });
+
+  it("sets the currency picked at sign-up, and refuses one that isn't a code", async () => {
+    const writes: Array<{ path: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/auth/v1/user") return Response.json({ id: "user-1", aud: "authenticated", role: "authenticated" });
+      if (init?.method === "PATCH") writes.push({ path: url.pathname + url.search, body: JSON.parse(String(init.body)) });
+      return Response.json(url.pathname === "/rest/v1/rpc/create_company" ? "company-1" : []);
+    });
+    const make = (currency: string) =>
+      request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ name: "Maple Lawn", timezone: "America/Toronto", currency, terms_version: TERMS_VERSION }) });
+    expect((await make("cad")).status).toBe(201);
+    expect(writes[0]).toEqual({ path: "/rest/v1/companies?id=eq.company-1", body: { currency: "CAD" } });
+    const bad = await make("dollars");
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "Pick a currency from the list, like USD." });
+  });
+
+  it("puts each preset checklist with the price list items it names, by their new ids", async () => {
+    const links: unknown[] = [];
+    const sent: Record<string, any[]> = {};
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const table = url.pathname.replace("/rest/v1/", "");
+      if (url.pathname === "/auth/v1/user") return Response.json({ id: "user-1", aud: "authenticated", role: "authenticated" });
+      if (table === "rpc/create_company") return Response.json("company-1");
+      if (init?.method === "PATCH") (sent[table] ??= []).push(JSON.parse(String(init.body)));
+      if (init?.method !== "POST") return Response.json([]);
+      const body = JSON.parse(String(init.body));
+      if (table === "services") sent.services = body;
+      if (table === "checklist_template_services") links.push(...body);
+      // What was made, each with an id from its name.
+      return Response.json(table === "services" || table === "checklist_templates" ? body.map((r: { name: string }) => ({ id: `${table}:${r.name}`, name: r.name })) : [], { status: 201 });
+    });
+    const body = { name: "Acme Lawn", trade_preset: "lawn_exterior", timezone: "America/Chicago", terms_version: TERMS_VERSION };
+    const res = await request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    expect(res.status).toBe(201);
+    expect(links).toContainEqual({ company_id: "company-1", template_id: "checklist_templates:Snow and salt route stop", service_id: "services:Snow plowing" });
+    expect(links).toContainEqual({ company_id: "company-1", template_id: "checklist_templates:Weekly mow standard", service_id: "services:Weekly mow" });
+    expect(links).toHaveLength(getPreset("lawn_exterior").checklists.reduce((n, cl) => n + (cl.services?.length ?? 0), 0));
+    // The weather rules name their items by the ids they're made with, so renaming one keeps its rule.
+    const made = new Map((sent.services ?? []).map((r: { id: string; name: string }) => [r.name, r.id]));
+    const rules = sent.companies?.[0]?.settings.weather_rules as Array<{ applies_to?: string; service_id?: string }>;
+    expect(rules.some((r) => r.service_id)).toBe(true);
+    for (const r of rules) expect(r.service_id).toBe(r.applies_to ? made.get(r.applies_to) : undefined);
   });
 
   it("refuses offsets, which Postgres reads with the sign reversed, and made-up zones", async () => {

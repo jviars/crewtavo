@@ -28,9 +28,22 @@ export const formSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-
 
 const hasOptions = (type: string) => type === "choice" || type === "multi_choice";
 
+/** A ZIP or postal code, from any country: letters, digits, spaces and dashes, up to 10 ("24141", "M5V 2T6", "SW1A 1AA"). */
+export const isPostalCode = (s: string) => /^[A-Za-z0-9][A-Za-z0-9 -]{0,9}$/.test(s.trim());
+
+const postalKey = (s: string) => s.toUpperCase().replace(/\s+/g, "");
+
+/**
+ * A booking form takes a request from its service areas, or anywhere when it has none. A postal code
+ * is in an area when it starts with the area's code, ignoring case and spaces: "24141-1234" is in
+ * "24141", and "M5V 2T6" in "M5V".
+ */
+export const inServiceArea = (postalCode: string | null | undefined, areas: readonly string[]) =>
+  !areas.length || areas.some((area) => postalKey(area) && postalKey(postalCode ?? "").startsWith(postalKey(area)));
+
 /**
  * A form ready to save: its link made from the slug or name, unique question keys, trimmed labels
- * and options, and its ZIP codes. `taken` is the links the company's other forms use.
+ * and options, and its ZIP or postal codes in capitals. `taken` is the links the company's other forms use.
  */
 export function normalizeIntakeForm(
   form: { name: string; slug?: string | null; zips: readonly string[]; questions: ReadonlyArray<{ key?: string | null; label: string; type: string; required?: boolean; options?: readonly string[] | null }> },
@@ -40,9 +53,9 @@ export function normalizeIntakeForm(
   if (!name) throw new Error("Name the form.");
   const slug = form.slug?.trim() ? formSlug(form.slug) : formSlug(name);
   if (taken.includes(slug)) throw new Error("Another form already uses that link.");
-  const zips = form.zips.map((z) => z.trim()).filter(Boolean);
-  const badZips = zips.filter((z) => !/^\d{5}$/.test(z));
-  if (badZips.length) throw new Error(`ZIP codes should be 5 digits: ${badZips.slice(0, 3).join(", ")}`);
+  const zips = form.zips.map((z) => z.trim().toUpperCase()).filter(Boolean);
+  const badZips = zips.filter((z) => !isPostalCode(z));
+  if (badZips.length) throw new Error(`Not a ZIP or postal code: ${badZips.slice(0, 3).join(", ")}`);
   const questions = form.questions.filter((q) => q.type !== "address");
   if (questions.length > 30) throw new Error("A form can have at most 30 questions.");
   if (questions.some((q) => !(INTAKE_QUESTION_TYPES as readonly string[]).includes(q.type))) throw new Error(`Question types are: ${INTAKE_QUESTION_TYPES.join(", ")}.`);
@@ -94,9 +107,8 @@ export function checklistItemKey(label: string, taken: readonly string[]): strin
 /** A checklist ready to save: a name, and items with unique keys and trimmed labels and options. */
 export function normalizeChecklist(checklist: {
   name: string;
-  job_type?: string | null;
   items: ReadonlyArray<{ key?: string | null; label: string; type: string; required?: boolean; options?: readonly string[] | null; sop_page_id?: string | null }>;
-}): { name: string; job_type: string | null; items: ChecklistItem[] } {
+}): { name: string; items: ChecklistItem[] } {
   const name = checklist.name.trim();
   if (!name) throw new Error("Name the checklist.");
   if (!checklist.items.length) throw new Error("Add at least one item.");
@@ -117,5 +129,69 @@ export function normalizeChecklist(checklist: {
       ...(i.sop_page_id ? { sop_page_id: i.sop_page_id } : {}),
     };
   });
-  return { name, job_type: checklist.job_type?.trim() || null, items };
+  return { name, items };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Filled-in checklists (public.checklist_responses)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * One item of a filled-in checklist, as it reads. `text` is null when it isn't answered; a check is
+ * "Yes" or "No". A signature reads as the printed name, with its drawing (`image`, a PNG data URL).
+ * A photo item has no answer of its own: the field app adds its photos to the visit's. `missing` is
+ * a required item the field app still asks for.
+ */
+export interface ChecklistAnswer {
+  key: string;
+  label: string;
+  type: ChecklistItemType;
+  text: string | null;
+  image?: string;
+  missing: boolean;
+}
+
+function answerText(type: ChecklistItemType, value: unknown): { text: string | null; image?: string } {
+  if (type === "photo") return { text: null };
+  if (type === "check") return { text: value === true ? "Yes" : "No" };
+  // Older checklists stored a typed name; a drawn one is { name, image }, and only counts with the drawing.
+  if (type === "signature" && value && typeof value === "object") {
+    const { name, image } = value as { name?: unknown; image?: unknown };
+    return typeof image === "string" && image ? { text: (typeof name === "string" && name.trim()) || "Signed", image } : { text: null };
+  }
+  const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  return { text: text || null };
+}
+
+/**
+ * A filled-in checklist's answers in its items' order, the same words wherever they show (a job,
+ * a visit, the Client Hub, the invoice, the assistant, the data download). `items` is the checklist's
+ * (checklist_templates.items); with the checklist deleted (null), each answer shows under its key.
+ */
+export function checklistAnswers(items: unknown, answers: unknown): ChecklistAnswer[] {
+  const given = (answers && typeof answers === "object" && !Array.isArray(answers) ? answers : {}) as Record<string, unknown>;
+  const list: ReadonlyArray<Pick<ChecklistItem, "key" | "label" | "type" | "required">> = Array.isArray(items)
+    ? (items as ChecklistItem[])
+    : Object.entries(given).map(([key, v]) => ({ key, label: key.replace(/_/g, " "), type: (typeof v === "boolean" ? "check" : v && typeof v === "object" ? "signature" : "text") as ChecklistItemType, required: false }));
+  return list.map((item) => {
+    const value = given[item.key];
+    const read = answerText(item.type, value);
+    const answered = item.type === "check" ? value === true : read.text !== null;
+    return { key: item.key, label: item.label, type: item.type, ...read, missing: item.required && item.type !== "photo" && !answered };
+  });
+}
+
+/** A filled-in checklist as its client sees it (Show to client on), on a past visit and the invoice. */
+export interface ClientChecklist {
+  name: string;
+  /** The visit's day. */
+  visit_on: string | null;
+  answers: Array<{ label: string; text: string }>;
+}
+
+/**
+ * What a client is shown of a checklist's answers: the answered items in words. Never photos (they
+ * are the visit's, not the item's), drawings, or answers to items the checklist no longer has.
+ */
+export const clientAnswers = (items: unknown, answers: unknown): ClientChecklist["answers"] =>
+  checklistAnswers(Array.isArray(items) ? items : [], answers).flatMap((a) => (a.text !== null && a.type !== "photo" ? [{ label: a.label, text: a.text }] : []));

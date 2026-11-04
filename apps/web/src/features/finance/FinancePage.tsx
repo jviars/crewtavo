@@ -18,8 +18,8 @@ import { downloadCsv, toCsv } from "@/lib/csv";
 import { formatDate, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { localDate } from "@crewtavo/core/time";
-import { Breakdown, Change, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Part } from "./Charts";
-import { agingBuckets, jobProfit, previousRange } from "@crewtavo/core/reports";
+import { Breakdown, Change, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Column, type Part } from "./Charts";
+import { agingBuckets, jobProfit, previousRange, serviceFigures } from "@crewtavo/core/reports";
 import { bucketize, bucketizeShifted, bucketsFor, resolveRange, shortDate, type Range } from "./range";
 import { both, fetchAll, pct, plural, RangeHeader, rangeQuery, SectionHead, sum, TabBody, timeRates, useRangeParams, type Rates } from "./shared";
 
@@ -27,6 +27,7 @@ const TABS = [
   { key: "overview", label: "Overview" },
   { key: "payments", label: "Payments" },
   { key: "profit", label: "Profit" },
+  { key: "services", label: "Services" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 type OpenTab = (tab: TabKey) => void;
@@ -60,6 +61,7 @@ export function FinancePage() {
         {tab === "overview" && <Overview range={range} openTab={openTab} />}
         {tab === "payments" && <Payments range={range} />}
         {tab === "profit" && <Profit range={range} />}
+        {tab === "services" && <Services range={range} />}
       </div>
     </>
   );
@@ -621,10 +623,8 @@ function Profit({ range }: { range: Range }) {
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const db = supabase();
-      const [jobs, lines, settings] = await Promise.all([
+      const [jobs, settings] = await Promise.all([
         fetchAll((a, b) => db.from("jobs").select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost, unit_labor_cost)").eq("company_id", cid).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end).range(a, b)),
-        // Deposit and progress invoices are partial billings of the same work, so count items from the rest.
-        fetchAll((a, b) => db.from("invoice_line_items").select("name, quantity, unit_price, invoice:invoices!inner(issued_on, status, kind)").eq("company_id", cid).gte("invoice.issued_on", range.from).lte("invoice.issued_on", range.to).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress)").gte("unit_price", 0).range(a, b)),
         db.from("companies").select("settings").eq("id", cid).single(),
       ]);
       const ids = jobs.map((j) => j.id);
@@ -640,7 +640,7 @@ function Profit({ range }: { range: Range }) {
       const target = Number(((unwrap(settings).settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
       // Costed as AI assistants' job_profit costs it (packages/core/src/reports.ts).
       const costed = jobProfit(jobs, time, expenses, (t) => Number(rates[t.id] ?? 0), target, crewPay).jobs.map((j) => ({ ...j, margin: j.margin_percent }));
-      return { jobs: costed, lines, target };
+      return { jobs: costed, target };
     },
   });
   return (
@@ -649,14 +649,6 @@ function Profit({ range }: { range: Range }) {
         const revenue = sum(d.jobs, (j) => j.revenue);
         const profit = sum(d.jobs, (j) => j.profit);
         const below = d.target ? d.jobs.filter((j) => j.margin !== null && j.margin < d.target!) : [];
-        const services = new Map<string, { name: string; qty: number; revenue: number }>();
-        for (const l of d.lines) {
-          if (Number(l.unit_price) < 0) continue; // discounts and credits aren't services
-          const row = services.get(l.name) ?? { name: l.name, qty: 0, revenue: 0 };
-          row.qty += Number(l.quantity);
-          row.revenue += Number(l.quantity) * Number(l.unit_price);
-          services.set(l.name, row);
-        }
         return (
           <>
             <KpiStrip label="Profit this period">
@@ -688,19 +680,95 @@ function Profit({ range }: { range: Range }) {
                 />
               </ReportCard>
             )}
-            <ReportCard title="Products & services sold" subtitle="From invoices issued in this period">
-              <ReportTable
-                rows={[...services.values()]}
-                rowKey={(r) => r.name}
-                filename={`services-sold-${range.from}-to-${range.to}`}
-                initialSort={{ key: "revenue", desc: true }}
-                empty="No invoices issued in this period"
-                columns={[
-                  { key: "name", label: "Item", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
-                  { key: "qty", label: "Quantity", num: true, value: (r) => Math.round(r.qty * 100) / 100, render: (r) => formatNumber(r.qty, r.qty % 1 ? 2 : 0) },
-                  { key: "revenue", label: "Revenue", num: true, value: (r) => Math.round(r.revenue * 100) / 100, render: (r) => formatMoney(r.revenue) },
-                ]}
-              />
+          </>
+        );
+      }}
+    </TabBody>
+  );
+}
+
+/* ------------------------------------------------------------------ Services */
+
+const SERVICE_LINES = "service_id, name, quantity, unit_price, invoice:invoices!inner(id, job_id, kind, status, issued_on, discount_amount, credit_amount)";
+type ServiceRow = ReturnType<typeof serviceFigures>["services"][number];
+
+function Services({ range }: { range: Range }) {
+  const session = useSession();
+  const { company } = session;
+  const costs = can(session, "job_costs");
+  const cid = company.id;
+  const query = useQuery({
+    queryKey: ["finance", cid, "services", range.from, range.to],
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const db = supabase();
+      // serviceFigures leaves out drafts, voids and part billings too; this just reads fewer rows.
+      const [sold, items] = await Promise.all([
+        fetchAll((a, b) => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).gte("invoice.issued_on", range.from).lte("invoice.issued_on", range.to).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)").order("id").range(a, b)),
+        fetchAll((a, b) => db.from("services").select("id, name, category, unit_cost, labor_cost").eq("company_id", cid).order("id").range(a, b)),
+      ]);
+      if (!costs) return serviceFigures(sold, items);
+      // 200 jobs a request keeps the address short enough (and /time/rates takes 300 at most).
+      const ids = [...new Set(sold.flatMap((l) => (l.invoice?.job_id ? [l.invoice.job_id] : [])))];
+      const byJobs = async <T,>(read: (jobs: string[]) => PromiseLike<T[]>) => (await Promise.all(Array.from({ length: Math.ceil(ids.length / 200) }, (_, i) => read(ids.slice(i * 200, i * 200 + 200))))).flat();
+      const [jobLines, time, expenses, rates, crewPay] = await Promise.all([
+        // Everything the jobs have been invoiced, whenever: their labor is split across all of it.
+        byJobs((jobs) => fetchAll((a, b) => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).in("invoice.job_id", jobs).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)").order("id").range(a, b))),
+        byJobs((jobs) => fetchAll((a, b) => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", jobs).order("id").range(a, b))),
+        byJobs((jobs) => fetchAll((a, b) => db.from("expenses").select("job_id, amount").in("job_id", jobs).order("id").range(a, b))),
+        byJobs((jobs) => timeRates(true, { job_ids: jobs }).then((r) => [r])).then((r): Rates => Object.assign({}, ...r)),
+        byJobs((jobs) => db.rpc("job_pay_costs", { p_jobs: jobs }).then(unwrap)),
+      ]);
+      return serviceFigures(sold, items, { jobLines, time, expenses, rateOf: (t) => Number(rates[t.id] ?? 0), crewPay });
+    },
+  });
+  const key = (s: ServiceRow) => s.service_id ?? "other";
+  const columns: Column<ServiceRow>[] = [
+    { key: "name", label: "Service", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
+    { key: "category", label: "Category", value: (r) => r.category ?? "", render: (r) => r.category ?? "—" },
+    { key: "count", label: "Times billed", num: true, value: (r) => r.count },
+    { key: "revenue", label: "Revenue", num: true, value: (r) => r.revenue, render: (r) => formatMoney(r.revenue) },
+  ];
+  if (costs)
+    columns.push(
+      { key: "cost", label: "Costs", num: true, value: (r) => r.cost, render: (r) => formatMoney(r.cost ?? 0) },
+      { key: "profit", label: "Profit", num: true, value: (r) => r.profit, render: (r) => <span style={{ color: (r.profit ?? 0) < 0 ? "var(--danger)" : undefined }}>{formatMoney(r.profit ?? 0)}</span> },
+      {
+        key: "margin", label: "Margin", num: true, value: (r) => (r.margin_percent === null ? null : Math.round(r.margin_percent)),
+        render: (r) => (r.margin_percent === null ? "—" : <span className={`chip tabular ${r.margin_percent < 0 ? "chip-red" : "chip-green"}`}>{Math.round(r.margin_percent)}%</span>),
+      },
+    );
+  return (
+    <TabBody query={query}>
+      {(d) => {
+        const buckets = bucketsFor(range);
+        const top = d.services.filter((s) => s.revenue > 0).slice(0, 6);
+        const profit = d.profit ?? 0;
+        return (
+          <>
+            <KpiStrip label="Services this period">
+              <Kpi label="Service revenue" value={formatMoney(d.revenue)} hint="Invoiced, paid or not" />
+              <Kpi label="Items billed" value={formatNumber(d.lines.length)} hint={plural(d.services.filter((s) => s.service_id).length, "service")} />
+              {costs && <Kpi label="Service profit" value={formatMoney(profit)} hint={d.revenue ? `${pct(profit, d.revenue)} margin` : undefined} tone={profit < 0 ? "bad" : undefined} />}
+            </KpiStrip>
+            {top.length > 0 && (
+              <section className="stack" style={{ gap: 14 }} aria-labelledby="fin-top-services">
+                <SectionHead title="Top services" id="fin-top-services"><span className="muted small">{range.label}</span></SectionHead>
+                <div className="fin-grid">
+                  {top.map((s) => (
+                    <ReportCard key={key(s)} as="h3" title={s.name} subtitle={s.category ?? undefined} value={formatMoney(s.revenue)} footer={`Billed ${plural(s.count, "time")}`}>
+                      <TrendChart buckets={buckets} values={bucketize(d.lines.filter((l) => l.key === key(s)), buckets, (l) => l.issued_on, (l) => l.revenue, company.timezone)} format={formatMoney} label={`${s.name} over time`} color="var(--invoice)" />
+                    </ReportCard>
+                  ))}
+                </div>
+              </section>
+            )}
+            <ReportCard
+              title={costs ? "Revenue and profit by service" : "Revenue by service"}
+              info="Invoices issued in this period, paid or not (not drafts or voided ones), before tax and after discounts and credits. Deposits and progress billing count when the final invoice lists the work. Lines not from the price list are Other."
+              subtitle={costs ? "Costs: each item's price list cost, plus its share of the job's labor and expenses, split by what the job's been invoiced" : "From invoices issued in this period"}
+            >
+              <ReportTable rows={d.services} rowKey={key} filename={`services-${range.from}-to-${range.to}`} initialSort={{ key: "revenue", desc: true }} empty="No invoices issued in this period" columns={columns} />
             </ReportCard>
           </>
         );
