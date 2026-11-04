@@ -5,7 +5,10 @@ import {
   hidesExactPrice,
   inRangeMode,
   lineChanges,
+  marginForMarkup,
   marginPct,
+  markupForMargin,
+  packageFigures,
   optionsIntroText,
   optionsRange,
   priceRange,
@@ -17,6 +20,8 @@ import {
   sitePriceSet,
   siteSubtotal,
   snapshotLines,
+  typicalRoof,
+  typicalSquares,
   type CurrentLine,
 } from "../src/estimates";
 import { discountSplit, optionBaseTotal, optionTotals, quoteTotals, toCents } from "../src/money";
@@ -94,6 +99,54 @@ describe("followPrice and marginPct", () => {
   it("works out the margin as a whole percent", () => {
     expect(marginPct(560, 329.37)).toBe(41);
     expect(marginPct(0, 10)).toBeNull();
+  });
+});
+
+describe("markup and margin", () => {
+  it("turns one into the other, to the hundredth", () => {
+    expect(marginForMarkup(70)).toBe(41.18);
+    expect(markupForMargin(45)).toBe(81.82);
+    expect(marginForMarkup(markupForMargin(45))).toBe(45);
+    expect(marginForMarkup(0)).toBe(0);
+  });
+});
+
+describe("a package on a typical roof", () => {
+  it("reads the business's typical roof size, else 30 squares", () => {
+    expect(typicalSquares({ roofing: { typical_squares: 24 } })).toBe(24);
+    expect(typicalSquares({ roofing: { typical_squares: 0 } })).toBe(30);
+    expect(typicalSquares({ roofing: { typical_squares: 12.5 } })).toBe(30);
+    expect(typicalSquares(null)).toBe(30);
+  });
+
+  it("grows a roof's edges with its width, not its area", () => {
+    const thirty = typicalRoof(30);
+    expect(thirty).toMatchObject({ roof_squares: 30, squares: 33, roof_sqft: 3000, eave_ft: 150, rake_ft: 40, steep_squares: 0, asphalt_sqft: 0 });
+    expect(typicalRoof(120)).toMatchObject({ roof_squares: 120, squares: 132, eave_ft: 300 });
+  });
+
+  const roof = { name: "Architectural shingle roof", unit_price: 431.78, unit_cost: 253.99, formula: "squares" };
+  it("adds up every line: measured, counted and turned off", () => {
+    const figures = packageFigures(
+      roof,
+      [
+        { name: "Drip edge", unit_price: 3.5, unit_cost: 1.6, formula: "eave_ft + rake_ft" },
+        { name: "Pipe boots", unit_price: 35, unit_cost: 30, formula: null, quantity: 3 },
+        { name: "Steep charge", unit_price: 40, unit_cost: 20, formula: "steep_squares" },
+        { name: "Skylight", unit_price: 900, unit_cost: 500, formula: null, active: false },
+      ],
+      typicalRoof(30),
+    );
+    // 33 squares at $431.78 ($253.99 cost), 190 ft of drip edge, 3 pipe boots; no steep squares.
+    expect(figures).toEqual({ price: 14248.74 + 665 + 105, cost: 8381.67 + 304 + 90, profit: 6243.07, margin: 42, perUnit: 455.11, noCost: [] });
+  });
+
+  it("says which lines have no cost, and is null when it comes to nothing", () => {
+    expect(packageFigures(roof, [{ name: "Permit", unit_price: 250, unit_cost: null, formula: null }], typicalRoof(30))?.noCost).toEqual(["Permit"]);
+    expect(packageFigures({ ...roof, formula: "valley_ft * nope" }, [], typicalRoof(30))).toBeNull();
+    expect(packageFigures(null, [], typicalRoof(30))).toBeNull();
+    // With no main line on, there's no "a square" for the package.
+    expect(packageFigures(null, [{ name: "Permit", unit_price: 250, unit_cost: 0, formula: null }], typicalRoof(30))?.perUnit).toBeNull();
   });
 });
 

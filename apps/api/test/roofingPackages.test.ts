@@ -402,19 +402,27 @@ describe("a package on an estimate", () => {
     expect((await unmeasured.json()).error).toBe("Measure the job first.");
   });
 
-  it("prices a package that follows ABC at today's materials, and the price list follows", async () => {
+  it("prices a package that follows ABC at today's materials, what's always on it too, and the price list follows", async () => {
     roofer();
     rows("roof_packages")[0]!.price_mode = "follow";
     rows("roof_packages")[0]!.markup_pct = 70;
     rows("services").find((s) => s.id === ROOF)!.labor_cost = 182;
+    rows("services").find((s) => s.id === EDGE)!.labor_cost = 1.5;
+    const tearOff = rows("services").find((s) => s.id === TEAR)!.unit_price;
     state.tables.service_materials = [
       { id: "sm1", company_id: ROOFER, service_id: ROOF, per_unit: 3, unit_price: 40 },
       { id: "sm2", company_id: ROOFER, service_id: ROOF, per_unit: 0.1, unit_price: 73.7 },
+      { id: "sm3", company_id: ROOFER, service_id: EDGE, per_unit: 0.1, unit_price: 12 },
     ];
     await send(`/roofing/${QUOTE}/package`, { package_id: PKG });
     const price = followPrice(3 * 40 + 0.1 * 73.7, 182, 70);
+    const edge = followPrice(1.2, 1.5, 70);
     expect(rows("quote_line_items").find((l) => l.service_id === ROOF)?.unit_price).toBe(price);
     expect(rows("services").find((s) => s.id === ROOF)?.unit_price).toBe(price);
+    expect(rows("quote_line_items").find((l) => l.service_id === EDGE)?.unit_price).toBe(edge);
+    expect(rows("services").find((s) => s.id === EDGE)?.unit_price).toBe(edge);
+    // With no ABC materials, it keeps the price list's price.
+    expect(rows("quote_line_items").find((l) => l.service_id === TEAR)?.unit_price).toBe(tearOff);
   });
 
   it("starts counted services at the package's count, and leaves off what isn't on this roof", () => {
@@ -996,11 +1004,15 @@ describe("the price set on site", () => {
 });
 
 describe("the packages' ABC prices", () => {
-  it("prices their materials at the branch today, and moves a following package's roof price", async () => {
+  it("prices their materials at the branch today, and moves a following package's prices", async () => {
     roofer();
     rows("roof_packages")[0]!.price_mode = "follow";
     rows("services").find((s) => s.id === ROOF)!.labor_cost = 182;
-    state.tables.service_materials = [{ id: "sm1", company_id: ROOFER, service_id: ROOF, item_number: "02GASTZ3WW", name: "Timberline HDZ", uom: "BD", length_ft: null, per_unit: 3, unit_price: 40, priced_at: null }];
+    rows("services").find((s) => s.id === EDGE)!.labor_cost = 1.5;
+    state.tables.service_materials = [
+      { id: "sm1", company_id: ROOFER, service_id: ROOF, item_number: "02GASTZ3WW", name: "Timberline HDZ", uom: "BD", length_ft: null, per_unit: 3, unit_price: 40, priced_at: null },
+      { id: "sm2", company_id: ROOFER, service_id: EDGE, item_number: "DRIP10", name: "Drip edge 10'", uom: "PC", length_ft: null, per_unit: 0.1, unit_price: 12, priced_at: null },
+    ];
     state.tables.integrations = [{ company_id: ROOFER, provider: "abc_supply", status: "connected", settings: { environment: "sandbox", ship_to: "1163698", ship_to_name: "PEAK", branch: "18", branch_name: "ABC Supply - Madison, WI", accounts: [] } }];
     state.tables.integration_secrets = [{ company_id: ROOFER, provider: "abc_supply", ciphertext: await encryptJson(env, { extra: { client_id: "id", client_secret: "secret", environment: "sandbox" } }) }];
     fetcher.mockImplementation(async (url, init) => {
@@ -1014,11 +1026,13 @@ describe("the packages' ABC prices", () => {
     });
     const res = await send("/roofing/prices", {});
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ branch_name: "ABC Supply - Madison, WI", services: 1 });
+    expect(await res.json()).toMatchObject({ branch_name: "ABC Supply - Madison, WI", services: 2 });
     expect(rows("service_materials")[0]).toMatchObject({ unit_price: 42.5, priced_at: expect.any(String) });
     const roof = rows("services").find((s) => s.id === ROOF)!;
     expect(roof.unit_cost).toBe(127.5 + 182);
     expect(roof.unit_price).toBe(followPrice(127.5, 182, 70));
+    // What's always on the roof follows too: 0.1 of a $42.50 piece a foot.
+    expect(rows("services").find((s) => s.id === EDGE)!.unit_price).toBe(followPrice(4.25, 1.5, 70));
   });
 
   it("keeps a material's last price when ABC won't price it, and holds a following roof whose material never had one", async () => {

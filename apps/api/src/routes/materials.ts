@@ -280,6 +280,8 @@ async function updateServiceCost(db: Db, companyId: string, serviceId: string, l
   const change = links.length ? { labor_cost: laborCost ?? 0, unit_cost: serviceUnitCost(links, laborCost) } : { labor_cost: null, unit_cost: laborCost };
   const { error } = await db.from("services").update(change).eq("id", serviceId).eq("company_id", companyId);
   if (error) throw dbError(error);
+  // A package that follows ABC moves this service's price too.
+  await recostServices(db, companyId, [serviceId]);
   return change;
 }
 

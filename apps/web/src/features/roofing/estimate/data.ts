@@ -17,6 +17,7 @@ import { undoable } from "@/lib/undo";
 import { TAKEOFF_FIELDS, type TakeoffRow } from "../../paving/data";
 import { sortOptions } from "../../quotes/options";
 import { layersFormula, layersName, layersOf } from "../data";
+import { followedPriceOf, useRoofPackages } from "../packages";
 import {
   baseFormula,
   baseName,
@@ -190,7 +191,7 @@ type Edit =
   | { op: "line"; lineId: string; patch: LinePatch }
   | { op: "delete"; lineId: string }
   | { op: "layers"; lineId: string; formula: string; name: string }
-  | { op: "insert"; row: NewLine; serviceId: string | null; putBack?: RemovedLine; pendingId: string | null };
+  | { op: "insert"; row: NewLine; serviceId: string | null; putBack?: RemovedLine; pendingId: string | null; followMarkup?: number };
 
 /** What apply-measurement says about a line it measured. */
 interface MeasuredLine {
@@ -280,6 +281,10 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
   const measuring = useRef(new Set<string>());
   const nextSort = useRef(0);
   const busy = useIsMutating({ mutationKey }) > 0;
+  // A package that follows ABC prices what's added to its estimate from ABC too, at its markup.
+  const packages = useRoofPackages({ enabled: Boolean(quote.roof_package_id) });
+  const pkg = packages.data?.find((p) => p.id === quote.roof_package_id);
+  const followMarkup = pkg?.price_mode === "follow" ? pkg.markup_pct : null;
   // Edits not saved yet, for a quote that isn't from useEstimateQuote (nothing to show them in): the
   // next tap still counts from them. Forgotten when the quote comes back from the database.
   const unsaved = useRef<EstimateLine[] | null>(null);
@@ -313,7 +318,7 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
   const edit = useMutation({
     mutationKey,
     scope: { id: `estimate-${quoteId}` },
-    mutationFn: async (e: Edit): Promise<{ id: string; measured: MeasuredLine | null } | null> => {
+    mutationFn: async (e: Edit): Promise<{ id: string; measured: MeasuredLine | null; unit_price: number } | null> => {
       const db = supabase();
       if (e.op === "quantity") {
         unwrap(await db.from("quote_line_items").update({ quantity: e.quantity }).eq("id", e.lineId));
@@ -332,7 +337,10 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
         await measure(e.lineId);
         return null;
       }
-      const inserted = unwrap(await db.from("quote_line_items").insert(e.row).select("id").single()) as { id: string };
+      const row = { ...e.row };
+      const followed = e.followMarkup !== undefined && row.service_id ? await followedPriceOf(row.service_id, e.followMarkup) : null;
+      if (followed !== null) row.unit_price = followed;
+      const inserted = unwrap(await db.from("quote_line_items").insert(row).select("id").single()) as { id: string };
       let measured: MeasuredLine | null = null;
       if (e.row.formula && (measurementId || !e.putBack)) {
         // A new measured line has to measure something on this roof; one that comes to nothing goes again.
@@ -348,13 +356,13 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
           throw problem;
         }
       }
-      return { id: inserted.id, measured };
+      return { id: inserted.id, measured, unit_price: row.unit_price };
     },
     onSuccess: (saved, e) => {
       if (e.op === "insert" && saved) {
         // On screen as saved, with its amount from the roof, before its button turns back on: the
         // estimate may not load again until later edits have saved.
-        show((lines) => withSavedLine(lines, measuredInto(pendingLine(saved.id, e.row, quote.option_id), saved.measured), e.pendingId));
+        show((lines) => withSavedLine(lines, measuredInto(pendingLine(saved.id, { ...e.row, unit_price: saved.unit_price }, quote.option_id), saved.measured), e.pendingId));
         if (!e.putBack || added.includes(e.putBack.id)) setAdded((a) => [...a, saved.id]);
       } else if (e.op === "quantity" || e.op === "layers" || e.op === "line") {
         setChanged((c) => (c.includes(e.lineId) ? c : [...c, e.lineId]));
@@ -453,7 +461,7 @@ export function useEstimateEditor({ quote, measurementId, optionId = null, own =
     } else {
       measuring.current.add(service.id);
     }
-    run({ op: "insert", row, serviceId: service.id, pendingId });
+    run({ op: "insert", row, serviceId: service.id, pendingId, followMarkup: followMarkup !== null && !byPrice ? followMarkup : undefined });
   };
 
   const putBack = (snapshot: SnapshotLine) => {

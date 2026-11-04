@@ -1,9 +1,11 @@
 /**
  * The roofing estimate's money steps, shared by the web app and the API so both agree to the cent:
  * the price range a homeowner is sent (from the lowest option to the highest when the estimate
- * offers two or three), a package's roof price that follows ABC Supply, what changed between the
- * range and the signed estimate, and the exact price the salesperson sets on site.
+ * offers two or three), a package's roof price that follows ABC Supply, a package's margin on a
+ * typical roof, what changed between the range and the signed estimate, and the exact price the
+ * salesperson sets on site.
  */
+import { evaluateFormula, FORMULA_VARIABLES, FormulaError, type FormulaVariable } from "./formulas";
 import { countsOn, discountSplit, inOptionBase, lineTotal, toCents, type Amount, type TotalsLine } from "./money";
 
 // ---------------------------------------------------------------------------------------------
@@ -86,6 +88,122 @@ export function marginPct(price: Amount, cost: Amount): number | null {
   const p = toCents(price);
   if (!(p > 0)) return null;
   return Math.round(((p - toCents(cost)) / p) * 100);
+}
+
+/** A margin under this (a whole percent) is low: estimates and a package's lines say so. */
+export const LOW_MARGIN = 25;
+
+/** The margin a markup comes to, to the hundredth: a 70% markup is a 41.18% margin. */
+export const marginForMarkup = (markupPct: number) => Math.round((markupPct / (100 + markupPct)) * 10000) / 100;
+
+/** The markup a margin needs, to the hundredth (all roof_packages.markup_pct keeps): a 45% margin is an 81.82% markup. */
+export const markupForMargin = (marginPct: number) => Math.round((marginPct / (100 - marginPct)) * 10000) / 100;
+
+// ---------------------------------------------------------------------------------------------
+// A package on a typical roof (Roofing → Packages)
+// ---------------------------------------------------------------------------------------------
+
+/** The roof a package's whole margin is shown on, in squares before waste, until the business sets its own. */
+export const TYPICAL_SQUARES = 30;
+export const TYPICAL_SQUARES_MAX = 200;
+
+/** The typical roof's size saved on a business (companies.settings.roofing.typical_squares), else TYPICAL_SQUARES. */
+export function typicalSquares(companySettings: unknown): number {
+  const roofing = companySettings && typeof companySettings === "object" ? (companySettings as { roofing?: unknown }).roofing : null;
+  const n = roofing && typeof roofing === "object" ? (roofing as { typical_squares?: unknown }).typical_squares : null;
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= TYPICAL_SQUARES_MAX ? n : TYPICAL_SQUARES;
+}
+
+/**
+ * A made-up roof of `squares` (before waste) to price a package on: 10% waste, a 6/12 pitch, nothing
+ * steep, and a hip roof's edges. Edges grow with the roof's width (the square root of its area), so a
+ * 120-square roof has twice the eaves of a 30-square one, not four times.
+ */
+export function typicalRoof(squares: number): Record<FormulaVariable, number> {
+  const width = Math.sqrt(squares / TYPICAL_SQUARES);
+  const ft = (atThirty: number) => Math.round(atThirty * width);
+  const edges = { eave_ft: ft(150), rake_ft: ft(40), ridge_ft: ft(40), hip_ft: ft(70), valley_ft: ft(20) };
+  const pitchFactor = 1.118;
+  const footprint = Math.round((squares * 100) / pitchFactor);
+  return {
+    // What a roof measurement doesn't have (paving, counts) is none, so lines priced by it are left off.
+    ...(Object.fromEntries(FORMULA_VARIABLES.map((name) => [name, 0])) as Record<FormulaVariable, number>),
+    area_sqft: footprint,
+    area_sqyd: Math.round((footprint / 9) * 10) / 10,
+    length_ft: Object.values(edges).reduce((sum, n) => sum + n, 0),
+    pitch_factor: pitchFactor,
+    waste: 0.1,
+    waste_pct: 10,
+    ...edges,
+    roof_sqft: squares * 100,
+    squares: Math.round(squares * 110) / 100,
+    roof_squares: squares,
+    steep_squares: 0,
+  };
+}
+
+/** A price-list service as a package line reads it, with the package's count for one that isn't measured. */
+export interface FiguresService {
+  name: string;
+  unit_price: Amount;
+  unit_cost: Amount;
+  formula: string | null;
+  formula_target?: string | null;
+  active?: boolean;
+  quantity?: number | null;
+}
+
+export interface PackageFigures {
+  price: number;
+  cost: number;
+  profit: number;
+  margin: number | null;
+  /**
+   * The whole package for each of its main service's units (a roof's: a square, with waste when its
+   * formula has it): what's always on it spread over the roof. Null when the main line isn't on.
+   */
+  perUnit: number | null;
+  /** Lines with no cost in the price list: the real cost is higher and the margin lower. */
+  noCost: string[];
+}
+
+/**
+ * A package's price, cost and margin on a roof (`vars`, a measurement's values), its lines worked out
+ * as the API's packageLines does: measured ones from the formula (left off when there's none of it, or
+ * it can't be worked out), counted ones at the package's count, else 1, and services turned off left
+ * off (but never the main one). Null when it comes to nothing.
+ */
+export function packageFigures(main: FiguresService | null, included: readonly FiguresService[], vars: Record<string, number | null>): PackageFigures | null {
+  let price = 0;
+  let cost = 0;
+  let mainQuantity = 0;
+  const noCost: string[] = [];
+  for (const [i, s] of [main, ...included].entries()) {
+    if (!s || (i > 0 && s.active === false)) continue;
+    let quantity = s.quantity && s.quantity > 0 ? s.quantity : 1;
+    let unitPrice = s.unit_price;
+    if (s.formula) {
+      let value: number;
+      try {
+        value = Math.round(evaluateFormula(s.formula, vars) * 1000) / 1000;
+      } catch (error) {
+        if (error instanceof FormulaError) continue;
+        throw error;
+      }
+      if (!(value > 0)) continue;
+      if (s.formula_target === "unit_price") {
+        unitPrice = Math.round(value * 100) / 100;
+        quantity = 1;
+      } else quantity = value;
+    }
+    if (i === 0) mainQuantity = quantity;
+    price += toCents(lineTotal(quantity, unitPrice));
+    if (s.unit_cost === null || s.unit_cost === undefined) noCost.push(s.name);
+    else cost += toCents(lineTotal(quantity, s.unit_cost));
+  }
+  if (!(price > 0)) return null;
+  const perUnit = mainQuantity > 0 ? Math.round(price / mainQuantity) / 100 : null;
+  return { price: price / 100, cost: cost / 100, profit: (price - cost) / 100, margin: marginPct(price / 100, cost / 100), perUnit, noCost };
 }
 
 // ---------------------------------------------------------------------------------------------

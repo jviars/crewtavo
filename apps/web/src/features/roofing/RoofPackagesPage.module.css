@@ -107,6 +107,22 @@
 .total { border-color: var(--green); background: var(--green-tint); }
 .total > span:first-child { color: var(--green-dark); font-weight: 600; }
 .total strong { font-size: var(--fs-16); font-weight: 700; }
+/* Set by the markup or the margin, with what the one comes to as the other */
+.term > .markupSwitch:first-child { display: inline-flex; justify-self: start; padding: 2px; }
+.term .markupSwitch button { height: 22px; padding: 0 8px; font-size: var(--fs-12); }
+.conv { font-size: var(--fs-12); color: var(--text-3); }
+
+/* A package on a typical roof */
+.squares { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-2); }
+.squares :global(.input) { width: 72px; }
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 0; }
+.figures > div { display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid var(--divider); border-radius: var(--radius-control); background: var(--fill); }
+.figures dt { font-size: var(--fs-12); color: var(--text-3); }
+.figures dd { margin: 0; font-size: var(--fs-16); font-weight: 700; font-variant-numeric: tabular-nums; }
+.figures > .marginFigure { border-color: var(--green); background: var(--green-tint); }
+.marginFigure dt { color: var(--green-dark); font-weight: 600; }
+.figures > .marginFigure[data-low] { border-color: var(--warning); background: var(--warning-tint); }
+.marginFigure[data-low] dt, .marginFigure[data-low] dd { color: var(--warning); }
 
 /* Always on this roof */
 .addSelect { width: auto; max-width: 100%; }
@@ -125,8 +141,13 @@
 .cellName strong { font-weight: 600; }
 .cellHow { grid-area: how; min-width: 0; font-size: var(--fs-13); color: var(--text-2); }
 .cellPrice { grid-area: price; }
+.follows { color: var(--green-dark); }
 .cellCost { grid-area: cost; min-width: 0; font-variant-numeric: tabular-nums; }
-.cellMargin { grid-area: margin; font-weight: 700; }
+/* Margins stay quiet; one under LOW_MARGIN stands out, and so does its line. */
+.cellMargin { grid-area: margin; color: var(--text-3); }
+.cellMargin svg { vertical-align: -2px; margin-right: 3px; }
+.row[data-low] { background: var(--warning-tint); }
+.row[data-low] .cellMargin { color: var(--warning); font-weight: 700; }
 .cellRemove { grid-area: remove; display: flex; justify-content: flex-end; }
 .count { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .count :global(.input) { width: 72px; }

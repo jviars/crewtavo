@@ -5,15 +5,16 @@
  * package from, or two or three to offer as options (PackagePicker), and the inputs for what's on a
  * package's or an option's card (TierWords, HighlightsField). Their pure parts are in data.ts.
  */
+import { typicalRoof, typicalSquares } from "@crewtavo/core/estimates";
 import { isExampleWarranty, PACKAGE_LIMITS, packagePictureSrc } from "@crewtavo/core/presets";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { formatMoney, formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { highlightRoom, isRoofingCompany, MAX_OPTIONS, moveItem, packageExtras, packagePriceLine, pickPackage, sameList, TIER_WORDS, type PackageStyle } from "./data";
+import { highlightRoom, isRoofingCompany, MAX_OPTIONS, moneyText, moveItem, packageExtras, packagePriceLine, pickPackage, sameList, TIER_WORDS, type PackageStyle } from "./data";
 import styles from "./PackageCards.module.css";
-import { canEditPackages, type RoofPackage } from "./packages";
+import { canEditPackages, typicalFigures, usePriceList, type RoofPackage } from "./packages";
 
 const FORMAT = { whole: formatMoney, cents: formatMoneyCents };
 
@@ -91,6 +92,10 @@ export function PackagePicker(props: PackagePickerProps) {
   const session = useSession();
   const roofing = isRoofingCompany(session.company);
   const flag = Boolean(props.flagExamples) && canEditPackages(session);
+  // A roof package's price a square is the whole package's, on the typical roof (Roofing → Packages).
+  const priceList = usePriceList({ enabled: roofing });
+  const byId = useMemo(() => new Map((priceList.data ?? []).map((s) => [s.id, s])), [priceList.data]);
+  const typical = useMemo(() => typicalRoof(typicalSquares(session.company.settings)), [session.company.settings]);
   const many = picksMany(props);
   const locked = many ? (props.locked ?? []) : [];
   const max = many ? (props.max ?? MAX_OPTIONS) : 1;
@@ -112,6 +117,7 @@ export function PackagePicker(props: PackagePickerProps) {
           const on = order >= 0;
           const fixed = locked.includes(p.id);
           const extras = packageExtras(p, roofing);
+          const perSquare = roofing ? typicalFigures(p, byId, typical)?.perUnit : null;
           return (
             <div key={p.id} className={styles.pick} data-on={on || undefined}>
               <button type="button" className={styles.pickMain} aria-pressed={on} aria-disabled={fixed || undefined} onClick={() => pick(p.id)}>
@@ -119,7 +125,7 @@ export function PackagePicker(props: PackagePickerProps) {
                 <span className={styles.pickText}>
                   {p.tier && <span className="chip">{p.tier}</span>}
                   <strong>{p.name}</strong>
-                  <span className={styles.pickPrice}>{packagePriceLine(p, roofing, FORMAT)}</span>
+                  <span className={styles.pickPrice}>{perSquare ? `${moneyText(perSquare, FORMAT)} a square` : packagePriceLine(p, roofing, FORMAT)}</span>
                   {extras && <small>{extras}</small>}
                   {flag && isExampleWarranty(p.warranty) && (
                     <span className={styles.pickFlag}>

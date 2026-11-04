@@ -578,8 +578,7 @@ export function beforeTax(quote: FiguresQuote, optionId: string | null): number 
   return (toCents(totals.subtotal) - toCents(totals.discount)) / 100;
 }
 
-/** A margin to look twice at. */
-export const LOW_MARGIN = 25;
+export { LOW_MARGIN } from "@crewtavo/core/estimates";
 
 // ---------------------------------------------------------------------------------------------
 // Where a line goes on an estimate with options

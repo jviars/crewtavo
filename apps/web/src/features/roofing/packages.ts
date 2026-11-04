@@ -8,6 +8,8 @@
  * (apps/api/src/routes/packages.ts and roofing.ts), and putting one or more on an estimate goes
  * through its options (quotes/options.ts, POST /quotes/:id/options).
  */
+import { followPrice, packageFigures } from "@crewtavo/core/estimates";
+import { materialsPerUnit, unpricedLinks, type MaterialLink } from "@crewtavo/core/materials";
 import { useQuery } from "@tanstack/react-query";
 import { api, supabase, unwrap } from "@/lib/api";
 import { base64Of } from "@/lib/files";
@@ -93,10 +95,11 @@ export function useRoofPackages({ enabled = true }: { enabled?: boolean } = {}) 
 }
 
 /** The whole price list (turned-off services too, so a package's old items still have names). */
-export function usePriceList() {
+export function usePriceList({ enabled = true }: { enabled?: boolean } = {}) {
   const { company } = useSession();
   return useQuery({
     queryKey: ["services", company.id, "roof-packages"],
+    enabled,
     queryFn: async () =>
       (unwrap(await supabase().from("services").select(PRICE_LIST_FIELDS).eq("company_id", company.id).order("sort").order("name")) as unknown as PriceListService[]).map((s) => ({
         ...s,
@@ -171,3 +174,52 @@ export const setPackagePicture = async (packageId: string, jpeg: Blob) => api.pu
 
 /** Back to the package's drawing. The file stays, for the options and signed estimates that show it. */
 export const removePackagePicture = (packageId: string) => api.delete<{ ok: true }>(`/packages/${packageId}/picture`);
+
+/**
+ * A roof package's whole price, cost and margin on a roof (`roof`, a typical one), and what that comes
+ * to a square: the price list's prices, or `prices` instead (a package that follows ABC, from
+ * followedPrices).
+ */
+// shortcut: without `prices` it reads the price list, where a service on two following packages with different markups has the last one saved; pass followedPrices if the package cards ever need it exact.
+export function typicalFigures(pkg: RoofPackage, byId: ReadonlyMap<string, PriceListService>, roof: Record<string, number | null>, prices?: ReadonlyMap<string, number>) {
+  const at = (s: PriceListService) => ({ ...s, unit_price: prices?.get(s.id) ?? s.unit_price });
+  const main = pkg.roof_service_id ? byId.get(pkg.roof_service_id) : undefined;
+  const included = pkg.items.filter((i) => i.kind === "included").flatMap((i) => {
+    const service = byId.get(i.service_id);
+    return service ? [{ ...at(service), quantity: i.quantity }] : [];
+  });
+  return packageFigures(main ? at(main) : null, included, roof);
+}
+
+/**
+ * A service's price at today's ABC materials plus its labor and `markup`, read fresh, for a package
+ * that follows ABC (a line added to its estimate, in the office or on site, or to the package); null
+ * when it has no ABC materials, or one ABC never priced (it keeps its price).
+ */
+export async function followedPriceOf(serviceId: string, markup: number): Promise<number | null> {
+  const db = supabase();
+  const [links, service] = await Promise.all([
+    db.from("service_materials").select("item_number, name, uom, per_unit, unit_price").eq("service_id", serviceId),
+    db.from("services").select("labor_cost").eq("id", serviceId).single(),
+  ]);
+  const own = unwrap(links) as unknown as MaterialLink[];
+  const price = own.length && !unpricedLinks(own).length ? followPrice(materialsPerUnit(own), unwrap(service).labor_cost, markup) : 0;
+  return price > 0 ? price : null;
+}
+
+/**
+ * For a package that follows ABC Supply: each of its services with ABC materials (the roof, what's
+ * always on it and its quick adds) at today's materials plus its labor, plus `markup`, as the API
+ * prices them (loadPackages, recostServices). One with a material ABC never priced keeps its price.
+ */
+export function followedPrices(pkg: RoofPackage, byId: ReadonlyMap<string, PriceListService>, links: ReadonlyArray<MaterialLink & { service_id: string }>, markup: number): Map<string, number> {
+  const prices = new Map<string, number>();
+  for (const id of [pkg.roof_service_id, ...pkg.items.map((i) => i.service_id)]) {
+    const service = id ? byId.get(id) : undefined;
+    const own = links.filter((l) => l.service_id === id);
+    if (!service || !own.length || unpricedLinks(own).length) continue;
+    const price = followPrice(materialsPerUnit(own), service.labor_cost, markup);
+    if (price > 0) prices.set(service.id, price);
+  }
+  return prices;
+}

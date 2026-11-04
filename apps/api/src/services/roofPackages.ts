@@ -219,8 +219,8 @@ export interface PricedPackage {
   included: Array<{ service: PackageService; quantity: number | null }>;
   /** Some of its services take their amount from a measurement. */
   measured: boolean;
-  /** For a package that follows ABC Supply: its main service's price at today's materials, for the price list once its lines are saved. */
-  followed: number | null;
+  /** For a package that follows ABC Supply: its services whose price at today's materials isn't the price list's yet, for the price list once its lines are saved. */
+  followed: Array<{ id: string; unit_price: number }>;
 }
 
 /** The measurement a quote's lines are worked out from: its newest. */
@@ -305,10 +305,18 @@ export async function loadPackages(db: Db, companyId: string, packageIds: readon
     ? (must(await db.from("services").select(SERVICE_FIELDS).eq("company_id", companyId).in("id", serviceIds)) as unknown as Array<PackageService & { labor_cost: number | null }>)
     : [];
   const byId = new Map(services.map((s) => [s.id, s]));
-  const following = rows.filter((p) => p.price_mode === "follow" && p.roof_service_id && byId.has(p.roof_service_id));
-  const links = following.length
-    ? (must(await db.from("service_materials").select("service_id, per_unit, unit_price").eq("company_id", companyId).in("service_id", following.map((p) => p.roof_service_id!))) as unknown as Array<MaterialLink & { service_id: string }>)
+  // A package that follows ABC prices each of its services with ABC materials: the roof, and what's always on it.
+  const followIds = [...new Set(rows.filter((p) => p.price_mode === "follow").flatMap((p) => [p.roof_service_id, ...items.filter((i) => i.package_id === p.id).map((i) => i.service_id)]))].filter((id): id is string => Boolean(id && byId.has(id)));
+  const links = followIds.length
+    ? (must(await db.from("service_materials").select("service_id, per_unit, unit_price").eq("company_id", companyId).in("service_id", followIds)) as unknown as Array<MaterialLink & { service_id: string }>)
     : [];
+  // A copy at today's materials, plus its labor and the markup, so it doesn't change the price another package reads.
+  const follow = <S extends PackageService & { labor_cost: number | null }>(pkg: PackageRow, service: S): S => {
+    const own = links.filter((l) => l.service_id === service.id);
+    // A material the branch never priced would come out as nothing: the service keeps its price until it has one.
+    const price = own.length && !unpricedLinks(own).length ? followPrice(materialsPerUnit(own), service.labor_cost, pkg.markup_pct) : 0;
+    return price > 0 ? { ...service, unit_price: price } : { ...service };
+  };
 
   return (packages as PackageRow[]).map((pkg) => {
     const found = pkg.roof_service_id ? byId.get(pkg.roof_service_id) : undefined;
@@ -318,23 +326,15 @@ export async function loadPackages(db: Db, companyId: string, packageIds: readon
         roofing ? `The ${pkg.name} package's roof isn't in your price list any more. Pick it again in Roofing → Packages.` : `The ${pkg.name} package's main service isn't in your price list any more. Pick it again in Packages.`,
       );
     }
-    // A copy, so a package that follows ABC doesn't change the price another package reads.
-    const main = found ? { ...found } : null;
-    let followed: number | null = null;
-    if (main && pkg.price_mode === "follow") {
-      const own = links.filter((l) => l.service_id === main.id);
-      // A material the branch never priced would come out as nothing: the roof keeps its price until it has one.
-      const price = own.length && !unpricedLinks(own).length ? followPrice(materialsPerUnit(own), main.labor_cost, pkg.markup_pct) : 0;
-      if (price > 0) {
-        if (price !== Number(main.unit_price)) followed = price;
-        main.unit_price = price;
-      }
-    }
+    const follows = pkg.price_mode === "follow";
+    const main = found ? (follows ? follow(pkg, found) : { ...found }) : null;
     const included = items.filter((i) => i.package_id === pkg.id).flatMap((i) => {
       const service = byId.get(i.service_id);
-      return service ? [{ service, quantity: i.quantity === null ? null : Number(i.quantity) }] : [];
+      return service ? [{ service: follows ? follow(pkg, service) : service, quantity: i.quantity === null ? null : Number(i.quantity) }] : [];
     });
-    return { pkg, main, included, measured: [main, ...included.map((i) => i.service)].some((s) => s?.formula), followed };
+    const services = [main, ...included.map((i) => i.service)];
+    const followed = follows ? services.flatMap((s) => (s && Number(s.unit_price) !== Number(byId.get(s.id)!.unit_price) ? [{ id: s.id, unit_price: Number(s.unit_price) }] : [])) : [];
+    return { pkg, main, included, measured: services.some((s) => s?.formula), followed };
   });
 }
 
@@ -351,9 +351,8 @@ export function pricedLines(p: PricedPackage, vars: MeasurementVariables | null,
 
 /** The price list follows the packages that follow ABC Supply, once their lines are on an estimate. */
 export async function saveFollowedPrices(db: Db, companyId: string, packages: readonly PricedPackage[]) {
-  for (const p of packages) {
-    if (p.followed === null || !p.main) continue;
-    const { error } = await db.from("services").update({ unit_price: p.followed }).eq("id", p.main.id).eq("company_id", companyId);
+  for (const { id, unit_price } of packages.flatMap((p) => p.followed)) {
+    const { error } = await db.from("services").update({ unit_price }).eq("id", id).eq("company_id", companyId);
     if (error) throw dbError(error);
   }
 }
@@ -749,16 +748,19 @@ export async function pricePackages(env: Env, db: Db, companyId: string, { all =
 }
 
 /**
- * The price list's costs from its materials' last prices: each service's cost per unit, and the
- * roof price of each package that follows ABC. A package whose roof has a material the branch
- * never priced keeps its price, since following would leave that material out.
+ * The price list's costs from its materials' last prices: each service's cost per unit, and for each
+ * package that follows ABC, the price of each of its services with ABC materials (the roof, what's
+ * always on it, and its quick adds). A service with a material the branch never priced keeps its price, since
+ * following would leave that material out.
  */
 export async function recostServices(db: Db, companyId: string, serviceIds: readonly string[]) {
   if (!serviceIds.length) return;
-  const [linkRows, serviceRows, packageRows] = await Promise.all([
+  const [linkRows, serviceRows, packageRows, itemRows] = await Promise.all([
     db.from("service_materials").select("service_id, per_unit, unit_price").eq("company_id", companyId).in("service_id", [...serviceIds]),
     db.from("services").select("id, labor_cost").eq("company_id", companyId).in("id", [...serviceIds]),
-    db.from("roof_packages").select("id, roof_service_id, price_mode, markup_pct").eq("company_id", companyId).in("roof_service_id", [...serviceIds]),
+    db.from("roof_packages").select("id, roof_service_id, markup_pct").eq("company_id", companyId).eq("price_mode", "follow"),
+    // Its quick adds too, so one put on an estimate is at today's price.
+    db.from("roof_package_items").select("package_id, service_id").eq("company_id", companyId).in("service_id", [...serviceIds]),
   ]);
   const links = must(linkRows) as unknown as Array<MaterialLink & { service_id: string }>;
   const labor = new Map(must(serviceRows).map((s) => [s.id, s.labor_cost === null ? null : Number(s.labor_cost)]));
@@ -768,12 +770,15 @@ export async function recostServices(db: Db, companyId: string, serviceIds: read
     const { error } = await db.from("services").update({ unit_cost: serviceUnitCost(linksOf(serviceId), labor.get(serviceId) ?? null) }).eq("id", serviceId).eq("company_id", companyId);
     if (error) throw dbError(error);
   }
+  const items = must(itemRows);
   for (const pkg of must(packageRows)) {
-    const own = pkg.roof_service_id ? linksOf(pkg.roof_service_id) : [];
-    if (pkg.price_mode !== "follow" || !own.length || unpricedLinks(own).length) continue;
-    const price = followPrice(materialsPerUnit(own), labor.get(pkg.roof_service_id!) ?? null, pkg.markup_pct);
-    if (!(price > 0)) continue;
-    const { error } = await db.from("services").update({ unit_price: price }).eq("id", pkg.roof_service_id!).eq("company_id", companyId);
-    if (error) throw dbError(error);
+    for (const serviceId of new Set([pkg.roof_service_id, ...items.filter((i) => i.package_id === pkg.id).map((i) => i.service_id)])) {
+      const own = serviceId ? linksOf(serviceId) : [];
+      if (!serviceId || !labor.has(serviceId) || !own.length || unpricedLinks(own).length) continue;
+      const price = followPrice(materialsPerUnit(own), labor.get(serviceId) ?? null, pkg.markup_pct);
+      if (!(price > 0)) continue;
+      const { error } = await db.from("services").update({ unit_price: price }).eq("id", serviceId).eq("company_id", companyId);
+      if (error) throw dbError(error);
+    }
   }
 }

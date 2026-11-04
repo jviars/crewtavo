@@ -25,6 +25,7 @@ import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast, type ToastTone } from "@/lib/toast";
 import { readJobDiscounts } from "../jobs/JobDiscountNote";
+import { followedPriceOf } from "../roofing/packages";
 import styles from "./LineItems.module.css";
 
 type Table = "quote_line_items" | "job_line_items" | "invoice_line_items";
@@ -127,6 +128,7 @@ export function LineItems({
   saveStatus,
   onOfferOptions,
   promoJob = null,
+  followMarkup = null,
 }: {
   table: Table;
   parent: Parent;
@@ -145,6 +147,8 @@ export function LineItems({
   saveStatus?: SaveStatusHandle;
   /** On a quote that offers no options yet: "Offer options" in the add row, beside "Custom item". */
   onOfferOptions?: () => void;
+  /** A roof estimate whose package follows ABC Supply: its markup, so a price-list item with ABC materials goes on at today's ABC price. */
+  followMarkup?: number | null;
   /** An invoice's job, for what the toast says when one of its promo lines is removed: where the discount went. */
   promoJob?: { id: string; repeats: boolean } | null;
 }) {
@@ -183,6 +187,8 @@ export function LineItems({
         : { name: "New item", quantity: 1, unit: "ea", unit_price: 0 };
       if (table !== "invoice_line_items" && s) row.unit_cost = s.unit_cost;
       if (table === "quote_line_items" && s) row.formula = s.formula;
+      const followed = table === "quote_line_items" && s && followMarkup !== null ? await followedPriceOf(s.id, followMarkup) : null;
+      if (followed !== null) row.unit_price = followed;
       if (offers) row.option_id = addToEvery ? null : viewing;
       return { id: await insert([row]), custom: !s };
     },
