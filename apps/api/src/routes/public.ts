@@ -1609,15 +1609,18 @@ publicRoutes.post("/hub/:token/visits/:id/change", async (c) => {
     slot = slots.find((s) => (body.starts_at ? s.starts_at !== null && Date.parse(s.starts_at) === Date.parse(body.starts_at) : !s.starts_at && s.date === body.scheduled_on));
     if (!slot) throw new HttpError(409, "That time isn't open anymore. Pick another.");
   } else if (body.kind === "reschedule" && !body.message) throw new HttpError(400, "Pick a time, or tell us what suits you.");
-  // One request waits per visit: a new one takes the old one's place.
-  const old = await admin.from("visit_change_requests").delete().eq("company_id", l.c).eq("visit_id", found.visit.id).eq("status", "pending");
-  if (old.error) throw dbError(old.error);
-  const { error } = await admin.from("visit_change_requests").insert({
-    company_id: l.c, visit_id: found.visit.id, client_id: l.id, kind: body.kind,
-    starts_at: slot?.starts_at ?? null, ends_at: slot?.ends_at ?? null, scheduled_on: slot?.date ?? null,
+  // One request waits per visit: a new one takes the old one's place, in that same row, so a failed
+  // save never loses the one already waiting.
+  const ask = {
+    kind: body.kind, starts_at: slot?.starts_at ?? null, ends_at: slot?.ends_at ?? null, scheduled_on: slot?.date ?? null,
     message: body.kind === "reschedule" ? body.message || null : null, reason: body.reason || null,
-  });
-  if (error) throw error.code === "23505" ? new HttpError(409, "Your request crossed with another one. Try again.") : dbError(error);
+  };
+  const replaced = await admin.from("visit_change_requests").update(ask).eq("company_id", l.c).eq("visit_id", found.visit.id).eq("status", "pending").select("id");
+  if (replaced.error) throw dbError(replaced.error);
+  if (!replaced.data.length) {
+    const { error } = await admin.from("visit_change_requests").insert({ company_id: l.c, visit_id: found.visit.id, client_id: l.id, ...ask });
+    if (error) throw error.code === "23505" ? new HttpError(409, "Your request crossed with another one. Try again.") : dbError(error);
+  }
   kickAutomations(c, l.c);
   return c.json({ ok: true }, 201);
 });

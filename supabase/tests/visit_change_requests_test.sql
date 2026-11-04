@@ -139,11 +139,13 @@ select vcr.check((select bool_and(link = '/schedule?date=' || :'tomorrow' || '&v
   where company_id = :'co' and kind = 'client'), 'the notice says what was asked and opens the visit');
 select vcr.expect_error(format($q$insert into public.visit_change_requests (company_id, visit_id, client_id, kind, message) values (%L, %L, %L, 'reschedule', 'Any Friday')$q$, :'co', :'v_ann', :'ann'),
   'one request waits per visit');
--- A new one takes the old one's place.
-delete from public.visit_change_requests where visit_id = :'v_ann' and status = 'pending';
-insert into public.visit_change_requests (company_id, visit_id, client_id, kind, reason) values (:'co', :'v_ann', :'ann', 'cancel', 'Moving away') returning id as ask \gset
-select vcr.check((select count(*) = 1 from public.visit_change_requests where visit_id = :'v_ann'), 'and a new one takes its place');
+-- A new one takes the old one's place, in the same row (routes/public.ts), so nothing waiting is lost
+-- if the save fails; the office hears about it as about a new one (20261107000500).
+update public.visit_change_requests set kind = 'cancel', reason = 'Moving away', starts_at = null, ends_at = null, scheduled_on = null, message = null
+where visit_id = :'v_ann' and status = 'pending' returning id as ask \gset
+select vcr.check((select count(*) = 1 from public.visit_change_requests where visit_id = :'v_ann') and :'ask'::uuid = :'first_ask'::uuid, 'and a new one takes its place');
 select vcr.check(exists (select 1 from public.activity where verb = 'visit.cancel_requested' and subject_id = :'v_ann'), 'a cancel starts its own automations');
+select vcr.check(exists (select 1 from public.notifications where company_id = :'co' and title = 'Ann Vcr asked to cancel Mow'), 'and the office is told about the new ask');
 select vcr.expect_error(format($q$insert into public.visit_change_requests (company_id, visit_id, client_id, kind) values (%L, %L, %L, 'reschedule')$q$, :'co', :'v_bob', :'bob'),
   'a reschedule needs a time or the client''s words');
 select vcr.expect_error(format($q$insert into public.visit_change_requests (company_id, visit_id, client_id, kind, scheduled_on) values (%L, %L, %L, 'cancel', %L)$q$, :'co', :'v_bob', :'bob', :'tomorrow'),

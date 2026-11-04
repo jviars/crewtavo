@@ -10,10 +10,25 @@ export function useStatusCounts(table: CountTable, companyId: string, groups: Re
     queryKey: [table, companyId, "counts", column, Object.keys(groups).join(",")],
     meta: { silent: true },
     queryFn: async () => {
+      // A job's state is worked out per job, so count them all once (job_state_counts) and add up each tab.
+      if (column === "job_state") return groupCounts(groups, await jobStateCounts(companyId));
       const entries = await Promise.all(Object.entries(groups).map(async ([key, statuses]) => [key, await statusCount(table, companyId, key, statuses, column)] as const));
       return Object.fromEntries(entries) as Record<string, number>;
     },
   });
+}
+
+/** How many of the company's jobs are in each state (job_state), as the person can see them. */
+async function jobStateCounts(companyId: string): Promise<Record<string, number>> {
+  const { data, error } = await supabase().rpc("job_state_counts", { p_company: companyId });
+  if (error) throw error;
+  return Object.fromEntries((data ?? []).map((r) => [r.state, Number(r.jobs)]));
+}
+
+/** Each tab's count from counts by state: those in its states, or all of them for null. */
+export function groupCounts(groups: Record<string, readonly string[] | null>, byState: Record<string, number>): Record<string, number> {
+  const total = Object.values(byState).reduce((sum, n) => sum + n, 0);
+  return Object.fromEntries(Object.entries(groups).map(([key, states]) => [key, states ? states.reduce((sum, s) => sum + (byState[s] ?? 0), 0) : total]));
 }
 
 /** How many records one tab (`key`) has: those in its statuses, or all of them for null. */

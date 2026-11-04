@@ -112,6 +112,17 @@ select tau.synced(:'oops');
 update public.invoices set status = 'void' where id = :'oops';
 select tau.check(tau.queued(:'oops', true) = 0, 'voiding isn''t sent');
 
+-- ===== Moved to another client by a merge ======================================================
+-- The books keep it under its customer there (20261107000600_accounting_ignores_client_moves).
+insert into public.clients (company_id, display_name) values (:'co', 'Hal G. (kept)') returning id as kept \gset
+select tau.synced(:'inv');
+begin;
+select set_config('crewtavo.merge', :'hal' || '>' || :'kept', true);
+update public.invoices set client_id = :'kept' where id = :'inv';
+commit;
+select tau.check((select client_id = :'kept' from public.invoices where id = :'inv') and tau.queued(:'inv', true) = 0,
+  'moved to another client alone, it isn''t sent to the books again');
+
 -- Nothing left for other tests' workers to claim.
 delete from public.outbox where company_id = :'co';
 delete from public.integrations where company_id = :'co';

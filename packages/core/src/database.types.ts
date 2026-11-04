@@ -3879,6 +3879,11 @@ isOneToOne: false
 "job_state":
 { Args: { "j": Omit<Database["public"]['Tables']["jobs"]['Row'], Database["public"]['Tables']["jobs"]['ComputedFields']> }; Returns: string
                            },
+"job_state_counts":
+{ Args: { "p_company": string }; Returns: {
+              "jobs": number,"state": string
+            }[]
+                           },
 "last_referral_ask":
 { Args: { "p_client": string,"p_company": string }; Returns: string
                            },

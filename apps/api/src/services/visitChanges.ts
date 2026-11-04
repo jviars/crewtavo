@@ -26,6 +26,14 @@ const FIELDS =
 type Visit = { id: string; title: string; status: string; scheduled_on: string | null; starts_at: string | null; ends_at: string | null };
 const length = (v: { starts_at: string | null; ends_at: string | null }) => (v.starts_at && v.ends_at ? Date.parse(v.ends_at) - Date.parse(v.starts_at) : null);
 
+/** Whether the visit's crew or people are busy between two times (the Client Hub's open slots read the same). */
+async function booked(env: Env, companyId: string, visitId: string, from: Date, to: Date): Promise<boolean> {
+  const { data, error } = await adminClient(env).rpc("visit_busy_times", { p_company: companyId, p_visit: visitId, p_from: from.toISOString(), p_to: to.toISOString() });
+  if (error) throw dbError(error);
+  // A booking that ends as this one starts (or starts as it ends) isn't in the way.
+  return (data ?? []).some((b) => Date.parse(b.starts_at) < to.getTime() && Date.parse(b.ends_at) > from.getTime());
+}
+
 /** The requests waiting for an answer that the person may answer, oldest first. */
 export async function pendingVisitChanges(s: Scope) {
   return must(await s.db.from("visit_change_requests").select(FIELDS).eq("company_id", s.companyId).eq("status", "pending").order("created_at").limit(100));
@@ -37,20 +45,26 @@ export async function answerVisitChange(s: Scope, env: Env, id: string, answer: 
     "That request isn't waiting for an answer.",
   );
   const visit = ask.visit as unknown as Visit;
+  // Without a time ("Tell us what suits you"), the office moves the visit itself: approving tells the client.
+  let move: { starts_at: string; ends_at: string } | { scheduled_on: string } | null = null;
   if (answer.approve) {
     if (visit.status !== "scheduled") throw new HttpError(409, "This visit has started or changed since. Decline the request, or change the visit yourself.");
-    if (ask.kind === "cancel") await updateVisit(s, visit.id, { status: "cancelled" });
-    else if (ask.scheduled_on) {
+    if (ask.kind === "reschedule" && ask.scheduled_on) {
       const { tz } = await companyZone(s);
       // At the time asked for; a whole day keeps the visit's own time, if it has one now. Either way
       // it keeps its own length.
       const start = ask.starts_at ? new Date(ask.starts_at) : visit.starts_at ? zonedTimeToUtc(ask.scheduled_on, localTime(new Date(visit.starts_at), tz), tz) : null;
       const ms = length(visit) ?? length(ask) ?? 3_600_000;
-      await updateVisit(s, visit.id, start ? { starts_at: start.toISOString(), ends_at: new Date(start.getTime() + ms).toISOString() } : { scheduled_on: ask.scheduled_on });
+      if (start) {
+        const end = new Date(start.getTime() + ms);
+        // The time was open when the client asked; the crew may have been booked into it since.
+        if (await booked(env, s.companyId, visit.id, start, end)) throw new HttpError(409, "The crew or people on this visit are booked then now. Decline the request, or move the visit yourself.");
+        move = { starts_at: start.toISOString(), ends_at: end.toISOString() };
+      } else move = { scheduled_on: ask.scheduled_on };
     }
-    // Without a time ("Tell us what suits you"), the office moves the visit itself: approving tells the client.
   }
   const status = answer.approve ? "approved" : "declined";
+  // Claimed before the visit changes, so when two people answer at once only the one whose answer lands acts on it.
   const { data, error } = await s.db
     .from("visit_change_requests")
     .update({ status, note: answer.approve ? null : answer.note?.trim() || null })
@@ -59,6 +73,16 @@ export async function answerVisitChange(s: Scope, env: Env, id: string, answer: 
     .select("id");
   if (error) throw dbError(error);
   if (!data.length) throw new HttpError(409, "Someone answered this request already.");
+  if (answer.approve && (ask.kind === "cancel" || move)) {
+    try {
+      await updateVisit(s, visit.id, ask.kind === "cancel" ? { status: "cancelled" } : move!);
+    } catch (failed) {
+      // The visit didn't change, so the request waits again. Only the server can put it back; a newer
+      // request from the client since takes its place instead.
+      await adminClient(env).from("visit_change_requests").update({ status: "pending", note: null }).eq("id", id).eq("status", status);
+      throw failed;
+    }
+  }
   const emailed = await tellClient(env, s, ask.id, answer.approve ? null : answer.note?.trim() || "", baseUrl);
   return { status, emailed };
 }

@@ -546,7 +546,9 @@ select t1070.check(array(
   'job_pay_mark_paid(uuid[], text, date, text, numeric)', 'job_pay_start(uuid, uuid, uuid, uuid[])', 'job_pay_suggest(uuid, uuid, uuid, uuid[])',
   'job_pay_unmark_paid(uuid[])', 'job_promo_discounts(uuid)', 'job_scope(uuid)',
   -- Runs with the caller's access: a sub sees the state of their own jobs, from their own visits.
-  'job_state(jobs)', 'last_referral_ask(uuid, uuid)', 'last_review_ask(uuid, uuid)',
+  'job_state(jobs)',
+  -- The same, counted per state for the Jobs list's tabs.
+  'job_state_counts(uuid)', 'last_referral_ask(uuid, uuid)', 'last_review_ask(uuid, uuid)',
   'marketing_set_enabled(uuid, boolean)', 'marketing_summary(uuid)', 'material_choices(uuid)', 'merge_clients(uuid, uuid, uuid)',
   -- Saving a screen's own settings: runs as the caller, so owners and admins only, never a sub.
   'merge_company_settings(uuid, jsonb)', 'my_crew_ids(uuid)', 'my_sub_offers(boolean, uuid)',

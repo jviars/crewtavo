@@ -91,6 +91,9 @@ select tjs.check((select state from tjs_states where title = 'Put away') = 'arch
 select tjs.check((select state from tjs_states where title = 'Weekly, missed one') = 'late', 'a recurring job with a missed visit is late');
 select tjs.check((select state from tjs_states where title = 'Weekly, all done') = 'upcoming', 'a recurring job caught up is upcoming');
 select tjs.check((select count(*) from public.jobs j where j.company_id = :'kiri' and public.job_state(j) = 'late') = 3, 'lists can count jobs by their state');
+select tjs.check((select jobs from public.job_state_counts(:'kiri') where state = 'late') = 3
+  and (select sum(jobs) from public.job_state_counts(:'kiri')) = (select count(*) from public.jobs where company_id = :'kiri'),
+  'the Jobs list''s tab counts come in one go, the same (20261107000700)');
 
 -- ===== The company's today, not UTC's ===========================================================
 select tjs.check((select state from tjs_states where title = 'Just after midnight') = 'today', 'a visit at 00:30 today is today, though UTC is still on yesterday');
@@ -101,6 +104,7 @@ select tjs.check((select public.job_state(j) from public.jobs j where j.id = :'n
 -- ===== Nobody else's jobs =======================================================================
 select tjs.check(not exists (select 1 from public.jobs j where j.company_id = :'kiri' or public.job_state(j) = 'late'), 'Nia sees none of Kai''s jobs, by company or by state');
 select tjs.check((select count(*) from public.jobs j where public.job_state(j) is not null) = 2, 'only her own two');
+select tjs.check(not exists (select 1 from public.job_state_counts(:'kiri')), 'and none of Kai''s jobs are counted for her');
 select set_config('request.jwt.claims', '{"sub": "ab4e0000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
 select tjs.check(not exists (select 1 from public.jobs j where public.job_state(j) is not null), 'crew on no visits see no jobs, as with jobs themselves');
 rollback;

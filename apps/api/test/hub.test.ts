@@ -2271,6 +2271,14 @@ describe("moving or cancelling a visit from the Client Hub", () => {
     await expect(answerVisitChange(office, env, "ask-1", { approve: true }, null)).rejects.toThrow(/isn't waiting/);
   });
 
+  it("won't approve a move to a time the crew has been booked into since, and the request keeps waiting", async () => {
+    const row = request({ kind: "reschedule", starts_at: at(day, "11:00"), ends_at: at(day, "12:00"), scheduled_on: day });
+    state.rpcs.visit_busy_times = () => ({ data: [{ starts_at: at(day, "11:30"), ends_at: at(day, "12:30") }], error: null });
+    await expect(answerVisitChange(office, env, "ask-1", { approve: true }, null)).rejects.toThrow(/booked then now/);
+    expect(row.status).toBe("pending");
+    expect(state.tables.visits![0]).toMatchObject({ starts_at: at(day, "09:00") });
+  });
+
   it("approving a cancel cancels only that visit; declining leaves it, with the office's note", async () => {
     const row = request({ kind: "cancel", reason: "Away" });
     // Email isn't set up here: the answer stands, and nobody is emailed.
