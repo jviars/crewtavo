@@ -239,3 +239,20 @@ export function unwrapOne<R extends DbResult>(result: R, what = "That record"): 
 
 /** Strip characters that break PostgREST filter syntax from free-text search. */
 export const searchTerm = (value: string) => value.replace(/[%,()*\\:."'#]/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * A PostgREST `or` filter that finds what was typed in any of `columns`, kept as typed: quoted, so
+ * "joe@acme.com" and "O'Brien, Jr." keep their dots, commas and apostrophes. A `phone` column also
+ * matches by its digits however either side lays them out ("5551234567" finds "(555) 123-4567"),
+ * like the database's global_search. Null when there's nothing to look for.
+ */
+export function textFilter(typed: string, columns: string[]): string | null {
+  const text = typed.replace(/[%*]/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const quoted = `"%${text.replace(/["\\]/g, "\\$&")}%"`;
+  const filters = columns.map((c) => `${c}.ilike.${quoted}`);
+  // Something that looks like a phone number: its digits, without a leading 1 before ten more.
+  const digits = /^[\d\s().+-]+$/.test(text) ? text.replace(/\D/g, "").replace(/^1(\d{10})$/, "$1") : "";
+  if (columns.includes("phone") && digits.length >= 4) filters.push(`phone.imatch."${digits.split("").join("[^0-9]*")}"`);
+  return filters.join(",");
+}

@@ -8,7 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { statusText } from "@/components/ui/StatusPill";
 import { TagInput } from "@/components/ui/TagInput";
-import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { supabase, textFilter, unwrap } from "@/lib/api";
 import { fieldError } from "@/lib/errors";
 import { addressLine } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -288,14 +288,15 @@ export function ClientPicker({ value, onChange, allowCreate = true }: { value: P
   const queryClient = useQueryClient();
   const [term, setTerm] = useState("");
   const [index, setIndex] = useState(0);
-  const query = useDeferredValue(searchTerm(term));
+  const query = useDeferredValue(term.trim());
   const results = useQuery({
     queryKey: ["clients", company.id, "picker", query],
     enabled: !value,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase().from("clients").select("id, display_name, company_name, email, properties(line1)").eq("company_id", company.id).neq("status", "archived").order("display_name").limit(8);
-      if (query) q = q.or(`display_name.ilike.%${query}%,company_name.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%`);
+      const match = textFilter(query, ["display_name", "company_name", "email", "phone"]);
+      if (match) q = q.or(match);
       return unwrap(await q);
     },
   });

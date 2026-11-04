@@ -1,13 +1,15 @@
 /**
- * ⌘K / Ctrl+K: search every client, address, request, quote, job, invoice, measurement, guide, campaign,
- * automation, price list service, file, piece of equipment and subcontractor, jump to any screen or section of
- * Settings, or start something new. "/" also opens it when you're not typing in a field.
+ * ⌘K / Ctrl+K: search every client (by name, contacts, email, phone or tag), address, request, quote, job,
+ * invoice, measurement, guide, campaign, automation, price list service, file, piece of equipment (the
+ * company's or at a client's property), subcontractor, applicant, chat channel, promo code and app, jump to
+ * any screen or section of Settings, or start something new. "/" also opens it when you're not typing in a field.
  */
 import { kindLabel } from "@crewtavo/core/equipment";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { api, searchTerm, supabase, unwrap } from "@/lib/api";
+import { type AppsData, categoryName, infoFor } from "@/features/apps/catalog";
 import { settingsGroups } from "@/features/settings/sections";
 import { managesSubs } from "@/features/subs/subsData";
 import { afterExit, announceTopLayer } from "@/lib/motion";
@@ -33,6 +35,7 @@ interface Item {
 const KIND_ICON: Record<string, IconName> = {
   client: "clients", property: "pin", request: "requests", quote: "quote", job: "job", invoice: "invoice", equipment: "truck",
   measurement: "area", kb: "book", campaign: "marketing", rule: "bolt", service: "list", sub: "users", file: "file",
+  applicant: "user", channel: "hash", asset: "wrench", promo: "tag",
 };
 const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; title: string }) => string> = {
   client: (r) => `/clients/${r.id}`,
@@ -50,11 +53,20 @@ const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; titl
   sub: (r) => `/subs/${r.id}`,
   // Opens in Drive's viewer.
   file: (r) => `/drive?file=${r.id}`,
+  applicant: (r) => `/applicants/${r.id}`,
+  channel: (r) => `/chat/${r.id}`,
+  // Shown on the client's page, under its property.
+  asset: (r) => `/clients/${r.client_id}`,
+  promo: () => "/marketing?tab=promos",
 };
 const KIND_LABEL: Record<string, string> = {
   client: "Client", property: "Property", request: "Request", quote: "Quote", job: "Job", invoice: "Invoice", equipment: "Equipment",
   measurement: "Measurement", kb: "Guide", campaign: "Campaign", rule: "Automation", service: "Price list", sub: "Subcontractor", file: "File",
+  applicant: "Applicant", channel: "Team chat", asset: "Property equipment", promo: "Promo code",
 };
+const SCREENS = [...NAV_GROUPS.flat(), ...OTHER_SCREENS];
+/** Kinds that live in an app or area someone may not have: shown only to whoever sees that screen. */
+const KIND_SCREEN: Record<string, string> = { applicant: "/applicants", channel: "/chat", promo: "/marketing?tab=promos", campaign: "/marketing" };
 
 export function CommandPalette() {
   const session = useSession();
@@ -76,7 +88,10 @@ export function CommandPalette() {
       setIndex(0);
     }
   }
-  const term = useDeferredValue(searchTerm(query));
+  // The database search takes what was typed as it is ("joe@acme.com", "O'Brien", "(555) 123-4567");
+  // the plain table lookups need it without the characters their filters use.
+  const typed = useDeferredValue(query.trim());
+  const term = searchTerm(typed);
 
   useEffect(() => {
     opener = () => setOpen(true);
@@ -119,15 +134,16 @@ export function CommandPalette() {
   }, [leaving]);
 
   const results = useQuery({
-    queryKey: ["global-search", session.company.id, term],
+    queryKey: ["global-search", session.company.id, typed],
     enabled: open && term.length >= 2,
     placeholderData: keepPreviousData,
     staleTime: 15_000,
     meta: { silent: true },
     queryFn: async () => {
       const [found, gear, subs] = await Promise.all([
-        supabase().rpc("global_search", { p_company_id: session.company.id, p_query: term, p_limit: 5 }),
-        supabase().from("equipment").select("id, name, kind, make, model").eq("company_id", session.company.id).neq("status", "retired").ilike("name", `%${term}%`).limit(3),
+        supabase().rpc("global_search", { p_company_id: session.company.id, p_query: typed, p_limit: 5 }),
+        supabase().from("equipment").select("id, name, kind, make, model").eq("company_id", session.company.id).neq("status", "retired")
+          .or(`name.ilike.%${term}%,make.ilike.%${term}%,model.ilike.%${term}%`).limit(3),
         // Only the office with the Subcontractors area can read subs at all.
         managesSubs(session)
           ? supabase().from("subcontractors").select("id, name, trade").eq("company_id", session.company.id).eq("active", true).ilike("name", `%${term}%`).limit(3)
@@ -140,8 +156,19 @@ export function CommandPalette() {
       const subcontractors: typeof equipment = unwrap(subs).map((s) => ({ kind: "sub", id: s.id, title: s.name, subtitle: s.trade ?? "", status: "", number: null, client_id: null }));
       // Files open in Drive, which is the office's: crews find theirs on their visits.
       const opensFiles = hasRole(session, "admin", "office", "estimator");
-      return [...records.filter((r) => KIND_PATH[r.kind] && (r.kind !== "file" || opensFiles)), ...equipment, ...subcontractors];
+      const opens = (kind: string) => !KIND_SCREEN[kind] || SCREENS.some((n) => n.to === KIND_SCREEN[kind] && navVisible(session, n));
+      return [...records.filter((r) => KIND_PATH[r.kind] && (r.kind !== "file" || opensFiles) && opens(r.kind)), ...equipment, ...subcontractors];
     },
+  });
+
+  // Apps by name ("quickbooks", "google calendar"), for whoever can set them up.
+  const canConnectApps = hasRole(session, "admin") && can(session, "apps");
+  const apps = useQuery({
+    queryKey: ["apps", session.company.id],
+    enabled: open && canConnectApps,
+    queryFn: () => api.get<AppsData>("/apps"),
+    staleTime: 60_000,
+    meta: { silent: true },
   });
 
   const go = (path: string) => {
@@ -158,7 +185,7 @@ export function CommandPalette() {
       ...(isOffice && can(session, "automations") ? [{ id: "new-rule", group: "Create", icon: "bolt" as IconName, title: "New automation", keywords: "add rule reminder follow up", run: () => go("/automations/new") }] : []),
       ...(managesSubs(session) ? [{ id: "new-sub", group: "Create", icon: "users" as IconName, title: "New subcontractor", keywords: "add sub contractor vendor", run: () => go("/subs?new=1") }] : []),
     ];
-    const screens: Item[] = [...NAV_GROUPS.flat(), ...OTHER_SCREENS]
+    const screens: Item[] = SCREENS
       .filter((n) => navVisible(session, n))
       .map((n) => ({ id: `go-${n.to}`, group: "Go to", icon: n.icon, title: n.label, keywords: `${n.to} ${n.keywords ?? ""}`, run: () => go(n.to) }));
     screens.push({ id: "go-settings", group: "Go to", icon: "settings", title: "Settings", keywords: "preferences options setup", run: () => go("/settings") });
@@ -168,6 +195,10 @@ export function CommandPalette() {
         return { id: `go-${to}`, group: "Go to", icon: s.icon, title: s.label, subtitle: "Settings", keywords: `${g.title} ${s.keywords}`, run: () => go(to) };
       }),
     );
+    const appItems: Item[] = (apps.data?.apps ?? []).map((a) => ({
+      id: `app-${a.id}`, group: "Go to", icon: "apps", title: a.name, subtitle: `Apps · ${categoryName(a.category)}`,
+      keywords: `app integration ${a.id.replace(/_/g, " ")} ${infoFor(a).tagline}`, run: () => go(`/apps/${a.id}`),
+    }));
 
     const q = query.trim().toLowerCase();
     if (!q) {
@@ -179,7 +210,7 @@ export function CommandPalette() {
     // Every word has to appear somewhere; a screen or action whose name starts with what was typed
     // comes first, so "measure" or "price" opens the screen before records that mention it.
     const words = q.split(/\s+/);
-    const local = [...actions, ...screens, ...settings].filter((i) => {
+    const local = [...actions, ...screens, ...settings, ...appItems].filter((i) => {
       const text = `${i.title} ${i.subtitle ?? ""} ${i.keywords ?? ""}`.toLowerCase();
       return words.every((w) => text.includes(w));
     });
@@ -194,7 +225,7 @@ export function CommandPalette() {
     }));
     return [...best, ...records, ...local.filter((i) => !best.some((b) => b.id === i.id))];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, results.data, session.company.id, session.role, session.permissions]);
+  }, [query, results.data, apps.data, session.company.id, session.role, session.permissions]);
 
   useEffect(() => setIndex(0), [query]);
   useEffect(() => {
@@ -238,7 +269,7 @@ export function CommandPalette() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Search anything: clients, jobs, measurements, settings… or type a command"
+              placeholder="Search anything: clients, jobs, files, apps, settings… or type a command"
               aria-label="Search"
               role="combobox"
               aria-expanded="true"

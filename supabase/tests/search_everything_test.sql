@@ -63,6 +63,35 @@ select tse.check(tse.found(:'co', 'cleanup', 'campaign') = 1, 'by subject too');
 select tse.check(tse.found(:'co', 'zephyr', 'rule') = 1, 'automation rules are found');
 select tse.check(tse.found(:'co', 'they pay', 'rule') = 1, 'by description too');
 select tse.check(tse.found(:'co', 'zephyr', 'service') = 1, 'price list services are found, hidden ones left out, other companies'' never');
+
+-- What's been added since (20261107000800_search_more.sql).
+update public.clients set phone = '(555) 123-4567', tags = '{VIP}' where id = :'client';
+insert into public.client_contacts (company_id, client_id, name, email, phone) values (:'co', :'client', 'Hal Kinsey', 'hal.k@kin.test', '+1 555 987 6543');
+update public.properties set city = 'Brookfield', region = 'WI', postal_code = '53005' where id = :'prop';
+insert into public.job_applicants (company_id, name, phone, position) values (:'co', 'Zed Applicant', '555-222-3333', 'Zephyr crew lead');
+select public.chat_set_enabled(:'co', true);
+insert into public.chat_channels (company_id, name, topic) values (:'co', 'zephyr-crew', 'Mowing route');
+insert into public.property_assets (company_id, property_id, name, make, model, serial) values (:'co', :'prop', 'Condenser', 'Trane', 'XR14', 'ZX-9001');
+insert into public.promo_codes (company_id, code, kind, value, description) values (:'co', 'ZEPHYR-20', 'percent', 20, 'Spring special');
+
+select tse.check(tse.found(:'co', '5551234567', 'client') = 1, 'a client is found by a phone typed without its punctuation');
+select tse.check(tse.found(:'co', '+1 (555) 123-4567', 'client') = 1, 'or with a country code');
+select tse.check(tse.found(:'co', '555.987.6543', 'client') = 1, 'by another contact''s phone');
+select tse.check(tse.found(:'co', 'hal.k@kin', 'client') = 1, 'their email');
+select tse.check(tse.found(:'co', 'Kinsey', 'client') = 1, 'or their name');
+select tse.check(tse.found(:'co', 'vip', 'client') = 1, 'and by a tag');
+select tse.check(tse.found(:'co', '555', 'client') = 1, 'a few digits still find what has them');
+select tse.check(tse.found(:'co', 'Brookfield', 'property') = 1, 'a property is found by its city');
+select tse.check(tse.found(:'co', '53005', 'property') = 1, 'its ZIP');
+select tse.check(tse.found(:'co', '12 Larkspur Way, Brookfield', 'property') = 1, 'or its whole address');
+select tse.check(tse.found(:'co', 'zephyr', 'applicant') = 1, 'applicants are found by the job they want');
+select tse.check(tse.found(:'co', '(555) 222-3333', 'applicant') = 1, 'or their phone');
+select tse.check(tse.found(:'co', '#general', 'channel') = 1, 'chat channels are found by name');
+select tse.check(tse.found(:'co', 'zephyr crew', 'channel') = 1, 'with spaces for dashes');
+select tse.check(tse.found(:'co', 'mowing', 'channel') = 1, 'or by topic');
+select tse.check(tse.found(:'co', 'trane xr14', 'asset') = 1, 'equipment at a property is found by make and model');
+select tse.check((select client_id from public.global_search(:'co', 'zx-9001', 20) where kind = 'asset') = :'client', 'or serial, with its client');
+select tse.check(tse.found(:'co', 'zephyr-20', 'promo') = 1, 'promo codes are found');
 commit;
 
 begin;
@@ -72,7 +101,11 @@ select tse.check(tse.found(:'co', 'zephyr', 'kb') = 1, 'crews find published pag
 select tse.check(tse.found(:'co', 'Larkspur', 'measurement') = 0, 'and none of what they can''t open: measurements,');
 select tse.check(tse.found(:'co', 'zephyr', 'campaign') = 0, 'campaigns,');
 select tse.check(tse.found(:'co', 'zephyr', 'rule') = 0, 'automation rules,');
-select tse.check(tse.found(:'co', 'zephyr', 'service') = 0, 'or prices');
+select tse.check(tse.found(:'co', 'zephyr', 'service') = 0, 'prices,');
+select tse.check(tse.found(:'co', 'zephyr', 'applicant') = 0, 'applicants,');
+select tse.check(tse.found(:'co', 'zephyr', 'promo') = 0, 'promo codes,');
+select tse.check(tse.found(:'co', 'trane', 'asset') = 0, 'or equipment at properties they don''t visit');
+select tse.check(tse.found(:'co', '#general', 'channel') = 1, 'they find the chat channels they''re in');
 commit;
 
 drop schema tse cascade;

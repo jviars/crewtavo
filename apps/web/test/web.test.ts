@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { companyFeatures } from "../src/lib/api";
+import { companyFeatures, textFilter } from "../src/lib/api";
 import { parseCsv, toCsv } from "../src/lib/csv";
 import { bucketize, bucketizeShifted, bucketsFor, resolveRange } from "../src/features/finance/range";
 import { previousRange } from "@crewtavo/core/reports";
@@ -87,5 +87,29 @@ describe("what's on for a business", () => {
   it("keeps whether a sub can get a sign-in code by email, which is for the whole Crewtavo", () => {
     expect(companyFeatures({ ...off, emailCodes: true }, {}).emailCodes).toBe(true);
     expect(companyFeatures({ ...off, emailCodes: false }, { email_connected: true })).toMatchObject({ emailCodes: false, email: true });
+  });
+});
+
+describe("search boxes' filter", () => {
+  const cols = ["display_name", "email", "phone"];
+
+  it("keeps what was typed, quoted, so dots, commas and apostrophes still match", () => {
+    expect(textFilter(" joe@acme.com ", cols)).toBe('display_name.ilike."%joe@acme.com%",email.ilike."%joe@acme.com%",phone.ilike."%joe@acme.com%"');
+    expect(textFilter("O'Brien, Jr.", ["display_name"])).toBe(`display_name.ilike."%O'Brien, Jr.%"`);
+    expect(textFilter('say "hi" \\o/', ["display_name"])).toBe('display_name.ilike."%say \\"hi\\" \\\\o/%"');
+    expect(textFilter("100%*", ["display_name"])).toBe('display_name.ilike."%100%"');
+    expect(textFilter("  ", cols)).toBeNull();
+  });
+
+  it("finds a phone by its digits however it's laid out", () => {
+    const regex = (typed: string) => new RegExp(/phone\.imatch\."([^"]+)"/.exec(textFilter(typed, cols) ?? "")?.[1] ?? "^$", "i");
+    for (const typed of ["5551234567", "+1 (555) 123-4567", "555.123.4567", "123-4567"]) {
+      expect(regex(typed).test("(555) 123-4567"), typed).toBe(true);
+      expect(regex(typed).test("+1 555 123 4567"), typed).toBe(true);
+    }
+    expect(regex("5551234567").test("(555) 123-4568")).toBe(false);
+    expect(textFilter("555", cols)).not.toContain("imatch");
+    expect(textFilter("5551234567", ["display_name"])).not.toContain("imatch");
+    expect(textFilter("Unit 1234", cols)).not.toContain("imatch");
   });
 });

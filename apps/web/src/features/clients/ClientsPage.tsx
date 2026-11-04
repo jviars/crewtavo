@@ -14,7 +14,7 @@ import { archiveWithUndo, SelectAllCell, SelectCell, SelectionBar, useSelection 
 import { ListPageSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
-import { api, searchTerm, supabase, unwrap } from "@/lib/api";
+import { api, supabase, textFilter, unwrap } from "@/lib/api";
 import { inChunks, reportBulk } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -53,7 +53,7 @@ export function ClientsPage() {
   const [inviting, setInviting] = useState(false);
   const [tagging, setTagging] = useState<"add" | "remove" | null>(null);
   const queryClient = useQueryClient();
-  const term = useDeferredValue(searchTerm(search));
+  const term = useDeferredValue(search.trim());
   const creating = params.get("new") === "1";
   const setCreating = (on: boolean) => setParams(on ? { new: "1" } : {}, { replace: true });
   const canEdit = hasRole(session, "admin", "office", "estimator");
@@ -96,7 +96,8 @@ export function ClientsPage() {
       // or a bank account being checked). An anti-join: a removed card, or one saved but not agreed to, counts.
       if (filter === "no_card") q = q.eq("status", "active").is("card.revoked_at", null).in("card.method.status", ["active", "pending"]).is("card", null);
       else q = filter === "all" ? q.neq("status", "archived") : q.eq("status", filter);
-      if (term) q = q.or(`display_name.ilike.%${term}%,company_name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%`);
+      const match = textFilter(term, ["display_name", "company_name", "email", "phone"]);
+      if (match) q = q.or(match);
       if (tag) q = q.contains("tags", [tag]);
       const { data, error, count } = await q;
       return { rows: unwrap({ data, error }), total: count ?? 0 };

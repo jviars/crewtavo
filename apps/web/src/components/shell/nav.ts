@@ -65,6 +65,11 @@ export const OTHER_SCREENS: NavItem[] = [
   { to: "/marketing?tab=promos", label: "Promo codes", icon: "tag", roles: ["admin", "office"], perm: "marketing", feature: "marketing", keywords: "marketing promo promos codes coupons discounts" },
   // Every file deleted in Crewtavo waits here, for the whole team, whether or not Drive is installed.
   { to: "/drive/trash", label: "Trash", icon: "trash", keywords: "deleted files removed photos restore undo undelete recycle bin get back" },
+  { to: "/clients/duplicates", label: "Possible duplicates", icon: "users", roles: ["admin", "office"], perm: "invoices", keywords: "duplicate clients merge combine same email phone address" },
+  { to: "/subs/1099", label: "Year-end totals", icon: "dollar", roles: ["admin", "office"], perm: "subs", keywords: "1099 nec subcontractors subs paid this year tax report" },
+  { to: "/subs/workers-comp", label: "Workers' comp audit", icon: "clipboard", roles: ["admin", "office"], perm: "subs", keywords: "workers comp compensation audit subcontractors subs insurance report csv" },
+  { to: "/roofing/catalog", label: "Roofing catalog", icon: "truck", roles: ["admin", "office", "estimator"], perm: "sales", feature: "roofing_app", keywords: "abc supply materials catalog shingles products prices branch" },
+  { to: "/chat/settings", label: "Chat settings", icon: "chat", roles: ["admin"], feature: "team_chat", keywords: "team chat channels roles who can see post manage" },
 ];
 
 export const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: "settings", also: ["/automations", "/booking"] };

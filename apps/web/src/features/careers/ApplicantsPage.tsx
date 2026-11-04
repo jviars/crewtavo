@@ -15,7 +15,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { supabase, textFilter, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { useStatusCounts } from "@/lib/listing";
 import { useListAnimation } from "@/lib/motion";
@@ -48,7 +48,7 @@ function ApplicantList() {
   const [filter, setFilter] = useState<FilterKey>(() => (FILTERS.find((x) => x.key === params.get("status"))?.key as FilterKey | undefined) ?? "open");
   const [position, setPosition] = useState("");
   const [search, setSearch] = useState("");
-  const term = useDeferredValue(searchTerm(search));
+  const term = useDeferredValue(search.trim());
   const adding = params.get("new") === "1";
   const setAdding = (on: boolean) =>
     setParams((p) => {
@@ -83,7 +83,8 @@ function ApplicantList() {
         .limit(300);
       if (statuses) q = q.in("status", [...statuses]);
       if (position) q = q.eq("position", position);
-      if (term) q = q.or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,position.ilike.%${term}%`);
+      const match = textFilter(term, ["name", "email", "phone", "position"]);
+      if (match) q = q.or(match);
       return unwrap(await q) as unknown as Row[];
     },
   });
