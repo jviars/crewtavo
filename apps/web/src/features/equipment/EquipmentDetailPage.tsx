@@ -1,5 +1,5 @@
-/** One piece of equipment: what's due, its history, and its details. */
-import { describeInterval, dueSummary, dueTone, formatMeter, kindLabel } from "@crewtavo/core/equipment";
+/** One piece of equipment: what's due, its tags and inspection, its photos, its history, and its details. */
+import { describeInterval, documentLabel, dueSummary, dueTone, expirySummary, formatMeter, kindLabel } from "@crewtavo/core/equipment";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -18,7 +18,8 @@ import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
-import { EquipmentDialog, LogDialog, PlanDialog, type LogKind } from "./EquipmentDialogs";
+import { EquipmentDialog, LogDialog, PaperDialog, PlanDialog, RenewDialog, type LogKind } from "./EquipmentDialogs";
+import { EquipmentPhotos, useEquipmentPhotos } from "./EquipmentPhotos";
 import {
   EQUIPMENT_FIELDS,
   managesEquipment,
@@ -27,9 +28,11 @@ import {
   STATUS_LABELS,
   STATUS_TONES,
   useEquipmentDue,
+  usePaperwork,
   type DueRow,
   type Equipment,
   type EquipmentLog,
+  type PaperRow,
 } from "./equipmentData";
 
 const LOG_ICON: Record<EquipmentLog["kind"], IconName> = { service: "check", repair: "wrench", reading: "gauge", note: "note" };
@@ -43,7 +46,7 @@ export function EquipmentDetailPage() {
   const queryClient = useQueryClient();
   const canManage = managesEquipment(session);
   const showCosts = seesEquipmentCosts(session);
-  const [dialog, setDialog] = useState<null | "edit" | { plan: DueRow | null } | { log: LogKind; planId?: string | null }>(null);
+  const [dialog, setDialog] = useState<null | "edit" | { plan: DueRow | null } | { log: LogKind; planId?: string | null } | { paper: PaperRow | null } | { renew: PaperRow }>(null);
   const [showAll, setShowAll] = useState(false);
   const plansRef = useListAnimation<HTMLDivElement>();
   const historyRef = useListAnimation<HTMLDivElement>();
@@ -57,6 +60,8 @@ export function EquipmentDetailPage() {
     },
   });
   const plans = useEquipmentDue(session.company.id, { equipmentId: id });
+  const papers = usePaperwork(session.company.id, { equipmentId: id });
+  const photos = useEquipmentPhotos(id);
   // Paused schedules and retired equipment aren't in equipment_due, so the full list comes from the table.
   const allPlans = useQuery({
     queryKey: ["equipment", session.company.id, "plans", id],
@@ -120,6 +125,11 @@ export function EquipmentDetailPage() {
     mutationFn: async ({ planId, active }: { planId: string; active: boolean }) => unwrap(await supabase().from("equipment_plans").update({ active }).eq("id", planId)),
     onSuccess: () => refreshEquipment(queryClient),
   });
+  const removePaper = useMutation({
+    meta: { success: "Removed" },
+    mutationFn: async (paperId: string) => unwrap(await supabase().from("equipment_documents").delete().eq("id", paperId)),
+    onSuccess: () => refreshEquipment(queryClient),
+  });
   const removeLog = useMutation({
     meta: { inline: true },
     mutationFn: async (logId: string) => unwrap(await supabase().from("equipment_logs").delete().eq("id", logId)),
@@ -151,6 +161,11 @@ export function EquipmentDetailPage() {
   const history = logs.data ?? [];
   const shown = showAll ? history : history.slice(0, 15);
   const retired = e.status === "retired";
+  // The main photo, or else the first one added.
+  const cover = e.photo_url ?? photos.photos.find((p) => p.url)?.url ?? null;
+  const paperRows = papers.data ?? [];
+  // Trucks and trailers have tags and stickers; anything else shows the section once it has paperwork.
+  const showPapers = !retired && (e.kind === "truck" || e.kind === "trailer" || paperRows.length > 0);
   const hasHistory = (planId: string) => history.some((l) => l.plan_id === planId && l.kind === "service");
   const details: Array<[string, string | null]> = [
     ["Type", kindLabel(e.kind)],
@@ -177,6 +192,7 @@ export function EquipmentDetailPage() {
                 { separator: true, hidden: !canManage },
                 { label: "Edit details", icon: "edit", hidden: !canManage, onSelect: () => setDialog("edit") },
                 { label: "Add maintenance schedule", icon: "plus", hidden: !canManage || retired, onSelect: () => setDialog({ plan: null }) },
+                { label: "Add tags or inspection", icon: "plus", hidden: !canManage || retired, onSelect: () => setDialog({ paper: null }) },
                 { label: "Mark in the shop", icon: "alert", hidden: !canManage || e.status !== "active", onSelect: () => update.mutate({ status: "in_shop" }) },
                 { label: "Back in service", icon: "check", hidden: !canManage || e.status === "active", onSelect: () => update.mutate({ status: "active" }) },
                 {
@@ -273,6 +289,46 @@ export function EquipmentDetailPage() {
             </div>
           </section>
 
+          {showPapers && (
+            <section className="stack">
+              <div className="section-head">
+                <h2 className="section-title">Tags and inspection</h2>
+                {canManage && <Button size="sm" icon="plus" onClick={() => setDialog({ paper: null })}>Add</Button>}
+              </div>
+              <div className="card">
+                {papers.isPending && <div className="card-row"><span className="grow stack-sm"><Skeleton width="40%" /><Skeleton width="30%" height={10} /></span><Skeleton width={80} height={24} radius={12} /></div>}
+                {papers.data && paperRows.length === 0 && (
+                  <EmptyState inline title="No tags or inspection tracked yet">Registration, inspection sticker, insurance: anything that runs out on a date. You hear 30 days before.</EmptyState>
+                )}
+                {paperRows.map((p) => (
+                  <div key={p.id} className="card-row">
+                    <span className="grow" style={{ minWidth: 0 }}>
+                      <strong>{documentLabel(p.kind, p.name)}</strong>
+                      <span className="muted small" style={{ display: "block" }}>
+                        {p.expires_on ? `${p.state === "overdue" ? "Was good through" : "Good through"} ${formatDate(p.expires_on)}` : "Permanent, doesn't expire"}
+                      </span>
+                      {p.notes && <span className="muted small ellipsis" style={{ display: "block" }}>{p.notes}</span>}
+                    </span>
+                    {p.expires_on && <StatusPill label={expirySummary(p.days_left, p.expires_on)} tone={dueTone(p.state)} />}
+                    {canManage && p.expires_on && <Button size="sm" icon="check" onClick={() => setDialog({ renew: p })}>Renew</Button>}
+                    {canManage && (
+                      <Menu
+                        triggerClassName="btn btn-sm btn-ghost btn-icon"
+                        label={`${documentLabel(p.kind, p.name)} actions`}
+                        items={[
+                          { label: "Edit", icon: "edit", onSelect: () => setDialog({ paper: p }) },
+                          { label: "Remove", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: `Remove "${documentLabel(p.kind, p.name)}"?`, body: "Renewals stay in the history.", confirmLabel: "Remove", danger: true })) && removePaper.mutate(p.id) },
+                        ]}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <EquipmentPhotos photos={photos} name={e.name} />
+
           <section className="stack">
             <div className="section-head">
               <h2 className="section-title">History</h2>
@@ -317,9 +373,9 @@ export function EquipmentDetailPage() {
         </div>
 
         <aside className="narrow stack">
-          {e.photo_url && (
-            <a href={e.photo_url} target="_blank" rel="noreferrer" className="card" style={{ overflow: "hidden", display: "block" }}>
-              <img src={e.photo_url} alt={e.name} style={{ width: "100%", aspectRatio: "4 / 3", objectFit: "cover", display: "block" }} />
+          {cover && (
+            <a href={cover} target="_blank" rel="noreferrer" className="card" style={{ overflow: "hidden", display: "block" }}>
+              <img src={cover} alt={e.name} style={{ width: "100%", aspectRatio: "4 / 3", objectFit: "cover", display: "block" }} />
             </a>
           )}
           <div className="card card-pad stack-sm">
@@ -349,6 +405,8 @@ export function EquipmentDetailPage() {
 
       {dialog === "edit" && <EquipmentDialog equipment={e} onClose={() => setDialog(null)} onSaved={() => undefined} />}
       {dialog && typeof dialog === "object" && "plan" in dialog && <PlanDialog equipment={e} plan={dialog.plan} hasHistory={dialog.plan ? hasHistory(dialog.plan.plan_id) : false} onClose={() => setDialog(null)} />}
+      {dialog && typeof dialog === "object" && "paper" in dialog && <PaperDialog equipment={e} paper={dialog.paper} taken={paperRows.map((p) => p.kind)} onClose={() => setDialog(null)} />}
+      {dialog && typeof dialog === "object" && "renew" in dialog && <RenewDialog equipment={e} paper={dialog.renew} onClose={() => setDialog(null)} />}
       {dialog && typeof dialog === "object" && "log" in dialog && <LogDialog equipment={e} plans={planOptions} kind={dialog.log} planId={dialog.planId} onClose={() => setDialog(null)} />}
     </>
   );

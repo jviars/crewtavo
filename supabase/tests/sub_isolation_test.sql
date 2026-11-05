@@ -106,6 +106,10 @@ insert into public.equipment (company_id, name, kind) values (:'co', 'Dump trail
 insert into public.equipment (company_id, name, kind) values (:'co', 'Shingle lift', 'other') returning id as e2 \gset
 insert into public.equipment_plans (company_id, equipment_id, name, every_count, every_unit) values (:'co', :'e1', 'Grease the axle', 3, 'month');
 insert into public.equipment_logs (company_id, equipment_id, kind, done_on) values (:'co', :'e1', 'repair', current_date);
+-- Its tags and a photo (20261109000100_equipment_paperwork.sql, 20261109000200_equipment_photos.sql): the team's, never a sub's,
+-- even on a machine booked on their visit.
+insert into public.equipment_documents (company_id, equipment_id, kind, expires_on) values (:'co', :'e1', 'registration', current_date + 90);
+insert into public.equipment_photos (company_id, equipment_id, path) values (:'co', :'e1', :'co' || '/equipment/' || :'e1' || '/side.jpg');
 insert into public.visits (company_id, job_id, property_id, title, scheduled_on) values (:'co', :'j1', :'p1', 'Tear off and shingle', private.company_today(:'co')) returning id as v1 \gset
 insert into public.visits (company_id, job_id, property_id, title, scheduled_on) values (:'co', :'j1', :'p1', 'Clean up', private.company_today(:'co') + 1) returning id as v2 \gset
 insert into public.visits (company_id, request_id, property_id, title, kind, scheduled_on) values (:'co', :'r1', :'p1', 'Look at the leak', 'assessment', private.company_today(:'co')) returning id as va \gset
@@ -564,7 +568,10 @@ select t1070.check(array(
   'my_sub_pay_totals(uuid)', 'promo_code_jobs(uuid, boolean)', 'promo_code_usage(uuid)', 'put_quote_package(uuid, uuid, jsonb, boolean)',
   'record_photos(uuid, uuid, uuid)', 'referral_auto_apply(uuid, boolean)', 'referral_credits_for(uuid, uuid)', 'referral_give_credit(uuid)', 'referral_no_reward(uuid)',
   'referral_set_given(uuid)', 'referral_stats(uuid, timestamp with time zone, timestamp with time zone)', 'remove_promo_code(text, uuid)',
-  'remove_quote_option(uuid, uuid)', 'remove_referral_credit(uuid)', 'request_manual_charges(uuid, uuid[], numeric[])', 'review_stats(uuid)',
+  'remove_quote_option(uuid, uuid)', 'remove_referral_credit(uuid)',
+  -- Renewing tags or an inspection sticker: runs as the caller, and only equipment managers can change them, never a sub.
+  'renew_equipment_document(uuid, date, text, uuid)',
+  'request_manual_charges(uuid, uuid[], numeric[])', 'review_stats(uuid)',
   'search_sops(uuid, text, integer, boolean)', 'send_sub_offer(uuid, timestamp with time zone)',
   -- Runs as the caller: no rule lets a sub link a checklist to an item.
   'set_checklist_services(uuid, uuid[])', 'set_job_discount_billing(uuid, uuid, boolean)',

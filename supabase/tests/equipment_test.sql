@@ -111,7 +111,7 @@ select t7.check(:'sent'::int = 1, 'an overdue schedule sends one alert');
 select t7.check((select count(*) from public.notifications where kind = 'equipment' and user_id = 'a7000000-0000-0000-0000-000000000001') = 1, 'the owner is told');
 select t7.check((select count(*) from public.notifications where kind = 'equipment' and user_id = 'a7000000-0000-0000-0000-000000000003') = 1, 'so is the lead of the crew that has it');
 select t7.check((select count(*) from public.notifications where kind = 'equipment' and user_id in ('a7000000-0000-0000-0000-000000000002', 'a7000000-0000-0000-0000-000000000004')) = 0, 'but not people who don''t manage equipment');
-select t7.check((select body from public.notifications where kind = 'equipment' limit 1) = 'Due at 150 hours (now 160)', 'the alert says when it was due');
+select t7.check((select body from public.notifications where kind = 'equipment' and company_id = :'co' limit 1) = 'Due at 150 hours (now 160)', 'the alert says when it was due');
 select public.emit_equipment_alerts() as again \gset
 select t7.check(:'again'::int = 0, 'running again sends nothing new');
 set role authenticated;

@@ -211,6 +211,7 @@ export const ASSISTANT_TOOL_LABELS: Record<string, string> = {
   // Setup
   search_sops: "Searched the knowledge base",
   equipment_maintenance: "Checked equipment maintenance",
+  equipment_paperwork: "Checked tags and inspection",
   get_company_settings: "Looked at company settings",
   update_company_settings: "Changed company settings",
   list_custom_fields: "Looked at custom fields",

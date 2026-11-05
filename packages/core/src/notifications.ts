@@ -6,7 +6,7 @@ export const NOTIFICATION_TOPICS = [
   { key: "schedule", label: "My schedule changes", hint: "Added to or taken off a visit, moved or cancelled" },
   { key: "client", label: "Messages from clients", hint: "Texts and Client Hub messages" },
   { key: "time", label: "Clock reminders", hint: "When a clock has been running too long" },
-  { key: "equipment", label: "Equipment maintenance", hint: "Service coming due or overdue" },
+  { key: "equipment", label: "Equipment maintenance", hint: "Service coming due or overdue, tags and inspection stickers running out" },
   // People with the subs area only (packages/core/src/roles.ts).
   { key: "subs", label: "Subcontractors", hint: "Insurance running out, paperwork a sub sends in, and answers to job offers" },
   // Owners, admins and office staff with the marketing area, while Google Business Profile brings

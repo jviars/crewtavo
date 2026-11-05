@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   EQUIPMENT_KINDS,
   PLAN_PRESETS,
+  addMonths,
+  endOfMonthAfter,
+  expirySummary,
+  presetInterval,
+  presetsFor,
+  renewalChoices,
   defaultMeter,
   describeInterval,
   dueProgress,
@@ -768,5 +774,54 @@ describe("equipment", () => {
     expect(defaultMeter("nonsense")).toBe("none");
     expect(PLAN_PRESETS.mower.length).toBeGreaterThan(0);
     expect(EQUIPMENT_KINDS.every((k) => Array.isArray(PLAN_PRESETS[k.key]))).toBe(true);
+  });
+
+  it("fits starter schedules to whichever meter the machine tracks", () => {
+    const oil = PLAN_PRESETS.truck[0];
+    expect(presetInterval(oil, "miles")).toEqual({ every_meter: 5000, every_count: 6, every_unit: "month" });
+    expect(presetInterval(oil, "hours")).toEqual({ every_meter: 250, every_count: 6, every_unit: "month" });
+    expect(presetInterval(oil, "none")).toEqual({ every_meter: null, every_count: 6, every_unit: "month" });
+    // Hours only, on a machine without a meter: once a year.
+    expect(presetInterval({ name: "Sharpen blades", every_hours: 25 }, "none")).toEqual({ every_meter: null, every_count: 1, every_unit: "year" });
+    // Anything on hours without hour-based schedules of its own starts from small-engine upkeep.
+    expect(presetsFor("tool", "hours").every((p) => p.every_hours)).toBe(true);
+    expect(presetsFor("other", "hours").length).toBeGreaterThan(0);
+    expect(presetsFor("tool", "none")).toBe(PLAN_PRESETS.tool);
+    expect(presetsFor("mower", "hours")).toBe(PLAN_PRESETS.mower);
+    expect(presetsFor("truck", "hours")).toBe(PLAN_PRESETS.truck);
+  });
+
+  it("works out paperwork dates", () => {
+    expect(endOfMonthAfter("2026-11-05", 12)).toBe("2027-11-30");
+    expect(endOfMonthAfter("2027-02-10", 12)).toBe("2028-02-29");
+    expect(addMonths("2026-05-31", 24)).toBe("2028-05-31");
+    expect(addMonths("2027-02-28", 12)).toBe("2028-02-29"); // a month's end stays one
+    expect(addMonths("2026-03-15", 6)).toBe("2026-09-15");
+    expect(addMonths("2026-11-05", -12)).toBe("2025-11-05");
+    expect(addMonths("2026-01-31", 1)).toBe("2026-02-28");
+  });
+
+  it("suggests renewal dates the way registration and inspection count", () => {
+    const today = "2026-11-05";
+    // Renewed early, tags count from the old date: nothing lost.
+    expect(renewalChoices("registration", "2027-01-31", today).map((c) => c.date)).toEqual(["2028-01-31", "2029-01-31", "2030-01-31"]);
+    // Up to a year late keeps the month; longer, or never registered, starts from this month.
+    expect(renewalChoices("registration", "2026-06-30", today)[0].date).toBe("2027-06-30");
+    expect(renewalChoices("registration", "2025-06-30", today)[0].date).toBe("2027-11-30");
+    expect(renewalChoices("registration", null, today)[1]).toEqual({ label: "2 years", date: "2028-11-30" });
+    // An inspection runs to the end of the month a year from when it's done, whatever the old sticker said.
+    expect(renewalChoices("inspection", "2027-03-31", today)).toEqual([{ label: "A year from this month", date: "2027-11-30" }]);
+    expect(renewalChoices("emissions", null, today)[0].date).toBe("2028-11-30");
+    expect(renewalChoices("insurance", "2026-12-14", today).map((c) => c.date)).toEqual(["2027-06-14", "2027-12-14"]);
+  });
+
+  it("says when paperwork runs out", () => {
+    expect(expirySummary(-3, "2026-11-02")).toBe("Ran out 3 days ago");
+    expect(expirySummary(-1, "2026-11-04")).toBe("Ran out yesterday");
+    expect(expirySummary(0, "2026-11-05")).toBe("Runs out today");
+    expect(expirySummary(1, "2026-11-06")).toBe("Runs out tomorrow");
+    expect(expirySummary(12, "2026-11-17")).toBe("Runs out in 12 days");
+    expect(expirySummary(200, "2027-05-24")).toBe("Current");
+    expect(expirySummary(null, null)).toBe("Doesn't expire");
   });
 });

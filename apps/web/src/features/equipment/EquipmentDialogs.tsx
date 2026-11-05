@@ -1,11 +1,15 @@
-/** Adding and editing equipment and maintenance schedules, and logging work done on it. */
+/** Adding and editing equipment, its maintenance schedules and paperwork, and logging work done on it. */
 import {
+  DOCUMENT_KINDS,
   EQUIPMENT_KINDS,
-  PLAN_PRESETS,
   defaultMeter,
   describeInterval,
+  documentLabel,
   formatMeter,
   meterUnit,
+  presetInterval,
+  presetsFor,
+  renewalChoices,
   type EquipmentKind,
   type IntervalUnit,
   type Meter,
@@ -20,9 +24,9 @@ import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
 import { uploadFile } from "@/lib/files";
-import { todayIn } from "@/lib/format";
+import { formatDate, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { refreshEquipment, seesEquipmentCosts, type DueRow, type Equipment } from "./equipmentData";
+import { refreshEquipment, seesEquipmentCosts, type DueRow, type Equipment, type PaperRow } from "./equipmentData";
 
 /** Digits and at most one decimal point. */
 const decimal = (value: string) => value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
@@ -64,18 +68,27 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
     purchased_on: equipment?.purchased_on ?? "",
     purchase_price: "",
     notes: equipment?.notes ?? "",
+    registration_on: "",
+    inspection_on: "",
   });
   const [meterTouched, setMeterTouched] = useState(Boolean(equipment));
-  const [presets, setPresets] = useState<string[]>(() => PLAN_PRESETS[(equipment?.kind ?? "mower") as EquipmentKind].map((p) => p.name));
+  const [presets, setPresets] = useState<string[]>(() => presetsFor(equipment?.kind ?? "mower", equipment?.meter ?? "hours").map((p) => p.name));
   const [photo, setPhoto] = useState<File | null>(null);
   const priceValue = f.purchase_price !== "" ? f.purchase_price : price.data?.purchase_price != null ? String(price.data.purchase_price) : "";
   const set = (key: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [key]: e.target.value });
   const year = toNumber(f.year);
   const yearOk = year == null || (Number.isInteger(year) && year >= 1900 && year <= 2100);
 
+  const vehicle = f.kind === "truck" || f.kind === "trailer";
   const pickKind = (kind: EquipmentKind) => {
-    setF((prev) => ({ ...prev, kind, meter: meterTouched ? prev.meter : defaultMeter(kind) }));
-    setPresets(PLAN_PRESETS[kind].map((p) => p.name));
+    const meter = meterTouched ? f.meter : defaultMeter(kind);
+    setF((prev) => ({ ...prev, kind, meter }));
+    setPresets(presetsFor(kind, meter).map((p) => p.name));
+  };
+  const pickMeter = (meter: Meter) => {
+    setMeterTouched(true);
+    setF((prev) => ({ ...prev, meter }));
+    if (!equipment) setPresets(presetsFor(f.kind, meter).map((p) => p.name));
   };
 
   const save = useMutation({
@@ -107,10 +120,14 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
         unwrap(await supabase().from("equipment").update({ ...row, ...(readingChanged ? { meter_read_on: reading == null ? null : todayIn(session.company.timezone) } : {}) }).eq("id", equipment.id));
       } else {
         id = unwrap(await supabase().from("equipment").insert({ ...row, company_id: session.company.id }).select("id").single()).id;
-        const chosen = PLAN_PRESETS[f.kind].filter((p) => presets.includes(p.name));
+        const chosen = presetsFor(f.kind, f.meter).filter((p) => presets.includes(p.name));
         if (chosen.length) {
           unwrap(await supabase().from("equipment_plans").insert(chosen.map((p) => planRow(session.company.id, id!, p, f.meter))));
         }
+        const papers = vehicle
+          ? ([["registration", f.registration_on], ["inspection", f.inspection_on]] as const).filter(([, on]) => on).map(([kind, expires_on]) => ({ company_id: session.company.id, equipment_id: id!, kind, expires_on }))
+          : [];
+        if (papers.length) unwrap(await supabase().from("equipment_documents").insert(papers));
       }
       if (showCosts && f.purchase_price !== "") {
         unwrap(await supabase().from("equipment_financials").upsert({ equipment_id: id!, company_id: session.company.id, purchase_price: toNumber(f.purchase_price) }));
@@ -123,7 +140,14 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
       onSaved(id);
     },
   });
-  const suggestions = equipment ? [] : PLAN_PRESETS[f.kind];
+  const suggestions = equipment ? [] : presetsFor(f.kind, f.meter);
+  // Schedules keep their numbers when the meter changes, so say what that does to them.
+  const meterHint =
+    equipment && f.meter !== equipment.meter && equipment.meter !== "none"
+      ? f.meter === "none"
+        ? `Schedules counted only in ${equipment.meter} stop coming due.`
+        : `Schedules set in ${equipment.meter} count ${f.meter} instead. Check their numbers.`
+      : undefined;
 
   return (
     <Dialog open onClose={onClose} title={equipment ? "Edit equipment" : "Add equipment"} size="lg">
@@ -137,8 +161,8 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
               {EQUIPMENT_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
             </select>
           </Field>
-          <Field label="Tracks">
-            <select className="select" value={f.meter} onChange={(e) => { setMeterTouched(true); setF({ ...f, meter: e.target.value as Meter }); }}>
+          <Field label="Tracks" hint={meterHint}>
+            <select className="select" value={f.meter} onChange={(e) => pickMeter(e.target.value as Meter)}>
               <option value="hours">Engine hours</option>
               <option value="miles">Miles</option>
               <option value="none">Dates only</option>
@@ -175,10 +199,24 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
             {suggestions.map((p) => (
               <label key={p.name} className="checkbox">
                 <input type="checkbox" checked={presets.includes(p.name)} onChange={(e) => setPresets(e.target.checked ? [...presets, p.name] : presets.filter((x) => x !== p.name))} />
-                <span>{p.name} <span className="muted">· {describeInterval(p, f.meter)}</span></span>
+                <span>{p.name} <span className="muted">· {describeInterval(presetInterval(p, f.meter), f.meter)}</span></span>
               </label>
             ))}
             <span className="muted small">Counted from today{f.meter !== "none" && f.meter_reading ? ` at ${formatMeter(Number(f.meter_reading), f.meter)}` : ""}. Change the intervals to match your manual any time.</span>
+          </fieldset>
+        )}
+
+        {!equipment && vehicle && (
+          <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend className="strong small" style={{ marginBottom: 6 }}>Tags and inspection</legend>
+            <div className="form-grid">
+              <Field label="Tags good through" optional hint="The month on the decal runs through its last day.">
+                <input className="input" type="date" value={f.registration_on} onChange={set("registration_on")} />
+              </Field>
+              <Field label="Inspection sticker good through" optional hint="Leave either empty to add it later.">
+                <input className="input" type="date" value={f.inspection_on} onChange={set("inspection_on")} />
+              </Field>
+            </div>
           </fieldset>
         )}
 
@@ -200,7 +238,7 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
           <Field label="Notes" optional hint="Oil type, filter part numbers, where the keys are."><textarea className="textarea" value={f.notes} onChange={set("notes")} maxLength={4000} rows={3} /></Field>
           <label className="dropzone" style={{ padding: 14 }}>
             <Icon name="camera" size={20} />
-            <span className="small strong">{photo ? photo.name : equipment?.photo_path ? "Replace the photo" : "Add a photo"}</span>
+            <span className="small strong">{photo ? photo.name : equipment?.photo_path ? "Replace the main photo" : "Add a main photo"}</span>
             <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} />
           </label>
         </details>
@@ -219,11 +257,7 @@ const planRow = (companyId: string, equipmentId: string, p: PlanPreset, meter: M
   company_id: companyId,
   equipment_id: equipmentId,
   name: p.name,
-  every_meter: meter === "none" ? null : p.every_meter ?? null,
-  every_count: p.every_count ?? null,
-  every_unit: p.every_count ? p.every_unit ?? "month" : null,
-  // Hours-only schedules on a machine without a meter fall back to once a year.
-  ...(meter === "none" && !p.every_count ? { every_count: 1, every_unit: "year" } : {}),
+  ...presetInterval(p, meter),
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -246,9 +280,11 @@ export function PlanDialog({ equipment, plan, hasHistory, onClose }: { equipment
   const everyMeter = usesMeter ? toNumber(f.every_meter) : null;
   const everyCount = toNumber(f.every_count);
   const valid = Boolean(f.name.trim()) && ((everyMeter ?? 0) > 0 || (everyCount ?? 0) >= 1);
-  const presets = PLAN_PRESETS[equipment.kind as EquipmentKind] ?? [];
-  const usePreset = (p: PlanPreset) =>
-    setF({ ...f, name: p.name, every_meter: usesMeter && p.every_meter ? String(p.every_meter) : "", every_count: p.every_count ? String(p.every_count) : usesMeter ? "" : "1", every_unit: (p.every_unit as IntervalUnit) ?? (usesMeter ? "month" : "year") });
+  const presets = presetsFor(equipment.kind, equipment.meter);
+  const usePreset = (p: PlanPreset) => {
+    const every = presetInterval(p, equipment.meter);
+    setF({ ...f, name: p.name, every_meter: every.every_meter ? String(every.every_meter) : "", every_count: every.every_count ? String(every.every_count) : "", every_unit: (every.every_unit as IntervalUnit | null) ?? f.every_unit });
+  };
 
   const save = useMutation({
     meta: { inline: true, success: plan ? "Schedule saved" : "Schedule added" },
@@ -328,6 +364,59 @@ export function PlanDialog({ equipment, plan, hasHistory, onClose }: { equipment
 // Logging work
 // ---------------------------------------------------------------------------------------------
 
+/** What some upkeep cost, as typed: the amount, where, a receipt, and whether to pay someone back. */
+interface Cost {
+  amount: string;
+  vendor: string;
+  reimbursable: boolean;
+  receipt: File | null;
+}
+const NO_COST: Cost = { amount: "", vendor: "", reimbursable: false, receipt: null };
+
+/** "Add what it cost", folded away until it's wanted. */
+function CostFields({ cost, onChange }: { cost: Cost; onChange: (cost: Cost) => void }) {
+  const amount = toNumber(cost.amount);
+  return (
+    <details className="more-options">
+      <summary>Add what it cost</summary>
+      <div className="form-grid">
+        <Field label="Cost" error={amount == null || amount > 0 ? null : "Enter an amount like 86.40."}><span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={cost.amount} onChange={(e) => onChange({ ...cost, amount: decimal(e.target.value) })} /></span></Field>
+        <Field label="Where" optional><input className="input" value={cost.vendor} onChange={(e) => onChange({ ...cost, vendor: e.target.value })} maxLength={120} placeholder="Dealer, parts store" /></Field>
+      </div>
+      <label className="dropzone" style={{ padding: 12 }}>
+        <Icon name="camera" size={20} />
+        <span className="small strong">{cost.receipt ? cost.receipt.name : "Add a receipt photo"}</span>
+        <input type="file" accept="image/*,application/pdf" capture="environment" className="sr-only" onChange={(e) => onChange({ ...cost, receipt: e.target.files?.[0] ?? null })} />
+      </label>
+      <label className="checkbox"><input type="checkbox" checked={cost.reimbursable} onChange={(e) => onChange({ ...cost, reimbursable: e.target.checked })} /> I paid with my own money (reimburse me)</label>
+    </details>
+  );
+}
+
+/** Records a cost as an equipment upkeep expense (with its receipt); its id, or null when there's no amount. */
+async function saveCost(companyId: string, equipment: Pick<Equipment, "id" | "name">, cost: Cost, what: string, on: string): Promise<string | null> {
+  const amount = toNumber(cost.amount);
+  if (amount == null) return null;
+  const receipt_path = cost.receipt ? await uploadFile(companyId, "receipts", cost.receipt) : null;
+  return unwrap(
+    await supabase()
+      .from("expenses")
+      .insert({
+        company_id: companyId,
+        equipment_id: equipment.id,
+        category: "Equipment upkeep",
+        description: `${what || "Upkeep"}: ${equipment.name}`.slice(0, 300),
+        vendor: cost.vendor.trim() || null,
+        amount: Math.round(amount * 100) / 100,
+        incurred_on: on,
+        reimbursable: cost.reimbursable,
+        receipt_path,
+      })
+      .select("id")
+      .single(),
+  ).id;
+}
+
 export type LogKind = "service" | "repair" | "reading" | "note";
 const LOG_TITLES: Record<LogKind, string> = { service: "Log maintenance", repair: "Log a repair", reading: "Update the reading", note: "Add a note" };
 
@@ -356,13 +445,10 @@ export function LogDialog({
     done_on: todayIn(session.company.timezone),
     meter_reading: initialKind === "reading" || current == null ? "" : String(current),
     notes: "",
-    amount: "",
-    vendor: "",
-    reimbursable: false,
   });
-  const [receipt, setReceipt] = useState<File | null>(null);
+  const [cost, setCost] = useState<Cost>(NO_COST);
   const reading = usesMeter ? toNumber(f.meter_reading) : null;
-  const amount = toNumber(f.amount);
+  const amount = toNumber(cost.amount);
   const plan = plans.find((p) => p.plan_id === f.plan_id);
   const title = kind === "service" ? plan?.name ?? f.title.trim() : f.title.trim();
   const lower = reading != null && current != null && reading < current;
@@ -378,27 +464,7 @@ export function LogDialog({
     mutationFn: async () => {
       // The browser checks what's required; this catches what it can't (a cost of 0, a name of only spaces).
       if (!valid) throw new Error(amount != null && !(amount > 0) ? "Enter a cost above zero, or leave it empty." : "Say what was done first.");
-      let expense_id: string | null = null;
-      if (amount != null && kind !== "reading" && kind !== "note") {
-        const receipt_path = receipt ? await uploadFile(session.company.id, "receipts", receipt) : null;
-        expense_id = unwrap(
-          await supabase()
-            .from("expenses")
-            .insert({
-              company_id: session.company.id,
-              equipment_id: equipment.id,
-              category: "Equipment upkeep",
-              description: `${title || "Upkeep"}: ${equipment.name}`.slice(0, 300),
-              vendor: f.vendor.trim() || null,
-              amount: Math.round(amount * 100) / 100,
-              incurred_on: f.done_on,
-              reimbursable: f.reimbursable,
-              receipt_path,
-            })
-            .select("id")
-            .single(),
-        ).id;
-      }
+      const expense_id = kind === "service" || kind === "repair" ? await saveCost(session.company.id, equipment, cost, title, f.done_on) : null;
       unwrap(
         await supabase().from("equipment_logs").insert({
           company_id: session.company.id,
@@ -463,26 +529,136 @@ export function LogDialog({
         <Field label="Notes" optional={kind !== "note"}>
           <textarea className="textarea" rows={kind === "note" ? 4 : 2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} maxLength={4000} required={kind === "note"} autoFocus={kind === "note"} placeholder={kind === "note" ? "Pulls left, check tire pressure" : undefined} />
         </Field>
-        {(kind === "service" || kind === "repair") && (
-          <details className="more-options">
-            <summary>Add what it cost</summary>
-            <div className="form-grid">
-              <Field label="Cost" error={amount == null || amount > 0 ? null : "Enter an amount like 86.40."}><span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.amount} onChange={(e) => setF({ ...f, amount: decimal(e.target.value) })} /></span></Field>
-              <Field label="Where" optional><input className="input" value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} maxLength={120} placeholder="Dealer, parts store" /></Field>
-            </div>
-            <label className="dropzone" style={{ padding: 12 }}>
-              <Icon name="camera" size={20} />
-              <span className="small strong">{receipt ? receipt.name : "Add a receipt photo"}</span>
-              <input type="file" accept="image/*,application/pdf" capture="environment" className="sr-only" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
-            </label>
-            <label className="checkbox"><input type="checkbox" checked={f.reimbursable} onChange={(e) => setF({ ...f, reimbursable: e.target.checked })} /> I paid with my own money (reimburse me)</label>
-          </details>
-        )}
+        {(kind === "service" || kind === "repair") && <CostFields cost={cost} onChange={setCost} />}
         <FormError error={save.error} />
         <div className="form-actions">
           <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" icon="check" loading={save.isPending} slowHint={receipt ? false : undefined}>{kind === "service" ? "Mark done" : "Save"}</Button>
+          <Button type="submit" variant="primary" icon="check" loading={save.isPending} slowHint={cost.receipt ? false : undefined}>{kind === "service" ? "Mark done" : "Save"}</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tags and inspection
+// ---------------------------------------------------------------------------------------------
+
+/** Kinds whose date is a month on a decal or sticker. */
+const MONTH_DATED = ["registration", "inspection", "emissions", "dot_inspection"];
+
+/** Add or change a piece of paperwork: what it is and the date it's good through. */
+export function PaperDialog({ equipment, paper, taken, onClose }: { equipment: Pick<Equipment, "id" | "name">; paper: PaperRow | null; taken: string[]; onClose: () => void }) {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  // One of each kind per machine (the database holds to it), any number of something else.
+  const kinds = DOCUMENT_KINDS.filter((k) => k.key === "other" || k.key === paper?.kind || !taken.includes(k.key));
+  const [f, setF] = useState({
+    kind: paper?.kind ?? kinds[0].key,
+    name: paper?.name ?? "",
+    expires_on: paper?.expires_on ?? "",
+    permanent: Boolean(paper && !paper.expires_on),
+    notes: paper?.notes ?? "",
+  });
+  const canBePermanent = f.kind === "registration" || f.kind === "other";
+  const permanent = canBePermanent && f.permanent;
+
+  const save = useMutation({
+    meta: { inline: true, success: paper ? "Saved" : "Added" },
+    mutationFn: async () => {
+      if (!permanent && !f.expires_on) throw new Error("Enter the date it's good through.");
+      const row = { kind: f.kind, name: f.kind === "other" ? f.name.trim() : null, expires_on: permanent ? null : f.expires_on, notes: f.notes.trim() || null };
+      if (paper) unwrap(await supabase().from("equipment_documents").update(row).eq("id", paper.id));
+      else unwrap(await supabase().from("equipment_documents").insert({ ...row, company_id: session.company.id, equipment_id: equipment.id }));
+    },
+    onSuccess: () => {
+      refreshEquipment(queryClient);
+      onClose();
+    },
+  });
+
+  return (
+    <Dialog open onClose={onClose} title={paper ? documentLabel(paper.kind, paper.name) : "Add tags or inspection"} description={equipment.name}>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+        {!paper && (
+          <Field label="What it is">
+            <select className="select" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })} autoFocus>
+              {kinds.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
+            </select>
+          </Field>
+        )}
+        {f.kind === "other" && (
+          <Field label="Name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={80} placeholder="Fire extinguisher tag, IFTA decal" /></Field>
+        )}
+        {!permanent && (
+          <Field label="Good through" hint={MONTH_DATED.includes(f.kind) ? "The month on the decal or sticker runs through its last day." : undefined}>
+            <input className="input" type="date" value={f.expires_on} onChange={(e) => setF({ ...f, expires_on: e.target.value })} required />
+          </Field>
+        )}
+        {canBePermanent && (
+          <label className="checkbox">
+            <input type="checkbox" checked={f.permanent} onChange={(e) => setF({ ...f, permanent: e.target.checked })} />
+            {f.kind === "registration" ? "Permanent plate (doesn't expire)" : "Doesn't expire"}
+          </label>
+        )}
+        <Field label="Notes" optional><textarea className="textarea" rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} maxLength={2000} placeholder="Plate state, policy number, where it's kept" /></Field>
+        <FormError error={save.error} />
+        <div className="form-actions">
+          <FormChecks />
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{paper ? "Save" : "Add"}</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** Renewed: the new date it's good through (with quick picks), any cost, and a line in the history. */
+export function RenewDialog({ equipment, paper, onClose }: { equipment: Pick<Equipment, "id" | "name">; paper: PaperRow; onClose: () => void }) {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const today = todayIn(session.company.timezone);
+  const choices = renewalChoices(paper.kind, paper.expires_on, today);
+  const [date, setDate] = useState(choices[0]?.date ?? "");
+  const [notes, setNotes] = useState("");
+  const [cost, setCost] = useState<Cost>(NO_COST);
+  const amount = toNumber(cost.amount);
+  const what = documentLabel(paper.kind, paper.name);
+
+  const save = useMutation({
+    meta: { inline: true, success: "Renewed" },
+    mutationFn: async () => {
+      if (!date) throw new Error("Enter the date it's good through now.");
+      if (amount != null && !(amount > 0)) throw new Error("Enter a cost above zero, or leave it empty.");
+      const expense = await saveCost(session.company.id, equipment, cost, `${what} renewed`, today);
+      unwrap(await supabase().rpc("renew_equipment_document", { p_document: paper.id, p_expires_on: date, p_notes: notes.trim() || undefined, p_expense: expense ?? undefined }));
+    },
+    onSuccess: () => {
+      refreshEquipment(queryClient);
+      onClose();
+    },
+  });
+
+  return (
+    <Dialog open onClose={onClose} title={`Renew: ${what}`} description={equipment.name}>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+        {paper.expires_on && <div className="muted small">{paper.days_left != null && paper.days_left < 0 ? "Was good through" : "Good through"} {formatDate(paper.expires_on)}.</div>}
+        {choices.length > 1 && (
+          <div className="segmented" role="group" aria-label="Renewed for" style={{ justifySelf: "start" }}>
+            {choices.map((c) => <button key={c.label} type="button" aria-pressed={date === c.date} onClick={() => setDate(c.date)}>{c.label}</button>)}
+          </div>
+        )}
+        <Field label="Now good through" hint={MONTH_DATED.includes(paper.kind) ? "Check it against the new decal or sticker." : undefined}>
+          <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </Field>
+        <Field label="Notes" optional><textarea className="textarea" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={4000} placeholder={paper.kind === "inspection" ? "Where it was inspected, sticker number" : undefined} /></Field>
+        <CostFields cost={cost} onChange={setCost} />
+        <FormError error={save.error} />
+        <div className="form-actions">
+          <FormChecks />
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" icon="check" loading={save.isPending} slowHint={cost.receipt ? false : undefined}>Renew</Button>
         </div>
       </form>
     </Dialog>

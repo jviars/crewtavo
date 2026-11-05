@@ -3,6 +3,7 @@
  * Google Calendar) or anytime, crew, people, status and notes, with "Find a time" for open slots.
  * Used by Schedule, Job, Request and Home.
  */
+import { documentLabel } from "@crewtavo/core/equipment";
 import { daysOff, weekday } from "@crewtavo/core/slots";
 import { isIsoDate, localDate, localTime, parseZonedTime } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +19,7 @@ import { EmptyState } from "@/components/ui/States";
 import { statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addDaysIso, formatTime, todayIn } from "@/lib/format";
+import { addDaysIso, formatDate, formatTime, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { VisitChecklists } from "../jobs/FilledChecklists";
 import { useSubSignIns } from "../subs/subsData";
@@ -150,6 +151,12 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
           p_except: visit.id ?? undefined,
         }),
       ),
+  });
+  // Tags or an inspection sticker that will have run out by the visit's day: a warning, not a block.
+  const lapsed = useQuery({
+    queryKey: ["equipment", session.company.id, "lapsed", picked.join(","), date],
+    enabled: picked.length > 0 && status !== "unscheduled" && validDate,
+    queryFn: async () => unwrap(await supabase().from("equipment_paperwork").select("id, equipment_id, kind, name, expires_on").in("equipment_id", picked).lt("expires_on", date)),
   });
   const unscheduled = status === "unscheduled";
   const crewChoices = (options.data?.crews ?? []).filter((c) => !rights.ownCrew || rights.myCrews.includes(c.id));
@@ -469,6 +476,18 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                   {clashes.data.map((cl) => (
                     <div key={`${cl.equipment_id}-${cl.visit_id}`}>
                       <strong>{machines.data.find((m) => m.id === cl.equipment_id)?.name}</strong> is also booked on {cl.title}{cl.starts_at ? ` (${new Date(cl.starts_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })}${cl.ends_at ? `–${new Date(cl.ends_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })}` : ""})` : " that day"}.
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!!lapsed.data?.length && (
+              <div className="callout callout-warning" style={{ marginTop: 6 }}>
+                <Icon name="alert" size={16} />
+                <div className="grow small" style={{ fontWeight: 400 }}>
+                  {lapsed.data.map((p) => (
+                    <div key={p.id}>
+                      <strong>{machines.data.find((m) => m.id === p.equipment_id)?.name}</strong>: {documentLabel(p.kind ?? "", p.name)} is good only through {formatDate(p.expires_on)}.
                     </div>
                   ))}
                 </div>

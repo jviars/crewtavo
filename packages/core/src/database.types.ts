@@ -902,6 +902,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"equipment_documents": {
+                  Row: {
+                    "alerted_state": string | null,"company_id": string,"created_at": string,"equipment_id": string,"expires_on": string | null,"id": string,"kind": string,"name": string | null,"notes": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "alerted_state"?: string | null,"company_id": string,"created_at"?: string,"equipment_id": string,"expires_on"?: string | null,"id"?: string,"kind": string,"name"?: string | null,"notes"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "alerted_state"?: string | null,"company_id"?: string,"created_at"?: string,"equipment_id"?: string,"expires_on"?: string | null,"id"?: string,"kind"?: string,"name"?: string | null,"notes"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "equipment_documents_company_id_equipment_id_fkey"
+      columns: ["company_id","equipment_id"]
+isOneToOne: false
+      referencedRelation: "equipment"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"equipment_financials": {
                   Row: {
                     "company_id": string,"equipment_id": string,"purchase_price": number | null,"updated_at": string
@@ -958,6 +978,26 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "equipment_plans"
       referencedColumns: ["equipment_id","id"]
+    }
+                  ]
+                },"equipment_photos": {
+                  Row: {
+                    "company_id": string,"content_type": string | null,"created_at": string,"created_by": string | null,"equipment_id": string,"file_name": string | null,"id": string,"path": string,"size_bytes": number | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"equipment_id": string,"file_name"?: string | null,"id"?: string,"path": string,"size_bytes"?: number | null
+                  }
+                  Update: {
+                    "company_id"?: string,"content_type"?: string | null,"created_at"?: string,"created_by"?: string | null,"equipment_id"?: string,"file_name"?: string | null,"id"?: string,"path"?: string,"size_bytes"?: number | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "equipment_photos_company_id_equipment_id_fkey"
+      columns: ["company_id","equipment_id"]
+isOneToOne: false
+      referencedRelation: "equipment"
+      referencedColumns: ["company_id","id"]
     }
                   ]
                 },"equipment_plans": {
@@ -3221,6 +3261,20 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"equipment_paperwork": {
+                  Row: {
+                    "company_id": string | null,"crew_id": string | null,"days_left": number | null,"equipment_id": string | null,"equipment_kind": string | null,"equipment_name": string | null,"equipment_status": string | null,"expires_on": string | null,"id": string | null,"kind": string | null,"name": string | null,"notes": string | null,"state": string | null
+                  }
+                  ComputedFields: never
+                  Relationships: [
+                    {
+      foreignKeyName: "equipment_documents_company_id_equipment_id_fkey"
+      columns: ["company_id","equipment_id"]
+isOneToOne: false
+      referencedRelation: "equipment"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"sub_paperwork": {
                   Row: {
                     "company_id": string | null,"days_left": number | null,"document_id": string | null,"expires_on": string | null,"kind": string | null,"requirement": string | null,"state": string | null,"subcontractor_id": string | null,"verified": boolean | null,"waiting": boolean | null
@@ -3660,6 +3714,9 @@ isOneToOne: false
 "emit_equipment_alerts":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
+"emit_equipment_document_alerts":
+{ Args: Record<PropertyKey, never>; Returns: number
+                           },
 "emit_guide_reviews":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
@@ -4090,6 +4147,9 @@ isOneToOne: false
                            },
 "renew_campaign_recipient":
 { Args: { "p_id": number,"p_links"?: (string)[],"p_token": string }; Returns: boolean
+                           },
+"renew_equipment_document":
+{ Args: { "p_document": string,"p_expense"?: string,"p_expires_on": string,"p_notes"?: string }; Returns: string
                            },
 "request_manual_charges":
 { Args: { "p_amounts": (number)[],"p_company": string,"p_invoices": (string)[] }; Returns: {

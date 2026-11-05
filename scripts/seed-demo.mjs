@@ -304,10 +304,9 @@ const [dumpTruck, paver, roller, trailer, sealSkid] = await must(
   "equipment",
 );
 const plan = (equipment, name, every, baseline) => c({ equipment_id: equipment.id, name, ...every, ...baseline });
-const [, , , rollerOil] = await must(
+const [, , rollerOil] = await must(
   db.from("equipment_plans").insert([
     plan(dumpTruck, "Oil change", { every_meter: 5000, every_count: 6, every_unit: "month" }, { baseline_on: dateAgo(110), baseline_meter: 79600 }),
-    plan(dumpTruck, "DOT inspection", { every_count: 1, every_unit: "year" }, { baseline_on: dateAgo(356) }),
     plan(paver, "Engine oil and filter", { every_meter: 250 }, { baseline_on: dateAgo(70), baseline_meter: 2040 }),
     plan(roller, "Engine oil and filter", { every_meter: 250, every_count: 1, every_unit: "year" }, { baseline_on: dateAgo(150), baseline_meter: 800 }),
     plan(roller, "Check water spray nozzles", { every_count: 1, every_unit: "month" }, { baseline_on: dateAgo(18) }),
@@ -325,6 +324,22 @@ await must(
   "equipment history",
 );
 await must(db.from("equipment_financials").insert(c({ equipment_id: paver.id, purchase_price: 148500 })), "equipment price");
+// Tags and inspection: the truck's tags run out at the end of this month, the trailer's sticker ran
+// out at the end of last month, and the trailer has a permanent plate.
+const monthEnd = (months) => {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + months + 1, 0)).toISOString().slice(0, 10);
+};
+await must(
+  db.from("equipment_documents").insert([
+    c({ equipment_id: dumpTruck.id, kind: "registration", expires_on: monthEnd(0), notes: "Virginia plate VA 4471-PV, 2-year registration" }),
+    c({ equipment_id: dumpTruck.id, kind: "inspection", expires_on: monthEnd(7) }),
+    c({ equipment_id: dumpTruck.id, kind: "insurance", expires_on: daysAgo(-140).slice(0, 10), notes: "Commercial auto policy CA-88213. Card in the glovebox." }),
+    c({ equipment_id: trailer.id, kind: "registration", expires_on: null, notes: "Permanent trailer plate" }),
+    c({ equipment_id: trailer.id, kind: "inspection", expires_on: monthEnd(-1) }),
+  ], DEFAULTS),
+  "tags and inspection",
+);
 
 // --- SOPs -----------------------------------------------------------------------------------
 const cats = await must(db.from("sop_categories").select("id, name").eq("company_id", company), "categories");

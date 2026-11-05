@@ -11,6 +11,7 @@
  * Photos and other files aren't in it yet, and nothing secret is (the keys of connected apps).
  */
 import { customFieldsFor, customValues, type CustomFieldRecord } from "@crewtavo/core/customFields";
+import { documentLabel } from "@crewtavo/core/equipment";
 import { checklistAnswers } from "@crewtavo/core/forms";
 import { jobberExport, jobberReadme, type JobberLine, type JobberVisit } from "@crewtavo/core/jobberExport";
 import { billingText } from "@crewtavo/core/jobBilling";
@@ -104,12 +105,13 @@ export async function exportEverything(session: Session, step: (what: string) =>
   ]);
 
   step("Reading time, expenses and equipment…");
-  const [services, timeEntries, expenses, equipment, equipmentLogs, subs, propertyAssets, visitAssets] = await Promise.all([
+  const [services, timeEntries, expenses, equipment, equipmentLogs, equipmentPapers, subs, propertyAssets, visitAssets] = await Promise.all([
     everyRow((from, to) => db.from("services").select("id, category, name, description, unit, unit_price, unit_cost, labor_cost, taxable, active, add_to_every_job, sort").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("time_entries").select("id, user_id, started_at, ended_at, category, job_id, notes, approved_at").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("expenses").select("id, incurred_on, vendor, category, description, amount, job_id, equipment_id, user_id, reimbursable, reimbursed_at").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("equipment").select("id, name, kind, make, model, year, serial, plate, status, meter, meter_reading, meter_read_on, purchased_on, crew_id, notes").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("equipment_logs").select("id, equipment_id, done_on, kind, title, meter_reading, notes, user_id").eq("company_id", companyId).order("id").range(from, to)),
+    everyRow((from, to) => db.from("equipment_documents").select("id, equipment_id, kind, name, expires_on, notes").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("subcontractors").select("id, name, contact_name, email, phone, trade, tax_classification, active, notes, address").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("property_assets").select("id, property_id, name, make, model, serial, installed_on, warranty_until, location, notes, status").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("visit_assets").select("visit_id, asset_id").eq("company_id", companyId).order("visit_id").order("asset_id").range(from, to)),
@@ -289,6 +291,11 @@ export async function exportEverything(session: Session, step: (what: string) =>
     sheet("equipment-log.csv", [...equipmentLogs].sort((a, b) => a.done_on.localeCompare(b.done_on)), [
       ["Equipment", (l) => equipmentById.get(l.equipment_id)?.name], ["Date", (l) => l.done_on], ["Kind", (l) => words(l.kind)], ["Title", (l) => l.title],
       ["Reading", (l) => l.meter_reading], ["Notes", (l) => l.notes], ["Person", (l) => person(l.user_id)], ["Equipment ID", (l) => l.equipment_id],
+    ]),
+    // Tags, inspection stickers, insurance: the date each is good through (empty: doesn't expire).
+    sheet("equipment-paperwork.csv", [...equipmentPapers].sort((a, b) => (equipmentById.get(a.equipment_id)?.name ?? "").localeCompare(equipmentById.get(b.equipment_id)?.name ?? "")), [
+      ["Equipment", (d) => equipmentById.get(d.equipment_id)?.name], ["What", (d) => documentLabel(d.kind, d.name)], ["Good through", (d) => d.expires_on], ["Notes", (d) => d.notes],
+      ["Equipment ID", (d) => d.equipment_id],
     ]),
     // The clients' own equipment at their properties (water heaters, AC units), and the visits that serviced it.
     sheet("property-equipment.csv", [...propertyAssets].sort((a, b) => address(a.property_id).localeCompare(address(b.property_id)) || a.name.localeCompare(b.name)), [

@@ -1,5 +1,5 @@
-/** Everything the company owns, what each one needs next, and who has it. */
-import { dueSummary, dueTone, formatMeter, kindLabel } from "@crewtavo/core/equipment";
+/** Everything the company owns, what each one needs next (maintenance or paperwork), and who has it. */
+import { dueTone, formatMeter, kindLabel } from "@crewtavo/core/equipment";
 import { useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -12,11 +12,11 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { EquipmentDialog } from "./EquipmentDialogs";
-import { EQUIPMENT_FIELDS, managesEquipment, STATUS_LABELS, STATUS_TONES, useEquipmentDue, type DueRow, type Equipment } from "./equipmentData";
+import { EQUIPMENT_FIELDS, groupByEquipment, managesEquipment, nextUp, STATUS_LABELS, STATUS_TONES, useEquipmentDue, usePaperwork, type Equipment, type NextUp } from "./equipmentData";
 
 const FILTERS = [
   { key: "all", label: "In use" },
-  { key: "due", label: "Needs maintenance" },
+  { key: "due", label: "Needs attention" },
   { key: "in_shop", label: "In the shop" },
   { key: "retired", label: "Retired" },
 ] as const;
@@ -40,13 +40,19 @@ export function EquipmentPage() {
     queryFn: async () => unwrap(await supabase().from("equipment").select(EQUIPMENT_FIELDS).eq("company_id", company.id).order("name").limit(1000)) as unknown as Equipment[],
   });
   const due = useEquipmentDue(company.id);
+  const papers = usePaperwork(company.id);
 
-  // The most urgent schedule on each machine.
+  // What each machine needs next: its most urgent schedule or paperwork.
   const next = useMemo(() => {
-    const map = new Map<string, DueRow>();
-    for (const row of due.data ?? []) if (!map.has(row.equipment_id)) map.set(row.equipment_id, row);
+    const plans = groupByEquipment(due.data);
+    const docs = groupByEquipment(papers.data);
+    const map = new Map<string, NextUp>();
+    for (const id of new Set([...plans.keys(), ...docs.keys()])) {
+      const n = nextUp(plans.get(id) ?? [], docs.get(id) ?? []);
+      if (n) map.set(id, n);
+    }
     return map;
-  }, [due.data]);
+  }, [due.data, papers.data]);
   const needing = (e: Equipment) => e.status !== "retired" && (next.get(e.id)?.state ?? "ok") !== "ok";
 
   const all = list.data ?? [];
@@ -69,7 +75,7 @@ export function EquipmentPage() {
       {overdue > 0 && filter !== "due" && (
         <div className="callout callout-danger">
           <Icon name="alert" size={20} />
-          <div className="grow">{overdue} {overdue === 1 ? "machine is" : "machines are"} overdue for maintenance.</div>
+          <div className="grow">{overdue} {overdue === 1 ? "machine has" : "machines have"} overdue maintenance or expired paperwork.</div>
           <Button size="sm" onClick={() => setFilter("due")}>Show them</Button>
         </div>
       )}
@@ -109,7 +115,7 @@ export function EquipmentPage() {
       ) : (
         <div className="card">
           <table className="table table-stack">
-            <thead><tr><th>Equipment</th><th>Crew</th><th>Reading</th><th>Next maintenance</th><th>Status</th></tr></thead>
+            <thead><tr><th>Equipment</th><th>Crew</th><th>Reading</th><th>Next due</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((e) => {
                 const n = next.get(e.id);
@@ -125,7 +131,7 @@ export function EquipmentPage() {
                       {n ? (
                         <>
                           <span className="strong">{n.name}</span>
-                          <div className={`small ${n.state === "overdue" ? "text-danger strong" : n.state === "due_soon" ? "strong" : "muted"}`} style={n.state === "due_soon" ? { color: "var(--warning)" } : undefined}>{dueSummary(n)}</div>
+                          <div className={`small ${n.state === "overdue" ? "text-danger strong" : n.state === "due_soon" ? "strong" : "muted"}`} style={n.state === "due_soon" ? { color: "var(--warning)" } : undefined}>{n.summary}</div>
                         </>
                       ) : (
                         <span className="muted">—</span>

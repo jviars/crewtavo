@@ -89,7 +89,7 @@ export const recordTools = {
     },
   }),
   equipment_maintenance: tool({
-    description: "Maintenance on the company's equipment (trucks, mowers, machines): what's overdue or coming due, with hours or miles left. Set include_ok for every schedule.",
+    description: "Maintenance on the company's equipment (trucks, mowers, machines): what's overdue or coming due, with hours or miles left. Set include_ok for every schedule. Tags and inspection stickers are equipment_paperwork.",
     input: z.object({ include_ok: z.boolean().default(false), ...companyArg }),
     run: async (ctx, a) => {
       let q = ctx.db
@@ -101,6 +101,16 @@ export const recordTools = {
       const found = await rows(q.order("next_due_on", { nullsFirst: false }).limit(200));
       const order: Record<string, number> = { overdue: 0, due_soon: 1, ok: 2 };
       return found.sort((x, y) => order[String(x.state)] - order[String(y.state)]);
+    },
+  }),
+  equipment_paperwork: tool({
+    description:
+      "Tags (registration), inspection stickers, emissions, insurance and other paperwork on the company's trucks, trailers and equipment: what has run out (state overdue) or runs out within 30 days (due_soon), with the date it's good through. Set include_ok for all of it.",
+    input: z.object({ include_ok: z.boolean().default(false), ...companyArg }),
+    run: async (ctx, a) => {
+      let q = ctx.db.from("equipment_paperwork").select("equipment_id, equipment_name, kind, name, expires_on, days_left, state").eq("company_id", ctx.companyId);
+      if (!a.include_ok) q = q.neq("state", "ok");
+      return rows(q.order("expires_on", { nullsFirst: false }).limit(200));
     },
   }),
 };

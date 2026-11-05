@@ -1,4 +1,3 @@
-import { dueSummary } from "@crewtavo/core/equipment";
 import { addDays, zonedTimeToUtc } from "@crewtavo/core/time";
 import { useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
@@ -14,7 +13,7 @@ import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { monthToDate } from "@/lib/trends";
-import { managesEquipment, useEquipmentDue } from "../equipment/equipmentData";
+import { groupByEquipment, managesEquipment, nextUp, useEquipmentDue, usePaperwork } from "../equipment/equipmentData";
 import { Change } from "../finance/change";
 import { seesWebsite } from "../marketing/website";
 import { InstallAppCard } from "../field/InstallAppCard";
@@ -66,21 +65,25 @@ export function HomePage() {
   useFirstArrival(page, Boolean(data));
   // Things handled elsewhere leave the list as it refreshes.
   const attentionRows = useListAnimation<HTMLDivElement>();
-  // Equipment overdue or coming due joins the list for the people who look after it.
+  // Equipment overdue or coming due (maintenance, tags, inspection) joins the list for the people who look after it.
   const gear = useEquipmentDue(session.company.id, { enabled: managesEquipment(session) });
+  const gearPapers = usePaperwork(session.company.id, { enabled: managesEquipment(session) });
   // Clients asking to move or cancel a visit, for whoever schedules (the database shows only those).
   const changes = usePendingChanges(hasRole(session, "admin", "office", "estimator", "crew_lead"));
   const attention = useMemo(() => {
-    const worst = new Map<string, NonNullable<typeof gear.data>[number]>();
-    for (const row of gear.data ?? []) if (row.equipment_status === "active" && row.state !== "ok" && !worst.has(row.equipment_id)) worst.set(row.equipment_id, row);
-    const rows = [...worst.values()];
-    const items: Dashboard["attention"] = rows.slice(0, 3).map((r) => ({
+    // Each machine's most urgent maintenance, and every piece of paperwork running out, overdue first.
+    const plans = groupByEquipment(gear.data?.filter((r) => r.equipment_status === "active" && r.state !== "ok"));
+    const papers = (gearPapers.data ?? []).filter((p) => p.equipment_status === "active" && p.state !== "ok").map((p) => ({ id: p.equipment_id, n: nextUp([], [p])!, machine: p.equipment_name }));
+    const rows = [...papers, ...[...plans.values()].map((r) => ({ id: r[0].equipment_id, n: nextUp(r, [])!, machine: r[0].equipment_name }))].sort(
+      (a, b) => Number(a.n.state !== "overdue") - Number(b.n.state !== "overdue"),
+    );
+    const items: Dashboard["attention"] = rows.slice(0, 3).map(({ id, n, machine }) => ({
       kind: "equipment",
-      title: `${r.name} ${r.state === "overdue" ? "overdue" : "coming due"}`,
-      detail: `${r.equipment_name} · ${dueSummary(r)}`,
-      link: `/equipment/${r.equipment_id}`,
+      title: `${n.name} ${n.paper ? (n.state === "overdue" ? "expired" : "expiring") : n.state === "overdue" ? "overdue" : "coming due"}`,
+      detail: `${machine} · ${n.summary}`,
+      link: `/equipment/${id}`,
     }));
-    if (rows.length > 3) items.push({ kind: "equipment", title: `${rows.length - 3} more machines need maintenance`, detail: null, link: "/equipment?show=due" });
+    if (rows.length > 3) items.push({ kind: "equipment", title: `${rows.length - 3} more equipment ${rows.length === 4 ? "reminder" : "reminders"}`, detail: null, link: "/equipment?show=due" });
     const asks: Dashboard["attention"] = (changes.data ?? []).slice(0, 5).map((r) => ({
       kind: "visit_change",
       title: `${r.client?.display_name ?? "A client"} asked ${askedFor(r, tz, session.company.settings)}`,
@@ -88,7 +91,7 @@ export function HomePage() {
       link: changeLink(r),
     }));
     return [...asks, ...(data?.attention ?? []), ...items];
-  }, [data?.attention, gear.data, changes.data, tz, session.company.settings]);
+  }, [data?.attention, gear.data, gearPapers.data, changes.data, tz, session.company.settings]);
   const firstName = session.profile.full_name.split(" ")[0] || "there";
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: tz });
   const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });

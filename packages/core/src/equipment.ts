@@ -1,6 +1,7 @@
 /**
- * Equipment: kinds, meters, starter maintenance schedules, and how schedules and due dates read.
- * Due states are worked out in Postgres (public.equipment_due); these turn them into words.
+ * Equipment: kinds, meters, starter maintenance schedules, and how schedules and due dates read;
+ * and the dates its paperwork (tags, inspection stickers) runs to. Due states are worked out in
+ * Postgres (public.equipment_due, public.equipment_paperwork); these turn them into words.
  */
 
 export const EQUIPMENT_KINDS = [
@@ -24,35 +25,59 @@ export interface PlanInterval {
   every_unit?: IntervalUnit | string | null;
   every_meter?: number | null;
 }
-export interface PlanPreset extends PlanInterval {
+/** A starter schedule. Hours and miles are both given where they make sense, so it fits whichever the machine tracks. */
+export interface PlanPreset {
   name: string;
+  every_hours?: number;
+  every_miles?: number;
+  every_count?: number;
+  every_unit?: IntervalUnit;
 }
 
 /** Common schedules to start from. Every manual differs, so people adjust them. */
 export const PLAN_PRESETS: Record<EquipmentKind, PlanPreset[]> = {
   truck: [
-    { name: "Oil change", every_meter: 5000, every_count: 6, every_unit: "month" },
-    { name: "Rotate tires", every_meter: 7500 },
-    { name: "Inspection and registration", every_count: 1, every_unit: "year" },
+    { name: "Oil change", every_miles: 5000, every_hours: 250, every_count: 6, every_unit: "month" },
+    { name: "Rotate tires", every_miles: 7500, every_count: 6, every_unit: "month" },
   ],
   trailer: [
     { name: "Check tires, lights and brakes", every_count: 3, every_unit: "month" },
     { name: "Grease wheel bearings", every_count: 1, every_unit: "year" },
   ],
   mower: [
-    { name: "Oil and filter", every_meter: 100, every_count: 1, every_unit: "year" },
-    { name: "Sharpen blades", every_meter: 25 },
-    { name: "Grease fittings", every_meter: 50 },
-    { name: "Air filter", every_meter: 200 },
+    { name: "Oil and filter", every_hours: 100, every_count: 1, every_unit: "year" },
+    { name: "Sharpen blades", every_hours: 25 },
+    { name: "Grease fittings", every_hours: 50 },
+    { name: "Air filter", every_hours: 200 },
   ],
   machine: [
-    { name: "Engine oil and filter", every_meter: 250 },
-    { name: "Grease fittings", every_meter: 10 },
-    { name: "Hydraulic filter", every_meter: 500 },
+    { name: "Engine oil and filter", every_hours: 250, every_count: 1, every_unit: "year" },
+    { name: "Grease fittings", every_hours: 10 },
+    { name: "Hydraulic filter", every_hours: 500 },
   ],
   tool: [{ name: "Tune-up", every_count: 1, every_unit: "year" }],
   other: [],
 };
+
+/** Small-engine upkeep (generators, pressure washers, blowers, saws) for anything with an hour meter. */
+const SMALL_ENGINE: PlanPreset[] = [
+  { name: "Oil change", every_hours: 50, every_count: 1, every_unit: "year" },
+  { name: "Clean the air filter", every_hours: 25 },
+  { name: "Spark plug", every_hours: 100, every_count: 1, every_unit: "year" },
+];
+
+/** The starter schedules for a type of machine tracking `meter`; anything on hours without hour-based ones of its own gets small-engine upkeep. */
+export function presetsFor(kind: string, meter: Meter | string): PlanPreset[] {
+  const own = PLAN_PRESETS[kind as EquipmentKind] ?? [];
+  return meter === "hours" && !own.some((p) => p.every_hours) ? SMALL_ENGINE : own;
+}
+
+/** A starter schedule as a machine tracking `meter` keeps it: its hours or miles, its date, and once a year if neither fits. */
+export function presetInterval(p: PlanPreset, meter: Meter | string): Required<PlanInterval> {
+  const every_meter = (meter === "hours" ? p.every_hours : meter === "miles" ? p.every_miles : null) ?? null;
+  if (!every_meter && !p.every_count) return { every_meter: null, every_count: 1, every_unit: "year" };
+  return { every_meter, every_count: p.every_count ?? null, every_unit: p.every_count ? p.every_unit ?? "month" : null };
+}
 
 const number = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
 const plural = (n: number, one: string, many = `${one}s`) => (Math.abs(n) === 1 ? one : many);
@@ -127,3 +152,85 @@ export function dueSummary(d: DueInfo): string {
 
 /** Status pill tone for a due state. */
 export const dueTone = (state: string): "danger" | "warning" | "good" => (state === "overdue" ? "danger" : state === "due_soon" ? "warning" : "good");
+
+// ---------------------------------------------------------------------------------------------
+// Tags and inspection: paperwork that runs out on a date (public.equipment_paperwork)
+// ---------------------------------------------------------------------------------------------
+
+export const DOCUMENT_KINDS = [
+  { key: "registration", label: "Registration (tags)" },
+  { key: "inspection", label: "Safety inspection" },
+  { key: "emissions", label: "Emissions inspection" },
+  { key: "insurance", label: "Insurance" },
+  { key: "dot_inspection", label: "DOT annual inspection" },
+  { key: "other", label: "Something else" },
+] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number]["key"];
+
+/** "Registration", "Safety inspection", or what an "other" is called. */
+export const documentLabel = (kind: string, name?: string | null) =>
+  kind === "other" ? name?.trim() || "Paperwork" : kind === "registration" ? "Registration" : DOCUMENT_KINDS.find((k) => k.key === kind)?.label ?? "Paperwork";
+
+const ymd = (date: string) => date.split("-").map(Number) as [number, number, number];
+const daysInMonth = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+/** The year and month `months` after (or before) year/month. */
+function shiftMonth(year: number, month: number, months: number): [number, number] {
+  const total = year * 12 + month - 1 + months;
+  const y = Math.floor(total / 12);
+  return [y, total - y * 12 + 1];
+}
+const isoDate = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+/** The last day of the month `months` after `from`'s month: an inspection sticker's date. "2026-11-05", 12 → "2027-11-30". */
+export function endOfMonthAfter(from: string, months: number): string {
+  const [y, m] = ymd(from);
+  const [ny, nm] = shiftMonth(y, m, months);
+  return isoDate(ny, nm, daysInMonth(ny, nm));
+}
+
+/** `from` moved on by `months`, on the same day, or the month's last day when `from` is a month's end (Feb 28 → Feb 29 in a leap year). */
+export function addMonths(from: string, months: number): string {
+  const [y, m, d] = ymd(from);
+  const [ny, nm] = shiftMonth(y, m, months);
+  const last = daysInMonth(ny, nm);
+  return isoDate(ny, nm, d >= daysInMonth(y, m) ? last : Math.min(d, last));
+}
+
+/**
+ * Quick picks for a renewal's new end date. Registration counts from the old date (renewing early
+ * loses nothing, and up to a year late keeps its month, as Virginia does), or from this month when
+ * there's none; inspections run to the end of the month a year (emissions two) from when they're
+ * done; insurance and the rest count from the old date. People check it against the decal or card.
+ */
+export function renewalChoices(kind: string, expiresOn: string | null, today: string): Array<{ label: string; date: string }> {
+  const from = (years: number) =>
+    expiresOn && expiresOn >= addMonths(today, -12) ? addMonths(expiresOn, years * 12) : kind === "registration" ? endOfMonthAfter(today, years * 12) : addMonths(today, years * 12);
+  switch (kind) {
+    case "registration":
+      return [1, 2, 3].map((n) => ({ label: `${n} ${plural(n, "year")}`, date: from(n) }));
+    case "inspection":
+    case "dot_inspection":
+      return [{ label: "A year from this month", date: endOfMonthAfter(today, 12) }];
+    case "emissions":
+      return [
+        { label: "2 years from this month", date: endOfMonthAfter(today, 24) },
+        { label: "1 year from this month", date: endOfMonthAfter(today, 12) },
+      ];
+    case "insurance":
+      return [
+        { label: "6 months", date: expiresOn && expiresOn >= addMonths(today, -12) ? addMonths(expiresOn, 6) : addMonths(today, 6) },
+        { label: "1 year", date: from(1) },
+      ];
+    default:
+      return [1, 2].map((n) => ({ label: `${n} ${plural(n, "year")}`, date: from(n) }));
+  }
+}
+
+/** "Ran out 3 days ago", "Runs out today", "Runs out tomorrow", "Runs out in 12 days", "Current", "Doesn't expire". */
+export function expirySummary(daysLeft: number | null, expiresOn: string | null): string {
+  if (!expiresOn || daysLeft == null) return "Doesn't expire";
+  if (daysLeft < 0) return daysLeft === -1 ? "Ran out yesterday" : `Ran out ${-daysLeft} days ago`;
+  if (daysLeft === 0) return "Runs out today";
+  if (daysLeft === 1) return "Runs out tomorrow";
+  return daysLeft <= 30 ? `Runs out in ${daysLeft} days` : "Current";
+}

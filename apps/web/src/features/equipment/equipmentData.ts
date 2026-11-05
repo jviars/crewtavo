@@ -1,5 +1,5 @@
-/** Shared queries and types for equipment, its maintenance schedules and history. */
-import { dueProgress, type DueState, type IntervalUnit, type Meter } from "@crewtavo/core/equipment";
+/** Shared queries and types for equipment, its maintenance schedules, paperwork and history. */
+import { documentLabel, dueProgress, dueSummary, expirySummary, type DueState, type IntervalUnit, type Meter } from "@crewtavo/core/equipment";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, type Session } from "@/lib/session";
@@ -89,6 +89,70 @@ export function useEquipmentDue(companyId: string, options: { enabled?: boolean;
       return (unwrap(await q) as unknown as DueRow[]).sort(byUrgency);
     },
   });
+}
+
+/** Tags, an inspection sticker or other paperwork, with how long it has left (public.equipment_paperwork). */
+export interface PaperRow {
+  id: string;
+  company_id: string;
+  equipment_id: string;
+  equipment_name: string;
+  equipment_kind: string;
+  crew_id: string | null;
+  equipment_status: string;
+  kind: string;
+  name: string | null;
+  expires_on: string | null;
+  notes: string | null;
+  days_left: number | null;
+  state: DueState;
+}
+
+/** Paperwork on equipment in use, soonest to run out first. */
+export function usePaperwork(companyId: string, options: { enabled?: boolean; equipmentId?: string } = {}) {
+  return useQuery({
+    queryKey: ["equipment", companyId, "paperwork", options.equipmentId ?? "all"],
+    enabled: options.enabled ?? true,
+    queryFn: async () => {
+      let q = supabase().from("equipment_paperwork").select("*").eq("company_id", companyId).order("expires_on", { nullsFirst: false }).limit(2000);
+      if (options.equipmentId) q = q.eq("equipment_id", options.equipmentId);
+      return unwrap(await q) as unknown as PaperRow[];
+    },
+  });
+}
+
+/** What a machine needs next, maintenance or paperwork, in a few words. */
+export interface NextUp {
+  name: string;
+  summary: string;
+  state: DueState;
+  plan?: DueRow;
+  paper?: PaperRow;
+}
+
+/**
+ * The most urgent of a machine's schedules (most urgent first, as useEquipmentDue sorts them) and
+ * paperwork: the worse state wins; at the same state, overdue or coming due, whichever date is
+ * sooner (paperwork on a tie, or against hours and miles: it's what keeps a truck off the road);
+ * when nothing's due, the next maintenance.
+ */
+export function nextUp(plans: DueRow[], papers: PaperRow[]): NextUp | null {
+  const plan = plans[0];
+  const paper = papers.filter((p) => p.expires_on).sort((a, b) => (a.days_left ?? 0) - (b.days_left ?? 0))[0];
+  const usePaper =
+    paper &&
+    (!plan ||
+      STATE_ORDER[paper.state] < STATE_ORDER[plan.state] ||
+      (paper.state === plan.state && paper.state !== "ok" && (plan.days_left == null || (paper.days_left ?? 0) <= plan.days_left)));
+  if (usePaper) return { name: documentLabel(paper.kind, paper.name), summary: expirySummary(paper.days_left, paper.expires_on), state: paper.state, paper };
+  return plan ? { name: plan.name, summary: dueSummary(plan), state: plan.state, plan } : null;
+}
+
+/** By machine: its schedules and paperwork, for nextUp. */
+export function groupByEquipment<T extends { equipment_id: string }>(rows: T[] | undefined) {
+  const map = new Map<string, T[]>();
+  for (const row of rows ?? []) map.set(row.equipment_id, [...(map.get(row.equipment_id) ?? []), row]);
+  return map;
 }
 
 /** After logging work or editing equipment: everything that shows equipment refreshes. */
