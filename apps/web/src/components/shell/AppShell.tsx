@@ -18,6 +18,7 @@ import { useChatBadge, useChatLive } from "@/features/chat/data";
 import { useMyJobs, waitingCount } from "@/features/field/myJobsData";
 import { signOutNote, subCodeWays } from "@/features/auth/textCode";
 import { createItems, mobileTabs, NAV_GROUPS, navVisible, settingsItem, subCanOpen, type NavItem } from "./nav";
+import { HelpButton } from "./Help";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
 import { RestartBanner } from "./RestartBanner";
@@ -246,6 +247,7 @@ export function AppShell() {
               <Link className="icon-btn hide-mobile" to="/messages" aria-label="Messages" title="Messages"><Icon name="messages" size={20} /></Link>
             </>
           )}
+          <HelpButton />
           <NotificationsButton />
           <Menu
             label="Account"

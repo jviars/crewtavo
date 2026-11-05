@@ -27,7 +27,7 @@ copy keys or run commands.
 **For a business:** press **Deploy on Railway** in the [README](../README.md), sign in to Railway
 (or create an account), and press **Deploy** again. After a few minutes, open the address Railway
 shows on the **crewtavo** service and create the owner account. Then set up the business and invite
-the team from **Settings → People and Roles**.
+the team from **Settings → People**.
 
 If something isn't right yet, the address shows a **Crewtavo is starting up** or **Finish setting up
 Crewtavo** page that says what to do, instead of an error.

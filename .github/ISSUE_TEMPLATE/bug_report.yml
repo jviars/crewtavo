@@ -27,6 +27,12 @@ body:
     validations:
       required: true
   - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Filled in when you report from Help in Crewtavo. Otherwise, open your Crewtavo's address with /api/health on the end.
+      placeholder: "0.4.5"
+  - type: input
     id: device
     attributes:
       label: Device and browser

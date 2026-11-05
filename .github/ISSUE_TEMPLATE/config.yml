@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Ask a question
+    url: https://github.com/jviars/crewtavo/discussions/new?category=q-a
+    about: How do I do something in Crewtavo? Ask in Discussions, where anyone can answer.
   - name: Report a security problem
     url: https://github.com/jviars/crewtavo/security/advisories/new
     about: Please report vulnerabilities privately, not in a public issue.

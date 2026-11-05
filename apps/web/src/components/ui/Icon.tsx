@@ -4,7 +4,7 @@
  */
 import {
   Archive, ArchiveRestore, ArrowLeft, AtSign, ArrowRight, Banknote, Bell, Bold, BookOpen, Calendar, CalendarCheck, Camera, ChartColumn, ChartLine, Check, ChevronDown, ChevronLeft,
-  ChevronRight, ChevronUp, CircleCheck, ClipboardCheck, Clock, Cloud, CodeXml, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileImage,
+  ChevronRight, ChevronUp, CircleCheck, CircleQuestionMark, ClipboardCheck, Clock, Cloud, CodeXml, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileImage,
   FileSpreadsheet, Folder, FolderInput, FolderOpen, FolderPlus, Funnel, Gauge, Gift, Globe, GripVertical, HardDrive, Hash, Heading, Hexagon, Highlighter, History, House, Image,
   Inbox, Info, Italic, Kanban, Landmark, Layers, LayoutGrid, Link, List, ListChecks, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Maximize, Megaphone, Menu, MessageSquareText,
   MessageSquareWarning, MessagesSquare, Minus, Monitor, Moon, Package, Palette, Paperclip, PenLine, Signature, Tablet, Type, MousePointer2, Navigation,
@@ -87,6 +87,7 @@ const ICONS = {
   /** AI only: asking the knowledge base, writing with AI, finding paving on the map. */
   sparkle: Sparkles,
   bell: Bell,
+  help: CircleQuestionMark,
   settings: Settings,
   menu: Menu,
   layers: Layers,

@@ -12,4 +12,6 @@ its source code, and don't call it Crewtavo.
 
 Bugs and ideas: [open an issue](https://github.com/jviars/crewtavo/issues/new/choose). Reports are
 read, but there's no promise of support or a reply.
+Questions: [ask in Discussions](https://github.com/jviars/crewtavo/discussions/categories/q-a),
+where anyone can answer.
 Security problems: please don't open a public issue; see [SECURITY.md](SECURITY.md).

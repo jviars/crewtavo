@@ -45,7 +45,7 @@ export const PLAN_FIELDS =
 
 /** Plan sets run big. The server's own limit (FILE_SIZE_LIMIT on the storage service) may be lower. */
 export const PLAN_MAX_BYTES = 200 * 1024 * 1024;
-export const PLAN_LIMIT_DOCS = "https://crewtavo.com/docs/getting-started/plans-and-files/#large-files";
+export const PLAN_LIMIT_DOCS = "https://crewtavo.com/docs/jobs/plans-and-files/#large-files";
 
 export const isPdf = (f: Pick<PlanFile, "content_type" | "file_name">) => f.content_type === "application/pdf" || /\.pdf$/i.test(f.file_name);
 export const isImage = (f: Pick<PlanFile, "content_type" | "file_name">) => Boolean(f.content_type?.startsWith("image/")) || /\.(png|jpe?g|webp|gif)$/i.test(f.file_name);

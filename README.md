@@ -51,7 +51,7 @@ The quickest way to run Crewtavo, and the one that suits a business without a de
    services behind sign-in, data and file storage. Every password and key is generated for you, so
    there's nothing to fill in.
 3. After a few minutes, open the address shown on the **crewtavo** service, create the owner account
-   and set up your business. Then invite your team from **Settings → People and Roles**.
+   and set up your business. Then invite your team from **Settings → People**.
 
 If something isn't ready yet, that address shows a **Finish setting up** page saying what to do,
 instead of an error.
@@ -63,8 +63,9 @@ instead of an error.
 > including $5 of usage) to keep it running. Busy instances use more; check
 > [Railway's pricing](https://railway.com/pricing) for current numbers.
 
-**Your own domain:** right after you set up the business, Crewtavo offers to connect to Railway
-(you're still signed in there, so it's one press of **Allow**) and then to set up your web address:
+**Your own domain:** when you first sign in, Crewtavo asks to connect to Railway (you're still
+signed in there, so it's one press of **Authorize**), which is how it warns you before Railway's
+trial runs out. Right after you set up the business, it offers to set up your web address:
 - **Need a domain?** Buy one on Railway. Railway sets it up, Crewtavo spots it and switches over,
   and there's nothing to add.
 - **Have one already** (like `app.yourbusiness.com`)? Crewtavo adds it in Railway and shows the two
@@ -74,11 +75,12 @@ instead of an error.
 Links already sent keep working, and the old address forwards to the new one. Skip it, and
 **Settings → Web address** does the same later, including the steps by hand.
 
-**Email:** Railway blocks outgoing mail servers (SMTP) on its trial and Hobby plans, so on those
-plans Crewtavo sends email through [Resend](https://resend.com): create a free Resend account,
-then add `RESEND_API_KEY` and `EMAIL_FROM` to the **crewtavo** service's variables. On Railway's Pro
-plan, or when you self-host, you can instead connect the business's own mailbox under
-**Settings → Email** (Gmail, Google Workspace, Microsoft 365, Zoho, iCloud or any SMTP server).
+**Email:** Railway blocks outgoing mail servers (SMTP) on its trial and Hobby plans, so Crewtavo
+sends email through [Resend](https://resend.com), which works on every plan: create a free Resend
+account and paste its API key under **Settings → Email**. On Railway's Pro plan, or when you
+self-host, you can instead connect the business's own mailbox there (Gmail, Google Workspace,
+Microsoft 365, Zoho, Yahoo, iCloud or any SMTP server). `RESEND_API_KEY` and `EMAIL_FROM` on the
+**crewtavo** service still work too, for any business that hasn't connected its own.
 
 ## Self-host
 
@@ -386,5 +388,6 @@ Copyright (C) 2026 Joshua Viars. Commercial licenses are available on request.
 ## Contributing
 
 Crewtavo doesn't accept contributions: pull requests are closed without review. Bug reports are
-welcome as [issues](https://github.com/jviars/crewtavo/issues), with no promise of support. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+welcome as [issues](https://github.com/jviars/crewtavo/issues) and questions in
+[Discussions](https://github.com/jviars/crewtavo/discussions/categories/q-a), with no promise of
+support. See [CONTRIBUTING.md](CONTRIBUTING.md).
