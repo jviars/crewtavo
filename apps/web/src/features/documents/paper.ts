@@ -5,8 +5,11 @@
  *
  * A letter page is 8.5 × 11 in: 816 × 1056 CSS px. Every page keeps a white margin of 0.4 in on each
  * side (the @page margin when it prints), and everything on it (the letterhead, the body and the
- * footer) is in the content box inside: 7.7 × 10.2 in, the width the business's own letterhead
- * pictures are cut for (letterhead.ts). The body's words sit a little further in.
+ * footer) is in the content box inside: 7.7 × 10.2 in. The body's words sit a little further in.
+ *
+ * The business's own letterhead cut full width (full_sheet, letterhead.ts) fills the sheet instead:
+ * the content box is the whole page, so its pictures print where they sit on the stationery, and the
+ * body's words keep the same inset from the paper's edge, so the same width (FULL_SHEET_PAPER_VARS).
  */
 import type { CSSProperties } from "react";
 import type { PaperSpace } from "./paginate";
@@ -57,11 +60,30 @@ export const PAPER_VARS = {
   "--pad-bottom": `${BODY_PAD_BOTTOM}px`,
 } as CSSProperties;
 
+/** The measurements for a document on the whole sheet: the content box is the page, and the words keep their place. */
+export const FULL_SHEET_PAPER_VARS = {
+  ...PAPER_VARS,
+  "--page-margin": "0px",
+  "--box-w": `${PAGE_WIDTH}px`,
+  "--box-h": `${PAGE_HEIGHT}px`,
+  "--doc-pad": `${PAGE_MARGIN + BODY_INSET}px`,
+  // Crewtavo's own header and footer, and the running header, keep the margin they print with on a page that has one.
+  "--sheet-margin": `${PAGE_MARGIN}px`,
+} as CSSProperties;
+
+/**
+ * WebKit's print scale for a document on the whole sheet: the full page printed the width a
+ * content box is at WEBKIT_PRINT_SCALE, so it fits the room an iPad leaves as surely. Not quite to
+ * the edges there (WebKit keeps its own margins), but the same picture, in the same place.
+ */
+export const WEBKIT_FULL_SHEET_SCALE = (WEBKIT_PRINT_SCALE * CONTENT_WIDTH) / PAGE_WIDTH;
+
 /** The room for the body on each page, from the measured letterhead, running header and footer. */
-export function paperSpace(parts: { letterhead: number; running: number; footer: number }): PaperSpace {
+export function paperSpace(parts: { letterhead: number; running: number; footer: number }, fullSheet = false): PaperSpace {
+  const height = fullSheet ? PAGE_HEIGHT : CONTENT_HEIGHT;
   return {
-    first: CONTENT_HEIGHT - parts.letterhead - parts.footer,
-    rest: CONTENT_HEIGHT - parts.running - parts.footer,
+    first: height - parts.letterhead - parts.footer,
+    rest: height - parts.running - parts.footer,
     padTop: BODY_PAD_TOP,
     padBottom: BODY_PAD_BOTTOM,
     slack: PAGE_SLACK,

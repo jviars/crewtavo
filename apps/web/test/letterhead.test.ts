@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATE } from "@crewtavo/core/documents";
-import { blankEdges, inkRows, roughPage, suggestBands, whitenPaper } from "@/features/documents/letterhead";
+import { inkRows, roughPage, suggestBands, whitenPaper } from "@/features/documents/letterhead";
 import { letterheadSummary } from "@/features/settings/TemplateSettings";
 
 const DPI = 100;
@@ -53,17 +53,6 @@ describe("letterhead bands", () => {
   it("takes a wide, short picture as the header alone", () => {
     expect(suggestBands(rows(200, [[20, 180]]), 1700, DPI)).toEqual({ headerEnd: 200, footerStart: 200 });
   });
-
-  it("cuts blank paper off the sides evenly and off the outer edge, up to the print margin", () => {
-    // Printing from x 30 to 170 of 200 and y 25 to 45 of 50, with a 40 px margin.
-    const data = page(200, 50, [[30, 25, 140, 20]]);
-    expect(blankEdges(data, 200, 50, 40, "top")).toEqual({ side: 30, outer: 25 });
-    expect(blankEdges(data, 200, 50, 40, "bottom")).toEqual({ side: 30, outer: 5 });
-    // Printing off-center keeps it where it is: only as much comes off each side as the narrower blank.
-    expect(blankEdges(page(200, 50, [[10, 0, 140, 50]]), 200, 50, 40, "top")).toEqual({ side: 10, outer: 0 });
-    // Never more than the margin, so it prints where it sits on the stationery.
-    expect(blankEdges(page(200, 100, [[90, 90, 20, 10]]), 200, 100, 40, "top")).toEqual({ side: 40, outer: 40 });
-  });
 });
 
 /** A letter page at 100 dpi on `paper` (its color at each point), with black boxes [x, y, width, height] printed on it, and a little noise as a camera has. */
@@ -95,7 +84,7 @@ describe("a photo or scan of the stationery", () => {
   const BOXES: Array<[number, number, number, number]> = [[100, 50, 200, 70], [100, 135, 400, 25], [100, 1010, 650, 30]];
   const read = (data: Uint8ClampedArray) => {
     const ink = inkRows(data, 850, 1100);
-    return { bands: suggestBands(ink, 850, DPI), header: blankEdges(data.subarray(0, 170 * 850 * 4), 850, 170, 40, "top"), ink };
+    return { bands: suggestBands(ink, 850, DPI), ink };
   };
   const white = read(photo(() => [255, 255, 255], BOXES));
   const at = (data: Uint8ClampedArray, x: number, y: number) => Array.from(data.subarray((y * 850 + x) * 4, (y * 850 + x) * 4 + 3));
@@ -115,9 +104,8 @@ describe("a photo or scan of the stationery", () => {
       // Unchanged, the paper reads as printing all the way down: the lines go to their limits.
       expect(suggestBands(inkRows(data, 850, 1100), 850, DPI), name).toEqual({ headerEnd: 440, footerStart: 770 });
       expect(whitenPaper(data, 850, 1100, DPI), name).toBeLessThan(245);
-      const { bands, header, ink } = read(data);
+      const { bands, ink } = read(data);
       expect(bands, name).toEqual(white.bands);
-      expect(header, name).toEqual(white.header);
       expect(roughPage(222, ink), name).toBe(false);
       // The paper is white paper now, and the printing is still printing.
       expect(at(data, 600, 600), name).toEqual([255, 255, 255]);

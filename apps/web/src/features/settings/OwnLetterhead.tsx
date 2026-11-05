@@ -4,7 +4,7 @@
  * finds where its printed top and bottom are, the person moves the lines if they like, and the two
  * bands go on the template (features/documents/letterhead.ts), to be kept when the template is saved.
  */
-import { letterheadSrc, type LetterheadPicture } from "@crewtavo/core/documents";
+import { letterheadSrc, printsFullSheet, type LetterheadPicture } from "@crewtavo/core/documents";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -45,6 +45,10 @@ export function OwnLetterhead({ header, footer, onChange }: { header: Letterhead
         <Button size="sm" icon="upload" loading={read.isPending} slowHint={false} style={{ justifySelf: "start" }} onClick={() => input.current?.click()}>
           {header || footer ? "Upload a different one" : "Upload your letterhead"}
         </Button>
+        {/* Cut before letterheads filled the sheet (inside the margins, blank edges trimmed): it prints as it always has until it's uploaded again. */}
+        {(header || footer) && !printsFullSheet({ header, footer }) && (
+          <span className="small">Upload it again to print it edge to edge, right where it sits on your stationery.</span>
+        )}
         <span className="muted small">A PDF of a blank page of your letterhead prints cleanest: in Word, choose File → Save as PDF. A scan or photo of a printed page works too.</span>
       </div>
       <FormError error={read.error} />

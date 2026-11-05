@@ -51,6 +51,7 @@ import {
 import { invoiceFill } from "../src/features/documents/data";
 import { documentBlocks, EstimateDocument } from "../src/features/documents/EstimateDocument";
 import styles from "../src/features/documents/EstimateDocument.module.css";
+import { BODY_INSET, CONTENT_HEIGHT, CONTENT_WIDTH, FULL_SHEET_PAPER_VARS, PAGE_HEIGHT, PAGE_MARGIN, PAGE_WIDTH, paperSpace, WEBKIT_FULL_SHEET_SCALE, WEBKIT_PRINT_SCALE } from "../src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLayout, DocumentOption, DocumentSection, PaperPart } from "../src/features/documents/types";
 import { logoUrl } from "../src/lib/files";
 import { contractBlocks, contractTable, sanitizeContractHtml, type ContractBlock } from "../src/lib/html";
@@ -917,6 +918,34 @@ describe("the business's own letterhead", () => {
   const top = { path: `${COMPANY_ID}/letterhead/11111111-1111-4111-8111-111111111111.png`, width: 1540, height: 300 };
   const bottom = { path: `${COMPANY_ID}/letterhead/22222222-2222-4222-8222-222222222222.png`, width: 1540, height: 120 };
   const own: Partial<TemplateSettings> = { letterhead: "custom", letterhead_header: top, letterhead_footer: bottom, footer: "Thank you for your business" };
+
+  it("fills the sheet with a letterhead cut full width, and keeps the margin for one cut before", () => {
+    const full = { ...own, letterhead_header: { ...top, full_sheet: true as const }, letterhead_footer: { ...bottom, full_sheet: true as const } };
+    expect(page(full)).toContain('data-full-sheet=""');
+    expect(page({ ...full, letterhead_header: null })).toContain('data-full-sheet=""');
+    expect(page({ ...full, letterhead_footer: null })).toContain('data-full-sheet=""');
+    // Pictures cut before lost their blank edges, so they print inside the margin where they always have.
+    expect(page(own)).not.toContain("data-full-sheet");
+    expect(page({ ...full, letterhead_footer: bottom })).not.toContain("data-full-sheet");
+    expect(page({ ...full, letterhead_header: null, letterhead_footer: null })).not.toContain("data-full-sheet");
+    expect(page({ ...full, letterhead: "built_in" })).not.toContain("data-full-sheet");
+    // The template keeps the mark, and only as true.
+    expect(templateSettings(full).letterhead_header).toEqual({ ...top, full_sheet: true });
+    expect(templateSettings({ ...own, letterhead_header: { ...top, full_sheet: "yes" } as never }).letterhead_header).toEqual(top);
+  });
+
+  it("keeps the body's words where they are on a full sheet, and fits it on an iPad's printed page", () => {
+    const inset = Number.parseFloat(String(FULL_SHEET_PAPER_VARS["--doc-pad" as keyof typeof FULL_SHEET_PAPER_VARS]));
+    expect(inset).toBeCloseTo(PAGE_MARGIN + BODY_INSET);
+    expect(PAGE_WIDTH - 2 * inset).toBeCloseTo(CONTENT_WIDTH - 2 * BODY_INSET);
+    const parts = { letterhead: 160, running: 50, footer: 140 };
+    expect(paperSpace(parts, true).first).toBe(PAGE_HEIGHT - 300);
+    expect(paperSpace(parts, true).rest).toBe(PAGE_HEIGHT - 190);
+    expect(paperSpace(parts).first).toBe(CONTENT_HEIGHT - 300);
+    // Safari prints the whole page as wide as it prints a content box, and no taller.
+    expect(PAGE_WIDTH * WEBKIT_FULL_SHEET_SCALE).toBeCloseTo(CONTENT_WIDTH * WEBKIT_PRINT_SCALE);
+    expect(PAGE_HEIGHT * WEBKIT_FULL_SHEET_SCALE).toBeLessThanOrEqual(CONTENT_HEIGHT * WEBKIT_PRINT_SCALE);
+  });
 
   it("prints its pictures in place of Crewtavo's letterhead and the footer's words, on estimates and invoices", () => {
     for (const data of [SAMPLE_DOCUMENT, { ...SAMPLE_DOCUMENT, kind: "invoice" as const, signatures: undefined }]) {

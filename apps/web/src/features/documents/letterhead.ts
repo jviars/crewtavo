@@ -4,8 +4,9 @@
  * or scan is made white too (whitenPaper), so it doesn't print as a gray box; Crewtavo suggests where
  * the printed top ends and the printed bottom starts; the person moves those lines if they like;
  * and the two bands are cut into PNGs and uploaded (PUT /api/templates/letterhead, which keeps each
- * for good). Each band loses the blank paper along its edges, up to the 0.4 in the printed page
- * leaves (PrintableDocument), so it prints where it sits on the stationery and at the same size.
+ * for good). Each band is the page's whole width, from its very top or down to its very bottom
+ * (full_sheet), so on a document that fills the sheet (PrintableDocument) it prints where it sits on
+ * the stationery and at the same size, a color band to the edge included.
  */
 import { LETTERHEAD_MAX_PIXELS, type LetterheadPicture } from "@crewtavo/core/documents";
 import { api } from "@/lib/api";
@@ -16,8 +17,6 @@ import { loadPdfJs } from "@/lib/pdf";
 export const LETTERHEAD_DPI = 200;
 /** A letter page is 8.5 in wide; a picture of one is taken to be that wide. */
 const PAGE_WIDTH_IN = 8.5;
-/** The printed page's margin (PrintableDocument). */
-const PRINT_MARGIN_IN = 0.4;
 /** What the API takes (services/letterhead.ts); a bigger band is made smaller. */
 const MAX_BYTES = 1_400_000;
 /** A band shorter than this (about a line of small print) is none at all. */
@@ -300,54 +299,22 @@ export async function readLetterhead(file: File): Promise<LetterheadPage | null>
   }
 }
 
-/**
- * How much blank paper comes off a band: the same at the left and right (so it stays centered) and
- * at its outer edge (the top of the header, the bottom of the footer), each up to the print margin.
- */
-export function blankEdges(data: Uint8ClampedArray, width: number, height: number, margin: number, outer: "top" | "bottom"): { side: number; outer: number } {
-  const printed = (x: number, y: number) => {
-    const i = (y * width + x) * 4;
-    return Math.min(data[i]!, data[i + 1]!, data[i + 2]!) < INK;
-  };
-  const columnBlank = (x: number) => {
-    for (let y = 0; y < height; y++) if (printed(x, y)) return false;
-    return true;
-  };
-  const rowBlank = (y: number) => {
-    for (let x = 0; x < width; x++) if (printed(x, y)) return false;
-    return true;
-  };
-  let left = 0;
-  while (left < margin && left < width / 2 && columnBlank(left)) left++;
-  let right = 0;
-  while (right < margin && right < width / 2 && columnBlank(width - 1 - right)) right++;
-  let edge = 0;
-  while (edge < margin && edge < height - 1 && rowBlank(outer === "top" ? edge : height - 1 - edge)) edge++;
-  return { side: Math.min(left, right), outer: edge };
-}
-
 function toPng(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't make a picture of the letterhead."))), "image/png"));
 }
 
-/** One band of the page as a PNG, its blank edges cut off, made smaller until the API takes it. */
-async function cutBand(page: LetterheadPage, top: number, bottom: number, outer: "top" | "bottom"): Promise<{ png: Blob; width: number; height: number } | null> {
+/** One band of the page, its whole width, as a PNG, made smaller until the API takes it. */
+async function cutBand(page: LetterheadPage, top: number, bottom: number): Promise<{ png: Blob; width: number; height: number } | null> {
   const { canvas, dpi } = page;
-  if (bottom - top < MIN_BAND_IN * dpi) return null;
-  const { data } = canvas.getContext("2d", { willReadFrequently: true })!.getImageData(0, top, canvas.width, bottom - top);
-  const edges = blankEdges(data, canvas.width, bottom - top, Math.round(PRINT_MARGIN_IN * dpi), outer);
-  const sx = edges.side;
-  const sw = canvas.width - 2 * edges.side;
-  const sy = outer === "top" ? top + edges.outer : top;
-  const sh = bottom - top - edges.outer;
-  if (sh < MIN_BAND_IN * dpi) return null;
+  const height = bottom - top;
+  if (height < MIN_BAND_IN * dpi) return null;
   for (const scale of [1, 0.75, 0.5]) {
     const out = document.createElement("canvas");
-    out.width = Math.round(sw * scale);
-    out.height = Math.round(sh * scale);
+    out.width = Math.round(canvas.width * scale);
+    out.height = Math.round(height * scale);
     const ctx = out.getContext("2d")!;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    ctx.drawImage(canvas, 0, top, canvas.width, height, 0, 0, out.width, out.height);
     const png = await toPng(out);
     const size = { width: out.width, height: out.height };
     out.width = out.height = 0; // hand the memory back
@@ -358,15 +325,16 @@ async function cutBand(page: LetterheadPage, top: number, bottom: number, outer:
 
 async function upload(band: { png: Blob } | null): Promise<LetterheadPicture | null> {
   if (!band) return null;
-  return api.put<LetterheadPicture>("/templates/letterhead", { picture: await base64Of(band.png) });
+  const picture = await api.put<LetterheadPicture>("/templates/letterhead", { picture: await base64Of(band.png) });
+  return { ...picture, full_sheet: true };
 }
 
 /** Cuts the header and footer out of the page where the lines are, and uploads them. */
 export async function saveLetterhead(page: LetterheadPage, bands: LetterheadBands): Promise<LetterheadPictures> {
   const height = page.canvas.height;
   const [header, footer] = await Promise.all([
-    cutBand(page, 0, Math.min(bands.headerEnd, height), "top"),
-    cutBand(page, Math.max(bands.footerStart, 0), height, "bottom"),
+    cutBand(page, 0, Math.min(bands.headerEnd, height)),
+    cutBand(page, Math.max(bands.footerStart, 0), height),
   ]);
   if (!header && !footer) throw new Error("Move the lines to take in your letterhead's top, its bottom, or both.");
   const [h, f] = await Promise.all([upload(header), upload(footer)]);

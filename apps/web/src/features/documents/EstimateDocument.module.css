@@ -205,11 +205,18 @@
 .pageNumber > * { grid-area: 1 / 1; white-space: nowrap; }
 .pageNumberRoom { visibility: hidden; }
 
-/* The business's own letterhead: pictures across the content box, the width they were cut for. */
+/*
+ * The business's own letterhead: pictures across the content box, the width they were cut for. One
+ * cut full width fills the sheet (data-full-sheet: the content box is the page), and Crewtavo's own
+ * header and footer, and the running header, keep the margin they'd print with on a page that has one.
+ */
 .ownImage { display: block; width: 100%; height: auto; }
 .ownHeader { padding-bottom: 6px; }
 .ownFooter { display: grid; gap: 4px; margin: 0; padding: 0; border-top: 0; }
 .ownPages { justify-self: end; padding: 0 var(--doc-pad); }
+.doc[data-full-sheet] :is(.running, .classic, .centered) { padding-top: var(--sheet-margin); }
+.doc[data-full-sheet] .banner { padding-inline: var(--doc-pad); }
+.doc[data-full-sheet] .footer:not(.ownFooter) { padding-bottom: var(--sheet-margin); }
 
 /* ---- On screen: the pages, scaled down to fit (DocumentSheet) ----------------------------- */
 .sheet { width: 100%; min-width: 0; display: flex; justify-content: center; }

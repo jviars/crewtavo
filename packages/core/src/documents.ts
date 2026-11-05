@@ -22,6 +22,12 @@ export type LetterheadPicture = {
   path: string;
   width: number;
   height: number;
+  /**
+   * Cut across the page's whole width, from its very edge (every one uploaded since letterheads
+   * print edge to edge): it fills the sheet, where it sits on the stationery. One without lost the
+   * blank paper along its edges and prints inside the page's 0.4 in margin, as it always has.
+   */
+  full_sheet?: true;
 };
 
 export interface TemplateSettings {
@@ -169,7 +175,9 @@ const pixels = (value: unknown) => typeof value === "number" && Number.isInteger
 function picture(value: unknown): LetterheadPicture | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const p = value as Record<string, unknown>;
-  return typeof p.path === "string" && isLetterheadPath(p.path) && pixels(p.width) && pixels(p.height) ? { path: p.path, width: p.width as number, height: p.height as number } : null;
+  return typeof p.path === "string" && isLetterheadPath(p.path) && pixels(p.width) && pixels(p.height)
+    ? { path: p.path, width: p.width as number, height: p.height as number, ...(p.full_sheet === true && { full_sheet: true as const }) }
+    : null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -230,6 +238,15 @@ export function documentColor(template: Pick<TemplateSettings, "color">, company
 export function ownLetterhead(template: Pick<TemplateSettings, "letterhead" | "letterhead_header" | "letterhead_footer">): { header: LetterheadPicture | null; footer: LetterheadPicture | null } {
   if (template.letterhead !== "custom") return { header: null, footer: null };
   return { header: template.letterhead_header, footer: template.letterhead_footer };
+}
+
+/**
+ * Whether a document prints on the whole sheet, edge to edge: with the business's own letterhead,
+ * when every picture of it was cut full width (full_sheet). A letterhead cut before keeps the margin.
+ */
+export function printsFullSheet(own: { header: LetterheadPicture | null; footer: LetterheadPicture | null }): boolean {
+  const pictures = [own.header, own.footer].filter((p): p is LetterheadPicture => p !== null);
+  return pictures.length > 0 && pictures.every((p) => p.full_sheet === true);
 }
 
 /** The words under the company's signature line. */

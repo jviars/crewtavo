@@ -14,7 +14,7 @@
  * screen and in print, so the pages on screen are the pages that print. A block too tall for the
  * room left is cut between two of its lines, and each page draws only its part's own words.
  */
-import { companySignatureLabel, documentColor, letterheadSrc, ownLetterhead, type LetterheadPicture, type TemplateSettings } from "@crewtavo/core/documents";
+import { companySignatureLabel, documentColor, letterheadSrc, ownLetterhead, printsFullSheet, type LetterheadPicture, type TemplateSettings } from "@crewtavo/core/documents";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { formatMoneyCents } from "@/lib/format";
@@ -22,7 +22,7 @@ import { contractBlocks, type ContractBlock } from "@/lib/html";
 import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "./build";
 import styles from "./EstimateDocument.module.css";
 import { paginate, type PaperBlock, type PaperLayout } from "./paginate";
-import { cutWords, isWebKit, lineCuts, nextFrames, PAGE_WIDTH, PAPER_VARS, paperSettled, paperSpace, stackHeight, WEBKIT_PAGE_MARGIN, WEBKIT_PRINT_SCALE, type PaperWords } from "./paper";
+import { cutWords, FULL_SHEET_PAPER_VARS, isWebKit, lineCuts, nextFrames, PAGE_WIDTH, PAPER_VARS, paperSettled, paperSpace, stackHeight, WEBKIT_FULL_SHEET_SCALE, WEBKIT_PAGE_MARGIN, WEBKIT_PRINT_SCALE, type PaperWords } from "./paper";
 import type { DocumentCompany, DocumentData, DocumentLayout, DocumentLine, DocumentOption, DocumentSection, DocumentSignature, EstimateDocumentProps, PaperPart } from "./types";
 
 export { PAGE_HEIGHT, PAGE_WIDTH } from "./paper";
@@ -82,6 +82,8 @@ interface PieceTable {
 /** A document taken apart for the pages: its look, the parts of a page, and the blocks of the body. */
 interface Paper {
   label: string;
+  /** On the whole sheet, edge to edge: the business's own letterhead, cut full width (printsFullSheet). */
+  fullSheet: boolean;
   vars: CSSProperties;
   letterhead: ReactNode;
   running: ReactNode;
@@ -131,14 +133,15 @@ function paperOf(template: TemplateSettings, company: DocumentCompany, data: Doc
   const estimate = data.kind === "estimate";
   const kind = estimate ? "Estimate" : "Invoice";
   const color = documentColor(template, company.settings);
+  const own = ownLetterhead(template);
+  const fullSheet = printsFullSheet(own);
   const vars = {
-    ...PAPER_VARS,
+    ...(fullSheet ? FULL_SHEET_PAPER_VARS : PAPER_VARS),
     "--doc-color": color,
     "--doc-on-color": inkOn(color),
     "--doc-text-color": readableOnWhite(color),
     fontFamily: template.font === "classic" ? CLASSIC_FONT : "var(--font)",
   } as CSSProperties;
-  const own = ownLetterhead(template);
   const words = template.footer.trim();
 
   const pieces: Piece[] = [];
@@ -235,6 +238,7 @@ function paperOf(template: TemplateSettings, company: DocumentCompany, data: Doc
   const once = (page: number, pages: number) => (page === pages ? undefined : true);
   return {
     label: data.number ? `${kind} ${data.number}` : kind,
+    fullSheet,
     vars,
     letterhead: own.header ? (
       <header className={styles.ownHeader}>
@@ -545,7 +549,7 @@ export function EstimateDocument({ template, company, data, className, layout, f
   const paper = paperOf(template, company, data, headingLevel);
   const pages = fits(layout, paper.pieces) ? layout : [onePage(paper.pieces)];
   return (
-    <article className={cx(styles.doc, className)} style={paper.vars} aria-label={paper.label}>
+    <article className={cx(styles.doc, className)} style={paper.vars} data-full-sheet={flag(paper.fullSheet)} aria-label={paper.label}>
       {(firstPageOnly ? pages.slice(0, 1) : pages).map((page, i) => (
         <section key={i} className={styles.page} data-page={i + 1} role="group" aria-label={`Page ${i + 1} of ${pages.length}`}>
           <div className={styles.box}>
@@ -893,7 +897,7 @@ function measurePaper(root: HTMLElement, paper: Paper): Measured | null {
       whole: p.whole,
     };
   });
-  const space = paperSpace({ letterhead: round(parts.letterhead), running: round(parts.running), footer: round(parts.footer) });
+  const space = paperSpace({ letterhead: round(parts.letterhead), running: round(parts.running), footer: round(parts.footer) }, paper.fullSheet);
   return { blocks, space, elements, signature: JSON.stringify([blocks, space]) };
 }
 
@@ -930,7 +934,7 @@ function PaperMeasure({ paper, rootRef }: { paper: Paper; rootRef: RefObject<HTM
     else groups.push(piece.table ? { table: piece.table, pieces: [piece] } : piece);
   }
   return createPortal(
-    <div ref={rootRef} className={cx(styles.doc, styles.measure)} style={paper.vars} aria-hidden="true" data-paper-measure="">
+    <div ref={rootRef} className={cx(styles.doc, styles.measure)} style={paper.vars} data-full-sheet={flag(paper.fullSheet)} aria-hidden="true" data-paper-measure="">
       <div className={styles.block} data-part="letterhead">{paper.letterhead}</div>
       <div className={styles.block} data-part="running">{paper.running}</div>
       <div className={styles.block} data-part="footer">{paper.footer(1, 1)}</div>
@@ -1088,16 +1092,18 @@ export type PrintableDocumentProps = Pick<EstimateDocumentProps, "template" | "c
 /**
  * The document, hidden on screen, and the only thing on the page when this screen prints (the
  * browser's Print, or Save as PDF): the same pages as on screen, each on its own sheet of letter
- * paper inside 0.4 in margins. While it's mounted, printing anything on the screen prints the
- * document instead. Safari (so the iPad) prints inside its own margins as well as the @page one,
- * so there the @page margin is thin and each page is printed a little smaller
- * (WEBKIT_PRINT_SCALE), centered: the same pages, the same breaks.
+ * paper, inside 0.4 in margins, or filling the sheet (no @page margin) on the business's own letterhead
+ * cut full width. Safari (so the iPad) prints inside its own margins as well as the @page one, so
+ * there the @page margin is thin and each page is printed a little smaller, centered: the same
+ * pages, the same breaks (WEBKIT_PRINT_SCALE, or WEBKIT_FULL_SHEET_SCALE for the whole sheet).
+ * While it's mounted, printing anything on the screen prints the document instead.
  *
  * Marked `data-paginated` once its pages are final (usePaper's settled); printDocument waits for it.
  */
 export function PrintableDocument({ template, company, data, className }: PrintableDocumentProps) {
   const paper = usePaper(template, company, data);
   const [webkit] = useState(isWebKit);
+  const fullSheet = printsFullSheet(ownLetterhead(template));
   if (typeof document === "undefined") return null;
   return (
     <>
@@ -1107,10 +1113,10 @@ export function PrintableDocument({ template, company, data, className }: Printa
           data-printable-document=""
           data-paginated={paper.settled ? "" : undefined}
           data-webkit={webkit ? "" : undefined}
-          style={webkit ? ({ "--print-scale": WEBKIT_PRINT_SCALE } as CSSProperties) : undefined}
+          style={webkit ? ({ "--print-scale": fullSheet ? WEBKIT_FULL_SHEET_SCALE : WEBKIT_PRINT_SCALE } as CSSProperties) : undefined}
         >
           {/* Only while it's mounted: letter paper, and nothing else on the printed page. */}
-          <style>{`@page { size: letter; margin: ${webkit ? WEBKIT_PAGE_MARGIN : "0.4in"}; }
+          <style>{`@page { size: letter; margin: ${webkit ? WEBKIT_PAGE_MARGIN : fullSheet ? "0" : "0.4in"}; }
 @media print {
   html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
   body > :not(.${styles.printRoot}) { display: none !important; }
