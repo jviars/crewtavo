@@ -63,6 +63,15 @@ async function shot(page, name, path) {
   console.log(`docs/images/${name}.png`);
 }
 
+/** Opens a list and follows the link to one of its rows, by the row's text. */
+async function follow(page, path, text, url) {
+  await page.goto(`${BASE}${path}`);
+  await settle(page);
+  await page.getByRole("link").filter({ hasText: text }).first().click();
+  await page.waitForURL(url);
+  await settle(page);
+}
+
 // --- The office, on a desktop ---------------------------------------------------------------------
 const office = await signedIn(EMAIL, DESKTOP);
 await shot(office, "dashboard", "/");
@@ -70,9 +79,40 @@ await shot(office, "dashboard", "/");
 await office.evaluate(() => localStorage.setItem("crewtavo.schedule.panel", "closed"));
 await shot(office, "schedule", "/schedule?view=week");
 await shot(office, "pipeline", "/pipeline");
-await shot(office, "finance", "/finance");
+await shot(office, "finance", "/finance?range=90d");
 await shot(office, "equipment", "/equipment");
 await shot(office, "knowledge-base", "/kb");
+await shot(office, "jobs", "/jobs");
+await shot(office, "invoices", "/invoices");
+await shot(office, "timesheets", "/timesheets");
+await shot(office, "marketing", "/marketing");
+await shot(office, "automations", "/automations");
+await shot(office, "apps", "/apps");
+await follow(office, "/clients", /Summit Ridge Builders/, /\/clients\/[\w-]+$/);
+await shot(office, "client");
+await follow(office, "/jobs", /Phase 2 subdivision roads/, /\/jobs\/[\w-]+$/);
+await shot(office, "job");
+await follow(office, "/invoices", /Town of Rocky Mount/, /\/invoices\/[\w-]+$/);
+await shot(office, "invoice");
+
+// The paving takeoff: its drawing on the aerial, and the project it prices.
+await follow(office, "/paving", /Clubhouse lot/, /\/paving\/[\w-]+$/);
+const project = new URL(office.url()).pathname;
+const noPicture = await office.getByText(/No picture saved yet/).isVisible();
+await office.evaluate(() => localStorage.setItem("crewtavo.measureHelpSeen", "1"));
+await office.getByRole("link", { name: "Edit the takeoff" }).click();
+await office.waitForURL(/\/measure\?/);
+await office.getByRole("button", { name: "Saved" }).waitFor();
+await office.locator(".measure-tool", { hasText: "Edit" }).click(); // so no drawing hint covers the map
+await office.waitForTimeout(3000); // aerial tiles
+await shot(office, "measure");
+if (noPicture) {
+  // The seed can't draw the map picture the project shows, so save the takeoff once to make it.
+  await office.getByLabel("Name this measurement").fill("Clubhouse lot "); // a change; the server trims it
+  await office.getByRole("button", { name: "Save changes" }).click();
+  await office.getByRole("button", { name: "Saved" }).waitFor({ timeout: 30_000 });
+}
+await shot(office, "paving", project);
 
 // A sent quote, and the client's view of it in the Client Hub ("Preview as client").
 await office.goto(`${BASE}/quotes`);
@@ -97,6 +137,12 @@ await client.context().close();
 
 const crew = await signedIn(FIELD_EMAIL, PHONE);
 await shot(crew, "field", "/field");
+await follow(crew, "/field", /Stone base/, /\/field\/visits\/[\w-]+$/);
+await shot(crew, "field-visit");
 await crew.context().close();
+
+const owner = await signedIn(EMAIL, PHONE);
+await shot(owner, "dashboard-phone", "/");
+await owner.context().close();
 
 await browser.close();

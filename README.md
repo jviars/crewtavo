@@ -223,6 +223,87 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   </tr>
 </table>
 
+<details>
+<summary><strong>More screenshots</strong></summary>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/measure.png" alt="Measure: a parking lot outlined on the aerial with stall rows, ADA stalls and crack seal, and the takeoff's totals">
+      <p><strong>Measure.</strong> A paving takeoff drawn on the aerial.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/paving.png" alt="A paving project: the takeoff sheet, its quantities and the steps from takeoff to invoice">
+      <p><strong>Paving.</strong> The takeoff priced into a proposal.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/jobs.png" alt="Jobs: active, upcoming and unscheduled jobs with their next visit and value">
+      <p><strong>Jobs.</strong> Every job and where it stands.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/job.png" alt="A job: its visits, line items and job costing">
+      <p><strong>A job.</strong> Visits, line items and job costing.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/client.png" alt="A client: properties, quotes, jobs, invoices, balance and marketing preferences">
+      <p><strong>A client.</strong> Properties, work, balance and contacts.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/invoices.png" alt="Invoices: awaiting payment, past due and collected, with the open invoices">
+      <p><strong>Invoices.</strong> What's owed, past due and collected.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/invoice.png" alt="A partly paid invoice with its payment and the printed copy">
+      <p><strong>An invoice.</strong> Payments and the printed copy.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/timesheets.png" alt="Timesheets: each person's hours for the week, approved and pending">
+      <p><strong>Timesheets.</strong> The crew's hours, approved for pay.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/marketing.png" alt="Marketing: emails sent, review requests and referrals, automated campaigns and a sent campaign">
+      <p><strong>Marketing.</strong> Campaigns, review asks and referrals.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/automations.png" alt="Automations: rules that notify the office and follow up with clients">
+      <p><strong>Automations.</strong> Rules that follow up by themselves.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/apps.png" alt="Apps: what's built in, and the marketing, calendar and AI apps to connect">
+      <p><strong>Apps.</strong> Built-in apps and connections.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/dashboard-dark.png" alt="Crewtavo's home screen in dark mode">
+      <p><strong>Dark mode.</strong> Home after dark.</p>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/images/field-visit.png" alt="A visit on a phone: call, text and directions, and the work to do" width="250">
+      <p><strong>A visit</strong> on the crew's phone.</p>
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/images/dashboard-phone.png" alt="Home on a phone: the day's workflow" width="250">
+      <p><strong>Home</strong> on the owner's phone.</p>
+    </td>
+  </tr>
+</table>
+
+</details>
+
 **And also:**
 
 - **Jobs and invoicing:** one-off and recurring jobs, multi-day work, change orders the client

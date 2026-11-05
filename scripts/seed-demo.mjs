@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Loads a demo company for local development and screenshots: a paving business with clients,
- * requests, quotes, jobs, a week of visits, invoices, crews, equipment and SOPs, and a striping sub
+ * requests, quotes, a takeoff, jobs, a week of visits and time, invoices and payments, crews,
+ * equipment, SOPs and a marketing campaign, and a striping sub
  * (Ray Lines of Precision Striping) with paperwork, paid work, a job offer waiting and a sign-in.
  *
  *   npm run seed:demo            (reads .dev.vars; needs the API running for onboarding)
@@ -165,14 +166,15 @@ const clientRows = [
   { display_name: "Priya Shah", email: "priya.shah@example.com", phone: "(540) 555-0163", status: "lead", lead_source: "Website form", tags: ["Residential"] },
   { display_name: "Carl Benton", email: "carl.benton@example.com", phone: "(540) 555-0109", status: "lead", lead_source: "Phone", tags: ["Residential"] },
 ];
-const clients = await must(db.from("clients").insert(clientRows.map(c), DEFAULTS).select("id, display_name"), "clients");
+const clients = await must(db.from("clients").insert(clientRows.map(c), DEFAULTS).select("id, display_name, email"), "clients");
 const byName = Object.fromEntries(clients.map((x) => [x.display_name, x.id]));
 
 const propertyRows = [
   { client: "Summit Ridge Builders", label: "Summit Ridge Phase 2", line1: "2200 Summit Ridge Rd", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 37.0121, lng: -79.8714 },
   { client: "Jordan Rivera", line1: "418 Pell Ave", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 36.9958, lng: -79.8862 },
   { client: "Town of Rocky Mount", label: "Alley program, block 4", line1: "Franklin St & Church St", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 36.9978, lng: -79.8915 },
-  { client: "Meadowbrook HOA", label: "Clubhouse lot", line1: "75 Meadowbrook Ln", city: "Wirtz", region: "VA", postal_code: "24184", lat: 37.0942, lng: -79.7731 },
+  // On a real parking lot, so the takeoff below lines up with the aerial.
+  { client: "Meadowbrook HOA", label: "Clubhouse lot", line1: "75 Meadowbrook Ln", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 36.98544, lng: -79.92777 },
   { client: "Priya Shah", line1: "9 Hillcrest Ct", city: "Boones Mill", region: "VA", postal_code: "24065", lat: 37.1154, lng: -79.9536 },
   { client: "Carl Benton", line1: "1360 Old Franklin Tpke", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 36.9742, lng: -79.9204 },
 ];
@@ -191,12 +193,12 @@ const line = (name, quantity, extra = {}) => {
   return { service_id: s.id, name: s.name, unit: s.unit, unit_price: s.unit_price, quantity, formula: s.formula, ...extra };
 };
 
-await must(
+const requests = await must(
   db.from("requests").insert([
     c({ client_id: byName["Priya Shah"], property_id: propOf[byName["Priya Shah"]], source: "web_form", title: "Driveway estimate request", details: "Gravel drive, about 120 ft long. Would like asphalt before winter.", answers: { surface: "Gravel", size: "120 ft x 12 ft", drainage: "Yes" } }),
     c({ client_id: byName["Carl Benton"], property_id: propOf[byName["Carl Benton"]], source: "phone", title: "Sealcoat and crack repair", details: "Driveway has spider cracking near the garage." }),
-    c({ client_id: byName["Meadowbrook HOA"], property_id: propOf[byName["Meadowbrook HOA"]], source: "email", status: "assessment_complete", title: "Clubhouse lot restripe", details: "42 stalls plus two ADA spaces." }),
-  ], DEFAULTS),
+    c({ client_id: byName["Meadowbrook HOA"], property_id: propOf[byName["Meadowbrook HOA"]], source: "email", status: "assessment_complete", title: "Clubhouse lot restripe", details: "About 45 stalls plus two ADA spaces." }),
+  ], DEFAULTS).select("id, client_id"),
   "requests",
 );
 
@@ -218,7 +220,8 @@ await quote("Jordan Rivera", "Driveway replacement, 418 Pell Ave", "sent", [
   line("Hot-mix asphalt surface", 31),
   line("Sealcoat", 1650, { optional: true, selected: false, description: "Recommended after 6 months" }),
 ], { sent_at: daysAgo(4), message: "Thanks for having us out. This covers full removal and a new 2.5 inch surface." });
-await quote("Meadowbrook HOA", "Clubhouse lot sealcoat and restripe", "draft", [line("Hot-pour crack seal", 600), line("Sealcoat", 18400), line("Line striping", 846)]);
+// Quantities as the takeoff below measures them.
+const hoaQuote = await quote("Meadowbrook HOA", "Clubhouse lot sealcoat and restripe", "draft", [line("Sealcoat", 26380), line("Hot-pour crack seal", 126), line("Line striping", 882), line("ADA stall package", 2)]);
 const approvedQuote = await quote("Summit Ridge Builders", "Phase 2 subdivision roads (binder + surface)", "approved", [
   line("Grade and compact stone base", 410),
   line("Hot-mix asphalt surface", 620),
@@ -336,6 +339,126 @@ await must(
   ], DEFAULTS),
   "SOPs",
 );
+
+// --- More clients: paid work from the last two months, and jobs coming up ------------------------
+const more = await must(
+  db.from("clients").insert([
+    c({ display_name: "Elena Marsh", email: "elena.marsh@example.com", phone: "(540) 555-0134", status: "active", lead_source: "Google", tags: ["Residential"] }),
+    c({ display_name: "Hillside Family Dental", company_name: "Hillside Family Dental PC", email: "office@hillsidedental.test", phone: "(540) 555-0158", status: "active", lead_source: "Referral", tags: ["Commercial"] }),
+    c({ display_name: "Ben Okafor", email: "ben.okafor@example.com", phone: "(540) 555-0192", status: "active", lead_source: "Website form", tags: ["Residential"] }),
+    c({ display_name: "Rocky Mount Self Storage", email: "manager@rmstorage.test", phone: "(540) 555-0116", status: "active", lead_source: "Phone", tags: ["Commercial"] }),
+  ], DEFAULTS).select("id, display_name, email"),
+  "more clients",
+);
+Object.assign(byName, Object.fromEntries(more.map((x) => [x.display_name, x.id])));
+const moreProperties = await must(
+  db.from("properties").insert([
+    c({ client_id: byName["Elena Marsh"], line1: "27 Chestnut Hill Rd", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 37.0034, lng: -79.8801 }),
+    c({ client_id: byName["Hillside Family Dental"], line1: "610 N Main St", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 37.0071, lng: -79.8885 }),
+    c({ client_id: byName["Ben Okafor"], line1: "88 Laurel Ln", city: "Boones Mill", region: "VA", postal_code: "24065", lat: 37.1102, lng: -79.9481 }),
+    c({ client_id: byName["Rocky Mount Self Storage"], line1: "1950 Tanyard Rd", city: "Rocky Mount", region: "VA", postal_code: "24151", lat: 36.9861, lng: -79.9012 }),
+  ], DEFAULTS).select("id, client_id"),
+  "more properties",
+);
+Object.assign(propOf, Object.fromEntries(moreProperties.map((p) => [p.client_id, p.id])));
+
+const jobLine = (name, quantity) => {
+  const { formula: _f, ...l } = line(name, quantity); // job lines don't keep formulas
+  return l;
+};
+async function job(client, title, lines, extra) {
+  const [row] = await must(db.from("jobs").insert(c({ client_id: byName[client], property_id: propOf[byName[client]], title, ...extra })).select("id"), `job ${title}`);
+  await must(db.from("job_line_items").insert(lines.map((l) => c({ job_id: row.id, ...l }))), `lines ${title}`);
+  return row.id;
+}
+// Done, billed and paid `ago` days back, as the town job above was billed.
+async function paidJob(client, title, lines, ago, method, notes) {
+  const id = await job(client, title, lines, { status: "requires_invoicing", default_crew_id: sealCrew.id });
+  await must(db.from("visits").insert(visit({ job_id: id, property_id: propOf[byName[client]], title, starts_at: at(-ago, "08:00"), ends_at: at(-ago, "13:00"), crew_id: sealCrew.id, status: "completed" })), `visit ${title}`);
+  const invoice = await must(db.rpc("create_invoice_for_job", { p_job: id }), `invoice ${title}`);
+  await must(db.from("invoices").update({ status: "sent", issued_on: tzDate(1 - ago), due_on: tzDate(31 - ago) }).eq("id", invoice), `send ${title}`);
+  const { total } = await must(db.from("invoices").select("total").eq("id", invoice).single(), `total ${title}`);
+  await must(db.from("payments").insert(c({ invoice_id: invoice, client_id: byName[client], amount: total, method, received_at: daysAgo(ago - 5), notes })), `pay ${title}`);
+  return id;
+}
+const pastJobs = [
+  await paidJob("Elena Marsh", "Driveway sealcoat and crack fill", [jobLine("Sealcoat", 1800), jobLine("Hot-pour crack seal", 120)], 52, "card"),
+  await paidJob("Hillside Family Dental", "Parking lot sealcoat and restripe", [jobLine("Sealcoat", 14200), jobLine("Line striping", 620), jobLine("ADA stall package", 1)], 24, "ach"),
+  await paidJob("Ben Okafor", "Driveway patch and sealcoat", [jobLine("Asphalt patch", 64), jobLine("Sealcoat", 1450)], 9, "check", "Check #3381"),
+];
+const storageJob = await job("Rocky Mount Self Storage", "Lot patch and sealcoat", [jobLine("Asphalt patch", 220), jobLine("Sealcoat", 21500)], { default_crew_id: sealCrew.id, po_number: "RMSS-1102" });
+await must(db.from("visits").insert(visit({ job_id: storageJob, property_id: propOf[byName["Rocky Mount Self Storage"]], title: "Patch and sealcoat, storage lot", starts_at: at(1, "08:00"), ends_at: at(1, "14:00"), crew_id: sealCrew.id })), "storage visit");
+await job("Town of Rocky Mount", "Crosswalks and stop bars, Franklin St", [jobLine("Crosswalks and stop bars", 340)], { default_crew_id: sealCrew.id, po_number: "WO-24-131" });
+
+// --- A paving takeoff: the clubhouse lot outlined on the aerial, saved as Measure saves it -------
+// The lot's outline is OpenStreetMap's (way 334609878), so it sits on real asphalt in the imagery.
+const shape = (id, item, type, coordinates, label) => ({ type: "Feature", id, geometry: { type, coordinates }, properties: { item, ...(label ? { label } : {}) } });
+const takeoff = await fetch(`${API}/api/measurements`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}`, "x-company-id": company, "Content-Type": "application/json" },
+  body: JSON.stringify({
+    title: "Clubhouse lot",
+    quote_id: hoaQuote,
+    property_id: propOf[byName["Meadowbrook HOA"]],
+    view: { center: [-79.927766, 36.985444], zoom: 19.3, mode: "auto" },
+    geojson: {
+      type: "FeatureCollection",
+      features: [
+        shape("lot", "asphalt", "Polygon", [[[-79.928213, 36.985474], [-79.928061, 36.985191], [-79.92734, 36.985402], [-79.927449, 36.985709], [-79.928213, 36.985474]]], "Clubhouse lot"),
+        shape("row-south", "stall_row", "LineString", [[-79.92805, 36.985247], [-79.927393, 36.985439]], "South row"),
+        shape("row-north", "stall_row", "LineString", [[-79.927458, 36.985653], [-79.928159, 36.985437]], "North row"),
+        shape("ada-1", "ada_stall", "Point", [-79.928159, 36.985465]),
+        shape("ada-2", "ada_stall", "Point", [-79.928128, 36.985475]),
+        shape("crack-1", "crack", "LineString", [[-79.928052, 36.985357], [-79.928019, 36.985366], [-79.92782, 36.985425]], "Crack seal 1"),
+        shape("crack-2", "crack", "LineString", [[-79.927698, 36.985435], [-79.927608, 36.985453], [-79.927518, 36.985439]], "Crack seal 2"),
+      ],
+    },
+  }),
+});
+if (!takeoff.ok) throw new Error(`takeoff: ${takeoff.status} ${await takeoff.text()}`);
+
+// --- Time on the clock this week (the crew's own, so written with the service key) ---------------
+const visitId = (title) => visits.find((v) => v.title === title).id;
+const shift = (user, offset, from, to, row) => ({ company_id: company, user_id: user, started_at: at(offset, from), ended_at: to && at(offset, to), ...row });
+const done = (rate) => ({ approved_by: ownerId, approved_at: daysAgo(1), labor_rate: rate });
+const [marcus, luis] = crewIds;
+await must(
+  admin.from("time_entries").insert([
+    shift(marcus, -2, "06:45", "16:20", { job_id: townJob.id, visit_id: visitId("Overlay, block 4 alleys"), ...done(32) }),
+    shift(luis, -2, "06:50", "16:15", { job_id: townJob.id, visit_id: visitId("Overlay, block 4 alleys"), ...done(24) }),
+    shift(marcus, -1, "07:00", "09:30", { category: "shop", notes: "Paver screed and roller service", ...done(32) }),
+    shift(marcus, -1, "09:30", "10:15", { category: "drive", job_id: jobId }),
+    shift(marcus, -1, "10:15", "15:30", { job_id: jobId, notes: "Proof-rolled the north loop with the GC" }),
+    shift(luis, -1, "07:00", "11:00", { category: "shop" }),
+    shift(marcus, 0, "06:55", "12:10", { job_id: jobId, visit_id: visitId("Stone base, Phase 2 north loop") }),
+    shift(luis, 0, "07:00", "12:05", { job_id: jobId, visit_id: visitId("Stone base, Phase 2 north loop") }),
+  ], DEFAULTS),
+  "time entries",
+);
+
+// --- Marketing: a sent campaign, review asks and a referral (the server records these) -----------
+const [campaign] = await must(
+  admin.from("campaigns").insert({
+    company_id: company, name: "Fall sealcoat special", subject: "Seal your driveway before winter", audience: { statuses: ["active"] }, status: "sent",
+    body: "Hi {{client.first_name}},\n\nSealcoat goes down best before the cold sets in. Book this month and take 10% off with code SPRING10.\n\n{{link}}\n\nThanks,\n{{company.name}}\n{{company.phone}}",
+    started_at: daysAgo(6), finished_at: daysAgo(6), recipients_count: 7, sent_count: 7, created_by: ownerId,
+  }).select("id"),
+  "campaign",
+);
+const audience = ["Summit Ridge Builders", "Jordan Rivera", "Town of Rocky Mount", "Meadowbrook HOA", "Elena Marsh", "Hillside Family Dental", "Ben Okafor"];
+const emails = Object.fromEntries([...clients, ...more].map((x) => [x.display_name, x.email]));
+await must(
+  admin.from("campaign_recipients").insert(audience.map((name) => ({ company_id: company, campaign_id: campaign.id, client_id: byName[name], email: emails[name], name, status: "sent", sent_at: daysAgo(6) }))),
+  "campaign recipients",
+);
+// Each ask's short link token is made here: the column's default is for the database's own use.
+const ask = (client, job, sent, clicked) => ({ company_id: company, client_id: byName[client], job_id: job, status: clicked == null ? "sent" : "clicked", sent_at: daysAgo(sent), clicked_at: clicked == null ? null : daysAgo(clicked), created_by: ownerId, link_token: crypto.randomUUID().replaceAll("-", "").slice(0, 12) });
+await must(
+  admin.from("review_requests").insert([ask("Hillside Family Dental", pastJobs[1], 18, 17), ask("Ben Okafor", pastJobs[2], 3, 3), ask("Town of Rocky Mount", townJob.id, 1)]),
+  "review requests",
+);
+const priyaRequest = requests.find((r) => r.client_id === byName["Priya Shah"]).id;
+await must(admin.from("referrals").insert({ company_id: company, referrer_client_id: byName["Jordan Rivera"], referred_client_id: byName["Priya Shah"], request_id: priyaRequest, referred_name: "Priya Shah" }), "referral");
 
 await seedSub(company);
 
