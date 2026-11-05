@@ -21,7 +21,7 @@ function inline(source: string): { html: string; text: string } {
   // Code first, so nothing inside it is read as Markdown.
   let html = escapeHtml(source.replace(/`([^`]+)`/g, (_, code: string) => `\u0000${codes.push(code) - 1}\u0000`));
   html = html
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label: string, url: string) => {
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_whole, label: string, url: string) => {
       const href = url.replace(/&amp;/g, "&");
       return SAFE_LINK.test(href) ? `<a href="${escapeHtml(href)}">${label}</a>` : label;
     })

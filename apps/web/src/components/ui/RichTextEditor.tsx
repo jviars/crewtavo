@@ -11,9 +11,10 @@
  * "Insert a fill-in" menu for words like {Customer name}.
  */
 import { videoFromPaste } from "@crewtavo/core/video";
-import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
+import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import { useEffect, useId, useRef, useState } from "react";
 import { isAppPath, sanitizeContractHtml, sanitizeHtml } from "@/lib/html";
+import { markdownPaste } from "@/lib/markdownPaste";
 import { CALLOUTS, contractExtensions, guideExtensions, type PictureLink } from "./editorExtensions";
 import { Icon, type IconName } from "./Icon";
 import { Menu } from "./Menu";
@@ -83,6 +84,7 @@ export function RichTextEditor({
   useEffect(() => busy.current?.(adding > 0), [adding]);
   const picturesIn = (list: FileList | null | undefined) => (pics.current ? [...(list ?? [])].filter(isPicture) : []);
 
+  const editorRef = useRef<Editor | null>(null);
   const editor = useEditor({
     extensions: contract ? contractExtensions(placeholder) : guideExtensions(placeholder, (path) => pics.current?.link(path) ?? Promise.resolve(null)),
     content: sanitize(initialHtml),
@@ -95,11 +97,18 @@ export function RichTextEditor({
         return true;
       },
       // A picture pasted (a screenshot, or one copied from somewhere) is stored and added where the cursor is.
+      // Markdown pasted as plain text (a .md file, a chat with an AI) comes in as the guide's formatting.
       handlePaste: (_, event) => {
         const files = picturesIn(event.clipboardData?.files);
-        if (!files.length) return false;
+        if (files.length) {
+          event.preventDefault();
+          addPicturesNow.current(files);
+          return true;
+        }
+        const markdown = contract ? null : markdownPaste(event.clipboardData?.getData("text/plain") ?? "", event.clipboardData?.getData("text/html") ?? "");
+        if (!markdown) return false;
         event.preventDefault();
-        addPicturesNow.current(files);
+        editorRef.current?.chain().focus().insertContent(sanitize(markdown)).run();
         return true;
       },
       // Dropped from the computer: added where it's dropped. A picture moved within the guide moves as before.
@@ -114,6 +123,7 @@ export function RichTextEditor({
     onUpdate: ({ editor: e }) => changed.current(sanitize(e.getHTML()), e.getText({ blockSeparator: "\n" }).trim()),
   });
 
+  editorRef.current = editor;
   const active = useEditorState({
     editor,
     selector: ({ editor: e }) => ({

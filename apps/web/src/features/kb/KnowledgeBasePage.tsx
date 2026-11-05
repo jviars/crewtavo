@@ -86,6 +86,8 @@ export function KnowledgeBasePage() {
   const now = new Date();
   const attention = editor ? pages.filter((p) => p.status === "published" && (reviewDueAt(p) ?? now) < now).length + (suggestions.data ?? 0) : 0;
   const find = useMemo(() => guideFinder(pages, categories.data ?? []), [pages, categories.data]);
+  // Pinned by the office (a "Start here"), first pinned first, above the categories.
+  const pinned = pages.filter((p) => p.pinned_at).sort((a, b) => a.pinned_at!.localeCompare(b.pinned_at!));
   const searching = term.length > 1;
   // Title, tag and category matches straight away; matches inside guides (with a snippet) once the server answers for these words.
   const hits = useMemo(() => {
@@ -222,6 +224,12 @@ export function KnowledgeBasePage() {
         </section>
       ) : (
         <>
+          {pinned.length > 0 && (
+            <section className="stack-sm" aria-labelledby="kb-pinned">
+              <h2 id="kb-pinned" className="section-title">Pinned</h2>
+              <GuideCards pages={pinned} loading={false} isRead={index.data?.isRead} showCategory={categories.data} />
+            </section>
+          )}
           <section className="stack-sm" aria-labelledby="kb-cats">
             <h2 id="kb-cats" className="section-title">Categories</h2>
             {categories.error ? (
@@ -256,7 +264,7 @@ export function KnowledgeBasePage() {
           {pages.length > 0 && (
             <section className="stack-sm" aria-labelledby="kb-recent">
               <h2 id="kb-recent" className="section-title">Recently updated</h2>
-              <GuideCards pages={[...pages].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 6)} loading={false} isRead={index.data?.isRead} showCategory={categories.data} />
+              <GuideCards pages={[...pages].sort((a, b) => b.revised_at.localeCompare(a.revised_at)).slice(0, 6)} loading={false} isRead={index.data?.isRead} showCategory={categories.data} />
             </section>
           )}
         </>
@@ -292,7 +300,7 @@ function GuideCards({ pages, loading, error, retry, isRead, empty, showCategory 
             <GuideCover path={p.cover_path} />
             <span className="guide-card-body">
               <strong className="guide-card-title">{p.title}</strong>
-              <span className="muted small">{showCategory && <>{showCategory.find((c) => c.id === p.category_id)?.name ?? "Uncategorized"} · </>}Updated {timeAgo(p.updated_at)}{p.revision > 1 && ` · Revision ${p.revision}`}</span>
+              <span className="muted small">{showCategory && <>{showCategory.find((c) => c.id === p.category_id)?.name ?? "Uncategorized"} · </>}Updated {timeAgo(p.revised_at)}{p.revision > 1 && ` · Revision ${p.revision}`}</span>
               {(p.status === "draft" || (p.required && p.status === "published")) && (
                 <span className="row wrap" style={{ gap: 6, marginTop: 4 }}>
                   {p.status === "draft" && <span className="pill">Draft</span>}

@@ -14,6 +14,8 @@ export interface SopIndexRow {
   status: string;
   revision: number;
   updated_at: string;
+  /** When its title or body last changed: what "Updated" shows (pinning or a review doesn't move it). */
+  revised_at: string;
   audience: string[] | null;
   audience_roles: string[] | null;
   tags: string[];
@@ -21,6 +23,8 @@ export interface SopIndexRow {
   owner_id: string | null;
   review_months: number | null;
   reviewed_at: string | null;
+  /** Pinned above the categories on the knowledge base home; null when it isn't. */
+  pinned_at: string | null;
 }
 
 /** Who a guide is for: the team's levels (a sub never reads guides). */
@@ -75,7 +79,7 @@ export const guideQuery = (companyId: string, pageId: string) => ({
     unwrap(
       await supabase()
         .from("sop_pages")
-        .select("id, title, body_html, cover_path, updated_at, updated_by, revision, tags, required, status, audience, audience_roles, owner_id, review_months, reviewed_at, category:sop_categories(id, name)")
+        .select("id, title, body_html, cover_path, updated_at, revised_at, updated_by, revision, tags, required, status, audience, audience_roles, owner_id, review_months, reviewed_at, pinned_at, category:sop_categories(id, name)")
         .eq("id", pageId)
         .maybeSingle(),
     ),
@@ -88,7 +92,7 @@ export function useSopIndex() {
     queryKey: ["kb", company.id, "index"],
     queryFn: async () => {
       const [pages, acks] = await Promise.all([
-        supabase().from("sop_pages").select("id, title, category_id, required, status, revision, updated_at, audience, audience_roles, tags, cover_path, owner_id, review_months, reviewed_at").eq("company_id", company.id).order("title").limit(2000),
+        supabase().from("sop_pages").select("id, title, category_id, required, status, revision, updated_at, revised_at, audience, audience_roles, tags, cover_path, owner_id, review_months, reviewed_at, pinned_at").eq("company_id", company.id).order("title").limit(2000),
         supabase().from("sop_acknowledgements").select("page_id, revision").eq("company_id", company.id).eq("user_id", userId),
       ]);
       const rows = unwrap(pages) as SopIndexRow[];

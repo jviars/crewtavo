@@ -30,8 +30,11 @@ export async function guidePicture(file: File): Promise<{ file: File; width: num
   return { file: new File([jpeg], "picture.jpg", { type: "image/jpeg" }), ...size };
 }
 
-/** A guide's HTML (sanitized) with its stored pictures' links filled in as they come, each loading as it scrolls into view. */
-export function useGuidePictures(html: string): string {
+/**
+ * A guide's HTML (sanitized) with its stored pictures' links filled in as they come, each loading as
+ * it scrolls into view. `open`: each picture can be opened full screen (tapped, or Enter on it).
+ */
+export function useGuidePictures(html: string, open = false): string {
   const paths = useMemo(() => picturePaths(html), [html]);
   const links = useQueries({ queries: paths.map((path) => photoQuery(path)) });
   const ready = links.map((l) => l.data ?? "").join("\n");
@@ -44,8 +47,13 @@ export function useGuidePictures(html: string): string {
       img.setAttribute("decoding", "async");
       const url = urls.get(img.getAttribute("data-path") ?? "");
       if (url) img.setAttribute("src", url);
+      if (open) {
+        img.setAttribute("tabindex", "0");
+        img.setAttribute("role", "button");
+        img.setAttribute("aria-label", `Open the picture${img.alt ? `: ${img.alt}` : ""}`);
+      }
     }
     return doc.body.innerHTML;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [html, ready]);
+  }, [html, ready, open]);
 }

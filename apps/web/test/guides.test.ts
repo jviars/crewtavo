@@ -10,6 +10,7 @@ import { picturePaths } from "../src/features/kb/pictures";
 import { cleanQuiz } from "../src/features/kb/quiz";
 import { GUIDE_TEMPLATES, templateFor } from "../src/features/kb/templates";
 import { isAppPath } from "../src/lib/html";
+import { markdownPaste } from "../src/lib/markdownPaste";
 
 describe("isAppPath", () => {
   it("is a path in the app", () => {
@@ -127,5 +128,25 @@ describe("pictures in guides", () => {
     const pic = (key: string): Block => ({ kind: "media", text: "Picture", key });
     expect(compareBlocks([pic("co/kb/a.jpg")], [pic("co/kb/b.jpg")]).map((r) => r.kind)).toEqual(["changed"]);
     expect(compareBlocks([pic("co/kb/a.jpg")], [pic("co/kb/a.jpg")]).map((r) => r.kind)).toEqual(["same"]);
+  });
+});
+
+describe("markdownPaste", () => {
+  it("turns pasted Markdown into a guide's headings, steps, lists and checklists", () => {
+    const html = markdownPaste("## Before you start\n\n- Cones\n- Arrow board\n\n1. Park the truck\n2. Set the cones\n\n**Never** stand in the lane.\n\n- [ ] Vest on")!;
+    expect(html).toContain("<h3>Before you start</h3>");
+    expect(html).toContain("<ul><li><p>Cones</p></li>");
+    expect(html).toMatch(/<ol>.*Park the truck/);
+    expect(html).toContain("<strong>Never</strong>");
+    expect(html).toContain('data-type="taskList"');
+  });
+  it("leaves plain sentences, and copies that bring their own formatting, to paste as they are", () => {
+    expect(markdownPaste("Call the office before you unload.")).toBeNull();
+    expect(markdownPaste("**Only bold** on one line")).toBeNull();
+    expect(markdownPaste("- Cones\n- Board", "<ul><li>Cones</li><li>Board</li></ul>")).toBeNull();
+    expect(markdownPaste("   ")).toBeNull();
+  });
+  it("takes Markdown from a code editor, whose HTML is only styled text", () => {
+    expect(markdownPaste("# Steps\n1. Mix", '<div style="color: #333"><span>Steps</span></div>')).toContain("<h2>Steps</h2>");
   });
 });

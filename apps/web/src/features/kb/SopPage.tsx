@@ -6,7 +6,7 @@
  */
 import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -27,6 +27,7 @@ import { GuideContents, goToSection, useCurrentSection } from "./GuideContents";
 import { GuideCover } from "./GuideCover";
 import { GuideFeedback } from "./GuideFeedback";
 import { useGuidePictures } from "./pictures";
+import { PictureViewer } from "./PictureViewer";
 import { QuizDialog, type QuizQuestion } from "./QuizDialog";
 import { VersionCompare } from "./VersionCompare";
 import { guideQuery, mustRead, reviewDueAt, ROLE_LABELS, useIsEditor, useSopIndex, useTraining } from "./kbData";
@@ -41,6 +42,7 @@ export function SopPage() {
   const queryClient = useQueryClient();
   const [history, setHistory] = useState(false);
   const [quizzing, setQuizzing] = useState(false);
+  const [picture, setPicture] = useState<{ src: string; alt: string } | null>(null);
   const inlineContents = useRef<HTMLDetailsElement>(null);
 
   const page = useQuery(guideQuery(company.id, pageId));
@@ -93,6 +95,11 @@ export function SopPage() {
     mutationFn: async () => unwrap(await supabase().from("sop_pages").update({ reviewed_at: new Date().toISOString() }).eq("id", pageId)),
     onSettled: refresh,
   });
+  const pin = useMutation({
+    meta: { success: (_: unknown, on: boolean) => (on ? "Pinned to the top of the knowledge base" : "Unpinned") },
+    mutationFn: async (on: boolean) => unwrap(await supabase().from("sop_pages").update({ pinned_at: on ? new Date().toISOString() : null }).eq("id", pageId)),
+    onSettled: refresh,
+  });
   const publish = useMutation({
     meta: { success: "Guide published" },
     mutationFn: async () => unwrap(await supabase().from("sop_pages").update({ status: "published" }).eq("id", pageId)),
@@ -103,7 +110,7 @@ export function SopPage() {
     return { empty: !hasContent(html), ...withSections(html) };
   }, [page.data?.body_html]);
   const sections = body.sections.length > 1 ? body.sections : [];
-  const bodyHtml = useGuidePictures(body.html);
+  const bodyHtml = useGuidePictures(body.html, true);
   const current = useCurrentSection(sections);
   // A link to a section (…/kb/id#mixing-ratio): go there once the guide is showing. A frame later, so the new screen's scroll to the top goes first.
   const { hash } = useLocation();
@@ -140,7 +147,20 @@ export function SopPage() {
   const reviewDue = due !== null && due <= new Date();
   // "#" beside a heading copies a link to it; the contents links just go there. A link to another
   // guide (or any screen in Crewtavo) opens here without reloading the app; ⌘-click still opens a tab.
+  // A picture opens full screen, to zoom into on a phone.
+  const openPicture = (target: EventTarget) => {
+    const img = target instanceof HTMLImageElement ? target : null;
+    if (!img?.currentSrc && !img?.getAttribute("src")) return false;
+    setPicture({ src: img.currentSrc || img.src, alt: img.alt });
+    return true;
+  };
+  const onArticleKeyDown = (e: KeyboardEvent) => {
+    if ((e.key === "Enter" || e.key === " ") && openPicture(e.target)) e.preventDefault();
+  };
+  // Asked at the top of a guide and again at its end, where a phone finishes reading.
+  const confirmRead = () => (quiz.data?.length ? setQuizzing(true) : acknowledge.mutate());
   const onArticleClick = (e: MouseEvent) => {
+    if (openPicture(e.target)) return;
     const link = (e.target as Element).closest("a");
     const href = link?.getAttribute("href");
     if (!link || !href) return;
@@ -164,7 +184,7 @@ export function SopPage() {
             {askToRead && (acknowledged ? (
               <span className="pill" data-tone="success" style={{ height: "var(--control)", padding: "0 14px" }}><Icon name="check" size={14} strokeWidth={2} />You've read this</span>
             ) : (
-              <Button variant="primary" icon="check" loading={acknowledge.isPending} disabled={reads.isPending || quiz.isPending} onClick={() => (quiz.data?.length ? setQuizzing(true) : acknowledge.mutate())}>I've read this</Button>
+              <Button variant="primary" icon="check" loading={acknowledge.isPending} disabled={reads.isPending || quiz.isPending} onClick={confirmRead}>I've read this</Button>
             ))}
             {editor && <Link className="btn" to={`/kb/${sop.id}/edit`}><Icon name="edit" size={16} />Edit</Link>}
             <Menu
@@ -172,6 +192,7 @@ export function SopPage() {
               items={[
                 { label: "Print", icon: "printer", onSelect: () => window.print() },
                 { label: "Revision history", icon: "history", onSelect: () => setHistory(true), hidden: !editor },
+                { label: sop.pinned_at ? "Unpin" : "Pin to the top", icon: sop.pinned_at ? "unpin" : "pushpin", onSelect: () => pin.mutate(!sop.pinned_at), hidden: !editor },
                 { label: "Make a copy", icon: "copy", onSelect: () => navigate(`/kb/new?copy=${sop.id}`), hidden: !editor },
                 { label: "Publish", icon: "send", onSelect: () => publish.mutate(), hidden: !editor || sop.status !== "draft" },
                 { label: "Mark reviewed", icon: "check", onSelect: () => review.mutate(), hidden: !editor || !due || reviewDue },
@@ -187,12 +208,13 @@ export function SopPage() {
       />
       <div className="page-meta">
         {sop.status === "draft" && <span className="pill" data-tone="warning">Draft · only the office can see this</span>}
+        {editor && sop.pinned_at && <span className="pill"><Icon name="pushpin" size={12} />Pinned</span>}
         {jobOf.length > 0 && <span className="pill" data-tone="info">Job description for {jobOf.join(", ")}</span>}
         {trainingFor.length > 0 && <span className="pill" data-tone="info">Training for {trainingFor.join(", ")}</span>}
         {sop.required && <span className="pill" data-tone="warning">Required reading{forWhom.length ? ` for ${forWhom.join(", ")}` : ""}</span>}
         {editor && reviewDue && <span className="pill" data-tone="warning">Review due{sop.owner_id ? ` · ${name(sop.owner_id)}` : ""}</span>}
         <span className="muted small">
-          Revision {sop.revision} · Updated {timeAgo(sop.updated_at)}{sop.updated_by && team.data ? ` by ${name(sop.updated_by)}` : ""}
+          Revision {sop.revision} · Updated {timeAgo(sop.revised_at)}{sop.updated_by && team.data ? ` by ${name(sop.updated_by)}` : ""}
           {editor && due && !reviewDue && ` · Next review ${formatDate(due.toISOString())}${sop.owner_id ? ` by ${name(sop.owner_id)}` : ""}`}
           {editor && quiz.data?.length ? ` · Quiz: ${quiz.data.length} ${quiz.data.length === 1 ? "question" : "questions"}` : ""}
         </span>
@@ -211,9 +233,24 @@ export function SopPage() {
                 <GuideContents sections={sections} current={current} onPick={() => inlineContents.current?.removeAttribute("open")} />
               </details>
             )}
-            <article className="card prose sop-body" onClick={onArticleClick}>
+            <article className="card prose sop-body" onClick={onArticleClick} onKeyDown={onArticleKeyDown}>
               {body.empty ? <p className="muted">This guide is empty.{editor && <> <Link to={`/kb/${sop.id}/edit`}>Add content</Link></>}</p> : <div dangerouslySetInnerHTML={{ __html: bodyHtml }} />}
             </article>
+            {askToRead && !body.empty && (
+              <section className="card card-pad guide-done no-print" aria-label="Confirm you've read it">
+                {acknowledged ? (
+                  <span className="row" style={{ gap: 8, color: "var(--green-dark)" }}><Icon name="check" size={16} strokeWidth={2} /><strong>You've read this revision</strong></span>
+                ) : (
+                  <>
+                    <span className="stack-sm" style={{ gap: 2 }}>
+                      <strong>Done reading?</strong>
+                      <span className="muted small">{quiz.data?.length ? `Answer ${quiz.data.length === 1 ? "a question" : `${quiz.data.length} questions`} to confirm you've read it.` : "Confirm you've read it, so the office knows."}</span>
+                    </span>
+                    <Button variant="primary" icon="check" loading={acknowledge.isPending} disabled={reads.isPending || quiz.isPending} onClick={confirmRead}>I've read this</Button>
+                  </>
+                )}
+              </section>
+            )}
             {published && !body.empty && <GuideFeedback page={sop} editor={editor} person={(id) => ({ name: name(id), photo: team.data?.find((m) => m.user_id === id)?.profile?.avatar_url })} />}
           </div>
           {(showReads || showTraining || sections.length > 0) && (
@@ -274,6 +311,7 @@ export function SopPage() {
         </div>
       </div>
       {history && <HistoryDialog pageId={sop.id} current={sop.revision} names={name} onClose={() => setHistory(false)} />}
+      {picture && <PictureViewer src={picture.src} alt={picture.alt} onClose={() => setPicture(null)} />}
       {quizzing && quiz.data?.length && <QuizDialog pageId={sop.id} title={sop.title} questions={quiz.data} onClose={() => setQuizzing(false)} />}
     </>
   );

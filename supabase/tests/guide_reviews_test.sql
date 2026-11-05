@@ -77,3 +77,22 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "9c000000-0000-4000-8000-000000000003", "role": "authenticated"}', true);
 select tgr.check((select count(*) from public.notifications where kind = 'guide_review') = 0, 'the crew never sees them');
 commit;
+
+-- Pinning (20261108000500_pinned_guides.sql), and "Updated": only a change to what a guide says moves it.
+reset role;
+select revised_at as before from public.sop_pages where id = :'coi' \gset
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "9c000000-0000-4000-8000-000000000002", "role": "authenticated"}', true);
+update public.sop_pages set pinned_at = now(), reviewed_at = now() where id = :'coi';
+select tgr.check((select pinned_at is not null and revised_at = :'before' from public.sop_pages where id = :'coi'), 'the office pins a guide, and pinning or marking it reviewed isn''t an update');
+update public.sop_pages set body = '{"type": "html", "html": "<p>Email the agent today.</p>"}', body_html = '<p>Email the agent today.</p>' where id = :'coi';
+select tgr.check((select revised_at > :'before' from public.sop_pages where id = :'coi'), 'changing what it says is');
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "9c000000-0000-4000-8000-000000000003", "role": "authenticated"}', true);
+update public.sop_pages set pinned_at = null where id = :'coi';
+commit;
+reset role;
+select tgr.check((select pinned_at is not null from public.sop_pages where id = :'coi'), 'the crew can''t unpin it');

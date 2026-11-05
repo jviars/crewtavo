@@ -1,7 +1,8 @@
 /**
  * A picture in the file viewer: fitted to the screen, then zoomed with the buttons, a pinch, the
  * keyboard (+, −, 0) or ⌘/Ctrl and the scroll wheel, and dragged around with a finger or the mouse.
- * Pinch zoom is locked in the installed app, so the pinch here is the viewer's own.
+ * Pinch zoom is locked in the installed app, so the pinch here is the viewer's own. A stored file's
+ * link is asked for here; `src` shows a picture that already has one (a picture in a guide).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { planLink } from "@/features/plans/plans";
@@ -11,7 +12,7 @@ import styles from "./files.module.css";
 
 type Point = { x: number; y: number };
 
-export default function ImageView({ file, download }: { file: ViewerFile; download: ReactNode }) {
+export default function ImageView({ file, src, download }: { file: Pick<ViewerFile, "path" | "title">; src?: string; download: ReactNode }) {
   const [link, setLink] = useState<string | null>(null);
   const [failed, setFailed] = useState<unknown>(null);
   const [unreadable, setUnreadable] = useState(false);
@@ -28,11 +29,12 @@ export default function ImageView({ file, download }: { file: ViewerFile; downlo
   useEffect(() => {
     let live = true;
     setFailed(null);
-    planLink(file.path).then((url) => live && setLink(url)).catch((error) => live && setFailed(error));
+    if (src) setLink(src);
+    else planLink(file.path).then((url) => live && setLink(url)).catch((error) => live && setFailed(error));
     return () => {
       live = false;
     };
-  }, [file.path, attempt]);
+  }, [file.path, src, attempt]);
 
   const stageSize = (): Size => {
     const el = stageRef.current;
