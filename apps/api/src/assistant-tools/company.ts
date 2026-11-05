@@ -66,7 +66,7 @@ export const companyTools = {
         .refine((f) => f.type === "flat" || f.amount <= 100, "A percent late fee is 100 or less.")
         .nullable()
         .optional()
-        .describe("Added once to each invoice still unpaid grace_days after it's due; never to a draft, paid, void or written-off one. Not taxed. Null turns late fees off."),
+        .describe("Added once to each invoice still unpaid grace_days after it's due; never to a draft, paid, void or written-off one, nor a deposit invoice. Not taxed. Null turns late fees off."),
       sales_tax_percent: z.number().min(0).lt(100).optional().describe("Default sales tax, as a percent: 8.875 for 8.875%."),
       quote_valid_days: z.number().int().min(1).max(365).optional(),
       working_hours: z.object({ start: time, end: time }).optional(),

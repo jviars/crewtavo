@@ -30,7 +30,7 @@ describe("the minimum charge", () => {
 
 describe("late fees", () => {
   const fee = { type: "flat" as const, amount: 25, grace_days: 5 };
-  const owed = { status: "overdue", balance_due: 216, due_on: "2026-10-01", late_fee_at: null };
+  const owed = { kind: "standard", status: "overdue", balance_due: 216, due_on: "2026-10-01", late_fee_at: null };
 
   it("are off unless the owner turns them on", () => {
     expect(lateFeeSettings({})).toBeNull();
@@ -57,6 +57,11 @@ describe("late fees", () => {
     expect(lateFeeOn({ ...owed, balance_due: 0 }, fee)).toBeNull();
     expect(lateFeeOn({ ...owed, due_on: null }, fee)).toBeNull();
     expect(lateFeeOn(owed, null)).toBeNull();
+  });
+
+  it("never go on a deposit invoice, as the hourly task skips them", () => {
+    expect(lateFeeOn({ ...owed, kind: "deposit" }, fee)).toBeNull();
+    expect(lateFeeOn(owed, fee)).toBe("2026-10-07");
   });
 });
 
