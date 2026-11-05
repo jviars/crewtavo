@@ -287,6 +287,11 @@ insert into public.roof_packages (company_id, name) values (:'co', 'Good') retur
 insert into public.roof_package_items (company_id, package_id, service_id, kind) values (:'co', :'roof_package', :'shingles_service', 'included');
 insert into public.service_materials (company_id, service_id, item_number, name, uom, per_unit) values (:'co', :'shingles_service', 'ABC-1', 'Shingle bundle', 'BD', 3);
 insert into public.sop_acknowledgements (company_id, page_id, revision, user_id) values (:'co', :'ladder_page', 1, 'd1070000-0000-0000-0000-000000000004');
+-- Whether guides work (20261108000300_guide_feedback_quizzes.sql): the team's and the office's, never a sub's.
+insert into public.sop_feedback (company_id, page_id, revision, user_id, helpful) values (:'co', :'ladder_page', 1, 'd1070000-0000-0000-0000-000000000004', true);
+insert into public.sop_feedback (company_id, page_id, revision, user_id, message) values (:'co', :'ladder_page', 1, 'd1070000-0000-0000-0000-000000000004', 'Say how far to set the feet out');
+insert into public.sop_quizzes (company_id, page_id, questions) values (:'co', :'ladder_page', '[{"question": "How far out do the feet go?", "options": ["A foot for every 4 feet up", "Against the wall"], "answer": 0}]');
+insert into public.sop_search_misses (company_id, user_id, query) values (:'co', 'd1070000-0000-0000-0000-000000000004', 'scaffold');
 insert into public.stripe_invoices (company_id, origin) values (:'co', 'crewtavo');
 insert into public.sync_links (company_id, provider, entity, local_id, external_id) values (:'co', 'quickbooks', 'client', :'c1', 'qb-1');
 insert into public.terms_acceptances (company_id, user_id, role, version) values (:'co', 'd1070000-0000-0000-0000-000000000001', 'owner', 't1070');
@@ -519,6 +524,9 @@ select t1070.check(array(
   select p.proname || '(' || oidvectortypes(p.proargtypes) || ')' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'execute') order by 1) = array[
   'accept_terms(uuid, text)',
+  -- Confirming a guide is read (its quiz answered), and its quiz and feedback: through
+  -- private.readable_guide, which a sub never passes (is_member leaves subs out).
+  'acknowledge_guide(uuid, integer[])',
   -- Adding work on site: the team on the visit only, never a sub (the job's prices are the client's).
   'add_field_line(uuid, uuid, numeric, uuid)',
   'answer_sub_offer(uuid, boolean, text, integer, uuid)', 'apply_promo_code(text, uuid, text, uuid, uuid[])',
@@ -538,6 +546,7 @@ select t1070.check(array(
   'drive_set_enabled(uuid, boolean)', 'drive_trash(uuid)', 'drive_trash_file(uuid)', 'drive_trash_folder(uuid)', 'drive_trash_version(uuid)',
   'drive_versions(uuid)', 'duplicate_quote(uuid, text, uuid, uuid, text, jsonb)',
   'equipment_conflicts(uuid, uuid[], date, timestamp with time zone, timestamp with time zone, uuid)', 'global_search(uuid, text, integer)',
+  'guide_feedback(uuid, boolean, text)', 'guide_quiz(uuid)',
   -- Bringing work over from Jobber: an owner's or admin's, never a sub's.
   'import_jobber(uuid, text, jsonb)', 'inactive_client_count(uuid, integer)',
   -- The checklists a job's items bring up: a sub's, for the jobs of their own visits (as job_scope).

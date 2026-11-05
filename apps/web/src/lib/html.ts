@@ -4,18 +4,27 @@ import DOMPurify from "dompurify";
 
 // div holds callouts (data-callout) and checklist items (ul data-type="taskList" > li data-checked); data-* attributes pass by default.
 const ALLOWED_TAGS = ["p", "br", "h2", "h3", "h4", "strong", "b", "em", "i", "u", "s", "ul", "ol", "li", "blockquote", "a", "hr", "code", "pre", "img", "iframe", "table", "thead", "tbody", "tr", "th", "td", "div"];
-const ALLOWED_ATTR = ["href", "src", "alt", "title", "target", "rel", "colspan", "rowspan"];
+const ALLOWED_ATTR = ["href", "src", "alt", "title", "target", "rel", "colspan", "rowspan", "width", "height"];
+
+/** A link to a screen in Crewtavo, like /kb/…; not //other.site, which is a link out. */
+export const isAppPath = (href: string) => /^\/(?![/\\])/.test(href);
 
 let hooked = false;
 function ensureHooks() {
   if (hooked) return;
   hooked = true;
-  // Links open in a new tab and never get access to this window.
+  // Links out open in a new tab and never get access to this window; a link to a screen in Crewtavo (/kb/…) opens here.
   DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-    if (node.tagName === "A" && node.getAttribute("href")) {
+    const href = node.tagName === "A" ? node.getAttribute("href") : null;
+    if (href && isAppPath(href)) {
+      node.removeAttribute("target");
+      node.removeAttribute("rel");
+    } else if (href) {
       node.setAttribute("target", "_blank");
       node.setAttribute("rel", "noopener noreferrer nofollow");
     }
+    // A picture with nothing to show (no link and no stored file, like one that never finished uploading) goes.
+    if (node.tagName === "IMG" && !node.getAttribute("src") && !node.getAttribute("data-path")) return node.remove();
     // Videos: only YouTube and Vimeo players, rebuilt from the video's id with our own attributes.
     if (node.tagName === "IFRAME") {
       const video = videoEmbed(node.getAttribute("src") ?? "");
@@ -28,7 +37,8 @@ function ensureHooks() {
 
 export function sanitizeHtml(html: string): string {
   ensureHooks();
-  return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|\/)/i });
+  // Numbers, not addresses: without ADD_URI_SAFE_ATTR the address rule (ALLOWED_URI_REGEXP) drops them.
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|tel:|\/)/i, ADD_URI_SAFE_ATTR: ["width", "height", "colspan", "rowspan"] });
 }
 
 /** Whether a guide has anything to read or watch. */

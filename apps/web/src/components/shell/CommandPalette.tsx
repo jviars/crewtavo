@@ -97,7 +97,8 @@ export function CommandPalette() {
     opener = () => setOpen(true);
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      // Not when something on the screen already used it (⌘K adds a link in the guide editor).
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && !e.defaultPrevented) {
         e.preventDefault();
         setOpen((v) => !v);
       } else if (e.key === "/" && !typing && !document.querySelector("dialog[open]")) {

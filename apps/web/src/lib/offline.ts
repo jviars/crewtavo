@@ -29,6 +29,9 @@ export const OFFLINE_LEVELS: readonly Role[] = ["crew_lead", "field_crew", "subc
 export const keepsDayOffline = (role: string) => (OFFLINE_LEVELS as readonly string[]).includes(role);
 /** Queries worth having with no signal (custom-fields: the labels a visit's job and property fields read with). */
 const KEEP = new Set(["field", "field-visit", "field-jobs", "checklist", "running-timer", "material-choices", "my-crews", "dispatch-options", "crew-clock", "job", "custom-fields"]);
+/** Guides crews have opened or a visit's checklist links to (kb/kbData guideQuery): kept too, to read how a step is done. */
+const isGuide = (key: readonly unknown[]) => key[0] === "kb" && key[2] === "page";
+const kept = (key: readonly unknown[]) => KEEP.has(String(key[0])) || isGuide(key);
 /** Mutations that can wait for a connection (their functions are registered with setMutationDefaults). */
 export const OFFLINE_MUTATIONS = new Set(["visit-status", "checklist-save", "visit-notes", "photo-share", "job-line-add"]);
 /** Field actions run one at a time, in the order they were made. */
@@ -143,7 +146,7 @@ async function reachable(): Promise<boolean> {
 /** What's saved: the unsent field actions, and the field screens when this person is crew. */
 function snapshot(queryClient: QueryClient, keepQueries: boolean): DehydratedState {
   const state = dehydrate(queryClient, {
-    shouldDehydrateQuery: (q) => keepQueries && q.state.status === "success" && KEEP.has(String(q.queryKey[0])) && !(q.queryKey[0] === "job" && q.queryKey[2] !== "scope"),
+    shouldDehydrateQuery: (q) => keepQueries && q.state.status === "success" && kept(q.queryKey) && !(q.queryKey[0] === "job" && q.queryKey[2] !== "scope"),
     shouldDehydrateMutation: unsent,
   });
   // All saved as waiting, the one on its way included, so if the app closes before the server
@@ -272,6 +275,8 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     const defaults = queryClient.getMutationDefaults([key]);
     queryClient.setMutationDefaults([key], { ...defaults, networkMode: "online", ...FIELD_RETRY, ...(defaults.mutationFn && { mutationFn: noteSending(defaults.mutationFn) }) });
   }
+  // Kept guides stay in memory a day, not 5 minutes, so one put back from storage is still there when it's opened.
+  if (keepQueries) queryClient.setQueryDefaults(["kb"], { gcTime: 24 * 60 * 60_000 });
   restore(queryClient, userId);
 
   let told = -1;
@@ -324,7 +329,7 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     if (action.type === "success" || action.type === "error") told = -1;
     // Turned down by the server: what the screens showed ahead of it is wrong, so load it again.
     // Screens do this too, but an action restored after a restart has no screen.
-    if (action.type === "error" && !signInExpired(action.error)) queryClient.invalidateQueries({ predicate: (q) => KEEP.has(String(q.queryKey[0])) });
+    if (action.type === "error" && !signInExpired(action.error)) queryClient.invalidateQueries({ predicate: (q) => kept(q.queryKey) });
   });
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
   if (typeof window !== "undefined") window.addEventListener("pagehide", flush);

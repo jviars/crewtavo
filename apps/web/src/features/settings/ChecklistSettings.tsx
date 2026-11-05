@@ -1,4 +1,4 @@
-/** Checklist templates crews fill in on a visit: inspections, safety steps, sign-offs. */
+/** Checklist templates crews fill in on a visit: inspections, safety steps, sign-offs, each step able to open the guide for how it's done. */
 import { checklistItemKey as slug, MAX_CHECKLIST_ITEMS, normalizeChecklist } from "@crewtavo/core/forms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -11,6 +11,7 @@ import { supabase, unwrap } from "@/lib/api";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
+import { useSopIndex } from "../kb/kbData";
 
 interface Item {
   key: string;
@@ -18,6 +19,8 @@ interface Item {
   type: "check" | "number" | "text" | "choice" | "photo" | "signature";
   required: boolean;
   options?: string[];
+  /** The guide crews open from the item on the visit. */
+  sop_page_id?: string;
 }
 interface Template {
   id: string;
@@ -122,6 +125,7 @@ function TemplateEditor({ template, services, onDelete }: { template: Template; 
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checklist-templates", session.company.id] }),
   });
   const saved = useJustDone(save);
+  const guides = useSopIndex();
   const setItem = (i: number, patch: Partial<Item>) => setT({ ...t, items: t.items.map((item, j) => (j === i ? { ...item, ...patch } : item)) });
   const move = (i: number, dir: -1 | 1) => {
     const items = [...t.items];
@@ -154,6 +158,11 @@ function TemplateEditor({ template, services, onDelete }: { template: Template; 
             <div className="row wrap" style={{ paddingLeft: 28 }}>
               <label className="checkbox small"><input type="checkbox" checked={item.required} onChange={(e) => setItem(i, { required: e.target.checked })} />Required</label>
               {item.type === "choice" && <input className="input input-sm grow" value={(item.options ?? []).join(", ")} placeholder="Options, separated by commas" onChange={(e) => setItem(i, { options: e.target.value.split(",").map((o) => o.trim()) })} aria-label="Options" />}
+              <select className="select input-sm" style={{ maxWidth: 240 }} value={item.sop_page_id ?? ""} onChange={(e) => setItem(i, { sop_page_id: e.target.value || undefined })} aria-label="Guide for this item" title="Crews open this guide from the item on their visit">
+                <option value="">No guide</option>
+                {(guides.data?.pages ?? []).map((g) => <option key={g.id} value={g.id}>{g.title}{g.status === "draft" ? " (draft: crews can't see it)" : ""}</option>)}
+                {item.sop_page_id && guides.data && !guides.data.pages.some((g) => g.id === item.sop_page_id) && <option value={item.sop_page_id}>A deleted guide</option>}
+              </select>
               <span className="grow" />
               <Button size="sm" variant="ghost" icon="chevronUp" aria-label="Move up" disabled={i === 0} onClick={() => move(i, -1)} />
               <Button size="sm" variant="ghost" icon="chevronDown" aria-label="Move down" disabled={i === t.items.length - 1} onClick={() => move(i, 1)} />

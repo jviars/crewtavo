@@ -70,7 +70,7 @@ interface Me {
   profile: { user_id: string; email: string | null; full_name: string; phone: string | null; color?: string | null; avatar_url?: string | null };
   /** False when every sign-in this person has is a sub's: they can't set up a business with it. */
   can_create_company?: boolean;
-  memberships: Array<{ role: Role; role_name: string; permissions: Permission[]; company: Company; subcontractor?: SubLogin | null; email_connected?: boolean; ai_connected?: boolean; fal_connected?: boolean; terms_accepted?: boolean; railway_needed?: boolean }>;
+  memberships: Array<{ role: Role; role_name: string; role_id?: string | null; permissions: Permission[]; company: Company; subcontractor?: SubLogin | null; email_connected?: boolean; ai_connected?: boolean; fal_connected?: boolean; terms_accepted?: boolean; railway_needed?: boolean }>;
 }
 
 export interface Session {
@@ -82,6 +82,8 @@ export interface Session {
   role: Role;
   /** The role's display name: a custom role ("Foreman") or a built-in one ("Office"). */
   roleName: string;
+  /** Their custom role (Settings → Roles), if they have one. */
+  roleId: string | null;
   /** Areas this person's role includes. */
   permissions: Permission[];
   /** The sub they sign in as (role "subcontractor"); null for the team. */
@@ -314,6 +316,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
       company: membership.company,
       role: membership.role,
       roleName: membership.role_name,
+      roleId: membership.role_id ?? null,
       permissions: membership.permissions ?? [],
       subcontractor: membership.role === "subcontractor" ? membership.subcontractor ?? null : null,
       switchCompany,

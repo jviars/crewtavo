@@ -11,9 +11,9 @@
  * the office on site makes its invoice, sends it and records cash or check (FieldBilling.tsx).
  */
 import { shownCustomFields } from "@crewtavo/core/customFields";
-import { onlineManager, useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { onlineManager, useIsMutating, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ChangeEvent, type RefObject } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -43,6 +43,7 @@ import { MaterialsCard } from "../jobs/JobMaterials";
 import { ScopeOfWork } from "../jobs/ScopeOfWork";
 import { FieldPlans } from "../plans/FieldPlans";
 import { PropertyEquipment } from "../clients/PropertyEquipment";
+import { guideQuery } from "../kb/kbData";
 import { contactLinks, visitContact, type VisitContact } from "./contact";
 import { pendingChecklistSaves, pendingVisitSave, pendingVisitStatus, showVisitStatus, statusSaved, type ChecklistSave, type VisitNotesSave, type VisitStatusChange } from "./fieldActions";
 import { formatDuration, useStatusTap } from "./fieldData";
@@ -53,7 +54,7 @@ import { AddWork, VisitInvoice } from "./FieldBilling";
 import { addsWork, fieldInvoiceKind, takesMoney, takesWork } from "./fieldMoney";
 import { YourPrice } from "./YourPrice";
 
-interface ChecklistItem { key: string; label: string; type: "check" | "number" | "text" | "choice" | "photo" | "signature"; required: boolean; options?: string[] }
+interface ChecklistItem { key: string; label: string; type: "check" | "number" | "text" | "choice" | "photo" | "signature"; required: boolean; options?: string[]; sop_page_id?: string }
 
 /** What's still required on the visit's checklists, for Complete visit. Null when nothing holds it up. */
 interface ChecklistProgress { required: number; missing: Array<{ key: string; label: string }> }
@@ -597,6 +598,11 @@ const Checklist = forwardRef<
 
   const template = templates.find((t) => t.id === templateId);
   const items = (template?.items ?? []) as unknown as ChecklistItem[];
+  // The guides its items link to (not for subs, who don't read guides): fetched now, so they open
+  // with no signal later (lib/offline.ts keeps them), and linked once there's one to open.
+  const guideIds = session.role === "subcontractor" ? [] : [...new Set(items.flatMap((i) => (i.sop_page_id ? [i.sop_page_id] : [])))];
+  const guides = useQueries({ queries: guideIds.map((id) => ({ ...guideQuery(company.id, id), staleTime: 60 * 60_000 })) });
+  const guideFor = (item: ChecklistItem) => (item.sop_page_id ? guides[guideIds.indexOf(item.sop_page_id)]?.data ?? null : null);
   const answered = (i: ChecklistItem) => {
     const a = answers[i.key];
     if (i.type === "photo") return true;
@@ -715,6 +721,7 @@ const Checklist = forwardRef<
                 <input className="input" inputMode={item.type === "number" ? "decimal" : undefined} value={String(answers[item.key] ?? "")} disabled={done} onChange={(e) => set(item.key, item.type === "number" ? e.target.value.replace(/[^0-9.\-]/g, "") : e.target.value)} onBlur={autosave.flush} />
               </label>
             )}
+            {guideFor(item) && <Link to={`/kb/${item.sop_page_id}`} className="check-guide" title={guideFor(item)!.title} aria-label={`How to: ${guideFor(item)!.title}`}><Icon name="book" size={14} />How to</Link>}
           </div>
         ))}
       </div>

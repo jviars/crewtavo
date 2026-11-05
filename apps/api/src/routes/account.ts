@@ -143,6 +143,7 @@ account.get("/me", requireUser, async (c) => {
         role: m.role,
         company,
         role_name: custom?.name ?? ROLE_LABELS[m.role as Role],
+        role_id: custom ? m.role_id : null,
         permissions: memberPermissions(m.role as Role, custom ? custom.permissions : null),
         subcontractor: sub
           ? {
@@ -533,6 +534,8 @@ const roleRow = z.object({
   name: z.string().trim().min(1).max(60),
   base_role: z.enum(STAFF.filter((r) => r !== "owner") as [Role, ...Role[]]),
   permissions: z.array(z.enum(PERMISSIONS.map((p) => p.key) as [Permission, ...Permission[]])).max(PERMISSIONS.length),
+  // Its job description: one of the company's guides (the database checks whose).
+  guide_id: z.uuid().nullable().optional(),
   current_password: currentPassword,
 });
 

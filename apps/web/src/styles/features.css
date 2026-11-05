@@ -230,6 +230,7 @@ a.field-card:active { transform: scale(0.99); }
 /* A visit's checklist: a box's whole row is its label, so a tap anywhere on it ticks it. */
 .check-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--row-divider); }
 .check-row:first-child { border-top: 0; }
+.check-guide { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; font-size: var(--fs-13); font-weight: 600; white-space: nowrap; }
 .check-row input[type="checkbox"] { width: 22px; height: 22px; margin: 0; flex: none; }
 .field-app .check-row:has(> .checkbox) { padding: 0; }
 .field-app .check-row:has(> .check-photo) { align-items: center; }
@@ -399,14 +400,20 @@ a.field-card:active { transform: scale(0.99); }
 .rte-btn[aria-pressed="true"], .rte-btn.is-on { background: var(--green-tint); color: var(--green-dark); }
 .rte-btn:disabled { opacity: 0.4; pointer-events: none; }
 .rte-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--divider); }
-.rte-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--divider); background: var(--fill); color: var(--text-3); animation: pop-in 150ms var(--ease-out); }
+.rte-link { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--divider); background: var(--fill); color: var(--text-3); animation: pop-in 150ms var(--ease-out); }
 .rte-link .input { flex: 1; min-width: 0; height: var(--control-sm); }
 .rte-link .error-text { flex-basis: 100%; padding-left: 23px; }
+.rte-link-note { flex-basis: 100%; margin: 0; padding-left: 23px; }
+.rte-link .tag-suggest { left: 32px; right: 10px; top: calc(100% - 4px); }
 /* Written at the size it's read at (.sop-body). */
 .rte-body { padding: 16px 20px 24px; outline: none; font-size: var(--fs-16); }
 /* Tiptap: the hint in an empty guide, players and pictures picked with a click, tables. */
 .rte-body .is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; color: var(--text-4); pointer-events: none; }
 .rte-body iframe { pointer-events: none; }
+/* A picture in a guide: as wide as the column at most, its space kept while it loads, faded while it uploads. */
+.rte-body img, .sop-body img { display: block; max-width: 100%; height: auto; margin: 1em 0; border-radius: var(--radius-control); background: var(--fill); }
+.rte-body img[data-uploading] { opacity: 0.55; }
+.rte-body img.ProseMirror-selectednode { outline: 3px solid var(--green); outline-offset: 2px; }
 .rte-body .ProseMirror-selectednode { outline: 3px solid var(--green); outline-offset: 2px; border-radius: var(--radius-control); }
 .rte-body .tableWrapper { overflow-x: auto; margin: 0 0 1em; }
 .rte-body .tableWrapper table { margin: 0; }
@@ -451,6 +458,8 @@ a.field-card:active { transform: scale(0.99); }
 .prose hr { border: 0; border-top: 1px solid var(--divider); margin: 1.4em 0; }
 .prose code { padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill-2); font-size: var(--fs-14); }
 .prose pre { padding: 12px; border-radius: var(--radius-control); background: var(--fill-2); overflow-x: auto; }
+.kb-job { gap: 12px; color: inherit; text-decoration: none; }
+.kb-job:hover { border-color: var(--border-strong); }
 .sop-required { display: flex; gap: 12px; align-items: center; padding: 14px 16px; border-radius: var(--radius-card); background: var(--warning-tint); color: var(--warning); }
 .kb-search { display: flex; gap: 8px; flex-wrap: wrap; }
 .kb-search .input-group { flex: 1 1 320px; }
@@ -519,6 +528,72 @@ button.guide-card { padding: 0; text-align: left; }
   .sop-toc-inline { display: block; }
 }
 @media (max-width: 600px) { .sop-body { padding: 20px 18px 24px; } }
+
+/* Under a guide: was it helpful, and suggesting a change. */
+.guide-feedback { display: grid; gap: 12px; }
+.guide-feedback-ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.guide-feedback .btn[aria-pressed="true"] { border-color: var(--green); background: var(--green-tint); color: var(--green-dark); }
+.icon-flip { display: inline-flex; transform: rotate(180deg); }
+
+/* A guide's quiz: answering it, and writing it. */
+.quiz-question { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.quiz-question > legend { margin-bottom: 4px; font-weight: 600; line-height: 1.4; }
+.quiz-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); cursor: pointer; line-height: 1.4; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.quiz-option:hover { border-color: var(--button-border); }
+.quiz-option:has(input:checked) { border-color: var(--green); background: var(--green-tint); }
+.quiz-option input { margin: 2px 0 0; flex: none; accent-color: var(--green); }
+.quiz-question[data-wrong] .quiz-option:has(input:checked) { border-color: var(--danger); background: var(--danger-tint); }
+.quiz-edit { display: grid; gap: 8px; margin: 0; padding: 12px; border: 0; border-radius: var(--radius-control); background: var(--fill); }
+.quiz-edit-number { width: 20px; flex: none; }
+.quiz-edit-options { display: grid; gap: 6px; padding-left: 28px; }
+.quiz-edit-options input[type="radio"] { flex: none; margin: 0; accent-color: var(--green); }
+
+/* New guide: how to start it. */
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.template-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-card); color: inherit; text-decoration: none; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.template-card:hover { border-color: var(--green); background: var(--green-tint); }
+.template-card:focus-visible { outline: none; box-shadow: var(--ring); }
+.template-card[data-blank] { border-style: dashed; }
+.template-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: var(--radius-control); background: var(--fill-2); color: var(--green-dark); }
+
+/* Two versions of a guide side by side (Revision history → Changes). */
+.diff-scroll { max-height: 60vh; overflow-y: auto; }
+.diff { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; font-size: var(--fs-14); line-height: 1.55; }
+.diff-head, .diff-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.diff-head { position: sticky; top: 0; z-index: 1; background: var(--surface); border-bottom: 1px solid var(--divider); }
+.diff-head > span { padding: 8px 14px; color: var(--text-2); font-size: var(--fs-13); font-weight: 600; }
+.diff-head > span + span, .diff-cell + .diff-cell { border-left: 1px solid var(--divider); }
+.diff-row + .diff-row { border-top: 1px solid var(--row-divider); }
+.diff-cell { padding: 7px 14px; overflow-wrap: anywhere; }
+.diff-cell[data-block="heading"] { font-weight: 700; color: var(--ink); }
+.diff-cell[data-block="item"]::before { content: "•"; margin-right: 8px; color: var(--text-4); }
+.diff-cell[data-block="media"] { font-style: italic; }
+.diff-row[data-row="changed"] .diff-cell[data-block="media"]:first-child { background: var(--danger-tint); }
+.diff-row[data-row="changed"] .diff-cell[data-block="media"]:last-child { background: var(--green-tint); }
+.diff-row[data-row="same"] .diff-cell { color: var(--text-3); }
+.diff-row[data-row="removed"] .diff-cell:first-child, .diff-cell del { background: var(--danger-tint); }
+.diff-row[data-row="added"] .diff-cell:last-child, .diff-cell ins { background: var(--green-tint); }
+.diff-cell del { color: var(--danger); text-decoration: line-through; text-decoration-thickness: 1px; border-radius: 3px; }
+.diff-cell ins { color: var(--green-dark); text-decoration: none; border-radius: 3px; }
+.diff-cell[data-empty] { background: var(--fill); }
+.diff-fold { display: block; width: 100%; padding: 6px 14px; border: 0; border-top: 1px solid var(--row-divider); background: var(--fill); color: var(--text-3); font-size: var(--fs-13); text-align: center; cursor: pointer; }
+.diff-fold:hover { color: var(--ink); }
+.diff-summary { margin: 0; padding: 8px 14px; border-top: 1px solid var(--divider); }
+@media (max-width: 640px) {
+  .diff-head { display: none; }
+  .diff-row { grid-template-columns: minmax(0, 1fr); }
+  .diff-cell + .diff-cell { border-left: 0; }
+  .diff-cell[data-empty], .diff-row[data-row="same"] .diff-cell:last-child { display: none; }
+}
+
+/* Knowledge base → Insights. */
+.page-lede { margin: -12px 0 4px; }
+.audience-label { display: block; margin-bottom: 6px; }
+.insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; align-items: start; }
+.insights .card-head h2 { font-size: var(--fs-16); }
+.insights-empty { margin: 0; }
+.insights-ratio { max-width: 220px; height: 6px; }
+.insights-ratio > span { background: var(--warning); }
 @media print {
   .sop-layout { display: block; }
   .sop-body { box-shadow: none; border: 0; padding: 0 !important; }

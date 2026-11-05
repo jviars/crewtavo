@@ -1,7 +1,12 @@
-/** One SOP: read it, confirm you've read it, see who has, and (for the office) edit, restore or delete. */
+/**
+ * One SOP: read it, confirm you've read it (answering its quiz first, if it has one), say whether it
+ * helped or suggest a change, and for the office: see who's read it and what people said, edit,
+ * copy, compare and restore versions, mark it reviewed or delete it. A job description also shows
+ * how far each person with the job is through its training (the guides it links to).
+ */
 import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -14,45 +19,64 @@ import { ErrorState, PageError } from "@/components/ui/States";
 import { Face } from "@/components/ui/Avatar";
 import { ApiError, api, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
-import { hasContent, htmlToText, sanitizeHtml, withSections } from "@/lib/html";
+import { hasContent, htmlToText, isAppPath, sanitizeHtml, withSections } from "@/lib/html";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { useCompanyRoles } from "../settings/roles";
 import { GuideContents, goToSection, useCurrentSection } from "./GuideContents";
 import { GuideCover } from "./GuideCover";
-import { ROLE_LABELS, useIsEditor } from "./kbData";
+import { GuideFeedback } from "./GuideFeedback";
+import { useGuidePictures } from "./pictures";
+import { QuizDialog, type QuizQuestion } from "./QuizDialog";
+import { VersionCompare } from "./VersionCompare";
+import { guideQuery, mustRead, reviewDueAt, ROLE_LABELS, useIsEditor, useSopIndex, useTraining } from "./kbData";
 
-interface TeamMember { user_id: string; role: string; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null }
+interface TeamMember { user_id: string; role: string; role_id: string | null; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null }
 
 export function SopPage() {
   const { pageId = "" } = useParams();
-  const { company, userId } = useSession();
+  const { company, userId, roleId } = useSession();
   const editor = useIsEditor();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [history, setHistory] = useState(false);
+  const [quizzing, setQuizzing] = useState(false);
   const inlineContents = useRef<HTMLDetailsElement>(null);
 
-  const page = useQuery({
-    queryKey: ["kb", company.id, "page", pageId],
-    queryFn: async () =>
-      unwrap(
-        await supabase()
-          .from("sop_pages")
-          .select("id, title, body_html, cover_path, updated_at, updated_by, revision, tags, required, status, audience, category:sop_categories(id, name)")
-          .eq("id", pageId)
-          .maybeSingle(),
-      ),
-  });
+  const page = useQuery(guideQuery(company.id, pageId));
   const team = useQuery({ queryKey: ["team", company.id], staleTime: 5 * 60_000, queryFn: () => api.get<TeamMember[]>("/team") });
+  const roles = useCompanyRoles();
+  const training = useTraining();
+  const index = useSopIndex();
+  // A job description (Settings → Roles): how far each person with the job is through its training.
+  const jobRoles = (roles.data ?? []).filter((r) => r.guide_id === pageId);
+  const trainingIds = [...new Set(jobRoles.flatMap((r) => training?.get(r.id) ?? []))];
+  const trainingReads = useQuery({
+    queryKey: ["kb", company.id, "training-reads", pageId, trainingIds],
+    enabled: editor && trainingIds.length > 0,
+    queryFn: async () => unwrap(await supabase().from("sop_acknowledgements").select("user_id, page_id, revision").eq("company_id", company.id).in("page_id", trainingIds)),
+  });
+  // The guides that link here, like a job's description linking each duty to how it's done.
+  const linkedFrom = useQuery({
+    queryKey: ["kb", company.id, "linked-from", pageId],
+    enabled: Boolean(page.data),
+    queryFn: async () => unwrap(await supabase().from("sop_pages").select("id, title").eq("company_id", company.id).neq("id", pageId).like("body_html", `%/kb/${pageId}%`).order("title").limit(50)),
+  });
   const reads = useQuery({
     queryKey: ["kb", company.id, "reads", pageId, page.data?.revision],
     enabled: Boolean(page.data),
     queryFn: async () => unwrap(await supabase().from("sop_acknowledgements").select("user_id, acknowledged_at").eq("page_id", pageId).eq("revision", page.data!.revision).order("acknowledged_at")),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["kb", company.id] });
+  // Its quiz, as readers get it (questions and options, no answers): null when it has none.
+  const quiz = useQuery({
+    queryKey: ["kb", company.id, "quiz", pageId],
+    enabled: Boolean(page.data),
+    queryFn: async () => (unwrap(await supabase().rpc("guide_quiz", { p_page: pageId })) as unknown as QuizQuestion[] | null) ?? null,
+  });
   const acknowledge = useMutation({
     meta: { success: "Marked as read" },
-    mutationFn: async () => unwrap(await supabase().from("sop_acknowledgements").insert({ company_id: company.id, page_id: pageId, revision: page.data!.revision })),
+    mutationFn: async () => unwrap(await supabase().rpc("acknowledge_guide", { p_page: pageId })),
     onSettled: refresh,
   });
   const remove = useMutation({
@@ -64,6 +88,11 @@ export function SopPage() {
       navigate("/kb", { replace: true });
     },
   });
+  const review = useMutation({
+    meta: { success: "Marked as reviewed" },
+    mutationFn: async () => unwrap(await supabase().from("sop_pages").update({ reviewed_at: new Date().toISOString() }).eq("id", pageId)),
+    onSettled: refresh,
+  });
   const publish = useMutation({
     meta: { success: "Guide published" },
     mutationFn: async () => unwrap(await supabase().from("sop_pages").update({ status: "published" }).eq("id", pageId)),
@@ -74,6 +103,7 @@ export function SopPage() {
     return { empty: !hasContent(html), ...withSections(html) };
   }, [page.data?.body_html]);
   const sections = body.sections.length > 1 ? body.sections : [];
+  const bodyHtml = useGuidePictures(body.html);
   const current = useCurrentSection(sections);
   // A link to a section (…/kb/id#mixing-ratio): go there once the guide is showing. A frame later, so the new screen's scroll to the top goes first.
   const { hash } = useLocation();
@@ -89,16 +119,38 @@ export function SopPage() {
   const name = (id: string | null) => team.data?.find((m) => m.user_id === id)?.profile?.full_name ?? "Team member";
   const readers = reads.data ?? [];
   const acknowledged = readers.some((r) => r.user_id === userId);
-  const audience = (team.data ?? []).filter((m) => m.active && (!sop.audience?.length || (sop.audience as string[]).includes(m.role)));
+  // Who has to read it: required reading's audience, and everyone whose job's training includes it.
+  const trainedBy = (roles.data ?? []).filter((r) => training?.get(r.id)?.includes(sop.id));
+  const forThem = (m: TeamMember) => (sop.required && mustRead(sop, m)) || (m.role_id != null && trainedBy.some((r) => r.id === m.role_id));
+  const audience = (team.data ?? []).filter((m) => m.active && forThem(m));
+  const published = sop.status === "published";
+  const askToRead = published && (sop.required || trainedBy.some((r) => r.id === roleId));
+  // Who it's for, by team role (Settings → Roles) and by level; a deleted role isn't named.
+  const forWhom = [...(roles.data ?? []).filter((r) => sop.audience_roles?.includes(r.id)).map((r) => r.name), ...(sop.audience ?? []).map((r) => ROLE_LABELS[r] ?? r)];
+  const jobOf = jobRoles.map((r) => r.name);
+  const trainingFor = jobOf.length ? [] : trainedBy.map((r) => r.name);
   const outstanding = audience.filter((m) => !readers.some((r) => r.user_id === m.user_id));
-  const showReads = sop.required && sop.status === "published";
-  // "#" beside a heading copies a link to it; the contents links just go there.
+  const showReads = published && (sop.required || trainedBy.length > 0);
+  const revisionOf = new Map((index.data?.pages ?? []).map((p) => [p.id, p.revision]));
+  const trainees = (team.data ?? []).filter((m) => m.active && jobRoles.some((r) => r.id === m.role_id));
+  const trainingDone = (user: string) => trainingIds.filter((id) => trainingReads.data?.some((a) => a.user_id === user && a.page_id === id && a.revision === revisionOf.get(id))).length;
+  const showTraining = editor && trainingIds.length > 0;
+  // On a review schedule: when it's next due, for the office.
+  const due = reviewDueAt(sop);
+  const reviewDue = due !== null && due <= new Date();
+  // "#" beside a heading copies a link to it; the contents links just go there. A link to another
+  // guide (or any screen in Crewtavo) opens here without reloading the app; ⌘-click still opens a tab.
   const onArticleClick = (e: MouseEvent) => {
     const link = (e.target as Element).closest("a");
     const href = link?.getAttribute("href");
-    if (!link || !href?.startsWith("#")) return;
-    e.preventDefault();
-    goToSection(decodeURIComponent(href.slice(1)), link.classList.contains("heading-anchor"));
+    if (!link || !href) return;
+    if (href.startsWith("#")) {
+      e.preventDefault();
+      goToSection(decodeURIComponent(href.slice(1)), link.classList.contains("heading-anchor"));
+    } else if (isAppPath(href) && !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) {
+      e.preventDefault();
+      navigate(href);
+    }
   };
 
   return (
@@ -108,10 +160,11 @@ export function SopPage() {
         title={sop.title}
         actions={
           <>
-            {sop.required && sop.status === "published" && (acknowledged ? (
+            {editor && reviewDue && <Button icon="check" loading={review.isPending} onClick={() => review.mutate()}>Mark reviewed</Button>}
+            {askToRead && (acknowledged ? (
               <span className="pill" data-tone="success" style={{ height: "var(--control)", padding: "0 14px" }}><Icon name="check" size={14} strokeWidth={2} />You've read this</span>
             ) : (
-              <Button variant="primary" icon="check" loading={acknowledge.isPending} disabled={reads.isPending} onClick={() => acknowledge.mutate()}>I've read this</Button>
+              <Button variant="primary" icon="check" loading={acknowledge.isPending} disabled={reads.isPending || quiz.isPending} onClick={() => (quiz.data?.length ? setQuizzing(true) : acknowledge.mutate())}>I've read this</Button>
             ))}
             {editor && <Link className="btn" to={`/kb/${sop.id}/edit`}><Icon name="edit" size={16} />Edit</Link>}
             <Menu
@@ -119,7 +172,9 @@ export function SopPage() {
               items={[
                 { label: "Print", icon: "printer", onSelect: () => window.print() },
                 { label: "Revision history", icon: "history", onSelect: () => setHistory(true), hidden: !editor },
+                { label: "Make a copy", icon: "copy", onSelect: () => navigate(`/kb/new?copy=${sop.id}`), hidden: !editor },
                 { label: "Publish", icon: "send", onSelect: () => publish.mutate(), hidden: !editor || sop.status !== "draft" },
+                { label: "Mark reviewed", icon: "check", onSelect: () => review.mutate(), hidden: !editor || !due || reviewDue },
                 { separator: true, hidden: !editor },
                 {
                   label: "Delete guide", icon: "trash", danger: true, hidden: !editor,
@@ -132,9 +187,19 @@ export function SopPage() {
       />
       <div className="page-meta">
         {sop.status === "draft" && <span className="pill" data-tone="warning">Draft · only the office can see this</span>}
-        {sop.required && <span className="pill" data-tone="warning">Required reading{sop.audience?.length ? ` for ${sop.audience.map((r) => ROLE_LABELS[r] ?? r).join(", ")}` : ""}</span>}
-        <span className="muted small">Revision {sop.revision} · Updated {timeAgo(sop.updated_at)}{sop.updated_by && team.data ? ` by ${name(sop.updated_by)}` : ""}</span>
+        {jobOf.length > 0 && <span className="pill" data-tone="info">Job description for {jobOf.join(", ")}</span>}
+        {trainingFor.length > 0 && <span className="pill" data-tone="info">Training for {trainingFor.join(", ")}</span>}
+        {sop.required && <span className="pill" data-tone="warning">Required reading{forWhom.length ? ` for ${forWhom.join(", ")}` : ""}</span>}
+        {editor && reviewDue && <span className="pill" data-tone="warning">Review due{sop.owner_id ? ` · ${name(sop.owner_id)}` : ""}</span>}
+        <span className="muted small">
+          Revision {sop.revision} · Updated {timeAgo(sop.updated_at)}{sop.updated_by && team.data ? ` by ${name(sop.updated_by)}` : ""}
+          {editor && due && !reviewDue && ` · Next review ${formatDate(due.toISOString())}${sop.owner_id ? ` by ${name(sop.owner_id)}` : ""}`}
+          {editor && quiz.data?.length ? ` · Quiz: ${quiz.data.length} ${quiz.data.length === 1 ? "question" : "questions"}` : ""}
+        </span>
         {sop.tags.map((t) => <Link key={t} to={`/kb?q=${encodeURIComponent(t)}`} className="tag no-print" title="Guides tagged with this">{t}</Link>)}
+        {linkedFrom.data && linkedFrom.data.length > 0 && (
+          <span className="muted small no-print">Linked from {linkedFrom.data.map((g, i) => <Fragment key={g.id}>{i > 0 && ", "}<Link to={`/kb/${g.id}`}>{g.title}</Link></Fragment>)}</span>
+        )}
       </div>
       <div className="sop-reader">
         <div className="sop-layout">
@@ -147,11 +212,34 @@ export function SopPage() {
               </details>
             )}
             <article className="card prose sop-body" onClick={onArticleClick}>
-              {body.empty ? <p className="muted">This guide is empty.{editor && <> <Link to={`/kb/${sop.id}/edit`}>Add content</Link></>}</p> : <div dangerouslySetInnerHTML={{ __html: body.html }} />}
+              {body.empty ? <p className="muted">This guide is empty.{editor && <> <Link to={`/kb/${sop.id}/edit`}>Add content</Link></>}</p> : <div dangerouslySetInnerHTML={{ __html: bodyHtml }} />}
             </article>
+            {published && !body.empty && <GuideFeedback page={sop} editor={editor} person={(id) => ({ name: name(id), photo: team.data?.find((m) => m.user_id === id)?.profile?.avatar_url })} />}
           </div>
-          {(showReads || sections.length > 0) && (
+          {(showReads || showTraining || sections.length > 0) && (
             <aside className="sop-aside no-print">
+              {showTraining && (
+                <div className="card card-pad stack-sm">
+                  <div className="row-between"><strong className="small">Training progress</strong><span className="muted small">{trainingIds.length} {trainingIds.length === 1 ? "guide" : "guides"}</span></div>
+                  {!team.data || trainingReads.isPending ? <Skeleton height={28} /> : trainees.length === 0 ? <p className="muted small" style={{ margin: 0 }}>No one has {jobOf.length === 1 ? "this role" : "these roles"} yet.</p> : (
+                    <div className="stack-sm" style={{ gap: 10 }}>
+                      {trainees.map((m) => {
+                        const done = trainingDone(m.user_id);
+                        return (
+                          <div key={m.user_id} className="stack-sm" style={{ gap: 4 }}>
+                            <div className="row" style={{ gap: 8 }}>
+                              <span className="avatar" style={{ width: 26, height: 26, fontSize: 11 }}><Face name={name(m.user_id)} photo={m.profile?.avatar_url} /></span>
+                              <span className="grow small strong">{name(m.user_id)}</span>
+                              <span className="muted small tabular">{done} of {trainingIds.length}</span>
+                            </div>
+                            <div className="progress"><span style={{ width: `${(done / trainingIds.length) * 100}%` }} /></div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               {showReads && (
                 <div className="card card-pad stack-sm">
                   <div className="row-between"><strong className="small">Read this revision</strong><span className="muted small">{readers.length}{team.data ? ` of ${audience.length}` : ""}</span></div>
@@ -186,14 +274,21 @@ export function SopPage() {
         </div>
       </div>
       {history && <HistoryDialog pageId={sop.id} current={sop.revision} names={name} onClose={() => setHistory(false)} />}
+      {quizzing && quiz.data?.length && <QuizDialog pageId={sop.id} title={sop.title} questions={quiz.data} onClose={() => setQuizzing(false)} />}
     </>
   );
 }
 
+/**
+ * Every saved version, newest first. Opening one shows what changed from the version before it, side
+ * by side (or any other version, picked), or reads it as it was; an old one can be restored.
+ */
 function HistoryDialog({ pageId, current, names, onClose }: { pageId: string; current: number; names: (id: string | null) => string; onClose: () => void }) {
   const { company } = useSession();
   const queryClient = useQueryClient();
   const [viewing, setViewing] = useState<number | null>(null);
+  const [mode, setMode] = useState<"changes" | "read">("changes");
+  const [against, setAgainst] = useState<number | null>(null);
   const revisions = useQuery({
     queryKey: ["kb", company.id, "revisions", pageId],
     queryFn: async () => unwrap(await supabase().from("sop_revisions").select("revision, title, body_html, edited_by, created_at").eq("page_id", pageId).order("revision", { ascending: false }).limit(100)),
@@ -209,29 +304,65 @@ function HistoryDialog({ pageId, current, names, onClose }: { pageId: string; cu
       onClose();
     },
   });
-  const shown = revisions.data?.find((r) => r.revision === viewing);
+  const all = revisions.data ?? [];
+  const open = (revision: number) => {
+    const before = all.find((r) => r.revision < revision);
+    setViewing(revision);
+    setAgainst(before?.revision ?? all.find((r) => r.revision !== revision)?.revision ?? null);
+    setMode(before ? "changes" : "read");
+  };
+  const shown = all.find((r) => r.revision === viewing);
+  const base = all.find((r) => r.revision === against);
+  const readHtml = useGuidePictures(useMemo(() => sanitizeHtml(shown?.body_html ?? ""), [shown?.body_html]));
+  // Older on the left, newer on the right, whichever was picked first.
+  const [older, newer] = shown && base ? (base.revision < shown.revision ? [base, shown] : [shown, base]) : [null, null];
+  const label = (r: { revision: number; created_at: string }) => `Revision ${r.revision}${r.revision === current ? " (current)" : ""} · ${formatDate(r.created_at)}`;
+  const comparing = Boolean(shown && mode === "changes" && older && newer);
+
   return (
-    <Dialog open onClose={onClose} title={shown ? `Revision ${shown.revision}` : "Revision history"} description={shown ? `${shown.title} · ${formatDateTime(shown.created_at)} by ${names(shown.edited_by)}` : "Every saved change is kept. Restoring makes the old version the newest revision."} size="lg">
+    <Dialog open onClose={onClose} title={shown ? `Revision ${shown.revision}` : "Revision history"} description={shown ? `${shown.title} · ${formatDateTime(shown.created_at)} by ${names(shown.edited_by)}` : "Every saved change is kept. Open one to see what changed, or to restore it."} size={comparing ? "xl" : "lg"}>
       {shown ? (
         <div className="stack">
-          <div className="card card-pad prose" style={{ maxHeight: "55vh", overflowY: "auto", boxShadow: "none" }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(shown.body_html) || "<p><em>Empty</em></p>" }} />
+          <div className="row-between wrap" style={{ gap: 12 }}>
+            <div className="segmented" role="group" aria-label="Show">
+              <button type="button" aria-pressed={mode === "changes"} disabled={all.length < 2} onClick={() => setMode("changes")}>Changes</button>
+              <button type="button" aria-pressed={mode === "read"} onClick={() => setMode("read")}>Read it</button>
+            </div>
+            {mode === "changes" && all.length > 1 && (
+              <label className="row small" style={{ gap: 8 }}>
+                <span className="muted" style={{ whiteSpace: "nowrap" }}>Compared with</span>
+                <select className="select input-sm" value={against ?? ""} onChange={(e) => setAgainst(Number(e.target.value))}>
+                  {all.filter((r) => r.revision !== shown.revision).map((r) => <option key={r.revision} value={r.revision}>{label(r)}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+          {comparing ? (
+            <div className="diff-scroll">
+              <VersionCompare before={{ label: label(older!), title: older!.title, html: older!.body_html }} after={{ label: label(newer!), title: newer!.title, html: newer!.body_html }} />
+            </div>
+          ) : (
+            <div className="card card-pad prose" style={{ maxHeight: "55vh", overflowY: "auto", boxShadow: "none" }} dangerouslySetInnerHTML={{ __html: readHtml || "<p><em>Empty</em></p>" }} />
+          )}
           <div className="form-actions">
             <Button variant="ghost" icon="arrowLeft" onClick={() => setViewing(null)}>All revisions</Button>
-            {shown.revision !== current && <Button variant="primary" icon="undo" loading={restore.isPending} onClick={() => restore.mutate(shown.revision)}>Restore this version</Button>}
+            <span className="spacer" />
+            {shown.revision !== current && <Button variant="primary" icon="undo" loading={restore.isPending} onClick={() => restore.mutate(shown.revision)}>Restore revision {shown.revision}</Button>}
           </div>
         </div>
       ) : (
         <div className="card" style={{ boxShadow: "none" }}>
           {revisions.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton height={20} /></div>)}
           {revisions.error && <ErrorState compact error={revisions.error} onRetry={() => revisions.refetch()} />}
-          {revisions.data?.map((r) => (
-            <button key={r.revision} type="button" className="card-row" onClick={() => setViewing(r.revision)}>
+          {all.map((r) => (
+            <button key={r.revision} type="button" className="card-row" onClick={() => open(r.revision)}>
               <span className="badge">{r.revision}</span>
               <span className="grow stack-sm" style={{ gap: 2, minWidth: 0 }}>
                 <strong className="ellipsis">{r.title}</strong>
                 <span className="muted small">{formatDateTime(r.created_at)} · {names(r.edited_by)}</span>
               </span>
-              {r.revision === current ? <span className="pill" data-tone="success">Current</span> : <Icon name="chevronRight" size={16} />}
+              {r.revision === current && <span className="pill" data-tone="success">Current</span>}
+              <Icon name="chevronRight" size={16} />
             </button>
           ))}
         </div>

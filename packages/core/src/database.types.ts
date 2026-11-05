@@ -726,14 +726,14 @@ isOneToOne: false
                   ]
                 },"company_roles": {
                   Row: {
-                    "base_role": Database["public"]['Enums']["member_role"],"company_id": string,"created_at": string,"description": string | null,"id": string,"name": string,"permissions": (string)[],"updated_at": string
+                    "base_role": Database["public"]['Enums']["member_role"],"company_id": string,"created_at": string,"description": string | null,"guide_id": string | null,"id": string,"name": string,"permissions": (string)[],"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "base_role": Database["public"]['Enums']["member_role"],"company_id": string,"created_at"?: string,"description"?: string | null,"id"?: string,"name": string,"permissions"?: (string)[],"updated_at"?: string
+                    "base_role": Database["public"]['Enums']["member_role"],"company_id": string,"created_at"?: string,"description"?: string | null,"guide_id"?: string | null,"id"?: string,"name": string,"permissions"?: (string)[],"updated_at"?: string
                   }
                   Update: {
-                    "base_role"?: Database["public"]['Enums']["member_role"],"company_id"?: string,"created_at"?: string,"description"?: string | null,"id"?: string,"name"?: string,"permissions"?: (string)[],"updated_at"?: string
+                    "base_role"?: Database["public"]['Enums']["member_role"],"company_id"?: string,"created_at"?: string,"description"?: string | null,"guide_id"?: string | null,"id"?: string,"name"?: string,"permissions"?: (string)[],"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -742,6 +742,12 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "companies"
       referencedColumns: ["id"]
+    },{
+      foreignKeyName: "company_roles_guide_fkey"
+      columns: ["company_id","guide_id"]
+isOneToOne: false
+      referencedRelation: "sop_pages"
+      referencedColumns: ["company_id","id"]
     }
                   ]
                 },"contract_sections": {
@@ -2634,16 +2640,36 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
-                },"sop_pages": {
+                },"sop_feedback": {
                   Row: {
-                    "audience": (Database["public"]['Enums']["member_role"])[] | null,"body": NonNullable<Json>,"body_html": string,"body_text": string,"category_id": string | null,"company_id": string,"cover_path": string | null,"created_at": string,"id": string,"required": boolean,"revision": number,"search": unknown,"status": string,"tags": (string)[],"title": string,"updated_at": string,"updated_by": string | null
+                    "company_id": string,"created_at": string,"helpful": boolean | null,"id": string,"message": string | null,"page_id": string,"resolved_at": string | null,"resolved_by": string | null,"revision": number,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id": string,"cover_path"?: string | null,"created_at"?: string,"id"?: string,"required"?: boolean,"revision"?: number,"search"?: never,"status"?: string,"tags"?: (string)[],"title": string,"updated_at"?: string,"updated_by"?: string | null
+                    "company_id": string,"created_at"?: string,"helpful"?: boolean | null,"id"?: string,"message"?: string | null,"page_id": string,"resolved_at"?: string | null,"resolved_by"?: string | null,"revision": number,"user_id"?: string
                   }
                   Update: {
-                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id"?: string,"cover_path"?: string | null,"created_at"?: string,"id"?: string,"required"?: boolean,"revision"?: number,"search"?: never,"status"?: string,"tags"?: (string)[],"title"?: string,"updated_at"?: string,"updated_by"?: string | null
+                    "company_id"?: string,"created_at"?: string,"helpful"?: boolean | null,"id"?: string,"message"?: string | null,"page_id"?: string,"resolved_at"?: string | null,"resolved_by"?: string | null,"revision"?: number,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "sop_feedback_company_id_page_id_fkey"
+      columns: ["company_id","page_id"]
+isOneToOne: false
+      referencedRelation: "sop_pages"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"sop_pages": {
+                  Row: {
+                    "audience": (Database["public"]['Enums']["member_role"])[] | null,"audience_roles": (string)[] | null,"body": NonNullable<Json>,"body_html": string,"body_text": string,"category_id": string | null,"company_id": string,"cover_path": string | null,"created_at": string,"id": string,"owner_id": string | null,"required": boolean,"revision": number,"review_months": number | null,"reviewed_at": string | null,"search": unknown,"status": string,"tags": (string)[],"title": string,"updated_at": string,"updated_by": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"audience_roles"?: (string)[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id": string,"cover_path"?: string | null,"created_at"?: string,"id"?: string,"owner_id"?: string | null,"required"?: boolean,"revision"?: number,"review_months"?: number | null,"reviewed_at"?: string | null,"search"?: never,"status"?: string,"tags"?: (string)[],"title": string,"updated_at"?: string,"updated_by"?: string | null
+                  }
+                  Update: {
+                    "audience"?: (Database["public"]['Enums']["member_role"])[] | null,"audience_roles"?: (string)[] | null,"body"?: NonNullable<Json>,"body_html"?: string,"body_text"?: string,"category_id"?: string | null,"company_id"?: string,"cover_path"?: string | null,"created_at"?: string,"id"?: string,"owner_id"?: string | null,"required"?: boolean,"revision"?: number,"review_months"?: number | null,"reviewed_at"?: string | null,"search"?: never,"status"?: string,"tags"?: (string)[],"title"?: string,"updated_at"?: string,"updated_by"?: string | null
                   }
                   Relationships: [
                     {
@@ -2658,6 +2684,26 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "companies"
       referencedColumns: ["id"]
+    }
+                  ]
+                },"sop_quizzes": {
+                  Row: {
+                    "company_id": string,"page_id": string,"questions": NonNullable<Json>,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"page_id": string,"questions": NonNullable<Json>,"updated_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"page_id"?: string,"questions"?: NonNullable<Json>,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "sop_quizzes_company_id_page_id_fkey"
+      columns: ["company_id","page_id"]
+isOneToOne: false
+      referencedRelation: "sop_pages"
+      referencedColumns: ["company_id","id"]
     }
                   ]
                 },"sop_revisions": {
@@ -2678,6 +2724,26 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "sop_pages"
       referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"sop_search_misses": {
+                  Row: {
+                    "company_id": string,"created_at": string,"id": number,"query": string,"user_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"id"?: number,"query": string,"user_id"?: string | null
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"id"?: number,"query"?: string,"user_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "sop_search_misses_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
     }
                   ]
                 },"storage_allowances": {
@@ -3172,6 +3238,9 @@ isOneToOne: false
 "accept_terms":
 { Args: { "p_company": string,"p_version": string }; Returns: string
                            },
+"acknowledge_guide":
+{ Args: { "p_answers"?: (number)[],"p_page": string }; Returns: (number)[]
+                           },
 "add_field_line":
 { Args: { "p_id"?: string,"p_quantity": number,"p_service": string,"p_visit": string }; Returns: string
                            },
@@ -3591,6 +3660,9 @@ isOneToOne: false
 "emit_equipment_alerts":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
+"emit_guide_reviews":
+{ Args: Record<PropertyKey, never>; Returns: number
+                           },
 "emit_inactive_clients":
 { Args: { "p_cap"?: number,"p_company"?: string,"p_now"?: string }; Returns: number
                            },
@@ -3644,6 +3716,12 @@ isOneToOne: false
 { Args: { "p_company_id": string,"p_limit"?: number,"p_query": string }; Returns: {
               "client_id": string,"id": string,"kind": string,"number": number,"status": string,"subtitle": string,"title": string
             }[]
+                           },
+"guide_feedback":
+{ Args: { "p_helpful"?: boolean,"p_message"?: string,"p_page": string }; Returns: undefined
+                           },
+"guide_quiz":
+{ Args: { "p_page": string }; Returns: Json
                            },
 "hub_deposit_invoice":
 { Args: { "p_company": string,"p_quote": string }; Returns: string

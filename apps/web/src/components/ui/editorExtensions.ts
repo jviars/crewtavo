@@ -14,6 +14,7 @@ import { TableKit } from "@tiptap/extension-table";
 import { Placeholder } from "@tiptap/extensions";
 import { Plugin } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
+import { isAppPath } from "@/lib/html";
 
 export const CALLOUTS = [
   { tone: "tip", label: "Tip" },
@@ -135,22 +136,76 @@ const Callout = Node.create({
   },
 });
 
-export function guideExtensions(placeholder: string): Extensions {
+/** Where a stored picture can be seen: a short-lived link to its path, or null when there isn't one. */
+export type PictureLink = (path: string) => Promise<string | null>;
+
+/**
+ * A picture. One added here (the Picture button, a paste or a drop: RichTextEditor) is stored and
+ * saved by its path (data-path), with no link, since a link to a private file only lasts a while:
+ * it's shown with one asked for as it's shown (`link`). An older or pasted one keeps its web address.
+ */
+const Picture = Image.extend<{ inline: boolean; allowBase64: boolean; HTMLAttributes: Record<string, unknown>; resize: false; link: PictureLink | null }>({
+  addOptions() {
+    return { ...this.parent!(), link: null };
+  },
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      path: { default: null, parseHTML: (el) => el.getAttribute("data-path"), renderHTML: (a) => (a.path ? { "data-path": a.path } : {}) },
+      // While it uploads: which upload it is, so it can be finished or taken out. Never saved.
+      uploading: { default: null, rendered: false },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "img[data-path]" }, { tag: 'img[src]:not([src^="data:"])' }];
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const attrs = { ...HTMLAttributes };
+    if (node.attrs.path) delete attrs.src;
+    return ["img", attrs];
+  },
+  addNodeView() {
+    const link = this.options.link;
+    return ({ node }) => {
+      const img = document.createElement("img");
+      let shown = node;
+      const show = (n: typeof node) => {
+        shown = n;
+        img.alt = n.attrs.alt ?? "";
+        for (const side of ["width", "height"] as const) {
+          if (n.attrs[side]) img.setAttribute(side, String(n.attrs[side]));
+          else img.removeAttribute(side);
+        }
+        img.toggleAttribute("data-uploading", Boolean(n.attrs.uploading));
+        if (n.attrs.src) img.src = n.attrs.src;
+        else if (n.attrs.path && link) {
+          const path = n.attrs.path as string;
+          void link(path).then((url) => {
+            if (url && shown.attrs.path === path && !shown.attrs.src) img.src = url;
+          }, () => undefined);
+        }
+      };
+      show(node);
+      return { dom: img, update: (n) => (n.type === node.type ? (show(n), true) : false) };
+    };
+  },
+});
+
+export function guideExtensions(placeholder: string, link: PictureLink | null = null): Extensions {
   return [
     StarterKit.configure({
       heading: false,
       link: {
         openOnClick: false,
         defaultProtocol: "https",
-        isAllowedUri: (url) => /^(https?:|mailto:|tel:)/i.test(url),
+        isAllowedUri: (url) => /^(https?:|mailto:|tel:)/i.test(url) || isAppPath(url),
       },
     }),
     GuideHeading,
     TaskList,
     TaskItem.configure({ nested: true }),
     TableKit.configure({ table: { resizable: false } }),
-    // No way to add one yet, but older guides (and pasted pages) can have pictures.
-    Image.configure({ allowBase64: false }),
+    Picture.configure({ allowBase64: false, link }),
     Video,
     Callout,
     Placeholder.configure({ placeholder }),

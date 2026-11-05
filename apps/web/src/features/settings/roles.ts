@@ -4,13 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
-export interface CompanyRole { id: string; name: string; base_role: Role; permissions: Permission[] }
+export interface CompanyRole { id: string; name: string; base_role: Role; permissions: Permission[]; guide_id: string | null }
 
 export function useCompanyRoles() {
   const { company } = useSession();
   return useQuery({
     queryKey: ["company-roles", company.id],
-    queryFn: async () => unwrap(await supabase().from("company_roles").select("id, name, base_role, permissions").eq("company_id", company.id).order("name")) as unknown as CompanyRole[],
+    queryFn: async () => unwrap(await supabase().from("company_roles").select("id, name, base_role, permissions, guide_id").eq("company_id", company.id).order("name")) as unknown as CompanyRole[],
   });
 }
 

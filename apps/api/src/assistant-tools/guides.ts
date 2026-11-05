@@ -32,7 +32,7 @@ export const guideTools = {
       const guide = await one(
         ctx.db
           .from("sop_pages")
-          .select("id, title, status, required, audience, tags, body_text, body_html, updated_at, revision, category:sop_categories(name)")
+          .select("id, title, status, required, audience, audience_roles, tags, body_text, body_html, updated_at, revision, category:sop_categories(name)")
           .eq("id", a.guide_id)
           .eq("company_id", ctx.companyId)
           .maybeSingle(),
@@ -69,7 +69,8 @@ export const guideTools = {
         body_text: text,
         ...(a.category !== undefined && { category_id: a.category ? await categoryId(ctx, a.category) : null }),
         ...(status && { status }),
-        ...(a.required !== undefined && { required: a.required, audience: a.required && a.audience?.length ? a.audience : null }),
+        // Its levels are the whole list: team roles (audience_roles, set in Crewtavo) are cleared with it.
+        ...(a.required !== undefined && { required: a.required, audience: a.required && a.audience?.length ? a.audience : null, audience_roles: null }),
         ...(a.tags && { tags: a.tags }),
       };
       if (a.guide_id) {

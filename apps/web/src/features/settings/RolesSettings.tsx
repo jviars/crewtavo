@@ -1,11 +1,13 @@
 /**
- * Roles: name a role, pick its access level, and choose which areas it includes. Owners also give a
+ * Roles: name a role, pick its access level, choose which areas it includes, and the guide that's its
+ * job description (the knowledge base shows it to the people with the role). Owners also give a
  * role, or a built-in level, a storage limit for everyone with it (Settings → Storage has the rest).
  */
 import { adminLevel, LEVEL_PERMISSIONS, LEVEL_SUMMARY, PERMISSIONS, ROLE_LABELS, STAFF, type Permission, type Role } from "@crewtavo/core/roles";
 import { formatBytes } from "@crewtavo/core/storage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
@@ -16,6 +18,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
+import { useSopIndex } from "../kb/kbData";
 import { useCompanyRoles, type CompanyRole } from "./roles";
 import { gbField, parseGb, refreshStorage, setAllowance, setsAllowances, useStorageOverview } from "./storage";
 import { AllowanceDialog, GbInput } from "./StorageSettings";
@@ -29,6 +32,7 @@ export function RolesSettings() {
   const session = useSession();
   const queryClient = useQueryClient();
   const roles = useCompanyRoles();
+  const guides = useSopIndex();
   const team = useQuery({ queryKey: ["team", session.company.id], queryFn: () => api.get<Array<{ role_id: string | null; active: boolean }>>("/team") });
   const [editing, setEditing] = useState<CompanyRole | "new" | null>(null);
   // Storage limits for everyone with a role: owners only.
@@ -86,6 +90,7 @@ export function RolesSettings() {
               <div className="row wrap" style={{ gap: 6 }}>
                 {r.permissions.length ? r.permissions.map((p) => <span key={p} className="chip">{label(p)}</span>) : <span className="muted small">Their own work only</span>}
               </div>
+              {r.guide_id && <Link to={`/kb/${r.guide_id}`} className="small">Job description: {guides.data?.pages.find((g) => g.id === r.guide_id)?.title ?? "open the guide"}</Link>}
               {owner && storageLimit(r.id) && <span className="muted small">Storage: {formatBytes(storageLimit(r.id)!)} each</span>}
             </div>
           ))}
@@ -130,6 +135,8 @@ export function RoleDialog({ role, existing, storage, onClose }: { role: Company
   const [name, setName] = useState(role?.name ?? "");
   const [level, setLevel] = useState<Role>(role?.base_role ?? "office");
   const [perms, setPerms] = useState<Permission[]>(role?.permissions ?? [...LEVEL_PERMISSIONS.office]);
+  const [guideId, setGuideId] = useState(role?.guide_id ?? "");
+  const guides = useSopIndex();
   // What's typed, or the role's limit as it stands (which may arrive after the dialog opens).
   const [typed, setTyped] = useState<string | null>(null);
   const size = typed ?? gbField(storage?.limit);
@@ -155,7 +162,7 @@ export function RoleDialog({ role, existing, storage, onClose }: { role: Company
         if (parsed && "problem" in parsed) throw new Error(`Storage limit: ${parsed.problem}`);
         limit = parsed ? parsed.bytes : null;
       }
-      const row = { name: clean, base_role: level, permissions: kept, current_password: current_password || undefined };
+      const row = { name: clean, base_role: level, permissions: kept, guide_id: guideId || null, current_password: current_password || undefined };
       let saved = id;
       if (saved) await api.put(`/team/roles/${saved}`, row);
       else saved = created.current = (await api.post<{ id: string }>("/team/roles", row)).id;
@@ -199,6 +206,12 @@ export function RoleDialog({ role, existing, storage, onClose }: { role: Company
         ) : (
           <p className="muted small" style={{ margin: 0 }}>This level sees only their own visits and time.</p>
         )}
+        <Field label="Job description" optional hint="The guide that says what this job is. It and every guide it links to are the job's training: people with this role have to read them all, and it shows how far each person is.">
+          <select className="select" value={guideId} onChange={(e) => { setGuideId(e.target.value); save.reset(); }}>
+            <option value="">None</option>
+            {(guides.data?.pages ?? []).map((g) => <option key={g.id} value={g.id}>{g.title}{g.status === "draft" ? " (draft)" : ""}</option>)}
+          </select>
+        </Field>
         {storage && (
           <Field label="Storage limit for everyone with this role" optional hint="For each person with this role who has no limit of their own: it stops what they add to Drive, plans and guides. Leave it empty for no limit.">
             <GbInput value={size} placeholder="No limit" onChange={(v) => { setTyped(v); save.reset(); }} />

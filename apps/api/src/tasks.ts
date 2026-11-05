@@ -365,6 +365,8 @@ async function hourlyUpkeep(env: Env) {
   const reminders = await step("emit_visit_reminders", admin.rpc("emit_visit_reminders"));
   // Maintenance coming due or overdue: one notification per change, to the people who look after it.
   const equipment = await step("emit_equipment_alerts", admin.rpc("emit_equipment_alerts"));
+  // Guides due for review: their reviewer hears once, then weekly while it stays due.
+  const guideReviews = await step("emit_guide_reviews", admin.rpc("emit_guide_reviews"));
   // Offers to subs left unanswered past their time to answer by: they run out (a new price leaves the
   // agreed one), and the office hears.
   const offers = await step("expire_sub_offers", admin.rpc("expire_sub_offers"));
@@ -404,7 +406,7 @@ async function hourlyUpkeep(env: Env) {
   // for looking into a run of requests.
   const codes = await step("tidy_sign_in_codes", admin.rpc("tidy_sign_in_codes"));
   return {
-    overdue: overdue ?? 0, late_fees: lateFees ?? 0, invoice_reminders: invoiceReminders ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, offers: offers ?? 0, subs: { alerts: subAlerts?.length ?? 0, reminded },
+    overdue: overdue ?? 0, late_fees: lateFees ?? 0, invoice_reminders: invoiceReminders ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, guide_reviews: guideReviews ?? 0, offers: offers ?? 0, subs: { alerts: subAlerts?.length ?? 0, reminded },
     cards: cards ?? 0, autopay_processing: autopayProcessing, clocks, codes: codes ?? 0, problems,
   };
 }

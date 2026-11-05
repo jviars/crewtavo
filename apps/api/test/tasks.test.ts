@@ -117,6 +117,7 @@ describe("hourly upkeep", () => {
       if (call.path === "rpc/emit_invoice_reminders") return 7;
       if (call.path === "rpc/emit_visit_reminders") return 2;
       if (call.path === "rpc/emit_equipment_alerts") return 1;
+      if (call.path === "rpc/emit_guide_reviews") return 2;
       if (call.path === "rpc/expire_sub_offers") return 3;
       // Two certificates running out; the subs have no email or phone to remind.
       if (call.path === "rpc/emit_sub_document_alerts") return [{ remind_sub: false }, { remind_sub: false }];
@@ -132,6 +133,7 @@ describe("hourly upkeep", () => {
       invoice_reminders: 7,
       reminders: 2,
       equipment: 1,
+      guide_reviews: 2,
       offers: 3,
       subs: { alerts: 2, reminded: { subs: 0, email: 0, sms: 0, failed: 0 } },
       cards: 5,
@@ -142,7 +144,7 @@ describe("hourly upkeep", () => {
     });
     // Cards expiring next month are flagged before the clocks.
     expect(calls.map((c) => c.path)).toEqual([
-      "rpc/mark_overdue_invoices", "rpc/add_late_fees", "rpc/emit_invoice_reminders", "rpc/emit_visit_reminders", "rpc/emit_equipment_alerts", "rpc/expire_sub_offers", "rpc/emit_sub_document_alerts",
+      "rpc/mark_overdue_invoices", "rpc/add_late_fees", "rpc/emit_invoice_reminders", "rpc/emit_visit_reminders", "rpc/emit_equipment_alerts", "rpc/emit_guide_reviews", "rpc/expire_sub_offers", "rpc/emit_sub_document_alerts",
       "rpc/emit_card_expiry_alerts", "rpc/clock_upkeep", "rpc/tidy_sign_in_codes",
     ]);
     expect(autopay.reconcile).toHaveBeenCalledWith(env, expect.anything());

@@ -45,16 +45,18 @@ async function signWaiting() {
   }
 }
 
+/** The query for a link to a stored photo, shared by everything that shows it (a face, a cover, a picture in a guide). */
+export const photoQuery = (path: string) => ({
+  queryKey: ["photo", path],
+  queryFn: () => photoLink(path),
+  staleTime: FRESH_MS,
+  gcTime: FRESH_MS,
+  meta: { silent: true },
+});
+
 /** A link to show the photo at `path` (profiles.avatar_url), or null while there's none. */
 export function usePhotoUrl(path: string | null | undefined): string | null {
-  const { data } = useQuery({
-    queryKey: ["photo", path],
-    enabled: Boolean(path),
-    queryFn: () => photoLink(path!),
-    staleTime: FRESH_MS,
-    gcTime: FRESH_MS,
-    meta: { silent: true },
-  });
+  const { data } = useQuery({ ...photoQuery(path ?? ""), enabled: Boolean(path) });
   return (path && data) || null;
 }
 
