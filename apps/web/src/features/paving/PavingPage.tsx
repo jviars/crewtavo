@@ -1,7 +1,8 @@
 /**
  * Paving: the whole job from one place, once Paving is installed. Start a takeoff from an
  * address, then each project walks through takeoff, estimate, proposal, schedule and invoice
- * (PavingProjectPage). The list prices a project that offers options from its cheapest until it's
+ * (PavingProjectPage). Jobs priced on the paving calculator without a takeoff list here too, and open
+ * on their quote. The list prices a project that offers options from its cheapest until it's
  * signed. The price book card adds the standard paving services to a price list that doesn't have
  * them yet.
  */
@@ -24,6 +25,8 @@ import { lowestOption, SIGNED } from "../roofing/flow/model";
 import { isPaving, sectionsOf, stageLabel, STEPS, TAKEOFF_FIELDS, type TakeoffRow } from "./data";
 import { NewTakeoffDialog } from "./NewTakeoffDialog";
 
+const QUOTE_FIELDS = "id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), client:clients(display_name), property:properties(line1, city, region, postal_code), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id), jobs!jobs_company_id_quote_id_fkey(id, status)";
+
 interface ProjectRow extends TakeoffRow {
   quote: {
     id: string;
@@ -44,6 +47,14 @@ interface ProjectRow extends TakeoffRow {
   } | null;
 }
 
+/** A project in the list: measured on the map (its newest takeoff), or priced on the calculator (its area). */
+interface ListRow {
+  quote: NonNullable<ProjectRow["quote"]>;
+  updated_at: string;
+  takeoff: ProjectRow | null;
+  sqft: number | null;
+}
+
 export function PavingPage() {
   const session = useSession();
   const { company } = session;
@@ -55,26 +66,52 @@ export function PavingPage() {
   const projects = useQuery({
     queryKey: ["paving-projects", company.id],
     queryFn: async () => {
-      const rows = unwrap(
-        await supabase()
-          .from("measurements")
-          .select(`${TAKEOFF_FIELDS}, quote:quotes(id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), client:clients(display_name), property:properties(line1, city, region, postal_code), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id), jobs!jobs_company_id_quote_id_fkey(id, status))`)
-          .not("quote_id", "is", null)
-          .order("updated_at", { ascending: false })
-          .limit(200),
-      ) as unknown as ProjectRow[];
+      const db = supabase();
+      const [takeoffs, worksheets] = await Promise.all([
+        db.from("measurements").select(`${TAKEOFF_FIELDS}, quote:quotes(${QUOTE_FIELDS})`).not("quote_id", "is", null).order("updated_at", { ascending: false }).limit(200),
+        db.from("paving_worksheets").select(`updated_at, sqft:data->input->sqft, quote:quotes(${QUOTE_FIELDS})`).order("updated_at", { ascending: false }).limit(200),
+      ]);
       // One row per project: its newest takeoff, and only takeoffs with paving items.
       const seen = new Set<string>();
-      return rows.filter((r) => r.quote && isPaving(r) && !seen.has(r.quote.id) && seen.add(r.quote.id));
+      const measured = (unwrap(takeoffs) as unknown as ProjectRow[]).filter((r) => r.quote && isPaving(r) && !seen.has(r.quote.id) && seen.add(r.quote.id));
+      // And the ones priced on the calculator without a takeoff, which open on their quote.
+      const priced = (unwrap(worksheets) as unknown as Array<{ updated_at: string; sqft: unknown; quote: ProjectRow["quote"] }>).filter((w) => w.quote && !seen.has(w.quote.id) && seen.add(w.quote.id));
+      const rows: ListRow[] = [
+        ...measured.map((r) => ({ quote: r.quote!, updated_at: r.updated_at, takeoff: r, sqft: null })),
+        ...priced.map((w) => ({ quote: w.quote!, updated_at: w.updated_at, takeoff: null, sqft: typeof w.sqft === "number" ? w.sqft : null })),
+      ];
+      return rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     },
   });
-  const open = (projects.data ?? []).filter((r) => !["lost", "archived"].includes(r.quote!.status) && !(r.quote!.jobs[0]?.status === "completed"));
+  const open = (projects.data ?? []).filter((r) => !["lost", "archived"].includes(r.quote.status) && !(r.quote.jobs[0]?.status === "completed"));
   const rows = showAll ? projects.data ?? [] : open;
 
   return (
     <>
-      <PageHeader title="Paving" actions={canSell && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>New takeoff</Button>} />
+      <PageHeader
+        title="Paving"
+        actions={
+          canSell && (
+            <>
+              <Link className="btn" to="/paving/calculator"><Icon name="calculator" size={16} />Calculator</Link>
+              <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>New takeoff</Button>
+            </>
+          )
+        }
+      />
       <p className="page-subtitle">From address to paid: measure the lot on the aerial, price it from your price book, send the proposal, then schedule and bill the job.</p>
+
+      {canSell && (
+        <Link to="/paving/calculator" className="card card-link calc-promo">
+          <span className="paving-step-icon"><Icon name="calculator" size={22} /></span>
+          <span className="grow stack-sm" style={{ gap: 2 }}>
+            <strong>Price a job in a minute</strong>
+            <span className="muted small">Already measured it? The calculator works out the tons, crew and profit from the area. No map or client needed to start.</span>
+          </span>
+          <span className="btn btn-primary hide-mobile">Open the calculator</span>
+          <Icon name="chevronRight" size={18} />
+        </Link>
+      )}
 
       <ol className="paving-steps" aria-label="How a paving job goes">
         {STEPS.map((step, i) => (
@@ -114,18 +151,19 @@ export function PavingPage() {
               <thead><tr><th>Project</th><th>Measured</th><th className="num">Price</th><th>Stage</th></tr></thead>
               <tbody>
                 {rows.map((r) => {
-                  const q = r.quote!;
+                  const q = r.quote;
+                  const href = r.takeoff ? `/paving/${q.id}` : `/quotes/${q.id}`;
                   const stage = stageLabel(q, true);
                   // Options not chosen yet: from the cheapest. Once signed, the total is the one chosen.
                   const from = q.options?.length && !SIGNED.includes(q.status) ? lowestOption(q) : null;
                   return (
-                    <tr key={q.id} className="row-link" onClick={() => navigate(`/paving/${q.id}`)}>
+                    <tr key={q.id} className="row-link" onClick={() => navigate(href)}>
                       <td>
-                        <Link className="cell-link" to={`/paving/${q.id}`} onClick={(e) => e.stopPropagation()}>{q.title}</Link>
+                        <Link className="cell-link" to={href} onClick={(e) => e.stopPropagation()}>{q.title}</Link>
                         <div className="muted small">{[q.client?.display_name, q.property ? addressLine(q.property) : null].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td>
-                        <span className="small">{measuredSummary(r)}</span>
+                        <span className="small">{r.takeoff ? measuredSummary(r.takeoff) : r.sqft ? `${formatNumber(r.sqft)} sq ft · calculator` : "Calculator"}</span>
                         <div className="muted small">{[q.options?.length ? `${q.options.length} options` : null, timeAgo(r.updated_at)].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td className="num">{from !== null ? <span title="Its cheapest option">From {formatMoney(from)}</span> : q.lines.length ? formatMoney(q.total) : <span className="muted" title="Not priced yet">—</span>}</td>

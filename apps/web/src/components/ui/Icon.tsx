@@ -3,7 +3,7 @@
  * drawn on the same 24px grid so they take the same props. Decorative unless given a label.
  */
 import {
-  Archive, ArchiveRestore, ArrowLeft, AtSign, ArrowRight, Banknote, Bell, Bold, BookOpen, Calendar, CalendarCheck, Camera, ChartColumn, ChartLine, Check, ChevronDown, ChevronLeft,
+  Archive, ArchiveRestore, ArrowLeft, AtSign, ArrowRight, Banknote, Bell, Bold, BookOpen, Calculator, Calendar, CalendarCheck, Camera, ChartColumn, ChartLine, Check, ChevronDown, ChevronLeft,
   ChevronRight, ChevronUp, CircleCheck, CircleQuestionMark, ClipboardCheck, Clock, Cloud, CodeXml, Command, Copy, CreditCard, DollarSign, Download, Ellipsis, ExternalLink, Eye, File, FileImage,
   FileSpreadsheet, Folder, FolderInput, FolderOpen, FolderPlus, Funnel, Gauge, Gift, Globe, GripVertical, HardDrive, Hash, Heading, Hexagon, Highlighter, History, House, Image,
   Inbox, Info, Italic, Kanban, Landmark, Layers, LayoutGrid, Link, List, ListChecks, ListOrdered, Lock, LogOut, Mail, Map, MapPin, Maximize, Megaphone, Menu, MessageSquareText,
@@ -180,6 +180,7 @@ const ICONS = {
   smartphone: Smartphone,
   pitch: TriangleRight,
   ruler: Ruler,
+  calculator: Calculator,
   paving: Road,
   roofing: Roof,
   checklist: ListChecks,

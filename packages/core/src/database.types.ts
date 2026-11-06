@@ -1704,6 +1704,38 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"paving_worksheets": {
+                  Row: {
+                    "company_id": string,"created_at": string,"created_by": string | null,"data": NonNullable<Json>,"id": string,"line_id": string | null,"name": string,"notes": string | null,"quote_id": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"created_by"?: string | null,"data": NonNullable<Json>,"id"?: string,"line_id"?: string | null,"name": string,"notes"?: string | null,"quote_id": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"created_by"?: string | null,"data"?: NonNullable<Json>,"id"?: string,"line_id"?: string | null,"name"?: string,"notes"?: string | null,"quote_id"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "paving_worksheets_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "paving_worksheets_company_id_quote_id_fkey"
+      columns: ["company_id","quote_id"]
+isOneToOne: false
+      referencedRelation: "quotes"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "paving_worksheets_line_id_fkey"
+      columns: ["line_id"]
+isOneToOne: false
+      referencedRelation: "quote_line_items"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"pay_period_lines": {
                   Row: {
                     "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"piece_amount": number,"reference": string | null,"updated_at": string,"user_id": string

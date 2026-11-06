@@ -1,7 +1,12 @@
 /**
  * One paving project, start to finish, on one page (ProjectFlow): the takeoff from the map, the
- * estimate priced from the price list (services whose formulas read the takeoff's items), the
- * proposal the client signs online, the job and its schedule, and the invoices.
+ * estimate, the proposal the client signs online, the job and its schedule, and the invoices.
+ *
+ * The estimate prices the paving on the calculator first (PavingCalculatorPage, with the takeoff's
+ * asphalt filled in), and the extras from the price list: services whose formulas read the takeoff's
+ * items, like sealcoat, striping, crack seal and patching. Price-list services that price the
+ * asphalt itself (data.ts pavesAsphalt) aren't offered beside the calculator, so the same asphalt is
+ * never priced in two places; one already on an estimate shows, to be taken off, and says so.
  *
  * The estimate can offer two or three options from packages (the options bar, quotes/
  * QuoteOptions.tsx). The services ticked here are then the ones of the option being looked at and
@@ -25,8 +30,9 @@ import { optionTabs, quoteOptionsKey, viewedOption } from "../quotes/options";
 import { QuoteOptions } from "../quotes/QuoteOptions";
 import { destinationText, lineDestination, packageServices, type LinePlace } from "../roofing/estimate/rows";
 import { useRoofPackages } from "../roofing/packages";
-import { formulaValue, sectionsOf, serviceKind, STEPS, takeoffVariables, usesDepth, viewedLines } from "./data";
+import { formulaValue, pavesAsphalt, sectionsOf, serviceKind, STEPS, takeoffVariables, usesDepth, viewedLines } from "./data";
 import { EstimateLines, ProjectFlow, SERVICE_FIELDS, type EstimateProps, type FlowTrade, type Service, type TakeoffProps } from "./ProjectFlow";
+import { useWorksheets, WorksheetsCard } from "./WorksheetsCard";
 
 const PAVING: FlowTrade = {
   id: "paving",
@@ -116,14 +122,21 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
   const [depth, setDepth] = useState("2");
   const onEstimate = new Set(visible.map((l) => l.service_id).filter(Boolean));
   const kinds = useMemo(() => new Map(services.map((s) => [s.id, serviceKind(s.formula, s.name)])), [services]);
-  // What the asphalt gets decides which area services are suggested; until someone picks, it follows what's on the estimate.
+  // Priced on the calculator: its worksheets, at the top of the estimate.
+  const worksheets = useWorksheets(quote.id);
+  const priced = (worksheets.data?.rows.length ?? 0) > 0;
+  // What the asphalt gets decides what's offered; until someone picks, it follows what's on the estimate.
   const [picked, setWork] = useState<AsphaltWork | null>(null);
-  const work: AsphaltWork = picked ?? (visible.some((l) => l.service_id && kinds.get(l.service_id) === "pave") ? "pave" : "seal");
+  const work: AsphaltWork = picked ?? (priced || visible.some((l) => l.service_id && kinds.get(l.service_id) === "pave") ? "pave" : "seal");
   const depthIn = Number(depth) > 0 ? Number(depth) : null;
   const vars = useMemo(() => takeoffVariables(takeoff, depthIn), [takeoff, depthIn]);
+  // The calculator prices the asphalt itself, so the price list's paving is only shown to take it off.
+  const covered = useMemo(() => new Set(services.filter((s) => pavesAsphalt(s.formula, s.name)).map((s) => s.id)), [services]);
   const rows = services
     .map((s) => ({ service: s, kind: kinds.get(s.id) ?? "other", qty: s.formula ? formulaValue(s.formula, vars) : null }))
-    .filter((r) => onEstimate.has(r.service.id) || ((r.qty ?? 0) > 0 && (r.kind === "other" || r.kind === work)));
+    .filter((r) => onEstimate.has(r.service.id) || ((r.qty ?? 0) > 0 && !covered.has(r.service.id) && (r.kind === "other" || r.kind === work)));
+  const twice = priced ? rows.filter((r) => onEstimate.has(r.service.id) && covered.has(r.service.id)).map((r) => r.service.name) : [];
+  const calculatorLink = `/paving/calculator?quote=${quote.id}`;
   const needsDepth = rows.some((r) => usesDepth(r.service.formula) && (r.kind !== "pave" || work === "pave"));
 
   const add = useMutation({
@@ -173,7 +186,6 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
   const notYet = rows.filter((r) => !onEstimate.has(r.service.id));
   const busy = add.isPending || remove.isPending || reprice.isPending;
 
-  const anyPaveOrSeal = services.some((s) => kinds.get(s.id) !== "other");
   const optionsChanged = () => {
     void queryClient.invalidateQueries({ queryKey: quoteOptionsKey(quote.id) });
     onChanged();
@@ -187,14 +199,12 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
       {editable && (
         <div className="stack-sm" style={{ gap: 10 }}>
           <div className="row wrap" style={{ gap: 12 }}>
-            {anyPaveOrSeal && (
-              <div className="stack-sm" style={{ gap: 4 }}>
-                <span className="small strong" id="asphalt-work">What's the asphalt getting?</span>
-                <div className="segmented" role="group" aria-labelledby="asphalt-work">
-                  {ASPHALT_WORK.map((w) => <button key={w.id} type="button" aria-pressed={work === w.id} onClick={() => setWork(w.id)}>{w.label}</button>)}
-                </div>
+            <div className="stack-sm" style={{ gap: 4 }}>
+              <span className="small strong" id="asphalt-work">What's the asphalt getting?</span>
+              <div className="segmented" role="group" aria-labelledby="asphalt-work">
+                {ASPHALT_WORK.map((w) => <button key={w.id} type="button" aria-pressed={work === w.id} onClick={() => setWork(w.id)}>{w.label}</button>)}
               </div>
-            )}
+            </div>
             {needsDepth && (
               <label className="stack-sm" style={{ gap: 4 }}>
                 <span className="small strong">Depth (in)</span>
@@ -202,7 +212,38 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
               </label>
             )}
           </div>
-          <span className="small strong">Services from your price list</span>
+        </div>
+      )}
+
+      {/* The paving first: priced on the calculator. */}
+      {priced ? (
+        <WorksheetsCard quoteId={quote.id} editable={editable} />
+      ) : (
+        editable &&
+        work === "pave" && (
+          <div className="card card-pad paving-calc-lead">
+            <span className="paving-step-icon"><Icon name="calculator" size={20} /></span>
+            <span className="grow stack-sm" style={{ gap: 2 }}>
+              <strong>Price the paving on the calculator</strong>
+              <span className="muted small">
+                The takeoff's {formatNumber(vars.asphalt_sqft ?? 0)} sq ft of asphalt fills in. Its tons, crew days, trucking and profit work out there, and the job goes on this estimate as one line.
+              </span>
+            </span>
+            <Link className="btn btn-primary" to={calculatorLink}><Icon name="calculator" size={16} />Use the calculator</Link>
+          </div>
+        )
+      )}
+      {twice.length > 0 && (
+        <div className="callout callout-warning" role="status">
+          <Icon name="alert" size={18} />
+          <span className="grow">The asphalt is priced twice: on the calculator, and by {twice.join(" and ")} from your price list. Untick {twice.length === 1 ? "it" : "them"} below unless that's on purpose.</span>
+        </div>
+      )}
+
+      {editable && (
+        <div className="stack-sm" style={{ gap: 10 }}>
+          <span className="small strong">{work === "pave" ? "Extras from your price list" : "Services from your price list"}</span>
+          {work === "pave" && <span className="muted small" style={{ marginTop: -6 }}>Sealcoat, striping, crack seal, patching and the rest. The asphalt itself is priced on the calculator.</span>}
           {tab && (
             <div className="row wrap" style={{ gap: "6px 10px" }}>
               <span className="muted small">For {label}. What you tick goes</span>
@@ -215,7 +256,7 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
           {loadingServices ? (
             <span className="muted small">Loading your price list…</span>
           ) : !rows.length ? (
-            <EmptyState inline title="None of your services price from this takeoff">
+            <EmptyState inline title={work === "pave" ? "No extras from your price list for this takeoff" : "None of your services price from this takeoff"}>
               Add the standard paving services on the <Link to="/paving">Paving</Link> page, or give your own a formula in <Link to="/settings?tab=prices">Settings → Price list</Link>.
             </EmptyState>
           ) : (
@@ -235,6 +276,7 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
                       <span className="muted small">
                         {qty === null ? "Needs a value the takeoff doesn't have" : byPrice ? `Price works out to ${formatMoney(qty)}` : `${formatNumber(qty, qty < 100 ? 2 : 0)} ${service.unit} × ${formatMoneyCents(service.unit_price)}`}
                         {where ? ` · ${where}` : ""}
+                        {on && covered.has(service.id) ? " · The calculator prices the asphalt now" : ""}
                       </span>
                     </span>
                     <strong className="num">{qty === null ? "—" : formatMoney(byPrice ? qty : qty * service.unit_price)}</strong>
@@ -244,7 +286,8 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
             </div>
           )}
           <div className="row wrap" style={{ gap: 8 }}>
-            {notYet.length > 1 && <Button icon="plus" loading={add.isPending} disabled={busy} onClick={() => add.mutate(notYet.filter((r) => r.qty !== null).map((r) => r.service))}>Add all {notYet.length}</Button>}
+            {work !== "pave" && !priced && <Link className="btn" to={calculatorLink}><Icon name="calculator" size={16} />Use the calculator</Link>}
+            {notYet.length > 1 &&<Button icon="plus" loading={add.isPending} disabled={busy} onClick={() => add.mutate(notYet.filter((r) => r.qty !== null).map((r) => r.service))}>Add all {notYet.length}</Button>}
             {quote.lines.some((l) => l.formula) && (
               <Button icon="refresh" loading={reprice.isPending} done={repriced} doneLabel="Updated" disabled={busy} onClick={() => reprice.mutate()} title="Work the quantities out again from the takeoff">
                 Update quantities

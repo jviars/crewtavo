@@ -97,6 +97,8 @@ insert into public.property_access (company_id, property_id, gate_code, lockbox_
 insert into public.requests (company_id, client_id, property_id, title, details) values (:'co', :'c1', :'p1', 'Roof leak', 'Over the kitchen') returning id as r1 \gset
 insert into public.quotes (company_id, client_id, title) values (:'co', :'c1', 'New roof') returning id as q1 \gset
 insert into public.quote_line_items (company_id, quote_id, name, quantity, unit_price) values (:'co', :'q1', 'Architectural shingles', 24, 450);
+-- The working behind a price, with its costs and profit (20261110000100_paving_worksheets.sql): the office's, never a sub's.
+insert into public.paving_worksheets (company_id, quote_id, name, data) values (:'co', :'q1', 'Mill and overlay', '{"v": 1}');
 insert into public.jobs (company_id, client_id, property_id, title, instructions) values (:'co', :'c1', :'p1', 'New roof', 'Dog in the yard') returning id as j1 \gset
 insert into public.jobs (company_id, client_id, property_id, title) values (:'co', :'c2', :'p2', 'Gutters') returning id as j2 \gset
 insert into public.job_line_items (company_id, job_id, name, quantity, unit, unit_price, sort) values

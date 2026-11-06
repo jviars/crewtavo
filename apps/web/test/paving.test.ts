@@ -7,7 +7,7 @@ import { contours, guessPolygons, opened } from "../src/features/measure/maskOut
 import { pickMask, pixelValues, SAM_SIZE } from "../src/features/measure/samLocal";
 import { combine, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
 import { feetPerPixel, scaleLength } from "../src/features/measure/takeoffSheet";
-import { currentStep, estimateSums, formulaValue, serviceKind, stageLabel, takeoffVariables, usesDepth, viewedLines, type SumsLine, type TakeoffRow } from "../src/features/paving/data";
+import { currentStep, estimateSums, formulaValue, pavesAsphalt, serviceKind, stageLabel, takeoffVariables, usesDepth, viewedLines, type SumsLine, type TakeoffRow } from "../src/features/paving/data";
 import { lineDestination } from "../src/features/roofing/estimate/rows";
 
 /** A cells × cells grid with the given rectangles filled ([x0, y0, x1, y1], end exclusive). */
@@ -340,5 +340,22 @@ describe("a paving estimate that offers options", () => {
     expect(lineDestination({ id: "s-crack", name: "Crack fill" }, "good", { lines, place: "every" })).toBe("good");
     expect(lineDestination({ id: "s-sealer-edge", name: "Edging" }, "good", { lines, place: "every" })).toBeNull();
     expect(lineDestination({ id: "s-sealer-edge", name: "Edging" }, "good", { lines, place: "only" })).toBe("good");
+  });
+});
+
+describe("What the calculator prices on a takeoff's estimate", () => {
+  it("is the asphalt itself: paving it, its stone base, milling and overlaying it", () => {
+    expect(pavesAsphalt("asphalt_sqyd * depth_in * 110 / 2000")).toBe(true); // Hot-mix asphalt surface
+    expect(pavesAsphalt("asphalt_sqyd * depth_in * 100 / 2000")).toBe(true); // Grade and compact stone base
+    expect(pavesAsphalt("overlay_sqft")).toBe(true); // Mill and overlay
+    expect(pavesAsphalt("area_sqft")).toBe(true);
+  });
+
+  it("leaves the extras to the price list", () => {
+    for (const formula of ["sealcoat_sqft", "stripe_ft", "crack_ft", "patch_sqft", "concrete_sqft", "curb_ft", "wheel_stops", null]) {
+      expect(pavesAsphalt(formula)).toBe(false);
+    }
+    expect(pavesAsphalt("asphalt_sqft * 0.28", "Sealcoat")).toBe(false); // an older sealcoat priced off the asphalt
+    expect(pavesAsphalt("not a formula (")).toBe(false);
   });
 });

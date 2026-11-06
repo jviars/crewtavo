@@ -106,6 +106,20 @@ export function serviceKind(formula: string | null, name = ""): "pave" | "seal" 
   if (names.has("asphalt_sqft") || names.has("asphalt_sqyd") || names.has("area_sqyd") || names.has("area_sqft")) return "pave";
   return "other";
 }
+/**
+ * Whether a service prices the asphalt itself: paving it, its stone base, milling and overlaying it.
+ * On a takeoff's estimate the paving calculator prices those, so they aren't offered beside it and
+ * the same asphalt is never priced in two places; the rest of the price list (sealcoat, striping,
+ * crack seal, patching, concrete) are the extras.
+ */
+export function pavesAsphalt(formula: string | null, name = ""): boolean {
+  if (serviceKind(formula, name) === "pave") return true;
+  try {
+    return Boolean(formula && formulaVariables(formula).has("overlay_sqft"));
+  } catch {
+    return false;
+  }
+}
 export const usesDepth = (formula: string | null) => {
   try {
     return Boolean(formula && formulaVariables(formula).has("depth_in"));

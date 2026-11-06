@@ -80,6 +80,7 @@ import { scheduleText } from "../jobs/repeatText";
 import { DrawingsCard } from "../measure/drawings";
 import { CustomFieldsCard, useCustomFields } from "../customFields/CustomFields";
 import { PlansCard } from "../plans/PlansCard";
+import { WorksheetsCard } from "../paving/WorksheetsCard";
 import { dayText } from "../roofing/flow/model";
 import { QuotePrint, useQuotePrint } from "../roofing/flow/QuotePrint";
 import { SendEstimateDialog } from "../roofing/flow/SendEstimateDialog";
@@ -846,6 +847,8 @@ export function QuotePage() {
               </div>
             </div>
           )}
+          {/* The paving calculator's working behind its lines: costs and profit, the office's only. */}
+          {canSell && !isTemplate && <WorksheetsCard quoteId={q.id} editable={editable} />}
           {canSell && !isTemplate && <MeasurementsCard quoteId={q.id} propertyId={q.property?.id ?? null} lat={q.property?.lat ?? null} lng={q.property?.lng ?? null} editable={editable} onApplied={refresh} />}
           {canSell && !isTemplate && !!history.data?.activity.length && (
             <div className="card">

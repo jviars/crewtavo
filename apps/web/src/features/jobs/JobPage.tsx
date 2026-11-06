@@ -33,6 +33,7 @@ import { MaterialsCard, useJobMaterials } from "./JobMaterials";
 import { PhotosCard } from "../files/PhotosCard";
 import { JobChecklists } from "./FilledChecklists";
 import { PlansCard } from "../plans/PlansCard";
+import { WorksheetsCard } from "../paving/WorksheetsCard";
 import { PropertyEquipment } from "../clients/PropertyEquipment";
 import { InvoiceJobDialog, JobDetailsDialog, PauseJobDialog, type JobRecord } from "./JobDialogs";
 import { JobDiscountNote } from "./JobDiscountNote";
@@ -476,6 +477,8 @@ export function JobPage() {
         </div>
 
         <aside className="narrow stack">
+          {/* How the quote it came from was priced (the paving calculator): the office's only, and fixed once sold. */}
+          {canSell && j.quote && <WorksheetsCard quoteId={j.quote.id} editable={false} />}
           {seesCosts && (
             <div className="card card-pad stack-sm">
               <strong>Job costing</strong>
