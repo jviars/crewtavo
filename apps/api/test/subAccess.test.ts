@@ -265,7 +265,7 @@ const NOT_SIGNED_IN_ROUTES = [
   "GET /api/hub/:token/visits/:id/slots", "POST /api/hub/:token/visits/:id/change",
   "POST /api/hub/:token/request", "POST /api/hub/:token/autopay/setup", "POST /api/hub/:token/autopay/finish", "POST /api/hub/:token/autopay/confirm",
   "POST /api/hub/:token/autopay/off", "POST /api/hub/:token/tip", "POST /api/public/forms/:company/:form/promo", "GET /api/public/forms/:company/:form", "POST /api/public/forms/:company/:form",
-  "POST /api/public/forms/:company/:form/files", "GET /api/public/logo/:company/:file", "GET /api/public/letterhead/:company/:file",
+  "POST /api/public/forms/:company/:form/files", "GET /api/public/logo/:company/:file", "GET /api/public/letterhead/:company/:file", "POST /api/public/documents/:file",
   "GET /api/public/package/:company/:file", "GET /api/public/service/:company/:file", "GET /api/public/unsubscribe/:token", "POST /api/public/unsubscribe/:token",
   "GET /api/public/r/:token", "GET /api/public/refer/:token", "POST /api/public/refer/:token",
   // A campaign email's tracking image and tracked links (routes/public.ts): a random token each.

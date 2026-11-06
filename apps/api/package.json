@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "0.135.0",
     "@crewtavo/core": "*",
     "@hono/node-server": "2.1.5",
+    "@react-pdf/renderer": "4.9.0",
     "@resvg/resvg-wasm": "2.6.2",
     "@sentry/core": "11.4.0",
     "@sentry/node": "11.4.0",
@@ -20,6 +21,7 @@
     "hono": "4.13.13",
     "jpeg-js": "0.4.4",
     "pngjs": "7.0.0",
+    "react": "18.3.1",
     "zod": "4.6.7"
   },
   "devDependencies": {

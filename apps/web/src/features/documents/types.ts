@@ -4,6 +4,7 @@
  * sample. The look comes separately, from the business's estimate template (core documents.ts).
  */
 import type { TemplateSettings } from "@crewtavo/core/documents";
+import type { ContractBlock } from "../../lib/html";
 import type { PaperFragment, PaperPage } from "./paginate";
 import type { PaperWords } from "./paper";
 
@@ -53,6 +54,8 @@ export interface DocumentSection {
   initials: boolean;
   /** Their initials on it (a PNG data URL) and when, once they've initialed it. */
   initialed?: { image: string; date: string | null } | null;
+  /** Its HTML read into paragraphs, list items and table rows (contractBlocks), when it's sent to the server for a PDF. */
+  blocks?: ContractBlock[];
 }
 
 export interface DocumentContract {

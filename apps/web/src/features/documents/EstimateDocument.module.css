@@ -3,6 +3,9 @@
  * and in print. The sizes come from paper.ts (PAPER_VARS on .doc). It's paper in every theme and in
  * print, so its colors are literal: white page, ink text, and the template's color (--doc-color)
  * for the rules, the name and the totals.
+ *
+ * Safari prints the server's PDF instead (apps/api/src/pdf/DocumentPdf.tsx): a change to how the
+ * pages look goes there too.
  */
 .doc {
   --doc-ink: #0f2a35;

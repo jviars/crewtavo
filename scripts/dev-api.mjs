@@ -9,7 +9,7 @@
  * the local Supabase that `npx supabase start` runs, which also applies the migrations.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { context } from "esbuild";
@@ -30,6 +30,8 @@ const vars = Object.fromEntries(
 const outfile = join(root, "dist/dev/server.mjs");
 // The web app comes from Vite in development; an empty folder keeps the server's static files quiet.
 mkdirSync(join(root, "dist/dev/no-web-app"), { recursive: true });
+// The PDF's maker (pdfkit) loads its built-in fonts as "#standard-fonts/..." from the package around the bundle: here, pdfkit's own.
+writeFileSync(join(root, "dist/dev/package.json"), `${JSON.stringify({ private: true, imports: { "#standard-fonts/*": "pdfkit/standard-fonts/*" } }, null, 2)}\n`);
 const build = await context({
   entryPoints: [join(root, "apps/api/src/server.ts")],
   outfile,

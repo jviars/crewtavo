@@ -36,6 +36,7 @@ import {
 } from "@/features/documents/build";
 import { smallInitials } from "@/features/documents/data";
 import { DocumentSheet, PrintableDocument } from "@/features/documents/EstimateDocument";
+import { openPrintablePdf } from "@/features/documents/pdfPrint";
 import { nextFrames, paperSettled } from "@/features/documents/paper";
 import type { DocumentSection } from "@/features/documents/types";
 import { ApiError } from "@/lib/api";
@@ -133,9 +134,19 @@ function usePrintMode(loaded: boolean) {
   }, []);
   const print = useCallback(() => {
     setOn(true);
-    void printWhenReady();
+    // In Safari, as a PDF of the page's document (filling the sheet, no browser header or footer); else the page itself.
+    if (!openPrintablePdf()) void printWhenReady();
   }, []);
-  return { on: asked || loaded, print };
+  // A tab opened to print (?print=1, the office's Print): in Safari it becomes the PDF, and Back comes
+  // to the page without ?print=1, so it doesn't print again.
+  const printHere = useCallback(() => {
+    setOn(true);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("print");
+    window.history.replaceState(window.history.state, "", url);
+    if (!openPrintablePdf("this tab")) void printWhenReady();
+  }, []);
+  return { on: asked || loaded, print, printHere };
 }
 
 /**
@@ -194,7 +205,7 @@ export function HubPage() {
   const printing = params.get("print") === "1";
   const view = useQuery({ queryKey: ["hub", token], queryFn: () => hubFetch<View>(token), retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 2 });
   const [messaging, setMessaging] = useState<{ visit?: PortalVisit } | null>(null);
-  const { on: printable, print } = usePrintMode(Boolean(view.data));
+  const { on: printable, print, printHere } = usePrintMode(Boolean(view.data));
   const printed = useRef(false);
 
   useEffect(() => {
@@ -202,9 +213,9 @@ export function HubPage() {
     // Once: a refresh of the page's data (after paying, say) doesn't print it again.
     if (view.data && printing && !printed.current) {
       printed.current = true;
-      print();
+      printHere();
     }
-  }, [view.data, printing, print]);
+  }, [view.data, printing, printHere]);
 
   const d = view.data;
   // The Hub has no session: its money shows in the business's currency from the page itself.

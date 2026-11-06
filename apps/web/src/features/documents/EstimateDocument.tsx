@@ -13,6 +13,12 @@
  * paginate.ts decides which go on which page; paper.ts has the page's measurements, the same on
  * screen and in print, so the pages on screen are the pages that print. A block too tall for the
  * room left is cut between two of its lines, and each page draws only its part's own words.
+ *
+ * Two copies of the layout: in Safari, printing sends the document to the server instead
+ * (pdfPrint.ts), which draws it again with react-pdf (apps/api/src/pdf/DocumentPdf.tsx), so the
+ * iPhone prints on the whole sheet. A change to what the pages show or how (a new line, a size, a
+ * template option) goes in both: the tests check the words and where key things land, not that
+ * the two look alike.
  */
 import { companySignatureLabel, documentColor, letterheadSrc, ownLetterhead, printsFullSheet, type LetterheadPicture, type TemplateSettings } from "@crewtavo/core/documents";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
@@ -22,6 +28,7 @@ import { contractBlocks, type ContractBlock } from "@/lib/html";
 import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "./build";
 import styles from "./EstimateDocument.module.css";
 import { paginate, type PaperBlock, type PaperLayout } from "./paginate";
+import { openPrintablePdf, printableOnPage } from "./pdfPrint";
 import { cutWords, FULL_SHEET_PAPER_VARS, isWebKit, lineCuts, nextFrames, PAGE_WIDTH, PAPER_VARS, paperSettled, paperSpace, stackHeight, WEBKIT_PAGE_MARGIN, WEBKIT_SHEET_RATIO, type PaperWords } from "./paper";
 import type { DocumentCompany, DocumentData, DocumentLayout, DocumentLine, DocumentOption, DocumentSection, DocumentSignature, EstimateDocumentProps, PaperPart } from "./types";
 
@@ -1102,6 +1109,8 @@ export type PrintableDocumentProps = Pick<EstimateDocumentProps, "template" | "c
  */
 export function PrintableDocument({ template, company, data, className }: PrintableDocumentProps) {
   const paper = usePaper(template, company, data);
+  // Up to be printed as a PDF (pdfPrint.ts) while it's here.
+  useEffect(() => printableOnPage({ template, company, data }), [template, company, data]);
   const [webkit] = useState(isWebKit);
   const fullSheet = printsFullSheet(ownLetterhead(template));
   if (typeof document === "undefined") return null;
@@ -1131,11 +1140,13 @@ export function PrintableDocument({ template, company, data, className }: Printa
 }
 
 /**
- * Prints the PrintableDocument on this screen once its lettering and pictures (the logo and the
- * signatures) have loaded and its pages are laid out with them, so the copy is never missing any.
- * Gives up waiting after a few seconds.
+ * Prints the PrintableDocument on this screen: as a PDF in a new tab (pdfPrint.ts), or, when that
+ * can't open, the page itself once its lettering and pictures (the logo and the signatures) have
+ * loaded and its pages are laid out with them, so the copy is never missing any. Gives up waiting
+ * after a few seconds.
  */
 export async function printDocument(waitMs = 4000): Promise<void> {
+  if (openPrintablePdf()) return;
   const images = Array.from(document.querySelectorAll<HTMLImageElement>("[data-printable-document] img, [data-paper-measure] img"));
   const loaded = images.map((img) =>
     img.complete

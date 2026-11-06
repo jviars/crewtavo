@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from "react";
 import { PrintableDocument, printDocument } from "../../documents/EstimateDocument";
+import { openPrintablePdf } from "../../documents/pdfPrint";
 import type { EstimateDocumentProps } from "../../documents/types";
 
 /** Asks for a print: each call prints again. */
@@ -17,6 +18,8 @@ export function useQuotePrint() {
 export function QuotePrint({ request, template, company, data }: { request: number } & Pick<EstimateDocumentProps, "template" | "company" | "data">) {
   useEffect(() => {
     if (!request) return;
+    // In Safari, the PDF now, while the tap still counts (React runs this right after a tap's render).
+    if (openPrintablePdf()) return;
     // Once the document is on the page; printDocument waits for its lettering, logo and signatures.
     const frame = requestAnimationFrame(() => void printDocument());
     return () => cancelAnimationFrame(frame);

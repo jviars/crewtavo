@@ -18,6 +18,7 @@ import { automations } from "./routes/automations";
 import { autopay } from "./routes/autopay";
 import { calendar } from "./routes/calendar";
 import { chat } from "./routes/chat";
+import { documentPdfRoutes } from "./routes/documentPdf";
 import { drive } from "./routes/drive";
 import { email } from "./routes/email";
 import { googleReviews } from "./routes/googleReviews";
@@ -61,11 +62,13 @@ const tooLarge = (c: Context) => c.json({ error: "That's too large to send." }, 
 const smallBody = bodyLimit({ maxSize: 2 * 1024 * 1024, onError: tooLarge });
 const calendarFile = bodyLimit({ maxSize: 12 * 1024 * 1024, onError: tooLarge });
 const CALENDAR_FILE = /^\/api\/calendars\/(file|[0-9a-f-]{36}\/file)$/i;
+// A document to make into a PDF carries its signatures as drawn (services/documentPdf.ts).
+const DOCUMENT_PDF = /^\/api\/public\/documents\/[^/]+$/;
 const formPost = bodyLimit({ maxSize: 32 * 1024 * 1024, onError: (c) => formTooLarge(c) });
 const FORM_ADDRESS = /^\/f\/[a-z0-9]{8,32}$/;
 app.use((c, next) => {
   if (c.req.method !== "POST") return smallBody(c, next);
-  if (CALENDAR_FILE.test(c.req.path)) return calendarFile(c, next);
+  if (CALENDAR_FILE.test(c.req.path) || DOCUMENT_PDF.test(c.req.path)) return calendarFile(c, next);
   return FORM_ADDRESS.test(c.req.path) ? formPost(c, next) : smallBody(c, next);
 });
 // MCP clients may run in a browser (for example the MCP Inspector).
@@ -98,6 +101,7 @@ app.route("/api", signing);
 app.route("/api", subs);
 app.route("/api", subOffers);
 app.route("/api", publicRoutes);
+app.route("/api", documentPdfRoutes);
 app.route("/api", calendar);
 app.route("/api", chat);
 app.route("/api", email);
