@@ -22,7 +22,7 @@ import { contractBlocks, type ContractBlock } from "@/lib/html";
 import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "./build";
 import styles from "./EstimateDocument.module.css";
 import { paginate, type PaperBlock, type PaperLayout } from "./paginate";
-import { cutWords, FULL_SHEET_PAPER_VARS, isWebKit, lineCuts, nextFrames, PAGE_WIDTH, PAPER_VARS, paperSettled, paperSpace, stackHeight, WEBKIT_FULL_SHEET_SCALE, WEBKIT_PAGE_MARGIN, WEBKIT_PRINT_SCALE, type PaperWords } from "./paper";
+import { cutWords, FULL_SHEET_PAPER_VARS, isWebKit, lineCuts, nextFrames, PAGE_WIDTH, PAPER_VARS, paperSettled, paperSpace, stackHeight, WEBKIT_PAGE_MARGIN, WEBKIT_SHEET_RATIO, type PaperWords } from "./paper";
 import type { DocumentCompany, DocumentData, DocumentLayout, DocumentLine, DocumentOption, DocumentSection, DocumentSignature, EstimateDocumentProps, PaperPart } from "./types";
 
 export { PAGE_HEIGHT, PAGE_WIDTH } from "./paper";
@@ -1093,9 +1093,9 @@ export type PrintableDocumentProps = Pick<EstimateDocumentProps, "template" | "c
  * The document, hidden on screen, and the only thing on the page when this screen prints (the
  * browser's Print, or Save as PDF): the same pages as on screen, each on its own sheet of letter
  * paper, inside 0.4 in margins, or filling the sheet (no @page margin) on the business's own letterhead
- * cut full width. Safari (so the iPad) prints inside its own margins as well as the @page one, so
- * there the @page margin is thin and each page is printed a little smaller, centered: the same
- * pages, the same breaks (WEBKIT_PRINT_SCALE, or WEBKIT_FULL_SHEET_SCALE for the whole sheet).
+ * cut full width. Safari (so the iPad and iPhone) prints inside its own margins as well as the @page
+ * one, so there the @page margin is thin and the pages are in a column it shrinks to fit the room it
+ * has, each centered: the same pages, the same breaks, as big as they fit (WEBKIT_SHEET_RATIO).
  * While it's mounted, printing anything on the screen prints the document instead.
  *
  * Marked `data-paginated` once its pages are final (usePaper's settled); printDocument waits for it.
@@ -1113,7 +1113,7 @@ export function PrintableDocument({ template, company, data, className }: Printa
           data-printable-document=""
           data-paginated={paper.settled ? "" : undefined}
           data-webkit={webkit ? "" : undefined}
-          style={webkit ? ({ "--print-scale": fullSheet ? WEBKIT_FULL_SHEET_SCALE : WEBKIT_PRINT_SCALE } as CSSProperties) : undefined}
+          style={webkit ? ({ "--sheet-ratio": WEBKIT_SHEET_RATIO } as CSSProperties) : undefined}
         >
           {/* Only while it's mounted: letter paper, and nothing else on the printed page. */}
           <style>{`@page { size: letter; margin: ${webkit ? WEBKIT_PAGE_MARGIN : fullSheet ? "0" : "0.4in"}; }

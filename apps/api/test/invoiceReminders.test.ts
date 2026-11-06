@@ -1,6 +1,6 @@
 /**
  * Payment reminders (remindInvoices in services/sales.ts): how the email words the due date, by the
- * company's own calendar. The database is a stand-in that answers each table's query, and the mailer
+ * company's own calendar, and whether it says to pay online. The database is a stand-in that answers each table's query, and the mailer
  * keeps what it was given.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,11 @@ vi.mock("../src/lib/notify", async (original) => ({
     return { sent: true, id: `email-${sent.length}` };
   },
 }));
+const stripe = vi.hoisted(() => ({ key: null as string | null }));
+vi.mock("../src/integrations/stripe", async (original) => ({
+  ...(await original<typeof import("../src/integrations/stripe")>()),
+  stripeAccess: async () => (stripe.key ? { key: stripe.key, own: true } : null),
+}));
 vi.mock("../src/lib/links", async (original) => ({
   ...(await original<typeof import("../src/lib/links")>()),
   clientLink: async (_env: Env, baseUrl: string, link: { id: string }) => `${baseUrl}/u/${link.id}`,
@@ -23,6 +28,7 @@ vi.mock("../src/lib/links", async (original) => ({
 }));
 
 const CO = "00000000-0000-4000-8000-0000000000a1";
+const env = { SUPABASE_URL: "http://db.test", SUPABASE_SECRET_KEY: "test" } as Env;
 const company = { name: "Ridge Paving", currency: "USD", timezone: "America/New_York", email: null, phone: null, address: {}, settings: {} };
 const client = { display_name: "Pat Lee", email: "pat@example.com", phone: null };
 const invoice = (id: string, number: number, due_on: string) => ({ id, number, status: "sent", total: 400, balance_due: 400, due_on, client_id: "client-1", client });
@@ -42,6 +48,7 @@ function stubDb(tables: Record<string, unknown>): Db {
 
 afterEach(() => {
   sent.length = 0;
+  stripe.key = null;
   vi.useRealTimers();
 });
 
@@ -56,12 +63,26 @@ describe("a payment reminder", () => {
       stripe_invoices: [],
     });
 
-    const result = await remindInvoices({ db, env: {} as Env, companyId: CO, baseUrl: "https://ops.example.com" }, ["inv-early", "inv-today", "inv-late"]);
+    const result = await remindInvoices({ db, env, companyId: CO, baseUrl: "https://ops.example.com" }, ["inv-early", "inv-today", "inv-late"]);
 
     expect(result).toEqual({ sent: 3, skipped: [] });
     const [early, today, late] = sent.map((m) => m.text);
     expect(early).toContain("$400.00 is still owed on invoice #4, which is due December 15.");
     expect(today).toContain("on invoice #5, which is due November 30.");
     expect(late).toContain("on invoice #6, which was due November 29.");
+  });
+
+  it("says to pay online only when the business takes payments online", async () => {
+    const db = stubDb({ companies: company, invoices: [invoice("inv-1", 7, "2026-12-15")], stripe_invoices: [] });
+    const scope = { db, env, companyId: CO, baseUrl: "https://ops.example.com" };
+
+    await remindInvoices(scope, ["inv-1"]);
+    stripe.key = "rk_live_own";
+    await remindInvoices(scope, ["inv-1"]);
+
+    const [noStripe, withStripe] = sent.map((m) => m.text);
+    expect(noStripe).toContain("You can view it online:");
+    expect(noStripe).not.toContain("pay it online");
+    expect(withStripe).toContain("You can view and pay it online:");
   });
 });

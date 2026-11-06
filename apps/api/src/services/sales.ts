@@ -10,7 +10,7 @@ import { hidesExactPrice, inRangeMode, optionsIntroText, rangeIntroText } from "
 import { optionBaseTotal, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { z } from "zod";
 import type { Env } from "../env";
-import { syncStripeInvoice } from "../integrations/stripe";
+import { stripeAccess, syncStripeInvoice } from "../integrations/stripe";
 import { firstName, isEmail, renderEmail } from "../lib/email";
 import { asJson, dbError, HttpError, must } from "../lib/http";
 import { clientLinks, sentToClient } from "../lib/links";
@@ -144,6 +144,11 @@ export async function keepDepositInCap(db: Db, companyId: string, quoteId: strin
   return lowered;
 }
 
+/** Where an invoice's email points to its link: "pay it online" only when the business takes payments online (hubPayment). */
+async function invoiceLinkLine(s: SalesScope) {
+  return (await stripeAccess(s.env, adminClient(s.env), s.companyId)) ? "You can view and pay it online:" : "You can view it online:";
+}
+
 /**
  * Email or text the client their link to a quote or invoice (or just make the link), and log it on
  * their timeline. Only an email or text to the client's own email or phone on file carries their
@@ -164,7 +169,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
   const intro =
     body.message?.trim() ||
     defaults.intro ||
-    (kind === "quote" ? `Thanks for the opportunity. Here's your quote (${amount}). You can review the details, choose any options and approve it online:` : `Here's your invoice for ${amount}. You can view and pay it online:`);
+    (kind === "quote" ? `Thanks for the opportunity. Here's your quote (${amount}). You can review the details, choose any options and approve it online:` : `Here's your invoice for ${amount}. ${await invoiceLinkLine(s)}`);
   const message = (link: string) => `${greeting}\n\n${intro}\n\n${link}\n\nThanks,\n${company.name}`;
   // The client's own link only to their own email or phone on file; any other address gets the office's copy.
   const linkFor = (channel: "email" | "sms", to: string) => (sentToClient(channel, to, record.client) ? links.own : links.office);
@@ -422,6 +427,7 @@ export async function remindInvoices(s: SalesScope, invoiceIds: readonly string[
       .in("id", [...invoiceIds])
       .in("status", ["sent", "partially_paid", "overdue"]),
   );
+  const linkLine = await invoiceLinkLine(s);
   let sent = 0;
   const skipped: Array<{ number: number | null; reason: string }> = [];
   // Don't ask again while a bank payment is on its way.
@@ -453,7 +459,7 @@ export async function remindInvoices(s: SalesScope, invoiceIds: readonly string[
       const result = await deliver(s, "invoice", invoice, {
         channel: "email",
         subject: `Reminder: invoice #${invoice.number} from ${company.name}`,
-        message: `A friendly reminder that ${amount} is still owed on invoice #${invoice.number}${due ? `, which ${due}` : ""}. You can view and pay it online:`,
+        message: `A friendly reminder that ${amount} is still owed on invoice #${invoice.number}${due ? `, which ${due}` : ""}. ${linkLine}`,
       });
       if (result.sent) sent++;
       else skipped.push({ number: invoice.number, reason: result.reason ?? "Not sent" });

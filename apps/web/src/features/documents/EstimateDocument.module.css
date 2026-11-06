@@ -243,10 +243,10 @@
   .printRoot .page + .page { break-before: page; }
   .printRoot .box { height: calc(var(--box-h) - 2px); }
   /*
-   * WebKit prints inside its own margins too (and a thin @page one): each page smaller, in a slot its
-   * size, centered. The page inside is one unbreakable box (inline), so WebKit never pushes a line of
-   * it down to where a sheet would end if the page weren't scaled.
+   * WebKit prints inside its own margins too, and shrinks what it prints to fit their width: the
+   * pages, full size, in a column narrower than a page is tall (--sheet-ratio), so each one fits
+   * the room's height as well. Centered in it.
    */
-  .printRoot[data-webkit] .page { width: calc(var(--box-w) * var(--print-scale)); height: calc((var(--box-h) - 2px) * var(--print-scale)); margin-inline: auto; }
-  .printRoot[data-webkit] .box { display: inline-flex; vertical-align: top; transform: scale(var(--print-scale)); transform-origin: top left; }
+  .printRoot[data-webkit] .doc { width: max(var(--box-w), calc((var(--box-h) - 2px) / var(--sheet-ratio))); }
+  .printRoot[data-webkit] .page { margin-inline: auto; }
 }

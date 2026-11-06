@@ -32,12 +32,16 @@ export const PAGE_SLACK = 8;
 /** Between pages on screen. */
 export const PAGE_GAP = 24;
 /**
- * Safari (on a Mac, and every browser on an iPad or iPhone) prints inside its own margins, with a
- * header and footer, as well as the @page margin. So there each page is printed this much smaller
- * (its content box 5.8 × 7.65 in), inside a thin @page margin (WEBKIT_PAGE_MARGIN): it fits the
- * room an iPad leaves on a letter sheet, with some to spare.
+ * WebKit (Safari on a Mac, and every browser on an iPad or iPhone) shrinks what it prints to fit the
+ * width of the room it has on the sheet, by itself. An iPad or iPhone leaves room inside the
+ * printer's margins and above Safari's own footer, and a page can't be told how tall that is. So
+ * there the pages print, full size, in a column this many times narrower than a page is tall:
+ * WebKit fits the column to the room's width, and each page then has the height it needs, as long
+ * as the room is at least this tall for its width. On an iPhone (iOS 26) with no printer chosen the
+ * room is 530 × 653 pt (1.23); a printer with thin margins leaves about 1.2, one with a deep bottom
+ * margin (½ in) about 1.16. A page taller than the room would spill onto a sheet of its own.
  */
-export const WEBKIT_PRINT_SCALE = 0.75;
+export const WEBKIT_SHEET_RATIO = 1.15;
 /**
  * The @page margin when WebKit prints: thin, since its own margins are on top of it, but not none,
  * so a page never touches the edge of a sheet the printer leaves no margin on.
@@ -70,13 +74,6 @@ export const FULL_SHEET_PAPER_VARS = {
   // Crewtavo's own header and footer, and the running header, keep the margin they print with on a page that has one.
   "--sheet-margin": `${PAGE_MARGIN}px`,
 } as CSSProperties;
-
-/**
- * WebKit's print scale for a document on the whole sheet: the full page printed the width a
- * content box is at WEBKIT_PRINT_SCALE, so it fits the room an iPad leaves as surely. Not quite to
- * the edges there (WebKit keeps its own margins), but the same picture, in the same place.
- */
-export const WEBKIT_FULL_SHEET_SCALE = (WEBKIT_PRINT_SCALE * CONTENT_WIDTH) / PAGE_WIDTH;
 
 /** The room for the body on each page, from the measured letterhead, running header and footer. */
 export function paperSpace(parts: { letterhead: number; running: number; footer: number }, fullSheet = false): PaperSpace {

@@ -51,7 +51,7 @@ import {
 import { invoiceFill } from "../src/features/documents/data";
 import { documentBlocks, EstimateDocument } from "../src/features/documents/EstimateDocument";
 import styles from "../src/features/documents/EstimateDocument.module.css";
-import { BODY_INSET, CONTENT_HEIGHT, CONTENT_WIDTH, FULL_SHEET_PAPER_VARS, PAGE_HEIGHT, PAGE_MARGIN, PAGE_WIDTH, paperSpace, WEBKIT_FULL_SHEET_SCALE, WEBKIT_PRINT_SCALE } from "../src/features/documents/paper";
+import { BODY_INSET, CONTENT_HEIGHT, CONTENT_WIDTH, FULL_SHEET_PAPER_VARS, PAGE_HEIGHT, PAGE_MARGIN, PAGE_WIDTH, paperSpace, WEBKIT_SHEET_RATIO } from "../src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLayout, DocumentOption, DocumentSection, PaperPart } from "../src/features/documents/types";
 import { logoUrl } from "../src/lib/files";
 import { contractBlocks, contractTable, sanitizeContractHtml, type ContractBlock } from "../src/lib/html";
@@ -934,7 +934,7 @@ describe("the business's own letterhead", () => {
     expect(templateSettings({ ...own, letterhead_header: { ...top, full_sheet: "yes" } as never }).letterhead_header).toEqual(top);
   });
 
-  it("keeps the body's words where they are on a full sheet, and fits it on an iPad's printed page", () => {
+  it("keeps the body's words where they are on a full sheet, and fits it on an iPhone's or iPad's printed page", () => {
     const inset = Number.parseFloat(String(FULL_SHEET_PAPER_VARS["--doc-pad" as keyof typeof FULL_SHEET_PAPER_VARS]));
     expect(inset).toBeCloseTo(PAGE_MARGIN + BODY_INSET);
     expect(PAGE_WIDTH - 2 * inset).toBeCloseTo(CONTENT_WIDTH - 2 * BODY_INSET);
@@ -942,9 +942,9 @@ describe("the business's own letterhead", () => {
     expect(paperSpace(parts, true).first).toBe(PAGE_HEIGHT - 300);
     expect(paperSpace(parts, true).rest).toBe(PAGE_HEIGHT - 190);
     expect(paperSpace(parts).first).toBe(CONTENT_HEIGHT - 300);
-    // Safari prints the whole page as wide as it prints a content box, and no taller.
-    expect(PAGE_WIDTH * WEBKIT_FULL_SHEET_SCALE).toBeCloseTo(CONTENT_WIDTH * WEBKIT_PRINT_SCALE);
-    expect(PAGE_HEIGHT * WEBKIT_FULL_SHEET_SCALE).toBeLessThanOrEqual(CONTENT_HEIGHT * WEBKIT_PRINT_SCALE);
+    // Safari's column is wider than either page, so it shrinks the column to the paper (rather than cutting a page off).
+    expect((PAGE_HEIGHT - 2) / WEBKIT_SHEET_RATIO).toBeGreaterThan(PAGE_WIDTH);
+    expect((CONTENT_HEIGHT - 2) / WEBKIT_SHEET_RATIO).toBeGreaterThan(CONTENT_WIDTH);
   });
 
   it("prints its pictures in place of Crewtavo's letterhead and the footer's words, on estimates and invoices", () => {
