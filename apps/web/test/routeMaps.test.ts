@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dayRoute } from "../src/features/schedule/dayRoute";
-import { routeLegs, shopPlace, type Place } from "../src/lib/maps";
+import { mapsUrl, routeLegs, shopPlace, visitPlace, type Place } from "../src/lib/maps";
 import type { Company } from "../src/lib/session";
 
 const shop: Place = { line1: "1 Shop Rd", city: "Dayton", region: "OH", postal_code: "45402", lat: 39.76, lng: -84.19 };
@@ -50,6 +50,18 @@ describe("a day's route in Google Maps", () => {
   });
 });
 
+describe("where a visit is", () => {
+  it("is its client's property, or else the address typed on it, opened by that address", () => {
+    expect(visitPlace({ property: stop(1), address: "ignored" })).toEqual(stop(1));
+    expect(visitPlace({ property: null, address: "1200 Industrial Pkwy, Dayton, OH" })).toEqual({ text: "1200 Industrial Pkwy, Dayton, OH" });
+    expect(visitPlace({ property: null, address: " " })).toBeNull();
+    expect(visitPlace({ property: null })).toBeNull();
+    const place = { text: "1200 Industrial Pkwy, Dayton, OH" };
+    expect(query(mapsUrl("google", place)).get("destination")).toBe("1200 Industrial Pkwy, Dayton, OH");
+    expect(query(mapsUrl("apple", place)).get("daddr")).toBe("1200 Industrial Pkwy, Dayton, OH");
+  });
+});
+
 describe("a day's route in Apple Maps", () => {
   it("uses Apple's directions link with a waypoint for each stop between", () => {
     const [leg] = routeLegs("apple", { start: shop, stops: stops(3), end: null });
@@ -87,6 +99,14 @@ describe("a crew's day as a route", () => {
     const route = dayRoute([visit("completed", 1), visit("in_progress", 2), visit("en_route", 3), visit("scheduled", 4)], company());
     expect(route.start).toBeNull();
     expect(route.stops).toEqual([stop(3), stop(4)]);
+  });
+
+  it("drives to a task's own address too, in its place in the day", () => {
+    const task = { status: "scheduled", property: null, address: "1200 Industrial Pkwy, Dayton, OH" };
+    const route = dayRoute([visit("scheduled", 1), task, { ...task, address: "  " }, visit("scheduled", 2)], company());
+    expect(route.stops).toEqual([stop(1), { text: "1200 Industrial Pkwy, Dayton, OH" }, stop(2)]);
+    const q = query(routeLegs("google", route)[0]!.url);
+    expect(q.get("waypoints")).toBe("1 Oak St, Dayton, OH|1200 Industrial Pkwy, Dayton, OH|2 Oak St, Dayton, OH");
   });
 
   it("has no shop when Settings → Company has no address", () => {

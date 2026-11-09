@@ -29,6 +29,7 @@ import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { errorMessage, isAuthError } from "@/lib/errors";
 import { signedUrls, storedType, uploadFile } from "@/lib/files";
 import { addressLine, formatDateTime, timeAgo } from "@/lib/format";
+import { visitPlace } from "@/lib/maps";
 import { useListAnimation } from "@/lib/motion";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
@@ -88,7 +89,7 @@ export function FieldVisitPage() {
       const row = unwrapOne(
         await supabase()
           .from("visits")
-          .select("id, title, kind, status, starts_at, ends_at, scheduled_on, notes, hold_reason, completed_at, series_day, series_total, equipment:visit_equipment(equipment:equipment(id, name, kind)), job:jobs(id, number, title, instructions, property_id, custom_fields, kind, status, pricing, client:clients(display_name, phone, social_photos_opt_out)), request:requests(id, title, details, client:clients(display_name, phone, social_photos_opt_out)), property:properties(id, line1, city, region, postal_code, lat, lng, notes, custom_fields)")
+          .select("id, title, kind, status, starts_at, ends_at, scheduled_on, notes, address, hold_reason, completed_at, series_day, series_total, equipment:visit_equipment(equipment:equipment(id, name, kind)), job:jobs(id, number, title, instructions, property_id, custom_fields, kind, status, pricing, client:clients(display_name, phone, social_photos_opt_out)), request:requests(id, title, details, client:clients(display_name, phone, social_photos_opt_out)), property:properties(id, line1, city, region, postal_code, lat, lng, notes, custom_fields)")
           .eq("id", id)
           .maybeSingle(),
         "This visit",
@@ -187,6 +188,7 @@ export function FieldVisitPage() {
     );
   }
 
+  const place = visitPlace(v);
   const client = visitContact((v.job?.client ?? v.request?.client) as { display_name: string; phone: string | null } | null, contact.data);
   const codes = access.data;
   const minutes = (myTime.data ?? []).reduce((s, t) => s + ((t.ended_at ? Date.parse(t.ended_at) : Date.now()) - Date.parse(t.started_at)), 0);
@@ -252,12 +254,12 @@ export function FieldVisitPage() {
         {contactLinks(client).map((link) => (
           <a key={link.label} className="btn big-action" href={link.href}><Icon name={link.label === "Call" ? "phone" : "messages"} size={20} />{link.label}</a>
         ))}
-        {v.property && <MapsLink className="btn big-action" place={v.property}><Icon name="navigation" size={20} />Directions</MapsLink>}
+        {place && <MapsLink className="btn big-action" place={place}><Icon name="navigation" size={20} />Directions</MapsLink>}
       </div>
 
       <section className="card card-pad stack-sm">
         <strong style={{ fontSize: 16 }}>{client.name ?? "Site"}</strong>
-        {v.property && <MapsLink className="address-link" place={v.property}>{addressLine(v.property)}</MapsLink>}
+        {place && <MapsLink className="address-link" place={place}>{v.property ? addressLine(v.property) : v.address}</MapsLink>}
         {access.isPending && v.property ? <Skeleton width="40%" /> : (
           <>
             {codes?.gate_code && <span style={{ fontSize: 16 }}><Icon name="lock" size={16} /> Gate code <strong style={{ fontSize: 20 }}>{codes.gate_code}</strong></span>}

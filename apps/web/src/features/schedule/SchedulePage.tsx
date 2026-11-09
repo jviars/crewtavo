@@ -67,6 +67,8 @@ interface Visit {
   notes: string | null;
   job: { id: string; number: number; title: string; client: { id: string; display_name: string } | null } | null;
   property: { id: string; line1: string; line2?: string | null; city: string | null; region?: string | null; postal_code?: string | null; lat: number | null; lng: number | null } | null;
+  /** Where an entry with no client property is (a task). */
+  address?: string | null;
   assignees: Array<{ user_id: string }>;
   series_day: number | null;
   series_total: number | null;
@@ -435,7 +437,7 @@ export function SchedulePage() {
    * (fitBlock). The time keeps a row of its own, so the people never squeeze it.
    */
   const content = (v: Visit, height?: number) => {
-    const who = v.job?.client?.display_name ?? v.property?.line1;
+    const who = v.job?.client?.display_name ?? v.property?.line1 ?? v.address;
     const done = v.status === "completed" ? "✓ " : "";
     const day = v.series_total && v.series_total > 1 ? ` · day ${v.series_day}/${v.series_total}` : "";
     const stop = v.route_order && v.status === "scheduled" ? `${v.route_order}. ` : "";
@@ -703,7 +705,7 @@ export function SchedulePage() {
                           <span className="schedule-list-time">{v.starts_at ? <TimeRange start={timeOf(v.starts_at)} end={v.ends_at && timeOf(v.ends_at)} /> : "Anytime"}</span>
                           <span className="grow" style={{ minWidth: 0 }}>
                             <strong>{v.title}</strong>
-                            {(v.job?.client || v.property) && <span className="muted small" style={{ display: "block" }}>{[v.job?.client?.display_name, addressLine(v.property)].filter(Boolean).join(" · ")}</span>}
+                            {(v.job?.client || v.property || v.address) && <span className="muted small" style={{ display: "block" }}>{[v.job?.client?.display_name, addressLine(v.property) || v.address].filter(Boolean).join(" · ")}</span>}
                             <span className="muted small" style={{ display: "block" }}>{[namesOn(v) || "Nobody assigned", crewOf(v.crew_id)?.name].filter(Boolean).join(" · ")}</span>
                           </span>
                           <EntityStatus kind="visit" status={v.status} />
@@ -814,7 +816,7 @@ export function SchedulePage() {
                     onClick={() => !wasDragging() && show(v)}
                   >
                     <span className="tg-line"><strong className="grow">{v.title}</strong>{faces(v)}</span>
-                    {(v.job?.client || v.property) && <span className="tg-m">{v.job?.client?.display_name ?? v.property?.line1}</span>}
+                    {(v.job?.client || v.property || v.address) && <span className="tg-m">{v.job?.client?.display_name ?? v.property?.line1 ?? v.address}</span>}
                   </button>
                 ))}
               </div>

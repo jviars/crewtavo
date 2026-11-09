@@ -36,6 +36,9 @@ export function placeText(p: Place): string {
 
 const hasPoint = (p: Place) => p.lat != null && p.lng != null;
 
+/** Where a visit is: its client's property, or else the address typed on an entry with none (a task). */
+export const visitPlace = (v: { property?: Place | null; address?: string | null }): Place | null => v.property ?? (v.address?.trim() ? { text: v.address } : null);
+
 export function device(): "apple" | "android" | "other" {
   if (typeof navigator === "undefined") return "other";
   const ua = navigator.userAgent;
