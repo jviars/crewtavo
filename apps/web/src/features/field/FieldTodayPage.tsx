@@ -15,6 +15,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, todayIn } from "@/lib/format";
+import { visitPlace } from "@/lib/maps";
 import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
 import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
 import { dayRoute } from "../schedule/dayRoute";
@@ -42,6 +43,8 @@ interface Visit {
   crew_id: string | null;
   job: { id: string; number: number; title: string; client: { display_name: string } | null } | null;
   property: { id: string; line1: string; line2?: string | null; city: string | null; region?: string | null; postal_code?: string | null; lat: number | null; lng: number | null } | null;
+  /** Where an entry with no client property is (a task). */
+  address?: string | null;
   assignees: Array<{ user_id: string }>;
   series_day: number | null;
   series_total: number | null;
@@ -165,6 +168,7 @@ export function FieldTodayPage() {
       <div className="stack">
         {open.map((v, i) => {
           const next = NEXT[v.status];
+          const place = visitPlace(v);
           // Which of the card's steps is on its way: finding the phone's place comes first for one that clocks.
           const going = statusTap.locating?.id === v.id ? statusTap.locating.status : setStatus.isPending && !setStatus.isPaused && setStatus.variables?.visitId === v.id ? setStatus.variables.status : null;
           return (
@@ -179,16 +183,16 @@ export function FieldTodayPage() {
                 </div>
                 <Link to={`/field/visits/${v.id}`} className="field-card-title">
                   <strong>{v.title}</strong>
-                  <span className="muted">{[clientName(v), v.property?.line1].filter(Boolean).join(" · ")}</span>
+                  <span className="muted">{[clientName(v), v.property?.line1 ?? v.address].filter(Boolean).join(" · ")}</span>
                 </Link>
                 {v.hold_reason && <div className="small" style={{ color: "var(--warning)", fontWeight: 600 }}><Icon name="cloud" size={14} /> Weather: {v.hold_reason}</div>}
               </div>
               {/* The card's next step last and full width, where the thumb is (beside the rest on a wide screen). */}
-              {(v.property || next) && (
+              {(place || next) && (
                 <div className="field-card-actions">
-                  {(v.property || v.status === "scheduled") && (
+                  {(place || v.status === "scheduled") && (
                     <div className="field-card-more">
-                      {v.property && <MapsLink className="btn big-action" place={v.property}><Icon name="navigation" size={20} />Directions</MapsLink>}
+                      {place && <MapsLink className="btn big-action" place={place}><Icon name="navigation" size={20} />Directions</MapsLink>}
                       {v.status === "scheduled" && <Button icon="navigation" className="big-action" loading={going === "en_route"} onClick={() => changeStatus(v, "en_route")}>On my way</Button>}
                     </div>
                   )}
@@ -230,7 +234,7 @@ export function FieldTodayPage() {
             {[...data.data.tomorrow].sort(order).map((v) => (
               <Link key={v.id} to={`/field/visits/${v.id}`} className="card-row">
                 <span className="tabular strong small" style={{ width: 64 }}>{v.starts_at ? time(v.starts_at) : "Anytime"}</span>
-                <span className="grow"><strong>{v.title}</strong><span className="muted small" style={{ display: "block" }}>{[clientName(v), v.property?.line1].filter(Boolean).join(" · ")}</span></span>
+                <span className="grow"><strong>{v.title}</strong><span className="muted small" style={{ display: "block" }}>{[clientName(v), v.property?.line1 ?? v.address].filter(Boolean).join(" · ")}</span></span>
                 <Icon name="chevronRight" size={16} />
               </Link>
             ))}

@@ -29,7 +29,7 @@ export async function companyZone(s: Scope): Promise<{ tz: string; settings: Rec
 }
 
 export const VISIT_FIELDS =
-  "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, hold_reason, crew_id, notes, series_id, series_day, series_total, job:jobs(id, number, title, client:clients(id, display_name)), property:properties(id, line1, line2, city, region, postal_code, lat, lng), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment_id)";
+  "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, hold_reason, crew_id, notes, address, series_id, series_day, series_total, job:jobs(id, number, title, client:clients(id, display_name)), property:properties(id, line1, line2, city, region, postal_code, lat, lng), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment_id)";
 
 /** Whether a date is one of the days in `off` (daysOff()). */
 const isOff = (off: readonly number[], date: string) => off.includes(weekday(date));
@@ -59,6 +59,8 @@ export const newVisitInput = z.object({
   job_id: uuid.nullable().optional(),
   request_id: uuid.nullable().optional(),
   property_id: uuid.nullable().optional(),
+  /** Where it is when there's no client property (a task at the supply yard). */
+  address: z.string().trim().max(300).nullable().optional(),
   crew_id: uuid.nullable().optional(),
   status: z.enum(STATUSES).default("scheduled"),
   notes: z.string().max(5000).nullable().optional(),
@@ -107,6 +109,7 @@ export async function createVisits(s: Scope, body: z.infer<typeof newVisitInput>
       job_id: body.job_id ?? null,
       request_id: body.request_id ?? null,
       property_id: body.property_id ?? null,
+      address: body.address || null,
       crew_id: body.crew_id ?? null,
       status: body.status,
       notes: body.notes ?? null,
@@ -142,6 +145,7 @@ export const visitChangeInput = z.object({
   crew_id: uuid.nullable().optional(),
   status: z.enum(STATUSES).optional(),
   notes: z.string().max(5000).nullable().optional(),
+  address: z.string().trim().max(300).nullable().optional(),
   /** Keep this start time when the route is organized. */
   time_fixed: z.boolean().optional(),
   assignee_ids: z.array(uuid).max(20).optional(),

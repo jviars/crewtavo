@@ -14,6 +14,7 @@ import { ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addressLine, formatTime } from "@/lib/format";
+import { visitPlace } from "@/lib/maps";
 import { hasRole, useSession } from "@/lib/session";
 import { usePendingChanges } from "./changeRequests";
 import { lengthLabel } from "./VisitDialog";
@@ -31,7 +32,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
         await supabase()
           .from("visits")
           .select(
-            "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, notes, hold_reason, series_day, series_total, crew:crews(name, color), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment:equipment(name)), job:jobs(id, number, title, instructions, client:clients(id, display_name, phone, email)), request:requests(id, title, details, client:clients(id, display_name, phone, email)), property:properties(id, label, line1, line2, city, region, postal_code, lat, lng, notes)",
+            "id, title, kind, status, scheduled_on, starts_at, ends_at, route_order, time_fixed, notes, address, hold_reason, series_day, series_total, crew:crews(name, color), assignees:visit_assignees(user_id), equipment:visit_equipment(equipment:equipment(name)), job:jobs(id, number, title, instructions, client:clients(id, display_name, phone, email)), request:requests(id, title, details, client:clients(id, display_name, phone, email)), property:properties(id, label, line1, line2, city, region, postal_code, lat, lng, notes)",
           )
           .eq("id", visitId)
           .maybeSingle(),
@@ -55,6 +56,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
   });
 
   const client = v?.job?.client ?? v?.request?.client ?? null;
+  const place = v ? visitPlace(v) : null;
   const minutes = v?.starts_at && v.ends_at ? Math.round((Date.parse(v.ends_at) - Date.parse(v.starts_at)) / 60_000) : null;
   const when = v
     ? `${v.scheduled_on ? day(v.scheduled_on) : "Not scheduled yet"}${v.starts_at ? ` · ${formatTime(v.starts_at, tz)}${v.ends_at ? ` – ${formatTime(v.ends_at, tz)}` : ""}` : v.scheduled_on ? " · Anytime" : ""}`
@@ -100,6 +102,12 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
                     {codes?.instructions && <span className="muted small pre-wrap" style={{ display: "block", marginTop: 4 }}>{codes.instructions}</span>}
                     {v.property.notes && <span className="muted small pre-wrap" style={{ display: "block", marginTop: 4 }}>{v.property.notes}</span>}
                   </div>
+                </>
+              )}
+              {!v.property && place && (
+                <>
+                  <Icon name="pin" size={16} />
+                  <div><MapsLink className="address-link" place={place}>{v.address}</MapsLink></div>
                 </>
               )}
 
@@ -152,7 +160,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
 
             <div className="visit-actions">
               {onEdit && <Button variant="primary" icon="edit" onClick={onEdit}>Edit</Button>}
-              {v.property && <MapsLink className="btn" place={v.property}><Icon name="navigation" size={16} />Directions</MapsLink>}
+              {place && <MapsLink className="btn" place={place}><Icon name="navigation" size={16} />Directions</MapsLink>}
               {client?.phone && <a className="btn" href={`tel:${client.phone}`}><Icon name="phone" size={16} />Call</a>}
               {client?.phone && <a className="btn" href={`sms:${client.phone}`}><Icon name="messages" size={16} />Text</a>}
               {office && v.job && <Link className="btn" to={`/jobs/${v.job.id}`} onClick={onClose}><Icon name="job" size={16} />Open job</Link>}

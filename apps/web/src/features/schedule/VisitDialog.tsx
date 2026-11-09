@@ -1,6 +1,7 @@
 /**
  * Create or edit a visit, assessment, task or event: date, start and end time (any minute, like
  * Google Calendar) or anytime, crew, people, status and notes, with "Find a time" for open slots.
+ * An entry with no client property (a task at the supply yard) gets an address, with suggestions.
  * Used by Schedule, Job, Request and Home.
  */
 import { documentLabel } from "@crewtavo/core/equipment";
@@ -20,8 +21,10 @@ import { statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { addDaysIso, formatDate, formatTime, todayIn } from "@/lib/format";
+import { shopPlace } from "@/lib/maps";
 import { useSession } from "@/lib/session";
 import { VisitChecklists } from "../jobs/FilledChecklists";
+import { AddressSearch } from "../measure/AddressSearch";
 import { useSubSignIns } from "../subs/subsData";
 import { ChangeRequestPanel, usePendingChanges } from "./changeRequests";
 import { useSchedulingRights } from "./myCrews";
@@ -116,18 +119,24 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
   const skipped = skipDaysOff ? daysOff(session.company.settings) : [];
   const [moveLater, setMoveLater] = useState(true);
   const [equipment, setEquipment] = useState<string[] | null>(isNew ? [] : null);
+  // Null until a saved visit's address has loaded.
+  const [address, setAddress] = useState<string | null>(isNew ? "" : null);
   const options = useDispatchOptions();
   // A client's request from the Client Hub to move or cancel it, waiting for an answer.
   const request = usePendingChanges(!isNew).data?.find((r) => r.visit_id === visit.id);
   const extra = useQuery({
     queryKey: ["visit-extra", visit.id],
     enabled: !isNew,
-    queryFn: async () => unwrapOne(await supabase().from("visits").select("series_id, series_day, series_total, time_fixed, equipment:visit_equipment(equipment_id)").eq("id", visit.id!).maybeSingle(), "This visit"),
+    queryFn: async () => unwrapOne(await supabase().from("visits").select("series_id, series_day, series_total, time_fixed, address, equipment:visit_equipment(equipment_id)").eq("id", visit.id!).maybeSingle(), "This visit"),
   });
   useEffect(() => {
     if (extra.data && equipment === null) setEquipment(extra.data.equipment.map((e) => e.equipment_id));
     if (extra.data && timeFixed === null) setTimeFixed(extra.data.time_fixed);
-  }, [extra.data, equipment, timeFixed]);
+    if (extra.data && address === null) setAddress(extra.data.address ?? "");
+  }, [extra.data, equipment, timeFixed, address]);
+  // A client's property is the address of a job's visit (and a request's, when it has one).
+  const hasAddress = !visit.property_id && !visit.job_id && kind !== "job";
+  const shop = shopPlace(session.company);
   const series = extra.data?.series_total && extra.data.series_total > 1 ? { day: extra.data.series_day!, total: extra.data.series_total } : null;
   const machines = useEquipmentChoices();
   const picked = equipment ?? [];
@@ -233,6 +242,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
         crew_id: crewId || null,
         status,
         notes: notes.trim() || null,
+        ...(hasAddress && address !== null && { address: address.trim() || null }),
         ...(timeFixed !== null && canDispatch && { time_fixed: Boolean(start) && timeFixed }),
       };
       if (!isNew) {
@@ -290,6 +300,13 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
         )}
         {pickJob && kind === "job" && <JobPicker value={job} onChange={chooseJob} />}
         <Field label="Title" requiredMessage={kind === "job" ? "Say what the crew is doing." : "Give it a title."}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} disabled={!canDispatch} placeholder={kind === "job" ? "What the crew is doing" : "Drop off estimate, supply run…"} /></Field>
+        {hasAddress && (
+          <Field label="Address" optional>
+            {address === null ? <Skeleton height={38} radius={8} /> : (
+              <AddressSearch disabled={!canDispatch} near={shop?.lat != null && shop.lng != null ? { lat: shop.lat, lng: shop.lng } : null} initial={address} onEdit={setAddress} label={null} placeholder="Search an address or a place" />
+            )}
+          </Field>
+        )}
 
         {!unscheduled && (
           <>

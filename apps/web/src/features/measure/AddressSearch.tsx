@@ -1,8 +1,9 @@
 /**
- * The address box on the measuring map. As someone types it suggests the company's own clients'
- * properties first, then places near the map (OpenStreetMap, through GET /api/places/suggest).
- * Enter on a suggestion goes there; Enter with none picked looks the whole address up exactly
- * (the Census geocoder for US addresses), which finds the rural house numbers OpenStreetMap lacks.
+ * The address box on the measuring map, and the Address field of a calendar entry (VisitDialog). As
+ * someone types it suggests the company's own clients' properties first, then places near the map
+ * or the shop (OpenStreetMap, through GET /api/places/suggest). Enter on a suggestion picks it. On
+ * the map, Enter with none picked looks the whole address up exactly (the Census geocoder for US
+ * addresses), which finds the rural house numbers OpenStreetMap lacks; in a form it's just a field.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
@@ -16,21 +17,27 @@ interface Suggestions { clients: ClientSuggestion[]; places: PlaceSuggestion[]; 
 type Item = { key: string; group: string; icon: IconName; title: string; sub: string | null; pick: () => void };
 
 export function AddressSearch({
-  disabled, busy, near, onSubmit, onPickClient, onPickPlace, onEdit,
+  disabled, busy, near, onSubmit, onPickClient, onPickPlace, onEdit, initial = "", placeholder = "Search a client or an address, US or worldwide", label = "Search a client or an address",
 }: {
   disabled: boolean;
   /** An exact lookup is running. */
-  busy: boolean;
-  /** Where the map is, so nearby places come first. */
+  busy?: boolean;
+  /** Where the map (or the shop) is, so nearby places come first. */
   near: { lat: number; lng: number } | null;
-  onSubmit: (text: string) => void;
-  onPickClient: (s: ClientSuggestion) => void;
-  onPickPlace: (s: PlaceSuggestion) => void;
-  onEdit: () => void;
+  /** Its own search form: Enter looks the typed address up. Without it, it's a field in the surrounding form. */
+  onSubmit?: (text: string) => void;
+  onPickClient?: (s: ClientSuggestion) => void;
+  onPickPlace?: (s: PlaceSuggestion) => void;
+  /** The text in the box, as typed or picked. */
+  onEdit: (text: string) => void;
+  initial?: string;
+  placeholder?: string;
+  /** Leave out inside a Field, which labels it. */
+  label?: string | null;
 }) {
   const id = useId();
   const box = useRef<HTMLDivElement>(null);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initial);
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(-1);
@@ -57,6 +64,7 @@ export function AddressSearch({
   const choose = (pick: () => void, label: string) => {
     setText(label);
     close();
+    onEdit(label);
     pick();
   };
   const data = term.length >= 3 ? suggest.data : undefined;
@@ -67,7 +75,7 @@ export function AddressSearch({
       icon: "user" as IconName,
       title: s.label,
       sub: [s.client, s.detail].filter(Boolean).join(" · ") || null,
-      pick: () => choose(() => onPickClient(s), s.label),
+      pick: () => choose(() => onPickClient?.(s), [s.label, s.detail].filter(Boolean).join(", ")),
     })),
     ...(data?.places ?? []).map((s, i) => ({
       key: `p-${i}-${s.label}`,
@@ -75,7 +83,7 @@ export function AddressSearch({
       icon: (s.kind === "place" ? "map" : "pin") as IconName,
       title: s.label,
       sub: s.detail,
-      pick: () => choose(() => onPickPlace(s), [s.label, s.detail].filter(Boolean).join(", ")),
+      pick: () => choose(() => onPickPlace?.(s), [s.label, s.detail].filter(Boolean).join(", ")),
     })),
   ];
   const showList = open && text.trim().length >= 3;
@@ -91,6 +99,10 @@ export function AddressSearch({
     } else if (e.key === "Escape" && open) {
       e.preventDefault();
       close();
+    } else if (e.key === "Enter" && !onSubmit && index >= 0 && items[index]) {
+      // In a form, Enter on a suggestion picks it instead of sending the form.
+      e.preventDefault();
+      items[index].pick();
     }
   };
   const submit = (e: FormEvent) => {
@@ -99,7 +111,7 @@ export function AddressSearch({
     const address = text.trim();
     if (address.length < 5) return;
     close();
-    onSubmit(address);
+    onSubmit?.(address);
   };
 
   // Clicking anywhere else closes the list.
@@ -110,75 +122,76 @@ export function AddressSearch({
     return () => document.removeEventListener("pointerdown", away);
   }, [showList]);
 
+  const enter = onSubmit ? " Press Enter to look up the full address." : "";
   let lastGroup = "";
-  return (
-    <form className="measure-find" onSubmit={submit} role="search">
-      <div className="input-group address-search" ref={box}>
-        <span className="addon">{busy || (suggest.isFetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={14} />}</span>
-        <input
-          name="address"
-          className="input"
-          placeholder="Search a client or an address, US or worldwide"
-          aria-label="Search a client or an address"
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={showList}
-          aria-controls={`${id}-list`}
-          aria-activedescendant={index >= 0 && items[index] ? `${id}-${index}` : undefined}
-          autoComplete="off"
-          spellCheck={false}
-          enterKeyHint="search"
-          disabled={disabled}
-          value={text}
-          onFocus={() => setOpen(true)}
-          onChange={(e) => {
-            setText(e.target.value);
-            setOpen(true);
-            setIndex(-1);
-            onEdit();
-          }}
-          onKeyDown={onKeyDown}
-        />
-        {showList && (
-          <div className="address-suggest" id={`${id}-list`} role="listbox" aria-label="Suggestions">
-            {items.map((item, i) => {
-              const header = item.group !== lastGroup ? <div className="palette-group" role="presentation">{item.group}</div> : null;
-              lastGroup = item.group;
-              return (
-                <div key={item.key}>
-                  {header}
-                  <button
-                    type="button"
-                    id={`${id}-${i}`}
-                    role="option"
-                    aria-selected={i === index}
-                    className="palette-item"
-                    onMouseMove={() => i !== index && setIndex(i)}
-                    onClick={item.pick}
-                  >
-                    <span className="p-icon"><Icon name={item.icon} size={14} /></span>
-                    <span style={{ minWidth: 0, flex: 1 }}>
-                      <span className="p-title ellipsis" style={{ display: "block" }}>{item.title}</span>
-                      {item.sub && <span className="p-sub ellipsis" style={{ display: "block" }}>{item.sub}</span>}
-                    </span>
-                  </button>
-                </div>
-              );
-            })}
-            <div className="address-suggest-foot muted small">
-              {term.length < 3 || (suggest.isFetching && !items.length)
-                ? "Looking…"
-                : suggest.isError
-                  ? "Suggestions aren't available right now. Press Enter to look up the full address."
-                  : !items.length
-                    ? "No suggestions yet. Type the full address and press Enter to look it up exactly."
-                    : data?.places_unavailable
-                      ? "Place suggestions aren't available right now. Press Enter to look up the full address."
-                      : "Not listed? Type the full address and press Enter."}
-            </div>
+  const field = (
+    <div className="input-group address-search" ref={box}>
+      <span className="addon">{busy || (suggest.isFetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={14} />}</span>
+      <input
+        name="address"
+        className="input"
+        placeholder={placeholder}
+        aria-label={label ?? undefined}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={showList}
+        aria-controls={`${id}-list`}
+        aria-activedescendant={index >= 0 && items[index] ? `${id}-${index}` : undefined}
+        autoComplete="off"
+        spellCheck={false}
+        enterKeyHint={onSubmit ? "search" : undefined}
+        disabled={disabled}
+        value={text}
+        onFocus={() => setOpen(true)}
+        maxLength={300}
+        onChange={(e) => {
+          setText(e.target.value);
+          setOpen(true);
+          setIndex(-1);
+          onEdit(e.target.value);
+        }}
+        onKeyDown={onKeyDown}
+      />
+      {showList && (
+        <div className="address-suggest" id={`${id}-list`} role="listbox" aria-label="Suggestions">
+          {items.map((item, i) => {
+            const header = item.group !== lastGroup ? <div className="palette-group" role="presentation">{item.group}</div> : null;
+            lastGroup = item.group;
+            return (
+              <div key={item.key}>
+                {header}
+                <button
+                  type="button"
+                  id={`${id}-${i}`}
+                  role="option"
+                  aria-selected={i === index}
+                  className="palette-item"
+                  onMouseMove={() => i !== index && setIndex(i)}
+                  onClick={item.pick}
+                >
+                  <span className="p-icon"><Icon name={item.icon} size={14} /></span>
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span className="p-title ellipsis" style={{ display: "block" }}>{item.title}</span>
+                    {item.sub && <span className="p-sub ellipsis" style={{ display: "block" }}>{item.sub}</span>}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+          <div className="address-suggest-foot muted small">
+            {term.length < 3 || (suggest.isFetching && !items.length)
+              ? "Looking…"
+              : suggest.isError
+                ? `Suggestions aren't available right now.${enter}`
+                : !items.length
+                  ? onSubmit ? "No suggestions yet. Type the full address and press Enter to look it up exactly." : "No suggestions yet. Type the full address."
+                  : data?.places_unavailable
+                    ? `Place suggestions aren't available right now.${enter}`
+                    : onSubmit ? "Not listed? Type the full address and press Enter." : "Not listed? Type the full address."}
           </div>
-        )}
-      </div>
-    </form>
+        </div>
+      )}
+    </div>
   );
+  return onSubmit ? <form className="measure-find" onSubmit={submit} role="search">{field}</form> : field;
 }
