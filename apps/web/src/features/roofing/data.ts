@@ -124,12 +124,14 @@ export interface RoofStageQuote {
   priced_on_site_at?: string | null;
   /** When the office sent the exact price instead of the range. */
   exact_sent_at?: string | null;
+  /** When the roof was found not measurable from the air, so the salesperson measures it on site. */
+  measure_on_site_at?: string | null;
 }
 
 export type StageTone = "muted" | "info" | "warning" | "good" | "danger";
 
 /**
- * A short word for where a roof estimate is: measuring the roof, pricing it, the range out with
+ * A short word for where a roof estimate is: measuring the roof (or waiting to be measured on site), pricing it, the range out with
  * the homeowner, the homeowner asking for a visit, priced on site (or the exact price sent from the
  * office instead), signed, then the job.
  */
@@ -143,7 +145,7 @@ export function roofStage(q: RoofStageQuote, hasTakeoff: boolean): { label: stri
     return { label: "Scheduled", tone: "good" };
   }
   if (q.status === "approved") return { label: "Signed", tone: "good" };
-  if (!hasTakeoff) return { label: "Measuring", tone: "muted" };
+  if (!hasTakeoff) return q.measure_on_site_at ? { label: "Measure on site", tone: "warning" } : { label: "Measuring", tone: "muted" };
   if (!q.lines?.length) return { label: "Pricing", tone: "muted" };
   if (q.status === "changes_requested") return { label: statusText("quote", q.status), tone: "warning" };
   const ranged = q.range_low !== null && q.range_low !== undefined;

@@ -27,35 +27,41 @@ import { lowestOption, SIGNED } from "./flow/model";
 import { canSetUpRoofing, packagesKey, setUpRoofing, setupMessage, useRoofPackages } from "./packages";
 import { RoofingTabs } from "./RoofingTabs";
 
-interface ProjectRow extends TakeoffRow {
-  quote: {
-    id: string;
-    number: number | null;
-    title: string;
-    status: string;
-    total: number;
-    tax_rate: number;
-    discount_amount: number;
-    promo: TotalsPromo | null;
-    range_low: number | null;
-    range_high: number | null;
-    range_sent_at: string | null;
-    range_accepted_at: string | null;
-    priced_on_site_at: string | null;
-    exact_sent_at: string | null;
-    client: { display_name: string } | null;
-    property: { line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
-    package: { name: string } | null;
-    /** Its options, when it offers two or three. */
-    options: Array<{ id: string }>;
-    /** What each option's price is worked out from. */
-    lines: Array<{ id: string; option_id: string | null; quantity: number; unit_price: number; taxable: boolean; optional: boolean; selected: boolean }>;
-    jobs: Array<{ id: string; status: string }>;
-  } | null;
+interface ProjectQuote {
+  id: string;
+  number: number | null;
+  title: string;
+  status: string;
+  total: number;
+  tax_rate: number;
+  discount_amount: number;
+  promo: TotalsPromo | null;
+  range_low: number | null;
+  range_high: number | null;
+  range_sent_at: string | null;
+  range_accepted_at: string | null;
+  priced_on_site_at: string | null;
+  exact_sent_at: string | null;
+  client: { display_name: string } | null;
+  property: { line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
+  package: { name: string } | null;
+  /** Its options, when it offers two or three. */
+  options: Array<{ id: string }>;
+  /** What each option's price is worked out from. */
+  lines: Array<{ id: string; option_id: string | null; quantity: number; unit_price: number; taxable: boolean; optional: boolean; selected: boolean }>;
+  jobs: Array<{ id: string; status: string }>;
+  /** Couldn't be measured from the air: a salesperson measures it on site. */
+  measure_on_site_at: string | null;
+}
+
+/** A project: its quote, and its newest roof measurement (none yet while it waits to be measured on site). */
+interface ProjectRow {
+  quote: ProjectQuote;
+  takeoff: TakeoffRow | null;
 }
 
 const QUOTE_FIELDS =
-  "id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), range_low, range_high, range_sent_at, range_accepted_at, priced_on_site_at, exact_sent_at, client:clients(display_name), property:properties(line1, city, region, postal_code), package:roof_packages!quotes_roof_package_fkey(name), options:quote_options!quote_options_quote_fkey(id), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), jobs!jobs_company_id_quote_id_fkey(id, status)";
+  "id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), range_low, range_high, range_sent_at, range_accepted_at, priced_on_site_at, exact_sent_at, client:clients(display_name), property:properties(line1, city, region, postal_code), package:roof_packages!quotes_roof_package_fkey(name), options:quote_options!quote_options_quote_fkey(id), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), jobs!jobs_company_id_quote_id_fkey(id, status), measure_on_site_at";
 
 export function RoofingPage() {
   const session = useSession();
@@ -68,20 +74,26 @@ export function RoofingPage() {
   const projects = useQuery({
     queryKey: ["roofing-projects", company.id],
     queryFn: async () => {
-      const rows = unwrap(
-        await supabase()
+      const [measured, onSite] = await Promise.all([
+        supabase()
           .from("measurements")
           .select(`${TAKEOFF_FIELDS}, quote:quotes(${QUOTE_FIELDS})`)
           .not("quote_id", "is", null)
           .order("updated_at", { ascending: false })
           .limit(200),
-      ) as unknown as ProjectRow[];
+        supabase().from("quotes").select(QUOTE_FIELDS).not("measure_on_site_at", "is", null).order("measure_on_site_at", { ascending: false }).limit(100),
+      ]);
       // One row per project: its newest measurement, and only measurements of roofs.
       const seen = new Set<string>();
-      return rows.filter((r) => r.quote && isRoof(r) && !seen.has(r.quote.id) && seen.add(r.quote.id));
+      const rows = (unwrap(measured) as unknown as Array<TakeoffRow & { quote: ProjectQuote | null }>)
+        .filter((r) => r.quote && isRoof(r) && !seen.has(r.quote.id) && seen.add(r.quote.id))
+        .map(({ quote, ...takeoff }): ProjectRow => ({ quote: quote!, takeoff }));
+      // Then the roofs waiting to be measured on site, first: nothing's drawn for them yet.
+      const waiting = (unwrap(onSite) as unknown as ProjectQuote[]).filter((q) => !seen.has(q.id)).map((quote): ProjectRow => ({ quote, takeoff: null }));
+      return [...waiting, ...rows];
     },
   });
-  const open = (projects.data ?? []).filter((r) => !["lost", "archived"].includes(r.quote!.status) && !(r.quote!.jobs[0]?.status === "completed"));
+  const open = (projects.data ?? []).filter((r) => !["lost", "archived"].includes(r.quote.status) && !(r.quote.jobs[0]?.status === "completed"));
   const rows = showAll ? projects.data ?? [] : open;
 
   return (
@@ -118,8 +130,8 @@ export function RoofingPage() {
               <thead><tr><th>Project</th><th>Measured</th><th className="num">Price</th><th>Stage</th></tr></thead>
               <tbody>
                 {rows.map((r) => {
-                  const q = r.quote!;
-                  const stage = roofStage(q, true);
+                  const q = r.quote;
+                  const stage = roofStage(q, Boolean(r.takeoff));
                   const ranged = inRangeMode(q) && q.range_high !== null;
                   // Options not chosen yet: from the cheapest. Once signed, the total is the one chosen.
                   const from = q.options?.length && !SIGNED.includes(q.status) ? lowestOption(q) : null;
@@ -130,8 +142,8 @@ export function RoofingPage() {
                         <div className="muted small">{[q.client?.display_name, q.property ? addressLine(q.property) : null].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td>
-                        <span className="small">{roofSummary(r, formatNumber)}</span>
-                        <div className="muted small">{[q.options?.length ? `${q.options.length} options` : q.package?.name, timeAgo(r.updated_at)].filter(Boolean).join(" · ")}</div>
+                        <span className="small">{r.takeoff ? roofSummary(r.takeoff, formatNumber) : "Not from the air"}</span>
+                        <div className="muted small">{[q.options?.length ? `${q.options.length} options` : q.package?.name, timeAgo(r.takeoff?.updated_at ?? q.measure_on_site_at!)].filter(Boolean).join(" · ")}</div>
                       </td>
                       <td className="num">
                         {ranged ? (

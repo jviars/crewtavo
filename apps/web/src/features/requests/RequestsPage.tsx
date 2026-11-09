@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
-import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
 import { can, hasRole, useSession, type Session } from "@/lib/session";
@@ -27,6 +27,11 @@ export const REQUEST_SOURCES: Record<string, string> = { web_form: "Booking form
 
 /** Where a request came from, as people say it: a message from a website form (Apps → Website Forms) is a web_form request too. */
 export const requestSource = (r: { source: string; website_form_id?: string | null }) => (r.website_form_id ? "Website form" : (REQUEST_SOURCES[r.source] ?? r.source));
+
+/** The team, for who a request is assigned to (the same list as Settings → People). */
+export interface TeamMember { user_id: string; role: string; active: boolean; profile: { full_name: string; email?: string | null } | null }
+export const useTeam = (companyId: string) => useQuery({ queryKey: ["team", companyId], staleTime: 5 * 60_000, queryFn: () => api.get<TeamMember[]>("/team") });
+export const memberName = (m: TeamMember | undefined) => (m ? m.profile?.full_name || m.profile?.email || "Team member" : null);
 
 /** Who can log a request: the roles the database lets add one (requests_insert). */
 export const canLogRequests = (session: Pick<Session, "role">) => hasRole(session, "admin", "office", "estimator");
@@ -54,6 +59,7 @@ export function RequestsPage() {
   const statuses = FILTERS.find((f) => f.key === filter)!.statuses;
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
   const counts = useStatusCounts("requests", session.company.id, Object.fromEntries(FILTERS.map((f) => [f.key, f.statuses])));
+  const team = useTeam(session.company.id);
 
   const requests = useQuery({
     queryKey: ["requests", session.company.id, filter, term, fromWebsite],
@@ -61,7 +67,7 @@ export function RequestsPage() {
     queryFn: async () => {
       let q = supabase()
         .from("requests")
-        .select("id, number, title, status, source, website_form_id, created_at, client:clients(id, display_name), property:properties(line1, city)")
+        .select("id, number, title, status, source, website_form_id, assigned_to, created_at, client:clients(id, display_name), property:properties(line1, city)")
         .eq("company_id", session.company.id)
         .in("status", [...statuses])
         .order("created_at", { ascending: false })
@@ -72,7 +78,7 @@ export function RequestsPage() {
     },
   });
 
-  if (requests.isPending) return <ListPageSkeleton columns={5} tabs={5} />;
+  if (requests.isPending) return <ListPageSkeleton columns={6} tabs={5} />;
   const rows = requests.data ?? [];
 
   return (
@@ -124,7 +130,7 @@ export function RequestsPage() {
       ) : (
         <div className={`card${requests.isPlaceholderData ? " is-stale" : ""}`}>
           <table className="table table-stack">
-            <thead><tr><th>#</th><th>Request</th><th>Client</th><th>Received</th><th>Status</th></tr></thead>
+            <thead><tr><th>#</th><th>Request</th><th>Client</th><th>Salesperson</th><th>Received</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="row-link" onClick={() => navigate(`/requests/${r.id}`)}>
@@ -134,6 +140,7 @@ export function RequestsPage() {
                     <div className="muted small">{requestSource(r)}{r.property ? ` · ${r.property.line1}` : ""}</div>
                   </td>
                   <td>{r.client?.display_name ?? <span className="muted">—</span>}</td>
+                  <td>{memberName(team.data?.find((m) => m.user_id === r.assigned_to)) ?? <span className="muted">—</span>}</td>
                   <td title={formatDate(r.created_at)}>
                     {timeAgo(r.created_at)}
                     {r.status === "new" && Date.now() - Date.parse(r.created_at) > 2 * 86_400_000 && <div className="small text-danger strong">Waiting over 2 days</div>}

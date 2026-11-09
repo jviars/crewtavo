@@ -1,3 +1,4 @@
+import { SALES, type Role } from "@crewtavo/core/roles";
 import { fieldLabel, fieldRole } from "@crewtavo/core/websiteForms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -22,7 +23,7 @@ import type { WebVisit } from "../marketing/website";
 import { WebVisitRows } from "../marketing/WebVisitRows";
 import { PlansCard } from "../plans/PlansCard";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
-import { requestSource } from "./RequestsPage";
+import { memberName, requestSource, useTeam } from "./RequestsPage";
 
 export function RequestPage() {
   const { id = "" } = useParams();
@@ -39,13 +40,14 @@ export function RequestPage() {
       unwrapOne(
         await supabase()
           .from("requests")
-          .select("id, number, title, details, status, source, website_form_id, answers, promo_code, rejected_promo_code, promo_problem, web_visit, created_at, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code, lat, lng), form:intake_forms(name, questions), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, assignees:visit_assignees(user_id)), quotes(id, number, title, status, total)")
+          .select("id, number, title, details, status, source, website_form_id, assigned_to, answers, promo_code, rejected_promo_code, promo_problem, web_visit, created_at, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code, lat, lng), form:intake_forms(name, questions), visits(id, title, kind, status, scheduled_on, starts_at, ends_at, crew_id, notes, assignees:visit_assignees(user_id)), quotes(id, number, title, status, total)")
           .eq("id", id)
           .maybeSingle(),
         "This request",
       ),
   });
   const r = request.data;
+  const team = useTeam(session.company.id);
   useRememberRecent(session.company.id, r ? { kind: "request", id: r.id, title: r.title, subtitle: `Request #${r.number} · ${r.client?.display_name ?? ""}`, path: `/requests/${r.id}` } : null);
 
   const refresh = () => {
@@ -79,6 +81,12 @@ export function RequestPage() {
   const setStatus = useMutation({
     meta: { success: (_: unknown, s: string) => (s === "archived" ? "Request archived" : s === "assessment_complete" ? "Assessment marked done" : "Request reopened"), tone: "request" },
     mutationFn: async (status: "new" | "assessment_complete" | "archived") => unwrap(await supabase().from("requests").update({ status }).eq("id", id)),
+    onSuccess: refresh,
+  });
+  // Who has the lead: set by itself from Settings → Sales areas when it came in, and changed here. They're told.
+  const assign = useMutation({
+    meta: { success: (_: unknown, userId: string | null) => (userId ? `Assigned to ${memberName(team.data?.find((m) => m.user_id === userId))}` : "Unassigned"), tone: "request" },
+    mutationFn: async (userId: string | null) => unwrap(await supabase().from("requests").update({ assigned_to: userId }).eq("id", id)),
     onSuccess: refresh,
   });
   const remove = useMutation({
@@ -218,6 +226,19 @@ export function RequestPage() {
             {r.client?.phone && <ContactLine icon="phone" href={`tel:${r.client.phone}`}>{r.client.phone}</ContactLine>}
             <dl className="kv" style={{ marginTop: 8 }}>
               <dt>Property</dt><dd>{r.property ? addressLine(r.property) : "—"}</dd>
+              <dt>Salesperson</dt>
+              <dd>
+                {canSell ? (
+                  <select className="select input-sm" aria-label="Salesperson" value={r.assigned_to ?? ""} disabled={assign.isPending || team.isPending} onChange={(e) => assign.mutate(e.target.value || null)}>
+                    <option value="">Nobody yet</option>
+                    {(team.data ?? [])
+                      .filter((m) => (m.active && SALES.includes(m.role as Role)) || m.user_id === r.assigned_to)
+                      .map((m) => <option key={m.user_id} value={m.user_id}>{memberName(m)}{m.user_id === session.userId ? " (you)" : ""}{m.active ? "" : " (no longer on the team)"}</option>)}
+                  </select>
+                ) : (
+                  memberName(team.data?.find((m) => m.user_id === r.assigned_to)) ?? "Nobody yet"
+                )}
+              </dd>
               <dt>Received</dt><dd>{formatDateTime(r.created_at)}{r.form ? ` via ${r.form.name}` : ""}</dd>
               {r.promo_code && <><dt>Promo code</dt><dd><span className="promo-code">{r.promo_code}</span></dd></>}
               {!r.promo_code && r.rejected_promo_code && (

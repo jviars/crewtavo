@@ -8,7 +8,7 @@ import { featureOn } from "@/components/shell/nav";
 import type { IconName } from "@/components/ui/Icon";
 import { can, hasRole, isSub, type Session } from "@/lib/session";
 
-export type SettingsTab = "profile" | "company" | "payments" | "schedule" | "address" | "hosting" | "storage" | "team" | "roles" | "crews" | "prices" | "templates" | "contracts" | "checklists" | "custom-fields" | "client-notifications" | "email" | "calendars" | "assistants" | "maps" | "data" | "license" | "weather";
+export type SettingsTab = "profile" | "company" | "payments" | "schedule" | "address" | "hosting" | "storage" | "team" | "roles" | "crews" | "sales-areas" | "prices" | "templates" | "contracts" | "checklists" | "custom-fields" | "client-notifications" | "email" | "calendars" | "assistants" | "maps" | "data" | "license" | "weather";
 export type SettingsItem = { label: string; icon: IconName; keywords: string } & ({ tab: SettingsTab } | { to: string });
 
 export function settingsGroups(session: Session): Array<{ title: string; items: SettingsItem[] }> {
@@ -60,6 +60,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
         managesTeam && { tab: "team", label: "People", icon: "users", keywords: "team members staff employees invite users photos pictures" },
         managesTeam && { tab: "roles", label: "Roles", icon: "lock", keywords: "permissions access levels custom roles" },
         managesSettings && { tab: "crews", label: "Crews", icon: "clients", keywords: "teams groups" },
+        managesSettings && { tab: "sales-areas", label: "Sales areas", icon: "pin", keywords: "sales areas territories territory zip codes postal codes assign leads requests automatically salesperson salesman estimator who gets which lead round robin" },
         managesSettings && { tab: "checklists", label: "Checklists", icon: "clipboard", keywords: "forms inspections job checklist job forms" },
       ],
     },

@@ -18,7 +18,7 @@ export const NOTIFICATION_TOPICS = [
   { key: "social", label: "Social posts", hint: "Automatic posts coming up, and posts that didn't go. Email only for those that didn't" },
   // Subs only: their job offers and their pay (on by default, texts too: an offer waits for their answer).
   { key: "jobs", label: "My jobs", hint: "Job offers, and what you're owed and paid" },
-  { key: "alerts", label: "Other alerts", hint: "From your company's automations, like a quote being approved" },
+  { key: "alerts", label: "Other alerts", hint: "Leads handed to you, and your company's automations, like a quote being approved" },
   { key: "chat", label: "Team chat", hint: "When someone @mentions you or your role" },
   // Owners and admins: Railway's warnings (services/hosting.ts) and storage nearing its limit
   // (services/storageUsage.ts). Off Railway, Settings → Profile calls it "Storage".

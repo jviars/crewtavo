@@ -10,6 +10,9 @@ describe("where a roof estimate is", () => {
 
   it("follows the roof from measuring to the job", () => {
     expect(roofStage(quote({ status: "draft", lines: [] }), false).label).toBe("Measuring");
+    // Couldn't be measured from the air: waiting on the salesperson, until the roof is drawn.
+    expect(roofStage(quote({ status: "draft", lines: [], measure_on_site_at: "2026-11-09T15:00:00Z" }), false)).toEqual({ label: "Measure on site", tone: "warning" });
+    expect(roofStage(quote({ status: "draft", lines: [], measure_on_site_at: "2026-11-09T15:00:00Z" }), true).label).toBe("Pricing");
     expect(roofStage(quote({ status: "draft", lines: [] }), true).label).toBe("Pricing");
     expect(roofStage(quote({ status: "draft" }), true).label).toBe("Pricing");
     expect(roofStage(quote({ status: "sent", range_low: 18300 }), true)).toEqual({ label: "Range sent", tone: "info" });

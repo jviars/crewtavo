@@ -2,7 +2,8 @@
  * One roofing project, start to finish, on one page: the roof measured on the map, the estimate
  * priced from its package (with the range the homeowner will see beside it), the range going out
  * and the homeowner's yes, the site visit on the iPad and the signed estimate, then the job and the
- * invoices. Six steps (ROOF_STEPS); the page opens wherever the project is.
+ * invoices. Six steps (ROOF_STEPS); the page opens wherever the project is. A roof the map can't
+ * measure goes to a salesperson to measure on site (flow/MeasureOnSite.tsx).
  *
  * The estimate is the estimate kit's (useEstimateQuote), so a tap on − or + shows at once; the rest
  * of the project (its dates, deposit and job) loads beside it (flow/data.ts). The pieces every trade
@@ -20,9 +21,10 @@ import { readApproval } from "../documents/data";
 import { usePictures } from "../measure/drawings";
 import { FlowProgress, InvoiceStepBody, invoiceStatus, measureLinkFor, StepCard, TakeoffEmpty, useJobInvoices, useScrollToHash, type FlowTrade } from "../paving/ProjectFlow";
 import { ROOF_STEPS, roofStep, type RoofStepId } from "./data";
-import { counts, useEstimateQuote } from "./estimate";
+import { counts, firstName, useEstimateQuote } from "./estimate";
 import { useFreshEstimate, useRefreshProject, useRoofProject, useTeam, useWatchProject } from "./flow/data";
 import { EstimateStep } from "./flow/EstimateStep";
+import { CantMeasureButton, MeasureOnSiteCard } from "./flow/MeasureOnSite";
 import { personName, rangeState, rangeStepStatus, visitStepStatus } from "./flow/model";
 import type { SendChannel, SendMode } from "./flow/RangeCard";
 import { RangeStep } from "./flow/RangeStep";
@@ -121,6 +123,11 @@ function RoofProject() {
         ? "Not priced yet"
         : ROOFING.takeoff.after;
   const send = (mode: SendMode, startWith?: SendChannel) => setSending({ mode, startWith });
+  const takeoffStatus = takeoff
+    ? `Updated ${timeAgo(takeoff.updated_at)}`
+    : quote.measure_on_site_at
+      ? ["Measure on site", firstName(personName(team.data, quote.salesperson_id))].filter(Boolean).join(" · ")
+      : "Not measured yet";
 
   return (
     <>
@@ -137,9 +144,14 @@ function RoofProject() {
       )}
 
       <div className="stack" style={{ gap: 16 }}>
-        <StepCard id="takeoff" n={1} title={label("takeoff")} status={takeoff ? `Updated ${timeAgo(takeoff.updated_at)}` : "Not measured yet"} done={Boolean(takeoff)} current={step === "takeoff"}>
-          {!takeoff ? (
-            <TakeoffEmpty trade={ROOFING} measureLink={measureLink} />
+        <StepCard id="takeoff" n={1} title={label("takeoff")} status={takeoffStatus} done={Boolean(takeoff)} current={step === "takeoff"}>
+          {!takeoff && quote.measure_on_site_at ? (
+            <MeasureOnSiteCard quote={quote} measureLink={measureLink} canSell />
+          ) : !takeoff ? (
+            <div className="stack-sm">
+              <TakeoffEmpty trade={ROOFING} measureLink={measureLink} />
+              <CantMeasureButton quote={quote} />
+            </div>
           ) : (
             <RoofCard takeoff={takeoff} picture={takeoff.snapshot_path ? pictures.data?.[takeoff.snapshot_path] : undefined} editLink={measureLink} />
           )}

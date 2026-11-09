@@ -23,6 +23,7 @@ import { PaymentSettings } from "./PaymentSettings";
 import { PriceList } from "./PriceList";
 import { ProfileSettings } from "./ProfileSettings";
 import { RolesSettings } from "./RolesSettings";
+import { SalesAreaSettings } from "./SalesAreaSettings";
 import { ScheduleSettings } from "./ScheduleSettings";
 import { settingsGroups, type SettingsTab } from "./sections";
 import { StorageSettings } from "./StorageSettings";
@@ -79,6 +80,7 @@ export function SettingsPage() {
           {tab === "team" && <TeamSettings />}
           {tab === "roles" && <RolesSettings />}
           {tab === "crews" && <CrewSettings />}
+          {tab === "sales-areas" && <SalesAreaSettings />}
           {tab === "prices" && <PriceList />}
           {tab === "templates" && <TemplateSettings />}
           {tab === "contracts" && <ContractSettings />}

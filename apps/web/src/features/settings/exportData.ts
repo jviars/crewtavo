@@ -76,7 +76,7 @@ export async function exportEverything(session: Session, step: (what: string) =>
     everyRow((from, to) => db.from("clients").select("id, display_name, company_name, email, phone, status, lead_source, referred_by, tags, notes, billing_address, marketing_opt_out, review_opt_out, sms_opt_out_at, tax_exempt, tax_exempt_note, payment_terms_days, created_at, custom_fields").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("client_contacts").select("id, client_id, name, role, email, phone, is_primary, notify_email, notify_sms").eq("company_id", companyId).order("id").range(from, to)),
     everyRow((from, to) => db.from("properties").select("id, client_id, label, line1, line2, city, region, postal_code, country, lot_size_sqft, tags, notes, lat, lng, created_at, custom_fields").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("requests").select("id, number, title, client_id, property_id, status, source, details, created_at").eq("company_id", companyId).order("id").range(from, to)),
+    everyRow((from, to) => db.from("requests").select("id, number, title, client_id, property_id, status, source, details, assigned_to, created_at").eq("company_id", companyId).order("id").range(from, to)),
     api.get<Member[]>("/team?with_subs=1"),
     everyRow((from, to) => db.from("custom_field_definitions").select("id, record_type, key, label, type, choices, show_on_pdf, show_in_portal, sort, archived_at").eq("company_id", companyId).order("sort").order("id").range(from, to)),
   ]);
@@ -126,7 +126,7 @@ export async function exportEverything(session: Session, step: (what: string) =>
   // People by name: the team, then anyone who has left but is still on old visits and timesheets.
   const people = new Map(members.map((m) => [m.user_id, m.profile?.full_name || m.profile?.email || "Team member"]));
   const missing = [
-    ...new Set([...assignees.map((a) => a.user_id), ...timeEntries.map((t) => t.user_id), ...expenses.map((e) => e.user_id), ...equipmentLogs.map((l) => l.user_id), ...quotes.map((q) => q.salesperson_id), ...filled.map((r) => r.completed_by)]),
+    ...new Set([...assignees.map((a) => a.user_id), ...timeEntries.map((t) => t.user_id), ...expenses.map((e) => e.user_id), ...equipmentLogs.map((l) => l.user_id), ...quotes.map((q) => q.salesperson_id), ...requests.map((r) => r.assigned_to), ...filled.map((r) => r.completed_by)]),
   ].filter((id): id is string => Boolean(id) && !people.has(id!));
   for (let at = 0; at < missing.length; at += 200) {
     for (const p of unwrap(await db.from("profiles").select("user_id, full_name").in("user_id", missing.slice(at, at + 200)))) people.set(p.user_id, p.full_name);
@@ -205,7 +205,7 @@ export async function exportEverything(session: Session, step: (what: string) =>
     ], customColumns<(typeof properties)[number]>("property"), 2)),
     sheet("requests.csv", [...requests].sort(byNumber), [
       ["Request #", (r) => r.number], ["Title", (r) => r.title], ["Client", (r) => clientName(r.client_id)], ["Property", (r) => address(r.property_id)],
-      ["Status", (r) => words(r.status)], ["Source", (r) => words(r.source)], ["Details", (r) => r.details], ["Received", (r) => when(r.created_at)],
+      ["Status", (r) => words(r.status)], ["Source", (r) => words(r.source)], ["Details", (r) => r.details], ["Assigned to", (r) => person(r.assigned_to)], ["Received", (r) => when(r.created_at)],
       ["Client ID", (r) => r.client_id], ["Request ID", (r) => r.id],
     ]),
     sheet("quotes.csv", [...quotes].sort(byNumber), beforeIds([
