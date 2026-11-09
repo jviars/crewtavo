@@ -136,4 +136,16 @@ select t1140.check((select count(*) from public.sales_areas where company_id = :
 select t1140.expect_error(format('insert into public.sales_areas (company_id, zip, user_id) values (%L, %L, %L)', :'co', '47', 'fa000000-0000-0000-0000-000000000002'), 'but an estimator can''t change them');
 commit;
 
+-- ===== Who sold the job =========================================================================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "fa000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+insert into public.jobs (company_id, client_id, property_id, quote_id, title) values (:'co', :'client', :'north', :'q2', 'Roof at 12 Oak St') returning id as job \gset
+select t1140.check((select salesperson_id from public.jobs where id = :'job') = 'fa000000-0000-0000-0000-000000000002', 'a job made from an estimate says who sold it');
+update public.quotes set salesperson_id = 'fa000000-0000-0000-0000-000000000004' where id = :'q2';
+select t1140.check((select salesperson_id from public.jobs where id = :'job') = 'fa000000-0000-0000-0000-000000000004', 'and follows the estimate when it changes hands');
+insert into public.jobs (company_id, client_id, title) values (:'co', :'client', 'Gutter cleaning') returning id as plain_job \gset
+select t1140.check((select salesperson_id is null from public.jobs where id = :'plain_job'), 'a job made without an estimate has nobody');
+commit;
+
 \o

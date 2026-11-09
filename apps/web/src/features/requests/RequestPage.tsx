@@ -108,7 +108,8 @@ export function RequestPage() {
   );
   const questions = ((r.form?.questions ?? []) as Array<{ key: string; label: string }>).reduce<Record<string, string>>((m, q) => ({ ...m, [q.key]: q.label }), {});
   const open = !["converted", "archived"].includes(r.status);
-  const assessment = (): VisitInput => ({ request_id: r.id, property_id: r.property?.id ?? null, title: `Assessment: ${r.title}`, kind: "assessment", context: { label: `Request #${r.number} · ${r.client?.display_name ?? ""}`, to: `/requests/${r.id}` } });
+  // The request's salesperson goes out, unless someone picks another.
+  const assessment = (): VisitInput => ({ request_id: r.id, property_id: r.property?.id ?? null, title: `Assessment: ${r.title}`, kind: "assessment", assignee_ids: r.assigned_to ? [r.assigned_to] : [], context: { label: `Request #${r.number} · ${r.client?.display_name ?? ""}`, to: `/requests/${r.id}` } });
 
   return (
     <>

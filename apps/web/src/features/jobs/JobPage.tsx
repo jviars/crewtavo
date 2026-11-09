@@ -44,6 +44,7 @@ import { repeatText } from "./repeatText";
 import { ScopeOfWork } from "./ScopeOfWork";
 import { askToastKind, type AskResult } from "../marketing/askForm";
 import { CustomFieldList, useCustomFields } from "../customFields/CustomFields";
+import { memberName, useTeam } from "../requests/RequestsPage";
 
 /** The sections a job only shows once it uses them, offered under its line items until then. */
 type Extra = "materials" | "expenses" | "pay";
@@ -95,6 +96,7 @@ export function JobPage() {
   const materialRows = useJobMaterials(id);
   const expenseRows = useJobExpenses(id, seesCosts);
   const payRows = useJobPays(session.company.id, id, seesPay);
+  const team = useTeam(session.company.id);
 
   const job = useQuery({
     queryKey: ["job", id],
@@ -542,6 +544,8 @@ export function JobPage() {
               {Number(j.retainage_pct) > 0 && <><dt>Retainage</dt><dd>{Number(j.retainage_pct)}%</dd></>}
               {j.warranty_until && <><dt>Warranty</dt><dd>until {formatDate(j.warranty_until)}</dd></>}
               {j.quote && <><dt>From</dt><dd><Link to={`/quotes/${j.quote.id}`}>Quote #{j.quote.number}</Link></dd></>}
+              {/* Who to ask about what was promised: the estimate's salesperson, for crew leads too (they can't open the estimate). */}
+              {j.salesperson_id && team.data && <><dt>Sold by</dt><dd>{memberName(team.data.find((m) => m.user_id === j.salesperson_id)) ?? "Former team member"}</dd></>}
               <CustomFieldList fields={jobFields} values={j.custom_fields} />
             </dl>
             {j.instructions && <p className="pre-wrap small" style={{ margin: 0, padding: 10, background: "var(--note)", borderRadius: "var(--radius-control)", border: "1px solid var(--note-border)" }}>{j.instructions}</p>}
