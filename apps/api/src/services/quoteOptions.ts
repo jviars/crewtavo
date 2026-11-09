@@ -104,7 +104,7 @@ const toOptions = (data: unknown): QuoteOption[] =>
 const optionLines = (lines: readonly PackageLine[], after: number) =>
   lines.map((l) => ({ service_id: l.service_id, name: l.name, quantity: l.quantity, unit: l.unit, unit_price: l.unit_price, unit_cost: l.unit_cost, taxable: l.taxable, formula: l.formula, sort: after + l.sort }));
 
-const skippedOf = (p: PricedPackage, skipped: ReadonlyArray<{ name: string; reason: string }>): SkippedLine[] => skipped.map((s) => ({ package: p.pkg.name, ...s }));
+const skippedOf = (p: PricedPackage, skipped: ReadonlyArray<{ name: string; reason: string }>): SkippedLine[] => skipped.map(({ name, reason }) => ({ package: p.pkg.name, name, reason }));
 
 /** The estimate's own lines while it becomes option 1, for pricing the options against each other. */
 const CURRENT = "current";

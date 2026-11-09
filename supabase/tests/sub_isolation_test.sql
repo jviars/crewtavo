@@ -568,6 +568,8 @@ select t1070.check(array(
   -- Saving a screen's own settings: runs as the caller, so owners and admins only, never a sub.
   'merge_company_settings(uuid, jsonb)', 'my_crew_ids(uuid)', 'my_sub_offers(boolean, uuid)',
   'my_sub_pay_totals(uuid)', 'promo_code_jobs(uuid, boolean)', 'promo_code_usage(uuid)', 'put_quote_package(uuid, uuid, jsonb, boolean)',
+  -- The quote follow-up after an exact price goes out: the office and estimators with Sales only, never a sub.
+  'quote_exact_sent(uuid)',
   'record_photos(uuid, uuid, uuid)', 'referral_auto_apply(uuid, boolean)', 'referral_credits_for(uuid, uuid)', 'referral_give_credit(uuid)', 'referral_no_reward(uuid)',
   'referral_set_given(uuid)', 'referral_stats(uuid, timestamp with time zone, timestamp with time zone)', 'remove_promo_code(text, uuid)',
   'remove_quote_option(uuid, uuid)', 'remove_referral_credit(uuid)',

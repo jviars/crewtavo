@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateFormula,
   FORMULA_VARIABLES,
+  formulaVariables,
   isRoofDrawing,
+  leftOutReason,
+  lowSlopeSections,
   optionLabels,
   PRESETS,
   ROOFING_SAMPLE,
@@ -82,5 +85,31 @@ describe("Good, Better and Best", () => {
     expect(optionLabels([roof("a", 500)]).size).toBe(0);
     expect(optionLabels([roof("a", 1), roof("b", 2), roof("c", 3), roof("d", 4)]).size).toBe(0);
     expect(optionLabels([roof("a", 500, null), roof("b", 700, null)]).size).toBe(0);
+  });
+});
+
+describe("before a roof estimate goes out", () => {
+  it("finds the sections too low for shingles", () => {
+    const main = { ...area(1800, "6/12"), label: "Main roof" };
+    const porch = { ...area(200, "3.5/12"), label: "Porch" };
+    const deck = { ...area(120, "1.5/12"), label: "Back deck" };
+    const flat = { ...area(80, "0/12"), label: "Garage" };
+    expect(lowSlopeSections([main, porch, deck, flat, line(40, "eave")], null)).toEqual([
+      { label: "Porch", pitch: "3.5/12", tooLow: false },
+      { label: "Back deck", pitch: "1.5/12", tooLow: true },
+      { label: "Garage", pitch: "flat", tooLow: true },
+    ]);
+    // A section without its own pitch is at the drawing's; with none at all, or one that doesn't read, it isn't judged.
+    expect(lowSlopeSections([area(500)], "3/12")).toEqual([{ label: "Roof", pitch: "3/12", tooLow: false }]);
+    expect(lowSlopeSections([area(500), area(600, "steep?")], null)).toEqual([]);
+    expect(lowSlopeSections([area(500, "4/12")], null)).toEqual([]);
+  });
+
+  it("asks about what's missing, not what's simply none on this roof", () => {
+    expect(leftOutReason(formulaVariables("(eave_ft + rake_ft) / 10"), true, "None on this roof")).toBe("No eaves or rakes marked on the roof");
+    expect(leftOutReason(formulaVariables("valley_ft / 10"), true, "None on this roof")).toBe("No valleys marked on the roof");
+    expect(leftOutReason(formulaVariables("(ridge_ft + hip_ft + valley_ft) / 33"), true, "None on this roof")).toBe("No ridges, hips or valleys marked on the roof");
+    expect(leftOutReason(formulaVariables("steep_squares"), true, "None on this roof")).toBeNull();
+    expect(leftOutReason(formulaVariables("squares"), false, "The roof hasn't been measured yet")).toBe("The roof hasn't been measured yet");
   });
 });

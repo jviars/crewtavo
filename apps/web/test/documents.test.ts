@@ -273,6 +273,18 @@ describe("a quote as a document", () => {
     expect(custom).toMatchObject({ client: { name: "Dana", lines: [] }, date: "2026-10-24", discountLabel: undefined });
   });
 
+  it("says what isn't included under the notes, only what the business chose to show", () => {
+    const leftOut = [
+      { service_id: "s1", option_id: null, name: "Drip edge", reason: "No eaves or rakes marked on the roof", shown: true },
+      { service_id: "s2", option_id: null, name: "Valley flashing", reason: "No valleys marked on the roof", shown: false },
+    ];
+    const base = { number: 11, subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0 };
+    expect(quoteDocument({ ...base, message: "Thanks for having us out.", left_out: leftOut }, []).notes).toBe("Thanks for having us out.\n\nNot included: Drip edge.");
+    expect(quoteDocument({ ...base, left_out: leftOut }, []).notes).toBe("Not included: Drip edge.");
+    expect(quoteDocument({ ...base, left_out: leftOut.filter((x) => !x.shown) }, []).notes).toBeNull();
+    expect(page({}, quoteDocument({ ...base, left_out: leftOut }, []))).toContain("Not included: Drip edge.");
+  });
+
   it("prints the custom fields marked for the PDF in the strip under the address", () => {
     const fields = [{ label: "Permit number", text: "P-1042" }, { label: "Unit", text: "Heat pump" }];
     const quote = quoteDocument({ number: 9, subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0, pdf_fields: fields }, [], { choice: { name: "Designer shingle", tier: "Better" } });

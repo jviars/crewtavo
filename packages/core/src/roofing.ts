@@ -75,3 +75,52 @@ export function suggestedWaste(edges: Partial<Record<RoofEdge, number>>): number
 export function isRoofDrawing(sections: readonly Pick<Section, "kind" | "pitch" | "edge">[], pitch?: string | null): boolean {
   return Boolean(pitch?.trim()) || sections.some((s) => (s.kind === "Area" && Boolean(s.pitch?.trim())) || (s.kind === "Length" && (ROOF_EDGES as readonly unknown[]).includes(s.edge)));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Before a roof estimate goes out (Roofing → Send): what its packages left off, and low slopes
+// ---------------------------------------------------------------------------------------------
+
+/** Below this rise per 12, shingles need low-slope underlayment (ice and water shield over the section). */
+export const LOW_SLOPE_RISE = 4;
+/** Below this rise per 12, shingles don't go on at all: the section is another system (modified bitumen, TPO). */
+export const SHINGLE_MIN_RISE = 2;
+
+/** A roof section too low for shingles as they are: under 4/12, or under 2/12 (`tooLow`). */
+export interface LowSlopeSection {
+  label: string;
+  pitch: string;
+  tooLow: boolean;
+}
+
+/** The roof's sections under 4/12, for a shingle roof. Sections with no pitch, or one that doesn't read, aren't judged. */
+export function lowSlopeSections(sections: readonly Pick<Section, "kind" | "label" | "pitch">[], pitch: string | null | undefined): LowSlopeSection[] {
+  return sections.flatMap((s) => {
+    if (s.kind !== "Area") return [];
+    const at = ownPitch(s as Section, pitch);
+    if (!at?.trim()) return [];
+    let rise: number;
+    try {
+      rise = pitchSlope(at) * 12;
+    } catch {
+      return [];
+    }
+    return rise < LOW_SLOPE_RISE - 1e-9 ? [{ label: s.label, pitch: rise === 0 ? "flat" : at, tooLow: rise < SHINGLE_MIN_RISE - 1e-9 }] : [];
+  });
+}
+
+const EDGE_PLURALS: Record<RoofEdge, string> = { eave: "eaves", rake: "rakes", ridge: "ridges", hip: "hips", valley: "valleys" };
+
+/**
+ * Why a package line left off a roof estimate needs someone to decide before it goes out: it
+ * couldn't be worked out (`reason`), or it came to nothing (`none`) from roof edges none of which
+ * are marked ("No eaves or rakes marked on the roof"). Null for one that's simply none on this roof,
+ * like a steep charge on a 6/12: there's nothing missing to decide about. `reads` is what its
+ * formula reads (core formulaVariables).
+ */
+export function leftOutReason(reads: ReadonlySet<string>, none: boolean, reason: string): string | null {
+  if (!none) return reason;
+  const edges = ROOF_EDGES.filter((e) => reads.has(`${e}_ft`));
+  if (!edges.length) return null;
+  const words = edges.map((e) => EDGE_PLURALS[e]);
+  return `No ${words.length < 3 ? words.join(" or ") : `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`} marked on the roof`;
+}

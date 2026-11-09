@@ -14,7 +14,7 @@ import { pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo
 import type { ClientChecklist } from "@crewtavo/core/forms";
 import { promoRuleWords } from "@crewtavo/core/promos";
 import { countsOn, lineTotal, optionBaseTotal, optionTierLabels, optionTotals, quoteTotals, toCents, type Amount, type OptionLine } from "@crewtavo/core/money";
-import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
+import { notIncludedText, SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { isPackagePicturePath, packagePictureSrc } from "@crewtavo/core/presets";
 import { isIsoDate } from "@crewtavo/core/time";
 import { logoUrl } from "@/lib/files";
@@ -232,6 +232,8 @@ export interface DocumentQuote {
   property?: Address;
   /** The quote's custom fields marked to print (core shownCustomFields, "pdf"), in the strip under the address. */
   pdf_fields?: ReadonlyArray<{ label: string; text: string }>;
+  /** What its packages left off (quotes.left_out): the ones the business shows print as "Not included" under the notes. */
+  left_out?: unknown;
 }
 
 /** "Tax exempt" in the totals, for a tax-exempt client charged no tax (with their certificate number or note). */
@@ -361,6 +363,8 @@ export function quoteDocument(quote: DocumentQuote, lines: readonly DocumentQuot
   const count = extras.options?.length ?? 0;
   const options = !approval && !choice && count >= 2 && count <= 3 ? extras.options!.map((o) => ({ ...o, chosen: o.id === shown })) : null;
   const contract = extras.contract !== undefined ? extras.contract : signedContract(approval);
+  const printed = documentLines(lines, shown);
+  const notIn = notIncludedText(quote.left_out, shown, printed.map((l) => l.name));
   return {
     kind: "estimate",
     number: quote.number,
@@ -369,7 +373,7 @@ export function quoteDocument(quote: DocumentQuote, lines: readonly DocumentQuot
     // No project name, package or roof size under the address: only, signing for an option, which one, and the business's fields marked to print.
     facts: [...(choice ? [choiceFact(choice)] : []), ...fieldFacts(quote.pdf_fields)],
     client: extras.client ?? { name: quote.client?.display_name ?? "", lines: addressLines(quote.property) },
-    lines: documentLines(lines, shown),
+    lines: printed,
     subtotal: Number(quote.subtotal ?? 0),
     discount,
     discountLabel: discount > 0 && quote.promo?.code ? `Promo code ${quote.promo.code}${quote.promo.every_visit != null ? ` · ${promoRuleWords(quote.promo.every_visit)}` : ""}` : undefined,
@@ -378,7 +382,7 @@ export function quoteDocument(quote: DocumentQuote, lines: readonly DocumentQuot
     total: Number(quote.total ?? 0),
     deposit: deposit > 0 ? deposit : null,
     repeats: quote.recurrence_rule ? scheduleText(quote.recurrence_rule, quote.active_months) : null,
-    notes: quote.message?.trim() || null,
+    notes: [quote.message?.trim(), notIn].filter(Boolean).join("\n\n") || null,
     signatures: extras.signatures ?? approvalSignatures(quote.approval, quote.approved_at),
     ...(contract ? { contract: { sections: contract.sections } } : {}),
     ...(options ? { options } : {}),

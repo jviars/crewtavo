@@ -306,7 +306,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
               <Icon name="chevronDown" size={16} />
             </summary>
             <div className={styles.materialsBody}>
-              <RoofMaterials quote={quote} editable={editable} onChanged={refresh} optionId={viewed} />
+              <RoofMaterials quote={quote} editable={editable} live={editable && state !== "exact"} onChanged={refresh} optionId={viewed} />
             </div>
           </details>
         )}

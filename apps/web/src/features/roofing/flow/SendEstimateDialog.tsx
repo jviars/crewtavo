@@ -9,9 +9,13 @@
  * An estimate that offers options goes out with the server's words for them (from the lowest option
  * to the highest, or how many there are and the lowest price), shown here as they'll be sent. From
  * the quote page the options aren't on the quote, so they're loaded first (quotes/options.ts).
+ *
+ * Before it goes: what the packages left off (GET /roofing/:id/send-check), each office only unless
+ * it's shown to the homeowner as "Not included" (saved with PUT /roofing/:id/left-out as it's sent),
+ * and the roof's sections too low for a shingle package.
  */
 import { inRangeMode, rangeSettings } from "@crewtavo/core/estimates";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -30,6 +34,11 @@ import { capital, estimateSubject, homeownerName, OPEN, rangeWords, sendWords, t
 import styles from "./flow.module.css";
 
 type Channel = "email" | "sms" | "link";
+
+/** What a package left off, and a roof section too low for shingles (services/sendCheck.ts). */
+interface LeftOutItem { service_id: string; option_id: string | null; option: string | null; name: string; reason: string; shown: boolean }
+interface SendCheck { items: LeftOutItem[]; low_slope: Array<{ label: string; pitch: string; tooLow: boolean }> }
+const itemKey = (i: Pick<LeftOutItem, "service_id" | "option_id">) => `${i.service_id}:${i.option_id ?? ""}`;
 
 /**
  * The quote being sent. Its options, lines (with their option_id), tax, discount and promo say what
@@ -97,10 +106,16 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
   const [message, setMessage] = useState(defaultMessage);
   useEffect(() => setTo(channel === "email" ? email ?? "" : channel === "sms" ? phone ?? "" : ""), [channel, email, phone]);
   const leavesRange = mode === "exact" && inRangeMode(quote);
+  const check = useQuery({ queryKey: ["send-check", quote.id], staleTime: 0, queryFn: () => api.get<SendCheck>(`/roofing/${quote.id}/send-check`) });
+  // Shown to the homeowner as "Not included": as decided last time, else office only.
+  const [shown, setShown] = useState<Set<string> | null>(null);
+  const showing = shown ?? new Set((check.data?.items ?? []).filter((i) => i.shown).map(itemKey));
 
   const send = useMutation({
     meta: { inline: true },
     mutationFn: async (): Promise<Sent> => {
+      const items = check.data?.items ?? [];
+      if (items.length) await api.put(`/roofing/${quote.id}/left-out`, { shown: items.filter((i) => showing.has(itemKey(i))).map(({ service_id, option_id }) => ({ service_id, option_id })) });
       const body = {
         channel,
         to: channel === "link" ? undefined : to.trim() || undefined,
@@ -173,6 +188,8 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
             <button type="button" aria-pressed={channel === "sms"} onClick={() => setChannel("sms")}>Text</button>
             <button type="button" aria-pressed={channel === "link"} onClick={() => setChannel("link")}>Copy link</button>
           </div>
+          {check.data && <LeftOffList check={check.data} showing={showing} onChange={(key, on) => setShown(new Set([...showing].filter((k) => k !== key).concat(on ? [key] : [])))} />}
+          {check.error && <p className="muted small" style={{ margin: 0 }}>Couldn't check what the packages left off. It can still go out.</p>}
           {leavesRange && (
             <div className="callout callout-info">
               <Icon name="info" size={20} />
@@ -211,12 +228,58 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
           <div className="form-actions">
             <FormChecks />
             <Button onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="primary" icon={channel === "link" ? "copy" : "send"} loading={send.isPending} disabled={unavailable}>
+            <Button type="submit" variant="primary" icon={channel === "link" ? "copy" : "send"} loading={send.isPending} disabled={unavailable || check.isPending}>
               {channel === "link" ? "Copy link" : channel === "email" ? "Send email" : "Send text"}
             </Button>
           </div>
         </form>
       )}
     </Dialog>
+  );
+}
+
+/**
+ * Before it goes out: each line a package left off, and why, office only unless it's shown to the
+ * homeowner as "Not included"; and the roof's sections too low for shingles as they are.
+ */
+function LeftOffList({ check, showing, onChange }: { check: SendCheck; showing: ReadonlySet<string>; onChange: (key: string, shown: boolean) => void }) {
+  const low = check.low_slope.filter((s) => !s.tooLow);
+  const tooLow = check.low_slope.filter((s) => s.tooLow);
+  const named = (list: typeof check.low_slope) => list.map((s) => `${s.label} (${s.pitch})`).join(", ");
+  return (
+    <>
+      {check.items.length > 0 && (
+        <section className={styles.leftOff} aria-labelledby="left-off-title">
+          <div>
+            <strong id="left-off-title">Left off this estimate</strong>
+            <p className={styles.note}>Office only unless you show it. To price one instead, mark the roof's edges on the map.</p>
+          </div>
+          {check.items.map((item) => {
+            const key = itemKey(item);
+            return (
+              <div key={key} className={styles.leftOffRow}>
+                <span>
+                  <strong>{item.name}</strong>{item.option ? <span className="muted"> · {item.option}</span> : null}
+                  <span className={styles.note} style={{ display: "block" }}>{item.reason}</span>
+                </span>
+                <select className="select input-sm" aria-label={`Who sees that ${item.name} is left off`} value={showing.has(key) ? "shown" : "office"} onChange={(e) => onChange(key, e.target.value === "shown")}>
+                  <option value="office">Office only</option>
+                  <option value="shown">Show as “Not included”</option>
+                </select>
+              </div>
+            );
+          })}
+        </section>
+      )}
+      {check.low_slope.length > 0 && (
+        <div className="callout callout-warning" role="note">
+          <Icon name="alert" size={20} />
+          <div className="grow">
+            {tooLow.length > 0 && <>Too low for shingles: {named(tooLow)}. Price {tooLow.length === 1 ? "it" : "them"} as another system, like modified bitumen or TPO. </>}
+            {low.length > 0 && <>Low slope: {named(low)}. Shingles there need low-slope underlayment.</>}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

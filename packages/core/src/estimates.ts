@@ -420,3 +420,29 @@ export function rangeIntroText(low: string, high: string, optionCount = 0): stri
 export function optionsIntroText(count: number, from: string): string {
   return `Thanks for the opportunity. Here's your quote, with ${count} options from ${from}. You can compare them, choose the one you want and approve it online:`;
 }
+
+/**
+ * What a roof estimate's packages left off that the business shows the homeowner as "Not included"
+ * (quotes.left_out's shown ones), by name. What it kept office only never leaves the office: the
+ * Client Hub gets these and no more.
+ */
+export function notIncluded(leftOut: unknown): Array<{ name: string; option_id: string | null; shown: true }> {
+  return (Array.isArray(leftOut) ? leftOut : []).flatMap((x: unknown) => {
+    const item = (x && typeof x === "object" ? x : {}) as { name?: unknown; option_id?: unknown; shown?: unknown };
+    return item.shown === true && typeof item.name === "string" && item.name.trim()
+      ? [{ name: item.name.trim(), option_id: typeof item.option_id === "string" ? item.option_id : null, shown: true as const }]
+      : [];
+  });
+}
+
+/**
+ * "Not included: Drip edge and Ridge cap." for the option shown (and every option's), on the
+ * estimate under its notes. One that's on the estimate after all (`onIt`, its lines' names) isn't
+ * said. Null with none.
+ */
+export function notIncludedText(leftOut: unknown, shownOptionId: string | null, onIt: readonly string[]): string | null {
+  const on = new Set(onIt.map((n) => n.trim().toLowerCase()));
+  const names = [...new Set(notIncluded(leftOut).filter((x) => x.option_id === null || x.option_id === shownOptionId).map((x) => x.name))].filter((n) => !on.has(n.toLowerCase()));
+  if (!names.length) return null;
+  return `Not included: ${names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}.`;
+}

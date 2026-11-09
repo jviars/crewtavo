@@ -236,7 +236,7 @@ export async function sendQuote(s: SalesScope, id: string, body: SendBody) {
     await s.db
       .from("quotes")
       .select(
-        "id, number, status, total, tax_rate, discount_amount, client_id, range_low, range_high, priced_on_site_at, exact_sent_at, recurrence_rule, client:clients(display_name, email, phone), promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)",
+        "id, number, status, total, tax_rate, discount_amount, client_id, range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at, recurrence_rule, client:clients(display_name, email, phone), promo:promo_codes(kind, value), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), options:quote_options!quote_options_quote_fkey(id)",
       )
       .eq("id", id)
       .eq("company_id", s.companyId)
@@ -255,6 +255,11 @@ export async function sendQuote(s: SalesScope, id: string, body: SendBody) {
   // Sent, or the office took the link to share themselves: the quote is now with the client.
   if (result.sent || body.channel === "link") {
     await s.db.from("quotes").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", id).in("status", ["draft", "changes_requested"]);
+    // The exact price after their yes to the range (or one set on site): the follow-up that yes stopped starts again.
+    if (quote.status === "sent" && !inRangeMode(quote) && (quote.range_accepted_at || quote.priced_on_site_at)) {
+      const { error } = await s.db.rpc("quote_exact_sent", { p_quote: id });
+      if (error) console.error("Couldn't start the follow-up for an exact price sent", error.message);
+    }
   }
   return result;
 }

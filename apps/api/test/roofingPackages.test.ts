@@ -1125,3 +1125,55 @@ describe("automations about an estimate", () => {
     expect((await facts())?.line_items).toEqual(["Dumpster", "Gutter guards"]);
   });
 });
+
+describe("before a roof estimate goes out", () => {
+  // The roof drawn without its edges, with a porch too low for shingles; the estimate has the roof and the tear-off.
+  const unmarked = (lines: Row[] = []) => {
+    roofer({ status: "sent", lines: [{ id: "l1", service_id: ROOF, name: "Architectural shingle roof" }, { id: "l2", service_id: TEAR, name: "Tear-off and disposal" }, ...lines] });
+    Object.assign(quote(), { roof_package_id: PKG, left_out: [] });
+    rows("measurements")[1]!.sections = [
+      { kind: "Area", label: "Main roof", value: 1800, pitch: "6/12" },
+      { kind: "Area", label: "Porch", value: 200, pitch: "1.5/12" },
+    ];
+  };
+
+  it("asks about what may be missing, and says which sections are too low for shingles", async () => {
+    unmarked();
+    const res = await send(`/roofing/${QUOTE}/send-check`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      // Drip edge came to nothing because no edge is marked; the steep charge is simply none on a 6/12 roof.
+      items: [{ service_id: EDGE, option_id: null, option: null, name: "Drip edge", reason: "No eaves or rakes marked on the roof", shown: false }],
+      low_slope: [{ label: "Porch", pitch: "1.5/12", tooLow: true }],
+    });
+  });
+
+  it("doesn't ask about a line that's on the estimate anyway", async () => {
+    unmarked([{ id: "l3", service_id: EDGE, name: "Drip edge" }]);
+    expect((await (await send(`/roofing/${QUOTE}/send-check`)).json()).items).toEqual([]);
+  });
+
+  it("keeps what the homeowner sees as not included, with a note saying who decided, once", async () => {
+    unmarked();
+    const res = await send(`/roofing/${QUOTE}/left-out`, { shown: [{ service_id: EDGE, option_id: null }] }, "PUT");
+    expect(res.status).toBe(200);
+    expect(quote().left_out).toEqual([{ service_id: EDGE, option_id: null, name: "Drip edge", reason: "No eaves or rakes marked on the roof", shown: true }]);
+    expect(rows("messages")).toEqual([
+      expect.objectContaining({ channel: "note", direction: "internal", related_id: QUOTE, sent_by: "viewer", body: "Left off this estimate:\n• Drip edge: No eaves or rakes marked on the roof. Shown to the homeowner as not included." }),
+    ]);
+    expect((await (await send(`/roofing/${QUOTE}/send-check`)).json()).items[0].shown).toBe(true);
+    // The same choice again changes nothing, and says nothing more.
+    await send(`/roofing/${QUOTE}/left-out`, { shown: [{ service_id: EDGE, option_id: null }] }, "PUT");
+    expect(rows("messages")).toHaveLength(1);
+    // Office only from now on.
+    await send(`/roofing/${QUOTE}/left-out`, { shown: [] }, "PUT");
+    expect((quote().left_out as Row[])[0]!.shown).toBe(false);
+    expect(rows("messages").at(-1)!.body).toContain("Office only.");
+  });
+
+  it("is for the people who sell", async () => {
+    unmarked();
+    rows("memberships")[0]!.role = "field_crew";
+    expect((await send(`/roofing/${QUOTE}/send-check`)).status).toBe(403);
+  });
+});

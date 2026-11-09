@@ -30,9 +30,14 @@ import { useMaterialReprice, type PricedLine, type PricedQuote } from "./estimat
 /** A material on a line as shown: what to order, at the price the estimate has (or the last one). */
 interface Row extends PricedMaterial { link: ServiceMaterial | null }
 
-export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
+export function RoofMaterials({ quote, editable, live = editable, onChanged, optionId = null }: {
   quote: PricedQuote;
   editable: boolean;
+  /**
+   * Priced again by itself as it changes, at today's prices: until the homeowner has a firm price.
+   * After that its materials keep the prices it was quoted at, and "Update prices" is the way to today's.
+   */
+  live?: boolean;
   onChanged: () => void;
   /** The option looked at, on an estimate with options: its lines and the shared ones show. */
   optionId?: string | null;
@@ -43,7 +48,7 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
   const lines = quote.lines.filter((l) => l.service_id && (l.option_id === null || l.option_id === optionId));
   // Prices the lines again by itself whenever they change, and onChanged refreshes the page (not
   // while − and + are still saving: the estimate's editor refreshes it once they have).
-  const { supplier, connected, linksOf, serviceOf, refreshMaterials, price } = useMaterialReprice(quote, editable, onChanged);
+  const { supplier, connected, linksOf, serviceOf, refreshMaterials, price } = useMaterialReprice(quote, live, onChanged);
 
   const [picking, setPicking] = useState<PricedLine | null>(null);
   const [editing, setEditing] = useState<{ link: ServiceMaterial; unit: string } | null>(null);
@@ -79,10 +84,10 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
 
   // An estimate with options names its options Good, Better and Best, not its lines.
   const choices = optionId ? new Map<string, string>() : optionLabels(quote.lines);
-  /** What's on a line: from its materials as they are now while it can change, or as it was priced once it can't. */
+  /** What's on a line: from its materials as they are now while it can change, or as it was priced once it can't (or the price is firm). */
   const rowsOf = (line: PricedLine): Row[] => {
     const priced = line.materials?.items ?? [];
-    if (!editable) return priced.map((item) => ({ ...item, link: null }));
+    if (!live) return priced.map((item) => ({ ...item, link: null }));
     return linksOf(line.service_id).map((link) => {
       const quantity = orderQuantity(line.quantity, link.per_unit);
       const was = priced.find((p) => p.item_number === link.item_number && p.uom === link.uom);
@@ -120,6 +125,7 @@ export function RoofMaterials({ quote, editable, onChanged, optionId = null }: {
           <span className="muted small">
             {where ?? "ABC Supply isn't connected, so these are the last prices"}
             {price.isPending ? " · getting today's prices…" : pricedAt ? ` · priced ${timeAgo(pricedAt)}` : ""}
+            {editable && !live && anyPriced && !price.isPending ? " · kept at the prices it was quoted at" : ""}
             {editable && connected && anyLinks && !price.isPending && <> · <button type="button" className="link-btn small" onClick={() => price.mutate()}>Update prices</button></>}
           </span>
         </span>

@@ -1,7 +1,8 @@
 /**
  * Roofing: the standard roofing services and roof packages for a business that doesn't have them
  * yet, a package's lines on a roof estimate, the price range the homeowner is sent first (and their
- * yes, when they give it on the phone or in person), the exact price set on site, and the packages' materials at today's ABC Supply prices. The roof itself is a
+ * yes, when they give it on the phone or in person), the exact price set on site, what a package left off (office only, or
+ * "Not included" for the homeowner) and low slopes before it goes out, and the packages' materials at today's ABC Supply prices. The roof itself is a
  * measurement; its estimate is a quote (services/roofPackages.ts). An estimate that offers two or
  * three options gets them from routes/packages.ts.
  */
@@ -17,6 +18,7 @@ import { postedId } from "../services/contracts";
 import { addMissingServices } from "../services/presetServices";
 import { applyPackage, markRangeAccepted, pricePackages, sendRange, setSitePrice, setupRoofing } from "../services/roofPackages";
 import { sendSchema, type SalesScope } from "../services/sales";
+import { saveLeftOut, sendCheck } from "../services/sendCheck";
 
 export const roofing = new Hono<AppEnv>();
 
@@ -56,6 +58,17 @@ roofing.post("/roofing/:id/package", requireUser, requireCompany(SALES, "sales")
   const id = param(c, "id");
   const body = await readJson(c, z.object({ package_id: uuid, replace: z.boolean().optional() }));
   return c.json(await applyPackage(c.var.db, c.var.companyId, id, body.package_id, body.replace ?? false));
+});
+
+/** Before it goes out: what its packages left off (and what was decided), and sections too low for shingles. */
+roofing.get("/roofing/:id/send-check", requireUser, requireCompany(SALES, "sales"), async (c) => {
+  return c.json(await sendCheck(c.var.db, c.var.companyId, param(c, "id")));
+});
+
+/** What the homeowner sees as "Not included" (the rest of what was left off is office only). */
+roofing.put("/roofing/:id/left-out", requireUser, requireCompany(SALES, "sales"), async (c) => {
+  const body = await readJson(c, z.object({ shown: z.array(z.object({ service_id: uuid, option_id: uuid.nullable() })).max(200) }));
+  return c.json({ items: await saveLeftOut(c.var.db, c.var.companyId, c.var.userId, param(c, "id"), body.shown) });
 });
 
 /** Send the homeowner the estimate as a price range, by email or text (or just make the link). */

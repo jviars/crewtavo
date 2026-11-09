@@ -8,6 +8,8 @@ import {
   marginForMarkup,
   marginPct,
   markupForMargin,
+  notIncluded,
+  notIncludedText,
   packageFigures,
   optionsIntroText,
   optionsRange,
@@ -418,5 +420,32 @@ describe("rangeIntroText", () => {
 describe("optionsIntroText", () => {
   it("says how many options there are and the lowest price", () => {
     expect(optionsIntroText(3, "$16,800.00")).toBe("Thanks for the opportunity. Here's your quote, with 3 options from $16,800.00. You can compare them, choose the one you want and approve it online:");
+  });
+});
+
+describe("what an estimate says isn't included", () => {
+  const leftOut = [
+    { service_id: "s1", option_id: null, name: "Drip edge", reason: "No eaves or rakes marked on the roof", shown: true },
+    { service_id: "s2", option_id: null, name: "Valley flashing", reason: "No valleys marked on the roof", shown: false },
+    { service_id: "s3", option_id: "better", name: "Ridge cap", reason: "No ridges or hips marked on the roof", shown: true },
+    { service_id: "s4", option_id: "best", name: "Snow guards", reason: "None", shown: true },
+  ];
+
+  it("gives the homeowner only what the business shows, by name", () => {
+    expect(notIncluded(leftOut)).toEqual([
+      { name: "Drip edge", option_id: null, shown: true },
+      { name: "Ridge cap", option_id: "better", shown: true },
+      { name: "Snow guards", option_id: "best", shown: true },
+    ]);
+    expect(notIncluded(null)).toEqual([]);
+    expect(notIncluded([{ name: 3, shown: true }, "x", { name: "  ", shown: true }])).toEqual([]);
+  });
+
+  it("says it for the option shown, and not for what's on the estimate after all", () => {
+    expect(notIncludedText(leftOut, "better", ["Architectural shingle"])).toBe("Not included: Drip edge and Ridge cap.");
+    expect(notIncludedText(leftOut, null, [])).toBe("Not included: Drip edge.");
+    expect(notIncludedText(leftOut, "better", ["drip edge "])).toBe("Not included: Ridge cap.");
+    expect(notIncludedText([...leftOut, { name: "Starter", option_id: null, shown: true }, { name: "Gutters", option_id: null, shown: true }], null, [])).toBe("Not included: Drip edge, Starter and Gutters.");
+    expect(notIncludedText(leftOut.filter((x) => !x.shown), null, [])).toBeNull();
   });
 });

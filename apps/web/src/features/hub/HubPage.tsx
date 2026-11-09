@@ -11,6 +11,7 @@
  * Quotes and invoices print as the business's estimate template. Add ?print=1 to print or save a PDF.
  */
 import { greetingName } from "@crewtavo/core/automations";
+import { notIncludedText } from "@crewtavo/core/estimates";
 import { lineTotal } from "@crewtavo/core/money";
 import { promoRuleWords } from "@crewtavo/core/promos";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -494,8 +495,9 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
   const website = company.website?.trim() || null;
   const address = (company.address ?? []).join(", ");
   const roofType = options.length ? "From the lowest option to the highest" : roofJob ? packageLabel(q.package?.name) : (q.package?.name.trim() ?? "");
-  // What's included is the option shown first's (with the shared lines).
+  // What's included is the option shown first's (with the shared lines), and what the business says isn't.
   const shown = options.find((o) => o.id === q.option_id) ?? null;
+  const notIn = notIncludedText(q.left_out, q.option_id ?? null, range.included);
   const [previewNote, setPreviewNote] = useState(false);
   const [leaning, setLeaning] = useState<string | null>(null);
   const thanks = useRef<HTMLDivElement>(null);
@@ -625,6 +627,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                         <li key={item}><span className={styles.tick}><Icon name="check" size={14} strokeWidth={2.25} /></span><span>{item}</span></li>
                       ))}
                     </ul>
+                    {notIn && <p className={styles.sub}>{notIn}</p>}
                   </section>
                 )}
                 {range.maybe.length > 0 && (

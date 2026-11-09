@@ -76,6 +76,8 @@ export interface EstimateQuote {
   /** The roof couldn't be measured from the air, so the salesperson measures it on site: when, and why. */
   measure_on_site_at: string | null;
   measure_on_site_reason: string | null;
+  /** What its packages left off when it went out, and which the homeowner sees as "Not included" (services/sendCheck.ts). */
+  left_out: unknown;
   /** The price range the homeowner was sent, and the lines it was made from. */
   range_low: number | null;
   range_high: number | null;
@@ -122,7 +124,7 @@ export interface QuickAddService extends EstimateService {
 
 export const ESTIMATE_LINE_FIELDS = "id, option_id, service_id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, formula, sort, materials, material_cost";
 
-export const ESTIMATE_QUOTE_FIELDS = `id, number, title, status, subtotal, discount_amount, tax_rate, tax_amount, total, promo_code_id, promo:promo_codes(code, kind, value), roof_package_id, option_id, section_ids, template_id, salesperson_id, measure_on_site_at, measure_on_site_reason, range_low, range_high, range_sent_at, range_accepted_at, range_lines, priced_on_site_at, exact_sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(${ESTIMATE_LINE_FIELDS}), ${QUOTE_OPTIONS_EMBED}`;
+export const ESTIMATE_QUOTE_FIELDS = `id, number, title, status, subtotal, discount_amount, tax_rate, tax_amount, total, promo_code_id, promo:promo_codes(code, kind, value), roof_package_id, option_id, section_ids, template_id, salesperson_id, measure_on_site_at, measure_on_site_reason, left_out, range_low, range_high, range_sent_at, range_accepted_at, range_lines, priced_on_site_at, exact_sent_at, approved_at, approval, client:clients(id, display_name, email, phone), property:properties(id, line1, city, region, postal_code), lines:quote_line_items(${ESTIMATE_LINE_FIELDS}), ${QUOTE_OPTIONS_EMBED}`;
 
 export const ESTIMATE_SERVICE_FIELDS = "id, name, unit, unit_price, unit_cost, labor_cost, taxable, formula, formula_target, category, picture";
 

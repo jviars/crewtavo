@@ -154,6 +154,8 @@ export interface QuoteView {
     status: string;
     title: string;
     message: string | null;
+    /** What the business shows as "Not included" (core notIncluded); left out by older servers. */
+    left_out?: Array<{ name: string; option_id: string | null; shown: true }>;
     change_order_for?: string | null;
     /** Null while the quote is out as a price range: the exact price isn't sent. */
     subtotal?: number | null;

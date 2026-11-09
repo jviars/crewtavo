@@ -30,7 +30,7 @@ function greeting(timeZone: string) {
   return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
-const ATTENTION_ICON: Record<string, IconName> = { quote: "quote", visit: "cloud", invoice: "invoice", equipment: "truck", autopay_failed: "card", autopay_approval: "card", visit_change: "calendar" };
+const ATTENTION_ICON: Record<string, IconName> = { quote: "quote", visit: "cloud", invoice: "invoice", equipment: "truck", autopay_failed: "card", autopay_approval: "card", visit_change: "calendar", request: "requests", roof: "roofing" };
 
 /**
  * Each kind's tint in Needs attention: money that didn't come in (a late invoice, an automatic charge
@@ -40,6 +40,9 @@ const ATTENTION_TINT: Record<string, { background: string; color: string }> = {
   invoice: { background: "var(--danger-tint)", color: "var(--danger)" },
   autopay_failed: { background: "var(--danger-tint)", color: "var(--danger)" },
   equipment: { background: "var(--warning-tint)", color: "var(--warning)" },
+  // A lead nobody has picked up, and a homeowner waiting on the site visit they said yes to.
+  request: { background: "var(--warning-tint)", color: "var(--warning)" },
+  roof: { background: "var(--warning-tint)", color: "var(--warning)" },
   autopay_approval: { background: "var(--warning-tint)", color: "var(--warning)" },
 };
 const ATTENTION_PLAIN = { background: "var(--fill-2)", color: "var(--text-2)" };

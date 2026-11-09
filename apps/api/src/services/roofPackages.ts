@@ -139,8 +139,8 @@ export interface PackageLine {
 
 export interface PackageLines {
   lines: PackageLine[];
-  /** Lines left off, and why: nothing to price on this job, or a formula that can't be worked out. */
-  skipped: Array<{ name: string; reason: string }>;
+  /** Lines left off, and why: nothing to price on this job (`none`), or a formula that can't be worked out. */
+  skipped: Array<{ service_id: string; name: string; reason: string; none: boolean }>;
   /** The main service's own formula couldn't be worked out (on a roof, usually: no pitch yet). */
   roofProblem: string | null;
 }
@@ -179,11 +179,11 @@ export function packageLines(
     } catch (error) {
       if (!(error instanceof FormulaError)) throw error;
       if (isMain) roofProblem = error.message;
-      skipped.push({ name: service.name, reason: error.message });
+      skipped.push({ service_id: service.id, name: service.name, reason: error.message, none: false });
       continue;
     }
     if (!(value > 0)) {
-      skipped.push({ name: service.name, reason: roofing ? "None on this roof" : "None on this job" });
+      skipped.push({ service_id: service.id, name: service.name, reason: roofing ? "None on this roof" : "None on this job", none: true });
       continue;
     }
     lines.push(service.formula_target === "unit_price" ? { ...base, unit_price: round2(value), quantity: 1, sort: lines.length } : { ...base, quantity: value, sort: lines.length });
@@ -408,7 +408,7 @@ export async function applyPackage(db: Db, companyId: string, quoteId: string, p
   if (!(await putQuotePackage(db, quoteId, pkg.id, lines, replace))) return { applied: false as const };
   await saveFollowedPrices(db, companyId, [priced!]);
   if (priced!.measured && measurement) await showMeasurement(db, companyId, quoteId, measurement.id);
-  return { applied: true as const, lines: built.lines.length, skipped: built.skipped };
+  return { applied: true as const, lines: built.lines.length, skipped: built.skipped.map(({ name, reason }) => ({ name, reason })) };
 }
 
 /**

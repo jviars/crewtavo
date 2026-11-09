@@ -43,6 +43,7 @@ import { RangeBar } from "../estimate/RangeBar";
 import { counts, estimateFigures, firstName, isPendingLine, LOW_MARGIN, money, packageServices, rangePosition } from "../estimate/rows";
 import { isEditableQuote, type EstimateLine, type EstimateQuote } from "../estimate/types";
 import { useMaterialReprice } from "../estimate/useMaterialReprice";
+import { rangeState } from "../flow/model";
 import { useRoofPackages } from "../packages";
 import { isSignedQuote, signContractInput, useCanSell, useSetSitePrice, useVisitDetails, visitPath } from "./data";
 import { LineEditor } from "./LineEditor";
@@ -184,8 +185,8 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
   const editor = useEstimateEditor({ quote, measurementId: takeoff?.id ?? null, optionId: viewed, own: view?.own });
   const quickAdds = usePackageQuickAdds(tab ? tab.option.package_id : quote.roof_package_id);
   const services = useActiveServices();
-  // Costs follow the quantities, so the margin is at today's ABC Supply prices.
-  useMaterialReprice(quote, true);
+  // Costs follow the quantities, so the margin is at today's ABC Supply prices, until the price is set (then they're kept).
+  useMaterialReprice(quote, rangeState(quote) !== "exact");
   const details = useVisitDetails(quote.id);
   const fields = useCustomFields("quote");
   const notes = useQuoteNotes(quote.id);
