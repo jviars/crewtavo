@@ -1,14 +1,18 @@
 /**
  * The address box on the measuring map, and the Address field of a calendar entry (VisitDialog). As
  * someone types it suggests the company's own clients' properties first, then places near the map
- * or the shop (OpenStreetMap, through GET /api/places/suggest). Enter on a suggestion picks it. On
- * the map, Enter with none picked looks the whole address up exactly (the Census geocoder for US
- * addresses), which finds the rural house numbers OpenStreetMap lacks; in a form it's just a field.
+ * or the shop: from Google when the company turned that on in Settings > Maps (googlePlaces.ts),
+ * else from OpenStreetMap (through GET /api/places/suggest), which it also falls back to when Google
+ * isn't answering. Enter on a suggestion picks it. On the map, Enter with none picked looks the
+ * whole address up exactly (the Census geocoder for US addresses), which finds the rural house
+ * numbers OpenStreetMap lacks; in a form it's just a field.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
+import { googlePlace, googlePlacesKey, googleSuggest } from "./googlePlaces";
 
 export interface ClientSuggestion { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null }
 export interface PlaceSuggestion { label: string; detail: string | null; lat: number; lng: number; country: string | null; kind: "address" | "street" | "place" }
@@ -41,6 +45,13 @@ export function AddressSearch({
   const [term, setTerm] = useState("");
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(-1);
+  const googleKey = googlePlacesKey(useSession().company.settings);
+  // One Google session from the first suggestion to the place picked.
+  const googleSession = useRef<string | null>(null);
+  const sessionToken = () => (googleSession.current ??= crypto.randomUUID());
+  const [locating, setLocating] = useState(false);
+  // Once Google fails, OpenStreetMap suggests for the rest of this visit instead of Google failing each time.
+  const [googleFailed, setGoogleFailed] = useState(false);
 
   // Ask once typing pauses, not on every key.
   useEffect(() => {
@@ -48,9 +59,24 @@ export function AddressSearch({
     return () => clearTimeout(t);
   }, [text]);
   const area = near ? `${near.lat.toFixed(2)},${near.lng.toFixed(2)}` : "";
+  const google = useQuery({
+    queryKey: ["google-place-suggest", term.toLowerCase(), area],
+    queryFn: () => googleSuggest(googleKey!, term, near, sessionToken()),
+    enabled: Boolean(googleKey) && !googleFailed && open && term.length >= 3,
+    staleTime: 10 * 60_000,
+    placeholderData: keepPreviousData,
+    retry: false,
+    meta: { silent: true },
+  });
+  useEffect(() => {
+    if (google.isError) setGoogleFailed(true);
+  }, [google.isError]);
+  // OpenStreetMap's places, unless Google's are coming (the clients' own come either way).
+  const googleDown = Boolean(googleKey) && (googleFailed || google.isError);
+  const freePlaces = !googleKey || googleDown;
   const suggest = useQuery({
-    queryKey: ["place-suggest", term.toLowerCase(), area],
-    queryFn: () => api.get<Suggestions>(`/places/suggest?${new URLSearchParams({ q: term, ...(near ? { lat: String(near.lat), lng: String(near.lng) } : {}) })}`),
+    queryKey: ["place-suggest", term.toLowerCase(), area, freePlaces],
+    queryFn: () => api.get<Suggestions>(`/places/suggest?${new URLSearchParams({ q: term, ...(near ? { lat: String(near.lat), lng: String(near.lng) } : {}), ...(freePlaces ? {} : { places: "none" }) })}`),
     enabled: open && term.length >= 3,
     staleTime: 10 * 60_000,
     placeholderData: keepPreviousData,
@@ -67,7 +93,21 @@ export function AddressSearch({
     onEdit(label);
     pick();
   };
+  /** A place Google suggested: where it is, when the map needs to go there; else just its words. */
+  const pickGoogle = (placeId: string, place: Omit<PlaceSuggestion, "lat" | "lng" | "country">) => {
+    const session = sessionToken();
+    googleSession.current = null;
+    const label = [place.label, place.detail].filter(Boolean).join(", ");
+    if (!onPickPlace) return;
+    setLocating(true);
+    googlePlace(googleKey!, placeId, session)
+      .then((at) => onPickPlace({ ...place, ...at }))
+      // Google's lookup failing: look the address up the other way.
+      .catch(() => onSubmit?.(label))
+      .finally(() => setLocating(false));
+  };
   const data = term.length >= 3 ? suggest.data : undefined;
+  const fromGoogle = term.length >= 3 && googleKey && !googleDown ? google.data ?? [] : [];
   const items: Item[] = [
     ...(data?.clients ?? []).map((s) => ({
       key: `c-${s.property_id}`,
@@ -85,8 +125,17 @@ export function AddressSearch({
       sub: s.detail,
       pick: () => choose(() => onPickPlace?.(s), [s.label, s.detail].filter(Boolean).join(", ")),
     })),
+    ...fromGoogle.map((s) => ({
+      key: `g-${s.placeId}`,
+      group: "From Google Maps",
+      icon: (s.kind === "place" ? "map" : "pin") as IconName,
+      title: s.label,
+      sub: s.detail,
+      pick: () => choose(() => pickGoogle(s.placeId, { label: s.label, detail: s.detail, kind: s.kind }), [s.label, s.detail].filter(Boolean).join(", ")),
+    })),
   ];
   const showList = open && text.trim().length >= 3;
+  const fetching = suggest.isFetching || (Boolean(googleKey) && google.isFetching);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown" && items.length) {
@@ -126,7 +175,7 @@ export function AddressSearch({
   let lastGroup = "";
   const field = (
     <div className="input-group address-search" ref={box}>
-      <span className="addon">{busy || (suggest.isFetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={14} />}</span>
+      <span className="addon">{busy || locating || (fetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={14} />}</span>
       <input
         name="address"
         className="input"
@@ -179,15 +228,16 @@ export function AddressSearch({
             );
           })}
           <div className="address-suggest-foot muted small">
-            {term.length < 3 || (suggest.isFetching && !items.length)
+            {term.length < 3 || (fetching && !items.length)
               ? "Looking…"
-              : suggest.isError
-                ? `Suggestions aren't available right now.${enter}`
-                : !items.length
-                  ? onSubmit ? "No suggestions yet. Type the full address and press Enter to look it up exactly." : "No suggestions yet. Type the full address."
-                  : data?.places_unavailable
-                    ? `Place suggestions aren't available right now.${enter}`
-                    : onSubmit ? "Not listed? Type the full address and press Enter." : "Not listed? Type the full address."}
+              : (googleDown ? "Google's suggestions aren't working right now. " : "") +
+                (suggest.isError && !fromGoogle.length
+                  ? `Suggestions aren't available right now.${enter}`
+                  : !items.length
+                    ? onSubmit ? "No suggestions yet. Type the full address and press Enter to look it up exactly." : "No suggestions yet. Type the full address."
+                    : freePlaces && data?.places_unavailable
+                      ? `Place suggestions aren't available right now.${enter}`
+                      : onSubmit ? "Not listed? Type the full address and press Enter." : "Not listed? Type the full address.")}
           </div>
         </div>
       )}

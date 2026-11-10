@@ -3,9 +3,10 @@
  * how we tell "this spot has no picture" from "the picture server is down". The free list itself
  * (NAIP and the states) lives in @crewtavo/core/imagery.
  *
- * Auto (the default) isn't imagery of its own: it picks the sharpest free source for wherever the
- * map is (autoOrder), and moves down the list when one isn't answering. The source it picked is
- * always named and credited, on the map and on saved drawings.
+ * Auto (the default) isn't imagery of its own: it picks the sharpest source for wherever the map is
+ * (autoOrder): Google satellite when the company added its own Google key, else the sharpest free
+ * one. It moves down the list when one isn't answering. The source it picked is always named and
+ * credited, on the map and on saved drawings.
  *
  * Terrain, slope and contours come from the USGS 3D Elevation Program (3DEP, lidar, about 1 m in
  * most of the US, public domain), drawn by USGS on request: Terrain is a map type, slope and
@@ -90,24 +91,35 @@ export function imageryCredit(id: ImageryId): string {
   }
 }
 
-/**
- * Where Auto looks, best first. Zoomed out, the USGS basemap (fast, nationwide). Zoomed in: the
- * state's own imagery, NAIP, the same NAIP photos from USGS's server (Microsoft's copy is a preview
- * service with no uptime promise), the USGS basemap, then, outside the US, Esri when there's a key,
- * and the street map, which loads anywhere. Google is never picked for you: its terms don't allow
- * keeping pictures of it with a drawing.
- */
-export function autoOrder(lng: number, lat: number, zoom: number, keys: MapKeys): ImageryId[] {
-  if (zoom < 11) return ["usgs", "street"];
-  return [...stateImageryAt(lng, lat).map(stateId), "naip", "usgs-naip", "usgs", ...(keys.esri_key ? (["esri"] as const) : []), "street"];
+/** The keys Measure can use. `google_own`: the Google key is the company's own, from Settings > Maps. */
+export interface UsableKeys extends MapKeys {
+  google_own?: boolean;
 }
+
+/**
+ * Where Auto looks, best first. With the company's own Google key, Google satellite at every zoom
+ * (the picture saved with a drawing is still taken on free imagery: Google's terms don't allow
+ * keeping one). Then, zoomed out, the USGS basemap (fast, nationwide). Zoomed in: the state's own
+ * imagery, NAIP, the same NAIP photos from USGS's server (Microsoft's copy is a preview service with
+ * no uptime promise), the USGS basemap, then, outside the US, Esri when there's a key, and the street
+ * map, which loads anywhere. A Google key the deployment set for every company is a choice only:
+ * Auto doesn't spend it.
+ */
+export function autoOrder(lng: number, lat: number, zoom: number, keys: UsableKeys): ImageryId[] {
+  const google: ImageryId[] = googleFirst(keys) ? ["google"] : [];
+  if (zoom < 11) return [...google, "usgs", "street"];
+  return [...google, ...stateImageryAt(lng, lat).map(stateId), "naip", "usgs-naip", "usgs", ...(keys.esri_key ? (["esri"] as const) : []), "street"];
+}
+
+/** Auto starts on Google: the company added its own key. */
+export const googleFirst = (keys: UsableKeys) => Boolean(keys.google_key && keys.google_own);
 
 /**
  * The first source in autoOrder that has a picture here, skipping ones that aren't answering.
  * `probe` answers "ok", "empty" or "down" (the page caches it).
  */
 export async function resolveAuto(
-  lng: number, lat: number, zoom: number, keys: MapKeys,
+  lng: number, lat: number, zoom: number, keys: UsableKeys,
   probe: (id: ImageryId) => Promise<"ok" | "empty" | "down">,
   skip: (id: ImageryId) => boolean = () => false,
 ): Promise<{ id: ImageryId; passed: Array<{ id: ImageryId; why: "empty" | "down" }> }> {
@@ -118,7 +130,7 @@ export async function resolveAuto(
       passed.push({ id, why: "down" });
       continue;
     }
-    // Zoomed out there's nothing to check: the USGS basemap covers the country.
+    // Zoomed out there's nothing to check: the USGS basemap covers the country, and Google the world.
     const result = zoom < 11 ? "ok" : await probe(id);
     if (result === "ok") return { id, passed };
     passed.push({ id, why: result });
@@ -127,9 +139,10 @@ export async function resolveAuto(
 }
 
 /** Keys from Settings > Maps, with the deployment's Google key as a fallback. */
-export function mapKeys(settings: Record<string, unknown>, deploymentGoogleKey: string | null): MapKeys {
+export function mapKeys(settings: Record<string, unknown>, deploymentGoogleKey: string | null): UsableKeys {
   const maps = (settings.maps ?? {}) as MapKeys;
-  return { esri_key: maps.esri_key?.trim() || null, google_key: maps.google_key?.trim() || deploymentGoogleKey || null };
+  const own = maps.google_key?.trim() || null;
+  return { esri_key: maps.esri_key?.trim() || null, google_key: own || deploymentGoogleKey || null, google_own: Boolean(own) };
 }
 
 export const isImageryId = (value: unknown): value is ImageryId =>

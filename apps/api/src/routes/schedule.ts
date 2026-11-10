@@ -63,10 +63,12 @@ const contains = (text: string) => `%${text.replace(/[\\%_]/g, (ch) => `\\${ch}`
  * Suggestions while someone types an address on the measuring map: the company's own clients'
  * properties first (by street or client name, as far as their role can see them), then places near
  * the map from OpenStreetMap (Photon). Place suggestions failing never fails the clients' list.
+ * `places=none` leaves the places out: the browser is asking Google for them (Settings > Maps).
  */
 schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
   const q = (c.req.query("q") ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
   if (q.length < 3) return c.json({ clients: [], places: [] });
+  const withPlaces = c.req.query("places") !== "none";
   const lat = Number(c.req.query("lat"));
   const lng = Number(c.req.query("lng"));
   const near = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : undefined;
@@ -76,6 +78,7 @@ schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
     db.from("properties").select(`${fields}, client:clients(id, display_name)`).eq("company_id", companyId).ilike("line1", contains(q)).limit(6),
     db.from("clients").select(`id, display_name, properties(${fields})`).eq("company_id", companyId).ilike("display_name", contains(q)).limit(4),
     (async () => {
+      if (!withPlaces) return [];
       if (!(await allow(c.env, `place-suggest:${companyId}`, 2000, 60 * 60))) return null;
       return suggestPlaces(q, near).catch(() => null);
     })(),

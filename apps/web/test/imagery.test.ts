@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { autoOrder, imageryCredit, openingImagery, overlaySource, resolveAuto, setMyDefault, SLOPE_CLASSES, type ImageryId } from "../src/features/measure/imagery";
+import { autoOrder, imageryCredit, mapKeys, openingImagery, overlaySource, resolveAuto, setMyDefault, SLOPE_CLASSES, type ImageryId } from "../src/features/measure/imagery";
 
 const ROCKY_MOUNT = [-79.8717, 37.0547] as const;
 const LONDON = [-0.13, 51.5] as const;
@@ -7,10 +7,28 @@ const LONDON = [-0.13, 51.5] as const;
 describe("Auto imagery", () => {
   it("tries the state's own imagery, then NAIP, then USGS, and the street map last", () => {
     expect(autoOrder(...ROCKY_MOUNT, 19, {})).toEqual(["state:VA", "naip", "usgs-naip", "usgs", "street"]);
-    // Esri only with a key, and never Google.
+    // Esri only with a key, and Google only when the key is the company's own.
     expect(autoOrder(...LONDON, 19, { esri_key: "AAPTkey", google_key: "AIza" })).toEqual(["naip", "usgs-naip", "usgs", "esri", "street"]);
     // Zoomed out: the USGS basemap, without asking anyone.
     expect(autoOrder(...ROCKY_MOUNT, 6, {})).toEqual(["usgs", "street"]);
+  });
+
+  it("starts on Google satellite when the company added its own Google key", async () => {
+    const own = mapKeys({ maps: { google_key: " AIzaOwn " } }, "AIzaDeployment");
+    expect(own).toEqual({ esri_key: null, google_key: "AIzaOwn", google_own: true });
+    expect(autoOrder(...ROCKY_MOUNT, 19, own)).toEqual(["google", "state:VA", "naip", "usgs-naip", "usgs", "street"]);
+    expect(autoOrder(...ROCKY_MOUNT, 6, own)).toEqual(["google", "usgs", "street"]);
+    // Zoomed out, Google covers the world: nothing to ask.
+    const probe = vi.fn(async () => "ok" as const);
+    expect(await resolveAuto(...LONDON, 6, own, probe)).toEqual({ id: "google", passed: [] });
+    expect(probe).not.toHaveBeenCalled();
+    // Google not answering: the free imagery, as before.
+    expect((await resolveAuto(...ROCKY_MOUNT, 19, own, async () => "ok", (id) => id === "google")).id).toBe("state:VA");
+
+    // The deployment's key is a choice on the Imagery button, not something Auto spends.
+    const deployment = mapKeys({}, "AIzaDeployment");
+    expect(deployment).toEqual({ esri_key: null, google_key: "AIzaDeployment", google_own: false });
+    expect(autoOrder(...ROCKY_MOUNT, 19, deployment)[0]).toBe("state:VA");
   });
 
   it("takes the first source with a picture here, and skips ones that aren't answering", async () => {
