@@ -255,18 +255,24 @@ Categories, pages, revisions, search and templates, built into our app:
    address (US or worldwide). As they type, the box suggests the company's own clients'
    properties first (picking one ties the drawing to that client), then places near the map from
    OpenStreetMap (Photon, `GET /api/places/suggest`, cached a day and rate limited per company to
-   stay a fair user of the public server). Enter on a full address looks it up exactly: the
-   Census geocoder in the US, which knows the rural house numbers OpenStreetMap lacks, else
-   OpenStreetMap. The map (MapLibre) starts on **Auto**, which picks the sharpest free
-   imagery for where it is and moves on when a source stops answering: the state's own imagery
+   stay a fair user of the public server). A company with its own Google key can have them come
+   from Google instead (**Settings → Maps**, "Suggest addresses from Google": Places API (New),
+   asked from the browser with that key, falling back to OpenStreetMap when Google doesn't
+   answer); the calendar entry's Address field uses the same box. Enter on a full address looks it
+   up exactly: the Census geocoder in the US, which knows the rural house numbers OpenStreetMap
+   lacks, else OpenStreetMap. The map (MapLibre) starts on **Auto**, which starts on Google
+   satellite when the company added its own Google key, else picks the sharpest free
+   imagery for where it is, and moves on when a source stops answering: the state's own imagery
    (`packages/core/src/imagery.ts`: 17 states and DC, 3 in to 1 ft), else USDA NAIP (about 2 ft,
    through Microsoft's Planetary Computer, a preview service with no uptime promise), else the same
    NAIP from USGS's server, else the USGS basemap; outside the US, Esri World Imagery with a key the
    company adds in **Settings → Maps**, else the OpenStreetMap street map (OpenFreeMap). Anyone can
-   pick a source instead. The source in use is always named and credited (`imageryCredit`); Google
-   is never picked automatically, and a drawing made on it is saved with a picture on free imagery,
-   since Google's terms don't allow keeping its imagery. Terrain (shaded relief), slope (colored by
-   grade) and 2 ft contours come from USGS 3DEP lidar, drawn by USGS for each tile.
+   pick a source instead. The source in use is always named and credited (`imageryCredit`). A
+   drawing made on Google is saved with a picture on free imagery, since Google's terms don't allow
+   keeping its imagery, and a Google key the deployment sets for everyone is only a choice: Auto
+   doesn't spend it. Terrain (shaded relief), slope (colored by grade) and 2 ft contours come from
+   USGS 3DEP lidar, drawn by USGS for each tile. On a phone or tablet the map can fill the screen,
+   over the top bar and tab bar (the schedule's map too).
 2. They draw areas (driveway, lawn, roof plane), lines (curb, edging, gutters) and points (drains,
    trees) with Terra Draw. Sizes show on each shape and update live, with the same math the server
    uses. Undo and redo cover points and whole shapes.

@@ -1,18 +1,19 @@
 /**
- * The Imagery button on the measuring map, like a model picker: Auto at the top (the sharpest free
- * imagery for wherever the map is), then sources to choose yourself, then what lies on top (slope,
- * contours, street names, house numbers). A state's sharper imagery is listed when the map is over that state;
- * Esri and Google say how to turn them on when there's no key. What Measure opens on is marked
- * Default, and whatever's picked can become this person's default.
+ * The Imagery button on the measuring map, like a model picker: Auto at the top (Google satellite
+ * with the company's own key, else the sharpest free imagery for wherever the map is), then sources
+ * to choose yourself, then what lies on top (slope, contours, street names, house numbers). A
+ * state's sharper imagery is listed when the map is over that state; Esri and Google say how to turn
+ * them on when there's no key. What Measure opens on is marked Default, and whatever's picked can
+ * become this person's default.
  */
-import { STATE_IMAGERY, stateImageryAt, type MapKeys } from "@crewtavo/core/imagery";
+import { STATE_IMAGERY, stateImageryAt } from "@crewtavo/core/imagery";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
 import { useSession } from "@/lib/session";
 import {
-  AUTO_NAME, choiceName, DEFAULT_CHOICES, imageryInfo, imageryUsable, mapKeys, myDefault, OVERLAYS, setMyDefault, stateId, teamDefault,
-  type ImageryChoice, type ImageryId, type OverlayId,
+  AUTO_NAME, choiceName, DEFAULT_CHOICES, googleFirst, imageryInfo, imageryUsable, mapKeys, myDefault, OVERLAYS, setMyDefault, stateId, teamDefault,
+  type ImageryChoice, type ImageryId, type OverlayId, type UsableKeys,
 } from "./imagery";
 
 export function ImageryPicker({
@@ -24,7 +25,7 @@ export function ImageryPicker({
   /** What's on the map now (what Auto picked, when it's Auto). */
   showing: ImageryId | null;
   center: { lng: number; lat: number } | null;
-  keys: MapKeys;
+  keys: UsableKeys;
   isAdmin: boolean;
   /** The street map loaded (it's an outside service, so it may not have). */
   streetMap: boolean;
@@ -107,8 +108,10 @@ export function ImageryPicker({
           "auto",
           <>{AUTO_NAME} <span className="chip chip-green imagery-chip">Recommended</span></>,
           choice === "auto" && now
-            ? <>Showing {now.name} here. Picks the sharpest free imagery wherever you are, and switches if a source isn't answering.</>
-            : "Picks the sharpest free imagery wherever you are: your state's own, else US aerial, else USGS.",
+            ? <>Showing {now.name} here. {googleFirst(keys) ? "Starts with Google satellite, since your team added a Google key" : "Picks the sharpest free imagery wherever you are"}, and switches if a source isn't answering.</>
+            : googleFirst(keys)
+              ? "Google satellite, since your team added a Google key, else the sharpest free imagery wherever you are."
+              : "Picks the sharpest free imagery wherever you are: your state's own, else US aerial, else USGS.",
         )}
         <div className="menu-sep" role="separator" />
         <div className="menu-label">Choose yourself</div>

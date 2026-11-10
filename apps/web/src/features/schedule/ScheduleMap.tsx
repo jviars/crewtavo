@@ -1,11 +1,14 @@
 /**
  * The schedule's map view: a day's visits as numbered pins on the street map the measuring map
  * uses (MapLibre, with OpenFreeMap's streets). Each pin is a button, so it can be tabbed to, and
- * opens its visit. Loaded only when the map view opens, since MapLibre is large.
+ * opens its visit. On a phone or tablet it can fill the screen (lib/extendMap). Loaded only when the
+ * map view opens, since MapLibre is large.
  */
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/ui/Icon";
+import { useExtendedMap } from "@/lib/extendMap";
 
 export interface MapPin {
   id: string;
@@ -25,6 +28,7 @@ export function ScheduleMap({ pins, onOpen }: { pins: MapPin[]; onOpen: (id: str
   const el = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [failed, setFailed] = useState(false);
+  const extend = useExtendedMap();
   const open = useRef(onOpen);
   open.current = onOpen;
 
@@ -81,5 +85,14 @@ export function ScheduleMap({ pins, onOpen }: { pins: MapPin[]; onOpen: (id: str
   }, [key]);
 
   if (failed) return <p className="muted">This browser can't show the map (WebGL is turned off or not supported). Try an up-to-date Chrome, Edge, Safari or Firefox, or turn on hardware acceleration.</p>;
-  return <div ref={el} className="schedule-map" role="region" aria-label="Map of the day's visits" />;
+  return (
+    <div className="schedule-map-frame" data-extended={extend.extended || undefined}>
+      <div ref={el} className="schedule-map" role="region" aria-label="Map of the day's visits" />
+      {extend.available && (
+        <button type="button" className="map-extend" onClick={() => extend.setExtended(!extend.extended)} title={extend.extended ? "Back to the page" : "Fill the screen with the map"} aria-label="Full-screen map" aria-pressed={extend.extended}>
+          <Icon name={extend.extended ? "minimize" : "maximize"} size={16} />
+        </button>
+      )}
+    </div>
+  );
 }

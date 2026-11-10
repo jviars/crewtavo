@@ -2,8 +2,10 @@
  * Settings → Maps: the imagery the measuring map draws on. Free US imagery needs nothing. A key
  * from Esri (free account) or Google adds sharp imagery worldwide; it's checked before it's saved,
  * and kept in the company's settings (settings.maps), since it's a browser key the whole team's map
- * uses anyway. What Measure opens on for the team is kept there too (each person can pick their
- * own in Settings → Profile).
+ * uses anyway. With the company's own Google key, Auto starts on Google satellite, and address boxes
+ * can suggest places from Google instead of OpenStreetMap (settings.maps.google_places, checked with
+ * Google before it's turned on). What Measure opens on for the team is kept there too (each person
+ * can pick their own in Settings → Profile).
  */
 import { STATE_IMAGERY, type MapKeys, type MapSettings } from "@crewtavo/core/imagery";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +20,8 @@ import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useSession } from "@/lib/session";
-import { AUTO_NAME, checkEsriKey, checkGoogleKey, choiceName, DEFAULT_CHOICES, imageryUsable, mapKeys, teamDefault, type ImageryChoice } from "../measure/imagery";
+import { checkGooglePlaces } from "../measure/googlePlaces";
+import { AUTO_NAME, checkEsriKey, checkGoogleKey, choiceName, DEFAULT_CHOICES, googleFirst, imageryUsable, mapKeys, teamDefault, type ImageryChoice } from "../measure/imagery";
 
 type Provider = "esri" | "google";
 const FIELD: Record<Provider, keyof MapKeys> = { esri: "esri_key", google: "google_key" };
@@ -31,6 +34,7 @@ export function MapsSettings() {
     queryKey: ["company", company.id, "settings"],
     queryFn: async () => unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings as Record<string, unknown> | null,
   });
+  const maps = ((settings.data ?? {}).maps ?? {}) as MapSettings;
 
   const writeMaps = async (patch: MapSettings) => {
     // Read the settings fresh, so a change someone made meanwhile isn't undone.
@@ -49,13 +53,34 @@ export function MapsSettings() {
         const problem = provider === "esri" ? await checkEsriKey(key) : await checkGoogleKey(key);
         if (problem) throw new Error(problem);
       }
-      await writeMaps({ [FIELD[provider]]: key });
-      return { provider, key };
+      // A new Google key keeps Google's address suggestions only if it can give them.
+      const placesProblem = provider === "google" && key && maps.google_places ? await checkGooglePlaces(key) : null;
+      await writeMaps({ [FIELD[provider]]: key, ...(placesProblem ? { google_places: false } : {}) });
+      return { provider, key, placesProblem };
     },
-    onSuccess: ({ provider, key }) => {
+    onSuccess: ({ provider, key, placesProblem }) => {
       saved();
-      if (key) toast.success(`${provider === "esri" ? "Esri" : "Google"} imagery is ready`, { description: "Pick it from the Imagery button on Measure, or make it the team's default above." });
+      if (placesProblem) toast.error("Google imagery is ready, but address suggestions are back on OpenStreetMap", { description: placesProblem });
+      else if (key) toast.success(`${provider === "esri" ? "Esri" : "Google"} imagery is ready`, { description: provider === "google" ? "Auto on Measure starts with it now. You can also have address boxes suggest places from Google, below." : "Pick it from the Imagery button on Measure, or make it the team's default above." });
       else toast.success("Key removed");
+    },
+  });
+  // Address suggestions from Google, once the key is shown to give them.
+  const places = useMutation({
+    meta: { inline: true },
+    mutationFn: async (on: boolean) => {
+      const key = maps.google_key;
+      if (on) {
+        if (!key) throw new Error("Add a Google key first.");
+        const problem = await checkGooglePlaces(key);
+        if (problem) throw new Error(problem);
+      }
+      await writeMaps({ google_places: on });
+      return on;
+    },
+    onSuccess: (on) => {
+      saved();
+      toast.success(on ? "Addresses are suggested from Google now" : "Addresses are suggested from OpenStreetMap again");
     },
   });
   // The team's map saves as it's picked, and says so beside the menu.
@@ -68,7 +93,6 @@ export function MapsSettings() {
 
   if (settings.isPending) return <CardSkeleton lines={6} />;
   if (settings.error) return <div className="card"><ErrorState error={settings.error} onRetry={() => settings.refetch()} /></div>;
-  const keys = ((settings.data ?? {}).maps ?? {}) as MapKeys;
   const deploymentGoogle = Boolean(session.config.mapsBrowserKey);
   const usableKeys = mapKeys(settings.data ?? {}, session.config.mapsBrowserKey);
   const opening = saveDefault.isPending ? saveDefault.variables : teamDefault(settings.data ?? {}, usableKeys) ?? "auto";
@@ -115,6 +139,9 @@ export function MapsSettings() {
         </div>
         <span id="team-map-help" className="muted small">
           For everyone on the team. Anyone can still switch from the Imagery button on Measure, and each person can pick their own in Settings › Profile.
+          {googleFirst(usableKeys)
+            ? ` With your Google key below, ${AUTO_NAME} starts on Google satellite (the picture saved with a drawing still uses free imagery, as Google's terms ask).`
+            : ` Add your own Google key below and ${AUTO_NAME} starts on Google satellite.`}
         </span>
         <FormError error={saveDefault.error} />
       </div>
@@ -123,7 +150,7 @@ export function MapsSettings() {
         provider="esri"
         title="Esri World Imagery"
         badge="Recommended for work outside the US"
-        current={keys.esri_key ?? null}
+        current={maps.esri_key ?? null}
         saving={save.isPending && save.variables?.provider === "esri"}
         error={save.variables?.provider === "esri" ? save.error : null}
         onSave={(key) => save.mutate({ provider: "esri", key })}
@@ -141,19 +168,41 @@ export function MapsSettings() {
         provider="google"
         title="Google satellite"
         badge="Needs Google Cloud"
-        current={keys.google_key ?? null}
-        inherited={!keys.google_key && deploymentGoogle}
+        current={maps.google_key ?? null}
+        inherited={!maps.google_key && deploymentGoogle}
         saving={save.isPending && save.variables?.provider === "google"}
         error={save.variables?.provider === "google" ? save.error : null}
         onSave={(key) => save.mutate({ provider: "google", key })}
-        intro="Google's satellite imagery, worldwide. Google needs a billing account on the project; its Map Tiles API includes 100,000 tiles a month at no charge."
+        intro="Google's satellite imagery, worldwide, and Auto on Measure starts with it. Google needs a billing account on the project; its Map Tiles API includes 100,000 tiles a month at no charge."
         steps={[
           <>In the <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer">Google Cloud console</a>, pick or create a project with billing turned on.</>,
-          <>Under <strong>APIs &amp; Services</strong>, enable the <strong>Map Tiles API</strong>.</>,
-          <>Create an API key. Restrict it to the Map Tiles API and to the website <code>{location.origin}/*</code>.</>,
+          <>Under <strong>APIs &amp; Services</strong>, enable the <strong>Map Tiles API</strong>. For address suggestions from Google too, also enable <strong>Places API (New)</strong>.</>,
+          <>Create an API key. Restrict it to those APIs and to the website <code>{location.origin}/*</code>.</>,
           <>Paste the key below.</>,
         ]}
-      />
+      >
+        {maps.google_key && (
+          <div className="stack-sm maps-places">
+            <label className="switch-row">
+              <input
+                type="checkbox"
+                className="switch"
+                checked={places.isPending ? Boolean(places.variables) : Boolean(maps.google_places)}
+                disabled={places.isPending}
+                onChange={(e) => places.mutate(e.target.checked)}
+                aria-describedby="google-places-help"
+              />
+              Suggest addresses from Google
+            </label>
+            <span id="google-places-help" className="muted small">
+              {places.isPending && places.variables
+                ? "Checking the key with Google…"
+                : "As anyone types an address, on Measure and in calendar entries, the places suggested come from Google Maps instead of OpenStreetMap. Your clients' own addresses still come first. Needs Places API (New) on this key; Google includes 10,000 lookups a month at no charge."}
+            </span>
+            <FormError error={places.error} />
+          </div>
+        )}
+      </KeyCard>
 
       <p className="muted small" style={{ margin: 0 }}>
         These keys are used in your team's browsers when they measure, the same way any website shows a map. That's why each one should be limited to your web
@@ -164,7 +213,7 @@ export function MapsSettings() {
 }
 
 function KeyCard({
-  provider, title, badge, current, inherited, intro, steps, saving, error, onSave,
+  provider, title, badge, current, inherited, intro, steps, saving, error, onSave, children,
 }: {
   provider: Provider;
   title: string;
@@ -177,6 +226,8 @@ function KeyCard({
   saving: boolean;
   error: unknown;
   onSave: (key: string | null) => void;
+  /** More settings for this key, shown once it's saved. */
+  children?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
@@ -250,13 +301,14 @@ function KeyCard({
             variant="ghost"
             icon="trash"
             onClick={async () => {
-              if (await confirm({ title: `Remove the ${title} key?`, body: "Measure goes back to the free imagery. Drawings already saved keep their pictures.", confirmLabel: "Remove", danger: true })) onSave(null);
+              if (await confirm({ title: `Remove the ${title} key?`, body: provider === "google" ? "Measure goes back to the free imagery, and address boxes to OpenStreetMap's suggestions. Drawings already saved keep their pictures." : "Measure goes back to the free imagery. Drawings already saved keep their pictures.", confirmLabel: "Remove", danger: true })) onSave(null);
             }}
           >
             Remove
           </Button>
         </div>
       )}
+      {set && children}
     </div>
   );
 }

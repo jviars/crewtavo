@@ -93,7 +93,12 @@ export interface MapKeys {
   google_key?: string | null;
 }
 
-/** companies.settings.maps: the keys, and what Measure opens on for the team ("auto" or a source). */
+/**
+ * companies.settings.maps: the keys, what Measure opens on for the team ("auto" or a source), and
+ * whether address boxes suggest places from Google (with the company's own Google key) instead of
+ * OpenStreetMap.
+ */
 export interface MapSettings extends MapKeys {
   default_imagery?: string | null;
+  google_places?: boolean | null;
 }

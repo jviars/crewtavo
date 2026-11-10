@@ -762,9 +762,14 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 .measure-tool[data-danger]:hover { background: var(--danger-tint); }
 .measure-rail-sep { height: 1px; margin: 2px 6px; background: var(--divider); }
 .measure-corner { position: absolute; top: 12px; right: 12px; z-index: 3; display: grid; gap: 6px; }
-.measure-round { display: grid; place-items: center; width: var(--control); height: var(--control); border: 0; border-radius: var(--radius-control); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-md); cursor: pointer; }
-.measure-round:hover { background: var(--fill-2); }
-.measure-round:focus-visible { outline: none; box-shadow: var(--ring); }
+.measure-round, .map-extend { display: grid; place-items: center; width: var(--control); height: var(--control); border: 0; border-radius: var(--radius-control); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-md); cursor: pointer; }
+.measure-round:hover, .map-extend:hover { background: var(--fill-2); }
+.measure-round:focus-visible, .map-extend:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* A map filling the screen on a phone or tablet (lib/extendMap): over the top bar and the tab bar,
+   under dialogs and sheets, with the page behind it held still. */
+html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavior: none; }
+.measure-stage[data-extended] { position: fixed; inset: 0; z-index: 25; background: var(--fill-2); }
 
 .measure-banner { position: absolute; top: 12px; left: 50%; z-index: 4; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 180px); padding: 9px 10px 9px 12px; border-radius: var(--radius-card); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); font-size: var(--fs-13); animation: fade-in var(--dur); }
 .measure-banner > svg { flex: none; color: var(--info); }
@@ -1110,6 +1115,7 @@ button.material-result:focus-visible { outline: none; box-shadow: var(--ring); }
 
 .maps-settings-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-control); background: var(--green-tint); color: var(--green-dark); flex: none; }
 .maps-steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+.maps-places { padding-top: 14px; border-top: 1px solid var(--divider); }
 .maps-steps code, .measure-help-tips code { font-size: var(--fs-12); padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill-2); overflow-wrap: anywhere; }
 
 /* Drawings on quotes and invoices */
@@ -1133,10 +1139,32 @@ button.material-result:focus-visible { outline: none; box-shadow: var(--ring); }
   .measure-tool { min-width: 44px; padding: 8px 4px; }
   .measure-tool span { display: none; }
   .measure-banner { left: 64px; right: 56px; transform: none; width: auto; max-width: none; }
-  .measure-hint { left: 64px; right: 12px; bottom: 40px; transform: none; width: auto; max-width: none; border-radius: var(--radius-card); }
+  /* Clear of the tools on the left and the zoom buttons on the right (38px, 10px in). */
+  .measure-hint { left: 64px; right: 60px; bottom: 40px; transform: none; width: auto; max-width: none; border-radius: var(--radius-card); }
   .measure-zoom-note { max-width: calc(100% - 130px); }
   .measure-legend { left: 64px; bottom: 96px; }
   .measure-legend .muted { display: none; }
+
+  /* Full screen: the map edge to edge, the search floating over its top (one row), the tools under
+     it, everything clear of the notch and the home bar. The panel waits on the page underneath. */
+  .measure-stage[data-extended] { --top: max(10px, env(safe-area-inset-top)); display: block; }
+  .measure-stage[data-extended] > .measure-map-wrap { position: absolute; inset: 0; height: auto; border: 0; border-radius: 0; }
+  .measure-stage[data-extended] > .measure-searchbar {
+    position: absolute; top: var(--top); left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)); z-index: 5; flex-wrap: nowrap;
+    padding: 6px; border: 0; border-radius: var(--radius-card); background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: var(--shadow-md); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .measure-stage[data-extended] .measure-find { flex: 1 1 auto; }
+  .measure-stage[data-extended] .imagery-button-label { max-width: 96px; }
+  .measure-stage[data-extended] > .measure-find-error { position: absolute; top: calc(var(--top) + 56px); left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)); z-index: 5; border: 0; border-radius: var(--radius-control); box-shadow: var(--shadow-sm); }
+  .measure-stage[data-extended] .measure-rail { top: calc(var(--top) + 62px); left: max(12px, env(safe-area-inset-left)); }
+  .measure-stage[data-extended] .measure-corner { top: calc(var(--top) + 62px); right: max(12px, env(safe-area-inset-right)); }
+  .measure-stage[data-extended] .measure-banner { top: calc(var(--top) + 62px); }
+  .measure-stage[data-extended] .measure-hint { bottom: calc(40px + env(safe-area-inset-bottom)); right: calc(60px + env(safe-area-inset-right)); }
+  .measure-stage[data-extended] .measure-legend { bottom: calc(96px + env(safe-area-inset-bottom)); }
+  .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { bottom: env(safe-area-inset-bottom); }
+  .measure-stage[data-extended] .maplibregl-ctrl-bottom-left { left: env(safe-area-inset-left); }
+  .measure-stage[data-extended] .maplibregl-ctrl-bottom-right { right: env(safe-area-inset-right); }
+  .measure-stage[data-extended] > :is(.measure-panel, .measure-panel-show) { display: none; }
 }
 
 /* ---------- Roles ---------- */
@@ -1283,6 +1311,14 @@ body.is-dragging-visit, body.is-dragging-visit * { cursor: grabbing !important; 
 /* Map view: the day's visits as numbered pins, ringed in their crew's color (ScheduleMap). */
 .schedule-map { height: min(70vh, 640px); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--fill-2); }
 @media (max-width: 700px) { .schedule-map { height: max(360px, calc(100dvh - var(--mobile-nav-height) - 220px)); } }
+.schedule-map-frame { position: relative; }
+.schedule-map-frame .map-extend { position: absolute; top: 10px; right: 10px; z-index: 2; }
+/* Full screen on a phone or tablet (lib/extendMap). */
+.schedule-map-frame[data-extended] { position: fixed; inset: 0; z-index: 25; background: var(--fill-2); }
+.schedule-map-frame[data-extended] .schedule-map { height: 100%; border: 0; border-radius: 0; }
+.schedule-map-frame[data-extended] .map-extend { top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); }
+.schedule-map-frame[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { bottom: env(safe-area-inset-bottom); }
+.schedule-map-frame[data-extended] .maplibregl-ctrl-bottom-right { right: env(safe-area-inset-right); }
 .schedule-map .maplibregl-ctrl-group { border-radius: var(--radius-control); box-shadow: var(--shadow-sm); }
 .schedule-pin { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 3px solid var(--crew, var(--green)); border-radius: 50%; background: var(--surface); color: var(--ink); font-size: var(--fs-13); font-weight: 700; box-shadow: var(--shadow-md); cursor: pointer; }
 .schedule-pin:hover { background: var(--fill); }

@@ -3,11 +3,12 @@
  * recomputes them on save), cut the house or a bed out of an area, keep a picture of the drawing,
  * and put it on a quote or invoice for the client. For roofs, each section can have its own pitch
  * (picked, read from USGS lidar, or measured with a phone or a photo: RoofPitch.tsx) and lines can
- * be marked as eaves, rakes, ridges, hips and valleys. The map opens on Auto: the state's own
- * imagery where it has some, else US aerial (NAIP), else USGS, else (outside the US) Esri with a key
- * from Settings > Maps, or the street map. Anyone can pick a source themselves instead, from the
- * Imagery button, and make it what Measure opens on (an admin can set that for the whole team in
- * Settings > Maps).
+ * be marked as eaves, rakes, ridges, hips and valleys. The map opens on Auto: Google satellite when
+ * the company added its own Google key in Settings > Maps, else the state's own imagery where it has
+ * some, else US aerial (NAIP), else USGS, else (outside the US) Esri with a key from Settings > Maps,
+ * or the street map. Anyone can pick a source themselves instead, from the Imagery button, and make
+ * it what Measure opens on (an admin can set that for the whole team in Settings > Maps). On a phone
+ * or tablet the map can fill the screen (lib/extendMap).
  */
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { drawingSquares, edgeLengths, isPitch, isRoofEdge, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type Position, type RoofEdge } from "@crewtavo/core/geo";
@@ -27,6 +28,7 @@ import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
+import { useExtendedMap } from "@/lib/extendMap";
 import { addressLine, formatNumber } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
@@ -166,6 +168,8 @@ export function MeasurePage() {
     }
   };
   const panelShown = panelOpen || !wide;
+  // On a phone or tablet the map can fill the whole screen; on a phone the panel waits underneath.
+  const extend = useExtendedMap();
 
   const mapRef = useRef<MeasureMapHandle>(null);
   const [tool, setTool] = useState<Tool>("polygon");
@@ -311,6 +315,9 @@ export function MeasurePage() {
 
   useEffect(() => {
     if (mapState === "ready" && !helpSeen()) setHelp(true);
+    // No map to fill the screen with: back to the page, which says why.
+    if (mapState === "error") extend.setExtended(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapState]);
 
   // ----- What's drawn ---------------------------------------------------------------------------
@@ -807,7 +814,7 @@ export function MeasurePage() {
   const freePicture = async (): Promise<ImageryId> => {
     if (!center) return "naip";
     const now = Date.now();
-    return (await resolveAuto(center.lng, center.lat, 19, { ...keys, esri_key: null }, (source) => probe(source, center.lng, center.lat), (source) => (down.current.get(source) ?? 0) > now)).id;
+    return (await resolveAuto(center.lng, center.lat, 19, { esri_key: null, google_key: null }, (source) => probe(source, center.lng, center.lat), (source) => (down.current.get(source) ?? 0) > now)).id;
   };
   // Tap to outline (TapOutline.tsx): the free way to find paving. Lining up a plan takes the taps.
   // Done (or Esc) goes over to Edit, so the outline's corners can be fixed and a click doesn't start
@@ -1064,7 +1071,7 @@ export function MeasurePage() {
         )}
         <FormError error={save.error} />
       </div>
-      <div className="measure-stage" data-panel={panelShown ? "open" : "closed"}>
+      <div className="measure-stage" data-panel={panelShown ? "open" : "closed"} data-extended={extend.extended || undefined}>
         {mapState !== "error" && (
           <div className="measure-toolbar measure-searchbar">
             <AddressSearch
@@ -1161,6 +1168,11 @@ export function MeasurePage() {
                   )}
                 </div>}
                 <div className="measure-corner">
+                  {extend.available && (
+                    <button type="button" className="measure-round" onClick={() => extend.setExtended(!extend.extended)} title={extend.extended ? "Back to the page" : "Fill the screen with the map"} aria-label="Full-screen map" aria-pressed={extend.extended}>
+                      <Icon name={extend.extended ? "minimize" : "maximize"} size={16} />
+                    </button>
+                  )}
                   <button type="button" className="measure-round" onClick={locate} title="Go to where I am" aria-label="Go to where I am"><Icon name="navigation" size={16} /></button>
                   {shapes.length > 0 && <button type="button" className="measure-round" onClick={() => mapRef.current?.fitShapes()} title={touch ? "Show all shapes" : "Show all shapes (F)"} aria-label="Show all shapes"><Icon name="eye" size={16} /></button>}
                   <button type="button" className="measure-round" onClick={() => setHelp(true)} title="How to measure" aria-label="How to measure"><Icon name="info" size={16} /></button>
