@@ -770,6 +770,9 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
    under dialogs and sheets, with the page behind it held still. */
 html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavior: none; }
 .measure-stage[data-extended] { position: fixed; inset: 0; z-index: 25; background: var(--fill-2); }
+.measure-stage[data-extended] > .measure-searchbar { flex-wrap: nowrap; }
+.measure-stage[data-extended] .measure-find { flex: 1 1 auto; }
+.measure-stage[data-extended] .imagery-button-label { max-width: 96px; }
 
 .measure-banner { position: absolute; top: 12px; left: 50%; z-index: 4; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 180px); padding: 9px 10px 9px 12px; border-radius: var(--radius-card); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); font-size: var(--fs-13); animation: fade-in var(--dur); }
 .measure-banner > svg { flex: none; color: var(--info); }
@@ -815,6 +818,31 @@ html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavio
   .measure-stage[data-panel="closed"] .measure-panel { display: none; }
   .measure-panel-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; margin: 0 -12px; padding: 12px 8px 10px 16px; background: var(--page); border-bottom: 1px solid var(--divider); }
   .measure-panel-show { position: absolute; top: 12px; right: 12px; z-index: 6; }
+
+  /* Full screen on a big phone held sideways, which is wider than 900px: the same layout, clear of
+     the notch and the home bar (lib/extendMap). */
+  .measure-stage[data-extended] { --t: max(12px, env(safe-area-inset-top)); --l: max(12px, env(safe-area-inset-left)); --r: max(12px, env(safe-area-inset-right)); --b: env(safe-area-inset-bottom); }
+  .measure-stage[data-extended][data-panel="open"] { --panel-room: calc(372px + var(--r)); }
+  .measure-stage[data-extended] > .measure-searchbar { top: var(--t); left: var(--l); width: min(600px, calc(100% - var(--panel-room) - 72px - var(--l))); }
+  .measure-stage[data-extended] > .measure-find-error { top: calc(var(--t) + 52px); left: var(--l); }
+  .measure-stage[data-extended] .measure-rail { top: calc(var(--t) + 56px); left: var(--l); }
+  .measure-stage[data-extended] .measure-corner { top: var(--t); }
+  .measure-stage[data-extended][data-panel="closed"] .measure-corner { top: calc(var(--t) + 48px); right: var(--r); }
+  .measure-stage[data-extended] .measure-banner { top: calc(var(--t) + 56px); }
+  .measure-stage[data-extended] .measure-hint { bottom: calc(46px + var(--b)); }
+  .measure-stage[data-extended] .measure-zoom-note { max-width: calc(100% - var(--panel-room) - 2 * var(--l) - 140px); }
+  .measure-stage[data-extended] .measure-legend { left: calc(var(--l) + 52px); bottom: calc(92px + var(--b)); }
+  .measure-stage[data-extended] > .measure-panel { top: var(--t); right: var(--r); bottom: max(12px, var(--b)); }
+  .measure-stage[data-extended] > .measure-panel-show { top: var(--t); right: var(--r); }
+  .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { bottom: var(--b); }
+  .measure-stage[data-extended] .maplibregl-ctrl-bottom-left { left: env(safe-area-inset-left); }
+  /* left too, so the map's credits wrap short of the notch. */
+  .measure-stage[data-extended] .maplibregl-ctrl-bottom-right { right: max(var(--panel-room), env(safe-area-inset-right)); left: env(safe-area-inset-left); }
+}
+/* A short screen (a phone held sideways): the tools without their labels, so they fit. */
+@media (max-height: 500px) {
+  .measure-tool { min-width: 44px; padding: 8px 4px; }
+  .measure-tool span { display: none; }
 }
 
 .measure-shape { padding: 10px 12px 10px 16px; gap: 10px; }
@@ -1147,20 +1175,19 @@ button.material-result:focus-visible { outline: none; box-shadow: var(--ring); }
 
   /* Full screen: the map edge to edge, the search floating over its top (one row), the tools under
      it, everything clear of the notch and the home bar. The panel waits on the page underneath. */
-  .measure-stage[data-extended] { --top: max(10px, env(safe-area-inset-top)); display: block; }
+  .measure-stage[data-extended] { --top: max(10px, env(safe-area-inset-top)); --left: max(12px, env(safe-area-inset-left)); display: block; }
   .measure-stage[data-extended] > .measure-map-wrap { position: absolute; inset: 0; height: auto; border: 0; border-radius: 0; }
   .measure-stage[data-extended] > .measure-searchbar {
-    position: absolute; top: var(--top); left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)); z-index: 5; flex-wrap: nowrap;
+    position: absolute; top: var(--top); left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)); z-index: 5;
     padding: 6px; border: 0; border-radius: var(--radius-card); background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: var(--shadow-md); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   }
-  .measure-stage[data-extended] .measure-find { flex: 1 1 auto; }
-  .measure-stage[data-extended] .imagery-button-label { max-width: 96px; }
   .measure-stage[data-extended] > .measure-find-error { position: absolute; top: calc(var(--top) + 56px); left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)); z-index: 5; border: 0; border-radius: var(--radius-control); box-shadow: var(--shadow-sm); }
-  .measure-stage[data-extended] .measure-rail { top: calc(var(--top) + 62px); left: max(12px, env(safe-area-inset-left)); }
+  .measure-stage[data-extended] .measure-rail { top: calc(var(--top) + 62px); left: var(--left); }
   .measure-stage[data-extended] .measure-corner { top: calc(var(--top) + 62px); right: max(12px, env(safe-area-inset-right)); }
-  .measure-stage[data-extended] .measure-banner { top: calc(var(--top) + 62px); }
-  .measure-stage[data-extended] .measure-hint { bottom: calc(40px + env(safe-area-inset-bottom)); right: calc(60px + env(safe-area-inset-right)); }
-  .measure-stage[data-extended] .measure-legend { bottom: calc(96px + env(safe-area-inset-bottom)); }
+  /* Sideways the tools move in from the notch, and what sits beside them moves with them. */
+  .measure-stage[data-extended] .measure-banner { top: calc(var(--top) + 62px); left: calc(var(--left) + 52px); right: calc(44px + max(12px, env(safe-area-inset-right))); }
+  .measure-stage[data-extended] .measure-hint { bottom: calc(40px + env(safe-area-inset-bottom)); left: calc(var(--left) + 52px); right: calc(60px + env(safe-area-inset-right)); }
+  .measure-stage[data-extended] .measure-legend { bottom: calc(96px + env(safe-area-inset-bottom)); left: calc(var(--left) + 52px); }
   .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { bottom: env(safe-area-inset-bottom); }
   .measure-stage[data-extended] .maplibregl-ctrl-bottom-left { left: env(safe-area-inset-left); }
   .measure-stage[data-extended] .maplibregl-ctrl-bottom-right { right: env(safe-area-inset-right); }
