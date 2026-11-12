@@ -1,6 +1,6 @@
 /** Time for the week: the running clock, hours per person per day, edits, and approval for payroll. */
 import { breakPay, isUnpaidBreak, SHORT_BREAK_MINUTES } from "@crewtavo/core/breaks";
-import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
+import { localDate, localTime } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
@@ -13,7 +13,7 @@ import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
-import { api, supabase, unwrap } from "@/lib/api";
+import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
@@ -27,27 +27,11 @@ import { timeEntryProblem } from "@crewtavo/core/pay";
 import { describePlace, type EntryPlaces, type StoredPlace } from "./clockPlace";
 import { entrySpan } from "./entrySpan";
 import { PayPeriods } from "./PayPeriods";
+import { loadWeek, type Entry, type TeamMember, type WeekData } from "./weekData";
 import { memberName } from "../subs/memberName";
 
 const hours = (start: string, end: string | null) => ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 3_600_000;
 const mondayOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
-
-interface Entry {
-  id: string;
-  user_id: string;
-  category: TimerCategory;
-  started_at: string;
-  ended_at: string | null;
-  approved_at: string | null;
-  /** The clock was left running and stopped by Crewtavo: the end time is a guess. */
-  auto_stopped_at: string | null;
-  notes: string | null;
-  visit: { title: string } | null;
-  job: { title: string } | null;
-}
-interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null; avatar_url?: string | null } | null; sub?: { id: string; name: string } }
-/** A week of time as the page loads it. */
-interface WeekData { rows: Entry[]; team: TeamMember[]; places: Record<string, EntryPlaces | undefined> }
 
 export function TimesheetsPage() {
   const session = useSession();
@@ -73,24 +57,7 @@ export function TimesheetsPage() {
   const weekKey = ["time", session.company.id, week];
   const data = useQuery({
     queryKey: weekKey,
-    queryFn: async (): Promise<WeekData> => {
-      const [rows, team] = await Promise.all([
-        supabase()
-          .from("time_entries")
-          .select("id, user_id, category, started_at, ended_at, approved_at, auto_stopped_at, notes, visit:visits(title), job:jobs(title)")
-          .eq("company_id", session.company.id)
-          .gte("started_at", zonedTimeToUtc(week, "00:00", tz).toISOString())
-          .lt("started_at", zonedTimeToUtc(addDaysIso(week, 7), "00:00", tz).toISOString())
-          .order("started_at"),
-        // Subs too, for one the office keeps hours for ("Uses the clock" on their page).
-        api.get<TeamMember[]>("/team?with_subs=1"),
-      ]);
-      const entries = unwrap(rows) as unknown as Entry[];
-      const places = seesPlaces && entries.length
-        ? (unwrap(await supabase().rpc("time_entry_places", { p_company: session.company.id, p_entries: entries.map((e) => e.id) })) as unknown as EntryPlaces[])
-        : [];
-      return { rows: entries, team, places: Object.fromEntries(places.map((p) => [p.id, p])) as Record<string, EntryPlaces | undefined> };
-    },
+    queryFn: () => loadWeek({ companyId: session.company.id, week, timeZone: tz, seesPlaces }),
   });
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["time", session.company.id] });
