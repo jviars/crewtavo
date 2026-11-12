@@ -14,7 +14,7 @@ import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { everyRow } from "@/lib/everyRow";
+import { everyRow } from "@/lib/paging";
 import { addDaysIso, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { Stat } from "../finance/Charts";
@@ -56,15 +56,14 @@ function PayoutsScreen() {
       for (let i = 0; i < ids.length; i += 100) {
         // A hundred deposits can hold more payments than one request hands over, so they're read to the end.
         payments.push(
-          ...(await everyRow((from, to) =>
-            db
-              .from("payments")
-              .select("id, amount, tip_amount, fee_amount, method, received_at, payout_id, invoice:invoices(id, number), client:clients(id, display_name)", { count: "exact" })
-              .eq("company_id", company.id)
-              .in("payout_id", ids.slice(i, i + 100))
-              .order("received_at")
-              .order("id")
-              .range(from, to),
+          ...(await everyRow(
+            () =>
+              db
+                .from("payments")
+                .select("id, amount, tip_amount, fee_amount, method, received_at, payout_id, invoice:invoices(id, number), client:clients(id, display_name)")
+                .eq("company_id", company.id)
+                .in("payout_id", ids.slice(i, i + 100)),
+            { order: "received_at", most: Infinity },
           )),
         );
       }

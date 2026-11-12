@@ -11,7 +11,7 @@ import type { ViewerFile } from "@/features/files/FileViewer";
 import { fileKind, fileSize, isImage, isPdf, type PlanFile } from "@/features/plans/plans";
 import { supabase, unwrap } from "@/lib/api";
 import { ApiError, friendlyDbError } from "@/lib/errors";
-import { everyRow } from "@/lib/everyRow";
+import { everyRow } from "@/lib/paging";
 import { formatDate } from "@/lib/format";
 import { can, hasRole, type Session } from "@/lib/session";
 
@@ -427,7 +427,7 @@ export function useDriveFolders(companyId: string, enabled = true) {
     queryFn: async () => {
       // Every folder, however many: the tree is built from all of them, and one request hands over 1,000 at most.
       const load = async () =>
-        (await everyRow((from, to) => supabase().from("drive_folders").select(FOLDER_FIELDS, { count: "exact" }).eq("company_id", companyId).order("name").order("id").range(from, to))) as unknown as DriveFolder[];
+        (await everyRow(() => supabase().from("drive_folders").select(FOLDER_FIELDS).eq("company_id", companyId), { order: "name", most: Infinity })) as unknown as DriveFolder[];
       const folders = await load();
       if (folders.some((f) => !f.parent_id)) return folders;
       unwrap(await supabase().rpc("drive_root", { p_company: companyId }));

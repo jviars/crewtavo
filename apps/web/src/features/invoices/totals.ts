@@ -2,10 +2,10 @@
  * The Invoices screen's figures and its list of jobs ready to invoice, and Deposits' Stripe fees.
  * The sums are the database's (supabase/migrations/20261112000300_money_totals.sql): added up here
  * from rows, they went wrong without a word once a business had more rows than the API hands over
- * in one request. Lists are read to their end (lib/everyRow.ts).
+ * in one request. Lists are read to their end (lib/paging.ts).
  */
 import { supabase, unwrap } from "@/lib/api";
-import { everyRow } from "@/lib/everyRow";
+import { everyRow } from "@/lib/paging";
 
 export interface InvoiceTotals {
   owed: number;
@@ -64,13 +64,11 @@ export async function readyJobs(companyId: string): Promise<ReadyJob[]> {
   const [finished, perVisit, charges, due] = await Promise.all([
     db.from("jobs").select(READY_FIELDS).eq("company_id", companyId).eq("status", "requires_invoicing").order("number").limit(200),
     // The database picks these out (jobs_with_visits_to_invoice): there are too many finished visits to read them all here.
-    everyRow((from, to) => db.rpc("jobs_with_visits_to_invoice", { p_company: companyId }, { count: "exact" }).select(READY_FIELDS).order("number").order("id").range(from, to)),
+    everyRow(() => db.rpc("jobs_with_visits_to_invoice", { p_company: companyId }).select(READY_FIELDS), { order: "number", most: Infinity }),
     // A server without autopay yet has nothing waiting: the list stays as it was rather than failing.
-    everyRow((from, to) =>
-      db.from("autopay_charges").select("job_id", { count: "exact" }).eq("company_id", companyId).in("status", ["waiting", "charging"]).is("invoice_id", null).not("job_id", "is", null).order("id").range(from, to),
-    ).catch(() => []),
+    everyRow(() => db.from("autopay_charges").select("job_id").eq("company_id", companyId).in("status", ["waiting", "charging"]).is("invoice_id", null).not("job_id", "is", null), { most: Infinity }).catch(() => []),
     // A server without monthly billing yet has none due: the list stays as it was.
-    everyRow((from, to) => db.from("due_invoices").select("job_id, month", { count: "exact" }).eq("company_id", companyId).order("month").order("id").range(from, to)).catch(() => []),
+    everyRow(() => db.from("due_invoices").select("job_id, month").eq("company_id", companyId), { order: "month", most: Infinity }).catch(() => []),
   ]);
   const charged = new Set(charges.map((c) => c.job_id));
   const ready = (unwrap(finished) as unknown as ReadyJob[]).filter((j) => !charged.has(j.id));

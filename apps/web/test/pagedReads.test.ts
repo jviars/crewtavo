@@ -51,8 +51,8 @@ describe("asking for more than 1,000 rows in one request", () => {
   // Reads that still ask for more than the database sends, and so stop at 1,000 without saying:
   // each wants lib/paging.ts. The list is here so that it only gets shorter.
   const KNOWN = [
-    "features/drive/data.ts", "features/equipment/equipmentData.ts", "features/home/HomePage.tsx", "features/invoices/AddWorkDialog.tsx", "features/invoices/InvoiceTools.tsx", "features/invoices/PayoutsPage.tsx",
-    "features/jobs/JobPayCard.tsx", "features/kb/InsightsPage.tsx", "features/kb/kbData.ts", "features/subs/SubsPage.tsx", "features/subs/payData.ts", "features/subs/subsData.ts",
+    "features/equipment/equipmentData.ts", "features/invoices/AddWorkDialog.tsx", "features/jobs/JobPayCard.tsx", "features/kb/InsightsPage.tsx",
+    "features/kb/kbData.ts", "features/subs/SubsPage.tsx", "features/subs/subsData.ts",
   ];
 
   it("isn't written anywhere new", () => {

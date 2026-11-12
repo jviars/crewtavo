@@ -9,7 +9,7 @@
 import type { SubPayMethod, SubYearTotal, WcAuditRow } from "@crewtavo/core/jobPay";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { api, supabase, unwrap } from "@/lib/api";
-import { everyRow } from "@/lib/everyRow";
+import { everyRow } from "@/lib/paging";
 import { can, hasRole, type Session } from "@/lib/session";
 import type { PayLine, Suggestion } from "./pay";
 
@@ -96,9 +96,7 @@ export function useTeamRateCounts(companyId: string, enabled: boolean) {
 
 /** The team's active rates counted by person. Every rate is read: a big team has more than one request hands over. */
 export async function teamRateCounts(companyId: string): Promise<Record<string, number>> {
-  const rows = await everyRow((from, to) =>
-    supabase().from("pay_rates").select("user_id", { count: "exact" }).eq("company_id", companyId).eq("active", true).not("user_id", "is", null).order("id").range(from, to),
-  );
+  const rows = await everyRow(() => supabase().from("pay_rates").select("user_id").eq("company_id", companyId).eq("active", true).not("user_id", "is", null), { most: Infinity });
   const counts: Record<string, number> = {};
   for (const r of rows) if (r.user_id) counts[r.user_id] = (counts[r.user_id] ?? 0) + 1;
   return counts;
@@ -109,7 +107,7 @@ export function useServices(companyId: string) {
   return useQuery({
     queryKey: ["services", companyId, "for-rates"],
     staleTime: 5 * 60_000,
-    queryFn: async () => unwrap(await supabase().from("services").select("id, name, unit, active").eq("company_id", companyId).order("sort").order("name").limit(2000)),
+    queryFn: async () => everyRow(() => supabase().from("services").select("id, name, unit, active").eq("company_id", companyId), { order: ["sort", "name"], most: Infinity }),
   });
 }
 
@@ -143,9 +141,7 @@ export function useOwed(companyId: string, enabled: boolean) {
 
 /** Every sub's pay that's done and not paid, oldest first. All of it is read, so what's owed adds up to the whole amount. */
 export async function owedPay(companyId: string): Promise<JobPay[]> {
-  const rows = await everyRow((from, to) =>
-    supabase().from("job_pay").select(PAY_FIELDS, { count: "exact" }).eq("company_id", companyId).eq("status", "done").not("subcontractor_id", "is", null).order("earned_on").order("created_at").order("id").range(from, to),
-  );
+  const rows = await everyRow(() => supabase().from("job_pay").select(PAY_FIELDS).eq("company_id", companyId).eq("status", "done").not("subcontractor_id", "is", null), { order: ["earned_on", "created_at"], most: Infinity });
   return rows as unknown as JobPay[];
 }
 
