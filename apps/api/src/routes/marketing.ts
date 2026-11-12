@@ -46,7 +46,7 @@ import { clientLink } from "../lib/links";
 import { emailReady, sendEmail } from "../lib/notify";
 import { adminClient } from "../lib/supabase";
 import { renderTemplate } from "@crewtavo/core";
-import { companyAnthropicKey, complete } from "../services/ai";
+import { companyAnthropicKey, complete, countAiAsk } from "../services/ai";
 import { companyAddress } from "../services/automations";
 import { logoImage } from "../services/logo";
 import { loadCampaign, requireCampaignEmail, requireCampaignsOn, startCampaign, stopCampaign } from "../services/campaigns";
@@ -255,6 +255,7 @@ marketing.post("/campaigns/automated/:key/test", requireUser, requireCompany(OFF
 /** Draft a campaign with Claude from a short goal. */
 marketing.post("/campaigns/draft", requireUser, requireCompany(OFFICE, "marketing"), async (c) => {
   const body = await readJson(c, z.object({ goal: z.string().trim().min(5).max(600), tone: z.enum(["friendly", "professional", "urgent"]).default("friendly") }));
+  await countAiAsk(c.env, c.var.companyId, c.var.userId);
   const company = must(await c.var.db.from("companies").select("name, trade_preset").eq("id", c.var.companyId).maybeSingle());
   const text = await complete(c.env, {
     apiKey: await companyAnthropicKey(c.env, adminClient(c.env), c.var.companyId),

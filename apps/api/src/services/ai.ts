@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Env } from "../env";
 import { loadSecret } from "../integrations/tokens";
 import { HttpError } from "../lib/http";
+import { allow } from "../lib/limit";
 import type { Db } from "../lib/supabase";
 
 export interface CompleteOptions {
@@ -20,6 +21,22 @@ export interface CompleteOptions {
 export async function companyAnthropicKey(env: Env, admin: Db, companyId: string): Promise<string | null> {
   const secret = await loadSecret(env, admin, companyId, "anthropic").catch(() => null);
   return secret?.api_key ?? null;
+}
+
+/** What one person may ask of the AI in an hour, and everyone at one company between them. */
+export const AI_ASKS_PER_PERSON = 60;
+export const AI_ASKS_PER_COMPANY = 300;
+
+/**
+ * Counts one ask of the AI (a rewrite, a draft, a suggestion, an answer from the guides), for the
+ * person and for their company, and refuses once either has had its hour's worth. Every ask is paid
+ * for from the company's Claude key or the deployment's, so one sign-in can't run up either. One a
+ * minute all hour is more than anyone drafting replies or captions asks for.
+ */
+export async function countAiAsk(env: Env, companyId: string, userId: string): Promise<void> {
+  if (!(await allow(env, `ai:person:${userId}`, AI_ASKS_PER_PERSON, 3600)) || !(await allow(env, `ai:company:${companyId}`, AI_ASKS_PER_COMPANY, 3600))) {
+    throw new HttpError(429, "That's a lot to ask the AI in an hour. Wait a while and try again.");
+  }
 }
 
 export async function complete(env: Env, options: CompleteOptions): Promise<string> {

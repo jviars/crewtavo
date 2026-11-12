@@ -4,18 +4,22 @@ import { encryptJson } from "../src/lib/crypto";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
 // that eq, neq and in filter, and search_sops answering with `hits`. Claude itself is replaced by
-// `complete`, which keeps what it was asked.
+// `complete`, which keeps what it was asked. Rate limits whose key matches `full` are used up.
 type Row = Record<string, unknown>;
 const state = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   hits: [] as Row[],
   rpcs: [] as Array<{ fn: string; args: Record<string, unknown> }>,
   completions: [] as Array<{ apiKey?: string | null; prompt: string; system?: string }>,
+  full: null as RegExp | null,
 }));
 vi.mock("../src/lib/supabase", () => {
   const client = () => ({
     auth: { getClaims: async () => ({ data: { claims: { sub: "viewer" } }, error: null }) },
-    rpc: async (fn: string, args: Record<string, unknown>) => (state.rpcs.push({ fn, args }), { data: state.hits, error: null }),
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      state.rpcs.push({ fn, args });
+      return { data: fn === "rate_limit_hit" ? !state.full?.test(String(args.p_key)) : state.hits, error: null };
+    },
     from: (table: string) => {
       const filters: Array<(row: Row) => boolean> = [];
       const rows = () => (state.tables[table] ?? []).filter((row) => filters.every((keep) => keep(row)));
@@ -79,6 +83,7 @@ afterEach(() => {
   state.hits = [];
   state.rpcs = [];
   state.completions = [];
+  state.full = null;
 });
 
 describe("a business's own Anthropic key", () => {
@@ -99,7 +104,7 @@ describe("a business's own Anthropic key", () => {
     const res = await request("/kb/ask", { question: "How long does sealer need to dry before cars drive on it?" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ answer: expect.any(String), sources: [{ id: "g1", title: "Sealcoating a driveway" }] });
-    expect(state.rpcs).toEqual([{ fn: "search_sops", args: { p_company: UNIFORM, p_query: "How long does sealer need to dry before cars drive on it?", p_limit: 4, p_any: true } }]);
+    expect(state.rpcs.filter((r) => r.fn !== "rate_limit_hit")).toEqual([{ fn: "search_sops", args: { p_company: UNIFORM, p_query: "How long does sealer need to dry before cars drive on it?", p_limit: 4, p_any: true } }]);
     expect(state.completions).toEqual([{ apiKey: "sk-ant-uniform-own-key", prompt: expect.stringContaining("[1] Sealcoating a driveway"), system: expect.any(String) }]);
   });
 
@@ -108,6 +113,8 @@ describe("a business's own Anthropic key", () => {
     const body = (await (await request("/kb/ask", { question: "Where do I park the trailer?" })).json()) as { answer: string; sources: unknown[] };
     expect(body).toEqual({ answer: expect.stringContaining("couldn't find a guide"), sources: [] });
     expect(state.completions).toEqual([]);
+    // Nothing was asked of the AI, so nothing counts toward the hour's asks.
+    expect(state.rpcs.map((r) => r.fn)).toEqual(["search_sops"]);
   });
 
   it("writes campaign drafts and rewrites with it too", async () => {
@@ -125,5 +132,41 @@ describe("a business's own Anthropic key", () => {
     const system = state.completions.at(-1)!.system!;
     expect(system).toContain("no placeholders other than {{client.first_name}}, {{company.name}}, {{company.phone}} and {{link}}");
     expect(system).toContain("put it alone on its own line, just before the sign-off, and it becomes a Request work button");
+  });
+});
+
+describe("how much is asked of the AI", () => {
+  const asks: Array<[string, unknown]> = [
+    ["/ai/rewrite", { text: "we r coming tmrw" }],
+    ["/kb/ask", { question: "How long does sealer need to dry?" }],
+    ["/campaigns/draft", { goal: "Spring aeration special" }],
+  ];
+  const guide = [{ id: "g1", title: "Sealcoating a driveway", body_text: "Let the sealer cure 24 hours before driving on it." }];
+
+  it("is counted for the person and for their company, once an ask", async () => {
+    await addKeys();
+    state.hits = guide;
+    for (const [path, body] of asks) {
+      state.rpcs = [];
+      expect((await request(path, body)).status).toBe(200);
+      expect(state.rpcs.filter((r) => r.fn === "rate_limit_hit").map((r) => r.args)).toEqual([
+        { p_key: "ai:person:viewer", p_max: 60, p_window_seconds: 3600 },
+        { p_key: `ai:company:${UNIFORM}`, p_max: 300, p_window_seconds: 3600 },
+      ]);
+    }
+    expect(state.completions).toHaveLength(3);
+  });
+
+  it("stops for the hour once one person, or everyone at the company, has asked a lot, before the key is used", async () => {
+    await addKeys();
+    state.hits = guide;
+    for (const full of [/^ai:person:/, /^ai:company:/]) {
+      state.full = full;
+      for (const [path, body] of asks) {
+        const res = await request(path, body);
+        expect([path, res.status, await res.json()]).toEqual([path, 429, { error: "That's a lot to ask the AI in an hour. Wait a while and try again." }]);
+      }
+    }
+    expect(state.completions).toEqual([]);
   });
 });

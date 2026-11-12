@@ -1036,6 +1036,24 @@ describe("replies", () => {
       serve({ tables: { ...(await connected({ company: { marketing: { enabled: false } } })), reviews: [theReview()] } });
       expect((await request(`/reviews/${ID}/suggest`, { method: "POST", body: {} })).status).toBe(409);
     });
+
+    it("counts each draft for the person and the company, and stops for the hour once either has asked a lot", async () => {
+      const w = serve({ tables: { ...(await connected()), reviews: [theReview()] } });
+      complete.mockResolvedValueOnce("Thank you, Ana.");
+      expect((await request(`/reviews/${ID}/suggest`, { method: "POST", body: {} })).status).toBe(200);
+      expect(rpcs(w, "rate_limit_hit")).toEqual([
+        { p_key: `ai:person:${USER}`, p_max: 60, p_window_seconds: 3600 },
+        { p_key: `ai:company:${CO}`, p_max: 300, p_window_seconds: 3600 },
+      ]);
+
+      complete.mockClear();
+      for (const used of ["ai:person:", "ai:company:"]) {
+        serve({ tables: { ...(await connected()), reviews: [theReview()] }, rpc: { rate_limit_hit: (b) => !b.p_key.startsWith(used) } });
+        const res = await request(`/reviews/${ID}/suggest`, { method: "POST", body: {} });
+        expect([res.status, await res.json()]).toEqual([429, { error: "That's a lot to ask the AI in an hour. Wait a while and try again." }]);
+      }
+      expect(complete).not.toHaveBeenCalled();
+    });
   });
 });
 

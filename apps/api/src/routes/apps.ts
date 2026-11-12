@@ -14,7 +14,7 @@ import { renderEmail } from "../lib/email";
 import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson } from "../lib/http";
 import { emailReady, sendEmail } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
-import { companyAnthropicKey, complete } from "../services/ai";
+import { companyAnthropicKey, complete, countAiAsk } from "../services/ai";
 import { analyticsSettings } from "../services/analytics";
 import { AbcProblem, chooseAbcAccount, connectAbc, settingsOf as abcSettingsOf } from "../integrations/abcSupply";
 import { describeAccount, retryAccounting } from "../integrations/accounting";
@@ -707,6 +707,7 @@ apps.post("/ai/rewrite", requireUser, requireCompany(), async (c) => {
       instruction: z.string().max(300).default("Make this clear, friendly and professional. Keep it about the same length."),
     }),
   );
+  await countAiAsk(c.env, c.var.companyId, c.var.userId);
   const text = await complete(c.env, {
     apiKey: await companyAnthropicKey(c.env, adminClient(c.env), c.var.companyId),
     system:
@@ -727,6 +728,8 @@ apps.post("/kb/ask", requireUser, requireCompany(), async (c) => {
   if (error) throw dbError(error);
   const hits = (data ?? []) as Array<{ id: string; title: string; body_text: string }>;
   if (!hits.length) return c.json({ answer: "I couldn't find a guide that covers that. Try different words, or ask the office.", sources: [] });
+  // Counted only now: a question no guide covers never reaches the AI.
+  await countAiAsk(c.env, c.var.companyId, c.var.userId);
 
   const excerpts = hits.map((h, i) => `[${i + 1}] ${h.title}\n${h.body_text.slice(0, 6000)}`).join("\n\n");
   const answer = await complete(c.env, {

@@ -1454,6 +1454,25 @@ describe("Suggest a caption", () => {
     expect(complete.mock.calls[0]![1].system).toContain("Never name a client or a reviewer");
     expect(complete).toHaveBeenCalledTimes(2);
   });
+
+  it("counts each draft for the person and the company, and stops for the hour once either has asked a lot", async () => {
+    const c = await connected();
+    const w = serve({ tables: c.tables, files: c.files });
+    complete.mockResolvedValueOnce("Fresh mulch and clean edges.");
+    expect((await request("/social/caption", { method: "POST", body: { source: "photos", attachment_ids: [c.ids[0]] } })).status).toBe(200);
+    expect(w.calls.filter((call) => call.path === "/rest/v1/rpc/rate_limit_hit").map((call) => call.body)).toEqual([
+      { p_key: `ai:person:${USER}`, p_max: 60, p_window_seconds: 3600 },
+      { p_key: `ai:company:${CO}`, p_max: 300, p_window_seconds: 3600 },
+    ]);
+
+    complete.mockClear();
+    for (const used of ["ai:person:", "ai:company:"]) {
+      serve({ tables: c.tables, files: c.files, rpc: { rate_limit_hit: (b) => !b.p_key.startsWith(used) } });
+      const res = await request("/social/caption", { method: "POST", body: { source: "photos", attachment_ids: [c.ids[0]] } });
+      expect([res.status, await res.json()]).toEqual([429, { error: "That's a lot to ask the AI in an hour. Wait a while and try again." }]);
+    }
+    expect(complete).not.toHaveBeenCalled();
+  });
 });
 
 describe("the words", () => {

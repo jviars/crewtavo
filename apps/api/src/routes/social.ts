@@ -31,7 +31,7 @@ import { renderReviewCard } from "../lib/reviewCard";
 import { shareJpeg, ShareImageError } from "../lib/shareImage";
 import { storedFile } from "../lib/storedFile";
 import { adminClient } from "../lib/supabase";
-import { companyAnthropicKey } from "../services/ai";
+import { companyAnthropicKey, countAiAsk } from "../services/ai";
 import {
   cardInput,
   checkPost,
@@ -346,6 +346,7 @@ social.post("/social/caption", requireUser, requireCompany(OFFICE, "marketing"),
   const admin = adminClient(c.env);
   const review = body.source === "review" && body.review_id ? await postableReview(postScope(c), body.review_id) : null;
   const facts = body.source === "photos" ? await photoFacts(admin, c.var.companyId, body.attachment_ids) : [];
+  await countAiAsk(c.env, c.var.companyId, c.var.userId);
   try {
     const result = await suggestCaption(c.env, {
       apiKey: await companyAnthropicKey(c.env, admin, c.var.companyId),
