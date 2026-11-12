@@ -43,17 +43,14 @@ describe("reading a page at a time", () => {
       if (!read.keyed) expect(row, `${read.where} has no id: name its key`).toContain('"id": ');
     }
     // The ones without an id that are read today, each by the columns that tell its rows apart.
-    expect(reads.filter((r) => r.keyed).map((r) => r.table).sort()).toEqual(["crew_members", "visit_assets", "visit_assignees"]);
+    expect(reads.filter((r) => r.keyed).map((r) => r.table).sort()).toEqual(["crew_members", "equipment_due", "sub_paperwork", "visit_assets", "visit_assignees"]);
   });
 });
 
 describe("asking for more than 1,000 rows in one request", () => {
   // Reads that still ask for more than the database sends, and so stop at 1,000 without saying:
   // each wants lib/paging.ts. The list is here so that it only gets shorter.
-  const KNOWN = [
-    "features/equipment/equipmentData.ts", "features/invoices/AddWorkDialog.tsx", "features/jobs/JobPayCard.tsx", "features/kb/InsightsPage.tsx",
-    "features/kb/kbData.ts", "features/subs/SubsPage.tsx", "features/subs/subsData.ts",
-  ];
+  const KNOWN: string[] = [];
 
   it("isn't written anywhere new", () => {
     const asking = files.filter((f) => [...f.code.matchAll(/\.limit\(([\d_]+)/g)].some((m) => Number(m[1]!.replaceAll("_", "")) > 1000)).map((f) => f.name);

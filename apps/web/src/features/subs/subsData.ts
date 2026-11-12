@@ -8,6 +8,7 @@ import type { SubAccessState } from "@crewtavo/core/subs";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { api, supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadBody, uploadRefused } from "@/lib/files";
+import { everyRow } from "@/lib/paging";
 import { can, hasRole, type Session } from "@/lib/session";
 import type { PaperworkRow } from "./paperwork";
 
@@ -65,17 +66,26 @@ export const DOCUMENT_FIELDS =
 /** People who see and keep subs and their paperwork (the database allows no one else). */
 export const managesSubs = (session: Pick<Session, "role" | "permissions">) => hasRole(session, "admin", "office") && can(session, "subs");
 
-/** Every active sub's paperwork status (public.sub_paperwork), or one sub's. */
-export function useSubPaperwork(companyId: string, subId?: string, enabled = true) {
-  return useQuery({
-    queryKey: ["subs", companyId, "paperwork", subId ?? "all"],
-    enabled,
-    queryFn: async () => {
-      let q = supabase().from("sub_paperwork").select("*").eq("company_id", companyId).limit(5000);
-      if (subId) q = q.eq("subcontractor_id", subId);
-      return unwrap(await q) as PaperworkRow[];
+/** Every sub, by name: the Subs list, and who a job's pay can go to. */
+export const loadSubs = async (companyId: string) =>
+  (await everyRow(() => supabase().from("subcontractors").select(SUB_FIELDS).eq("company_id", companyId), { order: "name" })) as unknown as Sub[];
+
+/**
+ * Every active sub's paperwork status (public.sub_paperwork), or one sub's. The view has three rows
+ * a sub and no id, so past 333 subs it's more than one request brings: read a page at a time, by
+ * the sub and the requirement.
+ */
+export const loadSubPaperwork = async (companyId: string, subId?: string) =>
+  (await everyRow(
+    () => {
+      const q = supabase().from("sub_paperwork").select("*").eq("company_id", companyId);
+      return subId ? q.eq("subcontractor_id", subId) : q;
     },
-  });
+    { key: ["subcontractor_id", "requirement"] },
+  )) as PaperworkRow[];
+
+export function useSubPaperwork(companyId: string, subId?: string, enabled = true) {
+  return useQuery({ queryKey: ["subs", companyId, "paperwork", subId ?? "all"], enabled, queryFn: () => loadSubPaperwork(companyId, subId) });
 }
 
 /** A sub's documents, current and replaced, newest first, each with a link to its file (good for an hour). */

@@ -16,7 +16,7 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { guideFinder } from "./finder";
-import { reviewDueAt, useCategories, useIsEditor, useSopIndex } from "./kbData";
+import { loadSearchMisses, loadSopFeedback, reviewDueAt, useCategories, useIsEditor, useSopIndex } from "./kbData";
 
 interface TeamMember { user_id: string; profile: { full_name: string; avatar_url?: string | null } | null }
 
@@ -33,12 +33,12 @@ export function InsightsPage() {
   const feedback = useQuery({
     queryKey: ["kb", company.id, "insights", "feedback"],
     enabled: editor,
-    queryFn: async () => unwrap(await supabase().from("sop_feedback").select("id, page_id, revision, user_id, helpful, message, created_at, resolved_at").eq("company_id", company.id).order("created_at", { ascending: false }).limit(3000)),
+    queryFn: () => loadSopFeedback(company.id),
   });
   const misses = useQuery({
     queryKey: ["kb", company.id, "insights", "misses"],
     enabled: editor,
-    queryFn: async () => unwrap(await supabase().from("sop_search_misses").select("query, created_at").eq("company_id", company.id).gte("created_at", new Date(Date.now() - MISS_DAYS * 86_400_000).toISOString()).order("created_at", { ascending: false }).limit(5000)),
+    queryFn: () => loadSearchMisses(company.id, new Date(Date.now() - MISS_DAYS * 86_400_000).toISOString()),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["kb", company.id] });
   const done = useMutation({

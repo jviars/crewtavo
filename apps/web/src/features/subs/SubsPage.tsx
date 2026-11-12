@@ -20,7 +20,7 @@ import { OwedCard } from "./OwedCard";
 import { inOrder, needsAttention, paperworkBySub, paperworkChip, type PaperworkRow } from "./paperwork";
 import { countryLabel, readCallingCode, withCountry } from "./signInCountries";
 import { SubDialog } from "./SubDialogs";
-import { managesSubs, SUB_FIELDS, useSubPaperwork, type Sub } from "./subsData";
+import { loadSubs, managesSubs, useSubPaperwork, type Sub } from "./subsData";
 
 const FILTERS = [
   { key: "all", label: "Active" },
@@ -47,7 +47,7 @@ function SubsList() {
 
   const list = useQuery({
     queryKey: ["subs", company.id, "list"],
-    queryFn: async () => unwrap(await supabase().from("subcontractors").select(SUB_FIELDS).eq("company_id", company.id).order("name").limit(2000)) as unknown as Sub[],
+    queryFn: () => loadSubs(company.id),
   });
   const paperwork = useSubPaperwork(company.id);
   const bySub = useMemo(() => paperworkBySub(paperwork.data ?? []), [paperwork.data]);

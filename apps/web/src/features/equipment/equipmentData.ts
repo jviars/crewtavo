@@ -1,7 +1,8 @@
 /** Shared queries and types for equipment, its maintenance schedules, paperwork and history. */
 import { documentLabel, dueProgress, dueSummary, expirySummary, type DueState, type IntervalUnit, type Meter } from "@crewtavo/core/equipment";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
-import { supabase, unwrap } from "@/lib/api";
+import { supabase } from "@/lib/api";
+import { everyRow } from "@/lib/paging";
 import { can, hasRole, type Session } from "@/lib/session";
 
 export interface Equipment {
@@ -78,16 +79,23 @@ const STATE_ORDER: Record<string, number> = { overdue: 0, due_soon: 1, ok: 2 };
 export const byUrgency = (a: DueRow, b: DueRow) =>
   STATE_ORDER[a.state] - STATE_ORDER[b.state] || (dueProgress(a) ?? 9) - (dueProgress(b) ?? 9) || a.name.localeCompare(b.name);
 
-/** Every active schedule in the company, most urgent first. */
+/** Every active schedule in the company (or one machine's), most urgent first. The view has no id: its rows are told apart by the schedule's. */
+export async function loadEquipmentDue(companyId: string, equipmentId?: string) {
+  const rows = await everyRow(
+    () => {
+      const q = supabase().from("equipment_due").select("*").eq("company_id", companyId);
+      return equipmentId ? q.eq("equipment_id", equipmentId) : q;
+    },
+    { key: "plan_id" },
+  );
+  return (rows as unknown as DueRow[]).sort(byUrgency);
+}
+
 export function useEquipmentDue(companyId: string, options: { enabled?: boolean; equipmentId?: string } = {}) {
   return useQuery({
     queryKey: ["equipment", companyId, "due", options.equipmentId ?? "all"],
     enabled: options.enabled ?? true,
-    queryFn: async () => {
-      let q = supabase().from("equipment_due").select("*").eq("company_id", companyId).limit(2000);
-      if (options.equipmentId) q = q.eq("equipment_id", options.equipmentId);
-      return (unwrap(await q) as unknown as DueRow[]).sort(byUrgency);
-    },
+    queryFn: () => loadEquipmentDue(companyId, options.equipmentId),
   });
 }
 
@@ -108,16 +116,23 @@ export interface PaperRow {
   state: DueState;
 }
 
-/** Paperwork on equipment in use, soonest to run out first. */
+/** Paperwork on equipment in use (or one machine's), soonest to run out first. */
+export async function loadPaperwork(companyId: string, equipmentId?: string) {
+  const rows = await everyRow(
+    () => {
+      const q = supabase().from("equipment_paperwork").select("*").eq("company_id", companyId);
+      return equipmentId ? q.eq("equipment_id", equipmentId) : q;
+    },
+    { order: { column: "expires_on", nullsFirst: false } },
+  );
+  return rows as unknown as PaperRow[];
+}
+
 export function usePaperwork(companyId: string, options: { enabled?: boolean; equipmentId?: string } = {}) {
   return useQuery({
     queryKey: ["equipment", companyId, "paperwork", options.equipmentId ?? "all"],
     enabled: options.enabled ?? true,
-    queryFn: async () => {
-      let q = supabase().from("equipment_paperwork").select("*").eq("company_id", companyId).order("expires_on", { nullsFirst: false }).limit(2000);
-      if (options.equipmentId) q = q.eq("equipment_id", options.equipmentId);
-      return unwrap(await q) as unknown as PaperRow[];
-    },
+    queryFn: () => loadPaperwork(companyId, options.equipmentId),
   });
 }
 

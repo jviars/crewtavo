@@ -16,6 +16,7 @@ import { FormChecks, FormError } from "@/components/ui/Field";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate, formatMoneyCents } from "@/lib/format";
+import { everyRow } from "@/lib/paging";
 import { useSession } from "@/lib/session";
 
 const qty = (n: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(n);
@@ -29,12 +30,13 @@ function useLoggedWork(invoiceId: string, jobId: string) {
       const db = supabase();
       const [invoice, time, materials, invoices, services] = await Promise.all([
         db.from("invoices").select("id, status, kind, minimum_charge, lines:invoice_line_items(quantity, unit_price, kind, sort)").eq("id", invoiceId).maybeSingle(),
-        db.from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("job_id", jobId).not("ended_at", "is", null).order("started_at").limit(2000),
-        db.from("job_materials").select("id, name, quantity, unit, service_id, logged_at").eq("job_id", jobId).order("logged_at").limit(2000),
+        // All of the job's time and materials, however long it has run: what isn't read can't be billed.
+        everyRow(() => db.from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("job_id", jobId).not("ended_at", "is", null), { order: "started_at" }),
+        everyRow(() => db.from("job_materials").select("id, name, quantity, unit, service_id, logged_at").eq("job_id", jobId), { order: "logged_at" }),
         db.from("invoices").select("lines:invoice_line_items(time_entry_ids, material_ids)").eq("job_id", jobId).neq("status", "void").limit(500),
         db.from("services").select("id, name, unit, unit_price, taxable, active").eq("company_id", company.id),
       ]);
-      const time_ = unwrap(time) as LoggedTime[];
+      const time_ = time as LoggedTime[];
       const ids = [...new Set(time_.map((t) => t.user_id))];
       const people = ids.length ? unwrap(await db.from("profiles").select("user_id, full_name").in("user_id", ids)) : [];
       const services_ = unwrap(services);
@@ -42,7 +44,7 @@ function useLoggedWork(invoiceId: string, jobId: string) {
         invoice: unwrap(invoice),
         names: new Map(people.map((p) => [p.user_id, p.full_name?.trim() || "Someone"])),
         rates: laborRates(services_),
-        ...workToBill({ time: time_, materials: unwrap(materials), billed: unwrap(invoices).flatMap((i) => i.lines), services: services_ }),
+        ...workToBill({ time: time_, materials, billed: unwrap(invoices).flatMap((i) => i.lines), services: services_ }),
       };
     },
   });

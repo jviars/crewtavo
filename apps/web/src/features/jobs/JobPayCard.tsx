@@ -93,7 +93,7 @@ import {
   type JobPay,
   type PayeeRef,
 } from "../subs/payData";
-import { SUB_FIELDS, useSubPaperwork, type Sub } from "../subs/subsData";
+import { loadSubs, useSubPaperwork } from "../subs/subsData";
 import { ChangePriceDialog, SendOfferDialog } from "./OfferDialogs";
 
 /** A visit as the job page has it. */
@@ -109,7 +109,7 @@ function usePayees(enabled: { subs: boolean; team: boolean }) {
   const subs = useQuery({
     queryKey: ["subs", cid, "list"],
     enabled: enabled.subs,
-    queryFn: async () => unwrap(await supabase().from("subcontractors").select(SUB_FIELDS).eq("company_id", cid).order("name").limit(2000)) as unknown as Sub[],
+    queryFn: () => loadSubs(cid),
   });
   const team = useQuery({ queryKey: ["team", cid], enabled: enabled.team, queryFn: () => api.get<TeamMember[]>("/team") });
   const paperwork = useSubPaperwork(cid, undefined, enabled.subs);

@@ -3,6 +3,7 @@ import { ROLE_LABELS as LEVEL_LABELS, STAFF } from "@crewtavo/core/roles";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { supabase, unwrap } from "@/lib/api";
+import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { useCompanyRoles } from "../settings/roles";
 
@@ -85,17 +86,31 @@ export const guideQuery = (companyId: string, pageId: string) => ({
     ),
 });
 
-/** Every page the person can see (crews only get published ones, via RLS) plus their read receipts. */
+/** Every page the person can see, by title (crews only get published ones, via RLS). */
+export const loadSopPages = async (companyId: string) =>
+  (await everyRow(
+    () => supabase().from("sop_pages").select("id, title, category_id, required, status, revision, updated_at, revised_at, audience, audience_roles, tags, cover_path, owner_id, review_months, reviewed_at, pinned_at").eq("company_id", companyId),
+    { order: "title" },
+  )) as SopIndexRow[];
+
+/** Everything people said about pages, newest first: Insights counts it and lists what's unanswered. */
+export const loadSopFeedback = (companyId: string) =>
+  everyRow(() => supabase().from("sop_feedback").select("id, page_id, revision, user_id, helpful, message, created_at, resolved_at").eq("company_id", companyId), { order: { column: "created_at", ascending: false } });
+
+/** Every search since `since` that found nothing, newest first. */
+export const loadSearchMisses = (companyId: string, since: string) =>
+  everyRow(() => supabase().from("sop_search_misses").select("query, created_at").eq("company_id", companyId).gte("created_at", since), { order: { column: "created_at", ascending: false } });
+
+/** Every page the person can see plus their read receipts. */
 export function useSopIndex() {
   const { company, userId, role, roleId } = useSession();
   return useQuery({
     queryKey: ["kb", company.id, "index"],
     queryFn: async () => {
-      const [pages, acks] = await Promise.all([
-        supabase().from("sop_pages").select("id, title, category_id, required, status, revision, updated_at, revised_at, audience, audience_roles, tags, cover_path, owner_id, review_months, reviewed_at, pinned_at").eq("company_id", company.id).order("title").limit(2000),
+      const [rows, acks] = await Promise.all([
+        loadSopPages(company.id),
         supabase().from("sop_acknowledgements").select("page_id, revision").eq("company_id", company.id).eq("user_id", userId),
       ]);
-      const rows = unwrap(pages) as SopIndexRow[];
       const read = new Set(unwrap(acks).map((a) => `${a.page_id}:${a.revision}`));
       const isRead = (p: SopIndexRow) => read.has(`${p.id}:${p.revision}`);
       const toRead = rows.filter((p) => p.required && p.status === "published" && mustRead(p, { role, role_id: roleId }) && !isRead(p));
