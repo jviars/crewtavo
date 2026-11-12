@@ -76,8 +76,7 @@ interface FoundForm {
 }
 
 /** The form at this address, while its business has the app installed. */
-async function findForm(c: Ctx): Promise<FoundForm | null> {
-  const key = c.req.param("key") ?? "";
+async function findForm(c: Ctx, key = c.req.param("key") ?? ""): Promise<FoundForm | null> {
   if (!/^[a-z0-9]{8,32}$/.test(key)) return null;
   const { data, error } = await adminClient(c.env)
     .from("website_forms")
@@ -110,9 +109,24 @@ function refuse(c: Ctx, json: boolean, status: ContentfulStatusCode, message: st
 const thanksPage = (c: Ctx, form: FoundForm, next: string | null) => next ?? form.redirect_url ?? `${appUrl(c)}/f/${form.key}/thanks`;
 const sentOk = (c: Ctx, json: boolean, next: string) => (json ? c.json({ ok: true, next }, 200, CORS) : c.redirect(next, 303));
 
-/** Nobody sends more than a few an hour; a script sends hundreds. */
-const underLimits = async (c: Ctx, companyId: string) =>
-  (await allow(c.env, `website-form:ip:${clientIp(c)}`, 10, 60 * 60)) && (await allow(c.env, `website-form:company:${companyId}`, 100, 60 * 60));
+const TOO_MANY = { contact: "Too many messages. Try again later, or call us.", careers: "Too many applications. Try again later, or call us." } as const;
+
+/**
+ * The visitor's limit: nobody sends more than a few an hour; a script sends hundreds. Counted before
+ * anything they sent is read (app.ts runs it ahead of its size limit), because a post can be 32 MB,
+ * and reading one, or measuring one that doesn't say its size, holds all of it in memory. The
+ * refusal when they're over it, said the way refuse() says it; null when they're not.
+ */
+export async function formVisitorLimit(c: Context): Promise<Response | null> {
+  const ctx = c as Ctx;
+  if (await allow(ctx.env, `website-form:ip:${clientIp(ctx)}`, 10, 60 * 60)) return null;
+  // In the form's own words, with its business's name, when the address is a form's.
+  const form = await findForm(ctx, ctx.req.path.split("/")[2]).catch(() => null);
+  return refuse(ctx, wantsJson(ctx), 429, TOO_MANY[form?.kind ?? "contact"], form?.company, form?.kind);
+}
+
+/** The business's limit, for messages that are kept: a flood from many visitors stops here. */
+const companyUnderLimit = (c: Ctx, companyId: string) => allow(c.env, `website-form:company:${companyId}`, 100, 60 * 60);
 
 /** More than any form sends, files and all (app.ts's limit for form addresses): said the way refuse() says it. */
 export function formTooLarge(c: Context) {
@@ -159,7 +173,7 @@ formInbox.post("/f/:key", async (c) => {
     const done = () => sentOk(c, json, next);
     // A bot that filled in the hidden field is told it worked, and nothing is kept.
     if (message.bot) return done();
-    if (!(await underLimits(c, company.id))) return refuse(c, json, 429, "Too many messages. Try again later, or call us.", company);
+    if (!(await companyUnderLimit(c, company.id))) return refuse(c, json, 429, TOO_MANY.contact, company);
 
     // The website visit that brought them in, when the business counts its website's visits.
     const visit = await bookingVisit(c, company.id);
@@ -214,7 +228,7 @@ async function takeApplication(c: Ctx, json: boolean, form: FoundForm, sent: Arr
 
   const done = () => sentOk(c, json, thanksPage(c, form, application.next));
   if (application.bot) return done();
-  if (!(await underLimits(c, company.id))) return refuse(c, json, 429, "Too many applications. Try again later, or call us.", company, "careers");
+  if (!(await companyUnderLimit(c, company.id))) return refuse(c, json, 429, TOO_MANY.careers, company, "careers");
 
   const admin = adminClient(c.env);
   const visit = await bookingVisit(c, company.id);

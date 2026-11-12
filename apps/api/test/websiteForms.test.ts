@@ -226,6 +226,57 @@ describe("a message from the website's own form", () => {
     expect(res.status).toBe(429);
     expect(await res.text()).toContain("Too many messages");
   });
+
+  it("counts the visitor before reading anything they sent, whether or not the post says its size", async () => {
+    // A post can be 32 MB. This one's body says when any of it is read.
+    const send = (headers: Record<string, string> = {}) => {
+      const sent = { read: 0 };
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            sent.read++;
+            controller.enqueue(new TextEncoder().encode("email=jane%40example.com"));
+            controller.close();
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const request = new Request(`https://crm.greenlawn.example/f/${KEY}`, {
+        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://www.greenlawn.example", ...headers }, body, duplex: "half",
+      } as RequestInit);
+      return { sent, response: app.request(request, undefined, env) };
+    };
+
+    for (const headers of [{}, { "Content-Length": "24" }] as Array<Record<string, string>>) {
+      // The visitor has sent their ten this hour.
+      const full = fakeDb({ tables: { website_forms: () => form() }, rpc: { rate_limit_hit: (args) => !args.p_key.startsWith("website-form:ip:") } });
+      const refused = send(headers);
+      const res = await refused.response;
+      expect(res.status).toBe(429);
+      const page = await res.text();
+      expect(page).toContain("Too many messages. Try again later, or call us.");
+      expect(page).toContain("Green Lawn");
+      expect(refused.sent.read).toBe(0);
+      expect(full.rpcs.map((r) => r.name)).toEqual(["rate_limit_hit"]);
+
+      // Under the limit, it's read and kept as ever.
+      const db = withForm();
+      const taken = send(headers);
+      expect((await taken.response).status).toBe(303);
+      expect(taken.sent.read).toBe(1);
+      expect(db.rpcs.filter((r) => r.name === "rate_limit_hit").map((r) => [r.args.p_key, r.args.p_max, r.args.p_window_seconds])).toEqual([
+        ["website-form:ip:unknown", 10, 3600], [`website-form:company:${COMPANY}`, 100, 3600],
+      ]);
+    }
+  });
+
+  it("is refused once the business has had its hundred this hour, whoever they're from", async () => {
+    const db = fakeDb({ tables: { website_forms: () => form() }, rpc: { rate_limit_hit: (args) => !args.p_key.startsWith("website-form:company:") } });
+    const res = await post("email=jane%40example.com", { Accept: "application/json" });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ ok: false, error: "Too many messages. Try again later, or call us." });
+    expect(db.rpcs.some((r) => r.name === "website_form_request")).toBe(false);
+  });
 });
 
 describe("the address's own pages", () => {

@@ -44,7 +44,7 @@ import { social } from "./routes/social";
 import { storage } from "./routes/storage";
 import { subOffers } from "./routes/subOffers";
 import { subs } from "./routes/subs";
-import { formInbox, formTooLarge, websiteForms } from "./routes/websiteForms";
+import { formInbox, formTooLarge, formVisitorLimit, websiteForms } from "./routes/websiteForms";
 import { runTask, TASKS, type TaskName } from "./tasks";
 
 export const app = new Hono<AppEnv>();
@@ -67,10 +67,13 @@ const CALENDAR_FILE = /^\/api\/calendars\/(file|[0-9a-f-]{36}\/file)$/i;
 const DOCUMENT_PDF = /^\/api\/public\/documents\/[^/]+$/;
 const formPost = bodyLimit({ maxSize: 32 * 1024 * 1024, onError: (c) => formTooLarge(c) });
 const FORM_ADDRESS = /^\/f\/[a-z0-9]{8,32}$/;
-app.use((c, next) => {
+app.use(async (c, next) => {
   if (c.req.method !== "POST") return smallBody(c, next);
   if (CALENDAR_FILE.test(c.req.path) || DOCUMENT_PDF.test(c.req.path)) return calendarFile(c, next);
-  return FORM_ADDRESS.test(c.req.path) ? formPost(c, next) : smallBody(c, next);
+  if (!FORM_ADDRESS.test(c.req.path)) return smallBody(c, next);
+  // A form's post is the biggest anyone can send without signing in, so the visitor's limit comes
+  // before any of it is read: by the size limit here, or by the form's own route.
+  return (await formVisitorLimit(c)) ?? formPost(c, next);
 });
 // MCP clients may run in a browser (for example the MCP Inspector).
 app.use(

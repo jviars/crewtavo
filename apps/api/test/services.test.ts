@@ -415,10 +415,11 @@ describe("public submissions", () => {
       if (call.path === "rpc/rate_limit_hit") return !options.full?.test(call.body.p_key);
       if (call.path === "companies") return [{ id: "co-1", name: "Acme Lawn Care", phone: null, timezone: "America/New_York", settings: {} }];
       if (call.path === "intake_forms") return [{ id: "form-1", name: "Request a quote", kind: "request", questions: options.questions ?? [], service_area_zips: options.zips ?? [], lead_time_days: 0, slot_minutes: null }];
-      // Storage: a link to upload each file, and what arrived (only the first file did).
+      // Storage: a link to upload each file, and what arrived, at the size it was stored.
       if (call.url.pathname.startsWith("/storage/v1/object/upload/sign/")) return { url: `${call.url.pathname.replace("/storage/v1", "")}?token=tok-${call.url.pathname.slice(-8)}` };
       if (call.url.pathname.startsWith("/storage/v1/object/info/")) {
-        return arrived.has(call.url.pathname.replace("/storage/v1/object/info/files/", "")) ? { size: 48_000_000, content_type: "application/pdf" } : Response.json({ statusCode: "404", error: "not_found", message: "Object not found" }, { status: 400 });
+        const size = arrived.get(call.url.pathname.replace("/storage/v1/object/info/files/", ""));
+        return size ? { size, content_type: "application/pdf" } : Response.json({ statusCode: "404", error: "not_found", message: "Object not found" }, { status: 400 });
       }
       if (call.method === "GET" && call.path === "clients") return [{ id: "client-1", display_name: "Ana Smith" }];
       if (call.path === "rpc/booking_form_client") return options.known ? { client_id: "client-1", property_id: "property-1", matched: true, new_property: false } : { client_id: "client-2", property_id: "property-2", matched: false, new_property: true };
@@ -508,7 +509,8 @@ describe("public submissions", () => {
     expect(db.calls.filter((c) => c.path === "rpc/web_visit_for").map((c) => c.body.p_ip)).toEqual(["2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::9"]);
   });
 
-  const arrived = new Set<string>();
+  // The files in Storage, by path, and how big each is there.
+  const arrived = new Map<string, number>();
   const plansQuestion = { key: "plans", label: "Plans or photos", type: "files", required: false };
 
   it("takes files with a request: a one-time upload link for each, then records the ones that arrived", async () => {
@@ -525,7 +527,7 @@ describe("public submissions", () => {
     expect(db.calls.find((c) => c.method === "POST" && c.path === "requests")?.body.answers).toEqual({ plans: ["C-101 Site Plan.pdf", "lot.jpg"] });
 
     // Only the first upload got through.
-    arrived.add(sent.uploads[0]!.path);
+    arrived.set(sent.uploads[0]!.path, 48_000_000);
     const done = await post("/public/forms/acme/quote/files", { files_token: sent.files_token, uploaded: sent.uploads.map((u) => u.path) });
     expect(done.status).toBe(200);
     expect(await done.json()).toEqual({ added: 1 });
@@ -546,6 +548,63 @@ describe("public submissions", () => {
     expect((await post("/public/forms/acme/quote", { ...lead, files: eleven })).status).toBe(400);
     expect((await post("/public/forms/acme/quote", { ...lead, files: [{ question: "plans", name: "huge.pdf", size: 300 * 1024 * 1024 }] })).status).toBe(400);
     expect(many.made()).toEqual([]);
+  });
+
+  const MB = 1024 * 1024;
+  /** Send a request with files of these sizes; the links and token that came back. */
+  async function sendFiles(sizes: number[]) {
+    const files = sizes.map((size, i) => ({ question: "plans", name: `sheet-${i + 1}.pdf`, size, type: "application/pdf" }));
+    const res = await post("/public/forms/acme/quote", { ...lead, files });
+    expect(res.status).toBe(201);
+    return (await res.json()) as { uploads: Array<{ name: string; path: string; token: string }>; files_token: string };
+  }
+  const removed = (db: ReturnType<typeof database>) => db.calls.filter((c) => c.method === "DELETE" && c.url.pathname === "/storage/v1/object/files").flatMap((c) => c.body.prefixes as string[]);
+  const recorded = (db: ReturnType<typeof database>) => db.calls.filter((c) => c.method === "POST" && c.path === "plan_files");
+
+  it("takes up to 500 MB of files with a request", async () => {
+    const db = database({ questions: [plansQuestion] });
+    const files = (sizes: number[]) => sizes.map((size, i) => ({ question: "plans", name: `sheet-${i + 1}.pdf`, size }));
+    const over = await post("/public/forms/acme/quote", { ...lead, files: files([190 * MB, 190 * MB, 190 * MB]) });
+    expect(over.status).toBe(400);
+    expect(await over.json()).toEqual({ error: "Send up to 500 MB of files with a request." });
+    // Refused before anything is made: no request, and no upload links.
+    expect(db.made()).toEqual([]);
+    expect(db.calls.some((c) => c.url.pathname.startsWith("/storage/"))).toBe(false);
+    expect((await post("/public/forms/acme/quote", { ...lead, files: files([200 * MB, 200 * MB, 100 * MB]) })).status).toBe(201);
+  });
+
+  it("holds each upload to the size given for its file: a bigger one is removed, and none are recorded", async () => {
+    const db = database({ questions: [plansQuestion] });
+    const sent = await sendFiles([48 * MB, 2 * MB]);
+    const [plan, photo] = sent.uploads.map((u) => u.path) as [string, string];
+    // The first arrived as it was said to be. The second link was sent far more than its 2 MB.
+    arrived.set(plan, 48 * MB);
+    arrived.set(photo, 150 * MB);
+    const res = await post("/public/forms/acme/quote/files", { files_token: sent.files_token, uploaded: [plan, photo] });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "Those files are bigger than this form takes. Send them to us another way." });
+    expect(removed(db)).toEqual([photo]);
+    expect(recorded(db)).toEqual([]);
+
+    // A file no bigger than it was said to be is recorded, as before.
+    arrived.set(photo, 2 * MB - 1);
+    const again = await post("/public/forms/acme/quote/files", { files_token: sent.files_token, uploaded: [plan, photo] });
+    expect(await again.json()).toEqual({ added: 2 });
+    expect(recorded(db)[0]!.body.map((row: { size_bytes: number }) => row.size_bytes)).toEqual([48 * MB, 2 * MB - 1]);
+  });
+
+  it("holds uploads on a link made before sizes were kept to the most a request takes", async () => {
+    const db = database({ questions: [plansQuestion] });
+    const paths = ["co-1/plans/a.pdf", "co-1/plans/b.pdf", "co-1/plans/c.pdf"];
+    const filesToken = await signToken(env, { purpose: "form-files", c: "co-1", r: "request-2", f: paths.map((path) => ({ path, name: "sheet.pdf" })), exp: Math.floor(Date.now() / 1000) + 3600 });
+    for (const path of paths) arrived.set(path, 190 * MB);
+    const res = await post("/public/forms/acme/quote/files", { files_token: filesToken, uploaded: paths });
+    expect(res.status).toBe(413);
+    expect(removed(db)).toEqual(paths);
+    expect(recorded(db)).toEqual([]);
+    // Within it, they're recorded.
+    arrived.delete(paths[2]!);
+    expect(await (await post("/public/forms/acme/quote/files", { files_token: filesToken, uploaded: paths })).json()).toEqual({ added: 2 });
   });
 
   it("keeps booking form answers to the size and shape of real ones", async () => {

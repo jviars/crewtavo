@@ -203,6 +203,17 @@ describe("an application from the website's careers form", () => {
     expect(db.rpcs.some((r) => r.name === "job_application")).toBe(false);
   });
 
+  it("is refused in an application's words when a visitor has sent too many, and nothing is stored", async () => {
+    const db = withCareersForm({}, { rate_limit_hit: (args) => !args.p_key.startsWith("website-form:ip:") });
+    const res = await apply({ email: "a@x.test", resume: resume() });
+    expect(res.status).toBe(429);
+    const page = await res.text();
+    expect(page).toContain("Your application wasn't sent");
+    expect(page).toContain("Too many applications. Try again later, or call us.");
+    expect(db.uploads).toEqual([]);
+    expect(db.rpcs.map((r) => r.name)).toEqual(["rate_limit_hit"]);
+  });
+
   it("isn't taken while Careers is uninstalled, even with Website Forms installed", async () => {
     withCareersForm({ company: { id: COMPANY, name: "Green Lawn", settings: { website_forms: { enabled: true }, careers: { enabled: false } } } });
     expect((await apply({ email: "a@x.test" })).status).toBe(404);

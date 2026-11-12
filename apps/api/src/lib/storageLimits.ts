@@ -9,7 +9,8 @@
  *    with or without "Bearer ") has role "authenticated" and a sub;
  *  - an upload to a signed upload link is whoever the link was made for (the owner in its token;
  *    Storage ignores Authorization there). Links the server makes (booking forms, sub paperwork) are
- *    made for nobody, so they're never checked.
+ *    made for nobody, so they're never checked here (a booking form's files are held to the sizes
+ *    its visitor gave once they've arrived, routes/public.ts).
  * Every token is checked as Storage checks it (HS256, signed with the instance's JWT_SECRET, not run
  * out) before anything is read for it: one that isn't genuine is nobody's, so it's sent on for
  * Storage to turn down, and nobody's numbers are read or shown for it. The numbers are read, and a

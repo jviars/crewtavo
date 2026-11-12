@@ -1032,12 +1032,18 @@ const formAnswers = z
   .refine((answers) => Object.keys(answers).length <= 50 && JSON.stringify(answers).length <= 50_000, "Too many answers.");
 
 // Files sent with a request (a "Files" or "Photos" question): what the visitor picked, before uploading.
+// Each as big as the form's page says (200 MB, the most Storage takes), and 500 MB between them: a
+// set of plans and a phone's worth of photos fit many times over, and a stranger can't fill the
+// business's storage 2 GB at a time. /files holds each upload to the size given here.
 const MAX_FORM_FILES = 10;
+const MAX_FORM_FILES_BYTES = 500 * 1024 * 1024;
 const formFiles = z
   .array(z.object({ question: z.string().max(100), name: z.string().trim().min(1).max(255), size: z.number().int().positive().max(UPLOAD_LIMIT), type: z.string().max(150).optional() }))
   .max(MAX_FORM_FILES, `Send up to ${MAX_FORM_FILES} files with a request.`)
+  .refine((files) => files.reduce((sum, f) => sum + f.size, 0) <= MAX_FORM_FILES_BYTES, "Send up to 500 MB of files with a request.")
   .default([]);
-interface FilesToken { purpose: "form-files"; c: string; r: string; f: Array<{ path: string; name: string; type?: string }>; exp: number }
+/** `size`: what the visitor said the file was (links made before sizes were kept have none). */
+interface FilesToken { purpose: "form-files"; c: string; r: string; f: Array<{ path: string; name: string; type?: string; size?: number }>; exp: number }
 const fileExtension = (name: string) => name.match(/\.([a-z0-9]{1,8})$/i)?.[1]?.toLowerCase() ?? "bin";
 const fileTitle = (name: string) => name.replace(/\.[a-z0-9]{1,8}$/i, "").replace(/_+/g, " ").replace(/\s+/g, " ").trim().slice(0, 200) || "File";
 
@@ -1098,18 +1104,19 @@ publicRoutes.post("/public/forms/:company/:form", async (c) => {
   if (!body.files.length) return c.json({ ok: true, reference: request.number }, 201);
 
   // The request is in. Each file goes straight to Storage on a link that works once (and is
-  // checked against Storage's size limit there); /files then records the ones that arrived.
+  // checked against Storage's size limit there); /files then records the ones that arrived, and
+  // holds each to the size given here.
   const uploads = await Promise.all(
     body.files.map(async (f) => {
       const path = `${company.id}/plans/${crypto.randomUUID()}.${fileExtension(f.name)}`;
       const { data, error } = await admin.storage.from("files").createSignedUploadUrl(path);
       if (error || !data) return null;
-      return { name: f.name, type: f.type, path, token: data.token };
+      return { name: f.name, type: f.type, size: f.size, path, token: data.token };
     }),
   );
   const ready = uploads.filter((u): u is NonNullable<typeof u> => Boolean(u));
   const filesToken = await signToken(c.env, {
-    purpose: "form-files", c: company.id, r: request.id, f: ready.map(({ path, name, type }) => ({ path, name, type })), exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60,
+    purpose: "form-files", c: company.id, r: request.id, f: ready.map(({ path, name, type, size }) => ({ path, name, type, size })), exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60,
   } satisfies FilesToken);
   // In the order the files were sent, null where Storage couldn't make a link.
   return c.json({ ok: true, reference: request.number, uploads: uploads.map((u) => u && { name: u.name, path: u.path, token: u.token }), files_token: filesToken }, 201);
@@ -1122,16 +1129,28 @@ publicRoutes.post("/public/forms/:company/:form/files", async (c) => {
   const token = await verifyToken<FilesToken>(c.env, body.files_token);
   const { admin, company } = await findForm(c);
   if (!token || token.purpose !== "form-files" || token.c !== company.id) throw new HttpError(400, "That upload has run out. Send the files to us another way.");
-  const rows = [];
+  const arrived = [];
   for (const f of token.f.filter((f) => body.uploaded.includes(f.path))) {
     // Only what's really there, at the size Storage took it.
     const { data: info } = await admin.storage.from("files").info(f.path);
-    if (!info) continue;
-    rows.push({
-      company_id: company.id, request_id: token.r, title: fileTitle(f.name), path: f.path, file_name: f.name.slice(0, 255),
-      content_type: (info.contentType ?? f.type ?? null)?.slice(0, 150) ?? null, size_bytes: info.size ?? null, crew_visible: true, created_by: null,
-    });
+    if (info) arrived.push({ ...f, info, stored: info.size ?? 0 });
   }
+  // An upload link takes anything up to Storage's own limit, whatever size was given for its file,
+  // so the sizes are checked here, before anything is recorded: each file against the size given
+  // for it, and all of them against the most a request takes. A bigger one isn't the file that was
+  // offered: it's removed, and none of them go on the request.
+  const tooBig = arrived.filter((f) => f.stored > (f.size ?? UPLOAD_LIMIT));
+  const tooMuch = arrived.reduce((sum, f) => sum + f.stored, 0) > MAX_FORM_FILES_BYTES;
+  if (tooBig.length || tooMuch) {
+    const { error } = await admin.storage.from("files").remove((tooMuch ? arrived : tooBig).map((f) => f.path));
+    // Left behind, it goes with the nightly tidy-up (services/planFiles.ts), as any unrecorded file does.
+    if (error) console.warn(`Couldn't remove a booking form's oversized files: ${error.message}`);
+    throw new HttpError(413, "Those files are bigger than this form takes. Send them to us another way.");
+  }
+  const rows = arrived.map(({ info, ...f }) => ({
+    company_id: company.id, request_id: token.r, title: fileTitle(f.name), path: f.path, file_name: f.name.slice(0, 255),
+    content_type: (info.contentType ?? f.type ?? null)?.slice(0, 150) ?? null, size_bytes: info.size ?? null, crew_visible: true, created_by: null,
+  }));
   if (rows.length) {
     const { error } = await admin.from("plan_files").upsert(rows, { onConflict: "path", ignoreDuplicates: true });
     if (error) throw dbError(error);
