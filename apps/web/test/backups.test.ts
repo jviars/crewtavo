@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { backupFileName, backupLine, backupProblem, BackupList, BACKUPS_KEY, BackupsCard } from "../src/features/settings/BackupsCard";
+import { backupFileName, backupLine, backupProblem, BackupList, BACKUPS_KEY, BackupsCard, secretsNote } from "../src/features/settings/BackupsCard";
 
 const session = vi.hoisted(() => ({ platform: "railway" }));
 vi.mock("../src/lib/session", () => ({
@@ -97,6 +97,16 @@ describe("database backups in Settings → Your data", () => {
     expect(words).toContain("(made by hand)");
     expect(html.match(/Download/g)?.length).toBe(1);
     expect(text(renderToStaticMarkup(createElement(BackupList, { backups: [], busy: null, onDownload: () => undefined })))).toContain("No backups yet.");
+  });
+
+  it("says which secrets to save, what stops working without them and where they are, by name only", () => {
+    const words = text(card(GOOD));
+    expect(words).toContain("Save JWT_SECRET (and ENCRYPTION_KEY, if you set one) and POSTGRES_PASSWORD somewhere outside Railway");
+    expect(words).toContain("Without JWT_SECRET, a restored Crewtavo can't read its connected apps, the owner's key file stops working, and links already sent to clients stop opening");
+    expect(words).toContain("In Railway they're under Variables: JWT_SECRET and ENCRYPTION_KEY on the crewtavo service, POSTGRES_PASSWORD on db.");
+    // With Docker they're in one file. It's said where backups can't be made too.
+    expect(secretsNote("compose")).toContain("Save a copy of the .env.instance file somewhere off this server.");
+    expect(text(card({ ...GOOD, available: false, unavailable: "No pg_dump." }))).toContain("Keep your secrets with it.");
   });
 
   it("names a downloaded file by when the backup was made", () => {

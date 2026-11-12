@@ -35,6 +35,18 @@ export function backupProblem(status: BackupStatus): string | null {
   return null;
 }
 
+/**
+ * What else a restore needs, in the words of docs/deploy.md (Secrets to keep): which settings to
+ * save, what stops working without them, and where they are. Their names only: the app never shows
+ * a secret's value.
+ */
+export function secretsNote(platform: string | undefined): string {
+  const without = "Without JWT_SECRET, a restored Crewtavo can't read its connected apps, the owner's key file stops working, and links already sent to clients stop opening; without POSTGRES_PASSWORD, the services can't sign in to a database volume you kept.";
+  return platform === "railway"
+    ? `Save JWT_SECRET (and ENCRYPTION_KEY, if you set one) and POSTGRES_PASSWORD somewhere outside Railway, such as a password manager. ${without} In Railway they're under Variables: JWT_SECRET and ENCRYPTION_KEY on the crewtavo service, POSTGRES_PASSWORD on db.`
+    : `Save a copy of the .env.instance file somewhere off this server. It holds JWT_SECRET and POSTGRES_PASSWORD (and ENCRYPTION_KEY, if you set one). ${without}`;
+}
+
 export function BackupsCard() {
   const session = useSession();
   const client = useQueryClient();
@@ -87,6 +99,7 @@ export function BackupsCard() {
         <li><strong>Photos and files aren&apos;t in it.</strong> Visit photos, receipts, plans and documents are only covered if the files volume or bucket is backed up separately. A restore without them shows them as missing.</li>
         <li><strong>Download one now and then.</strong> The backups are kept on {place}, so if that&apos;s lost, they go with it. A backup you&apos;ve downloaded and put somewhere else is your copy.</li>
       </ul>
+      <span className="small"><strong>Keep your secrets with it.</strong> {secretsNote(session.config.platform)}</span>
       {s?.available && (
         <form
           className="stack-sm"

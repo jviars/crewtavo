@@ -112,6 +112,22 @@ backups stop covering anything added since (see
 [Moving files to a bucket](#moving-files-to-a-bucket)). Whatever someone deletes in Crewtavo waits
 30 days in the Trash first (see [Crewtavo - Drive](#crewtavo---drive)).
 
+**Secrets to keep:** save `JWT_SECRET` (and `ENCRYPTION_KEY`, if you set one) and
+`POSTGRES_PASSWORD` somewhere outside Railway, such as a password manager. They exist only in the
+project's variables, and a backup is only half of what a restore needs:
+
+- **Without `JWT_SECRET`** (or `ENCRYPTION_KEY`, when that's set) a restored Crewtavo can't read its
+  connected apps (Stripe, QuickBooks, Google, the business's mailbox, Railway), so each has to be
+  connected again; the owner's key file stops working; and links already sent to clients (quotes,
+  invoices, the Client Hub) stop opening. Everyone can still sign in with their password.
+- **Without `POSTGRES_PASSWORD`** the services can't sign in to a database volume you kept or
+  restored from Railway's volume backups. (A new instance restored from a downloaded backup gets a
+  new one of its own.)
+
+**Where they are:** in the Railway project, open the **crewtavo** service, then **Variables**, for
+`JWT_SECRET` and `ENCRYPTION_KEY`, and the **db** service's **Variables** for `POSTGRES_PASSWORD`;
+the eye next to each shows its value. Copy them the day you deploy. Crewtavo itself never shows them.
+
 **Updates:** Crewtavo keeps itself up to date. When a new version comes out, Railway installs it
 within several hours, with no downtime: the new version starts next to the old one, updates the
 database, and takes over only once it's working; if something goes wrong, the old one keeps
@@ -184,6 +200,13 @@ and keep it on another computer. For photos and files too, back up the
 `crewtavo-instance_db-data` and `crewtavo-instance_storage-data` Docker volumes, and
 `.env.instance`. Files stay on the `storage-data` volume: moving them to a bucket is for instances
 on Railway.
+
+**Secrets to keep:** save a copy of `.env.instance` somewhere off this computer. It holds
+`JWT_SECRET` and `POSTGRES_PASSWORD` (and `ENCRYPTION_KEY`, if you set one), and what stops working
+without them is the same as on Railway (see **Secrets to keep** [above](#on-railway)): without
+`JWT_SECRET` a restored Crewtavo can't read its connected apps, the owner's key file stops working
+and links already sent to clients stop opening; without `POSTGRES_PASSWORD` the services can't sign
+in to the `db-data` volume.
 
 For working on Crewtavo's code, the faster loop is in the README's **Develop** section.
 

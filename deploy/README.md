@@ -19,6 +19,17 @@ Five services, which fits Railway's free trial (5 services per project) as well 
 plans. Only `crewtavo` gets a public domain. Secrets use Railway's template functions, so
 every deploy generates its own and the person deploying fills in nothing.
 
+**Secrets the owner must keep.** The two generated secrets exist only in that project's variables,
+so tell every owner to save them somewhere outside Railway the day they deploy: `JWT_SECRET` (and
+`ENCRYPTION_KEY`, if they set one) from the **crewtavo** service's **Variables**, and
+`POSTGRES_PASSWORD` from the **db** service's. Without `JWT_SECRET`, a restored Crewtavo can't read
+its connected apps, the owner's key file stops working, and links already sent to clients stop
+opening (the key that encrypts app tokens and signs links is derived from it,
+`apps/api/src/lib/crypto.ts`); without `POSTGRES_PASSWORD`, the services can't sign in to a database
+volume the owner kept or restored. Crewtavo's own nightly database backups don't hold either one
+([docs/deploy.md](../docs/deploy.md#database-backups)), and **Settings → Your data** says the same
+next to them without showing any value.
+
 ### crewtavo
 
 - **Source:** Docker image `ghcr.io/jviars/crewtavo:latest`, which always points at the newest

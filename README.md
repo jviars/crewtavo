@@ -87,6 +87,14 @@ week's and month's. They're kept in the same Railway project, so download one fr
 Your data** now and then and keep it somewhere else. Photos and files aren't in a backup.
 [Restoring one](docs/deploy.md#restoring-a-backup) into a new instance is a few steps.
 
+> [!IMPORTANT]
+> Save `JWT_SECRET` (and `ENCRYPTION_KEY`, if you set one) and `POSTGRES_PASSWORD` somewhere
+> outside Railway, such as a password manager. Without `JWT_SECRET`, a restored Crewtavo can't read
+> its connected apps, the owner's key file stops working, and links already sent to clients stop
+> opening; without `POSTGRES_PASSWORD`, the services can't sign in to a database volume you kept.
+> In Railway they're under **Variables**: `JWT_SECRET` and `ENCRYPTION_KEY` on the **crewtavo**
+> service, `POSTGRES_PASSWORD` on **db**.
+
 ## Self-host
 
 Crewtavo runs anywhere Docker does: your laptop, an office server or a VPS. It's the same five
@@ -105,7 +113,11 @@ The first run writes `.env.instance` with fresh secrets, builds Crewtavo, starts
 prints the address: **http://localhost:8080**. Open it and create the owner account.
 
 > [!IMPORTANT]
-> Keep `.env.instance`. The database is locked with the secrets inside it.
+> Keep `.env.instance`, and save a copy somewhere off this computer. It holds `JWT_SECRET` and
+> `POSTGRES_PASSWORD` (and `ENCRYPTION_KEY`, if you set one). Without `JWT_SECRET`, a restored
+> Crewtavo can't read its connected apps, the owner's key file stops working, and links already
+> sent to clients stop opening; without `POSTGRES_PASSWORD`, the services can't sign in to the
+> database volume.
 
 ```bash
 npm run instance -- logs                           # follow what's happening
