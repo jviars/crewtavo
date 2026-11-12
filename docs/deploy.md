@@ -17,8 +17,10 @@ Both run the same five services (`docker-compose.yml` with Docker, the Railway t
 | `storage` | Photos, receipts and documents (Supabase Storage, on a volume) | Inside the instance |
 
 Only `crewtavo` is public. It forwards `/auth/v1`, `/rest/v1` and `/storage/v1` to the others (`apps/api/src/lib/stack.ts`), creates their keys from one shared secret, and applies
-database migrations every time it starts (`/api/health` answers once they're done). Nobody has to
-copy keys or run commands.
+database migrations every time it starts (`/api/health` answers once they're done). If the database
+or one of the other services isn't up yet, it keeps trying by itself, a little later each time (five
+minutes apart at most), and starts its background tasks once they are. Nobody has to copy keys or
+run commands.
 
 ---
 

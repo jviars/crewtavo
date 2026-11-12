@@ -35,7 +35,7 @@ import { reportError } from "./lib/monitoring";
 import { describeRecovery } from "./lib/recovery";
 import { startMonitoring } from "./lib/monitoring-node";
 import { stackServices, withStack } from "./lib/stack";
-import { setStartup, startup, type Startup } from "./lib/startup";
+import { retryStartup, setStartup, startup, worthRetrying, type Startup } from "./lib/startup";
 import { CRON_TASKS, runTask, type TaskName } from "./tasks";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -111,40 +111,62 @@ closeAfterUnreadBodies(listener as HttpServer);
 
 // ---------------------------------------------------------------------------------------------
 // Migrations, as a separate process (scripts/migrate.mjs, next to this file in the build) so a
-// failure is reported rather than crashing the server. Background tasks start once it's done.
+// failure is reported rather than crashing the server. Background tasks start once it's done,
+// however many tries that takes.
 // ---------------------------------------------------------------------------------------------
 const migrateScript = join(here, "scripts/migrate.mjs");
+/**
+ * Whether this is a brand-new instance or an update, once a try has reached the database and seen.
+ * A later try that can't reach it doesn't know, and mustn't make /api/health forget that this is an
+ * update that failed, which answers 503 so the previous version keeps serving.
+ */
+let firstInstall: boolean | undefined;
 
 /**
  * In an instance, Auth and Storage set up their own tables as they start, and the migrations build
- * on those, so wait until both answer their health checks (up to five minutes on a cold start).
+ * on those, so wait until both answer their health checks: up to five minutes on a cold start, and
+ * one look at each when a failed start is tried again.
  */
-async function waitForServices(): Promise<boolean> {
+async function waitForServices(limit: number): Promise<boolean> {
   if (!stack) return true;
-  const deadline = Date.now() + 5 * 60_000;
+  const deadline = Date.now() + limit;
   for (const url of [`${stack.auth}/health`, `${stack.storage}/status`]) {
     for (;;) {
       const ok = await fetch(url, { signal: AbortSignal.timeout(5_000) }).then((r) => r.ok, () => false);
       if (ok) break;
-      if (Date.now() > deadline) return false;
+      if (Date.now() >= deadline) return false;
       await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
   }
   return true;
 }
 
-async function migrate(): Promise<void> {
+/**
+ * One go at starting up. `again` is a further try after a start that failed because the database or
+ * its services weren't there (retryStartup in lib/startup.ts): it looks rather than waits, so the
+ * failure, and what the setup page says to check, stays on show until there's something to run.
+ */
+async function migrate(again = false): Promise<void> {
   if (!existsSync(migrateScript) || !(process.env.SUPABASE_DB_URL || process.env.DATABASE_URL)) return;
-  setStartup({ state: "migrating" });
-  if (!(await waitForServices())) {
+  if (!again) setStartup({ state: "migrating" });
+  if (!(await waitForServices(again ? 0 : 5 * 60_000))) {
+    if (again) return;
     console.error("Startup: Auth or Storage didn't come up within five minutes.");
     return setStartup({ state: "failed", problem: "services_not_ready" });
   }
+  // From here migrations may be running, so /api/health and the setup page say "starting" again,
+  // and nobody can create the owner's account on a half-made database (routes/setup.ts).
+  setStartup({ state: "migrating" });
   const statusFile = join(tmpdir(), `crewtavo-migrate-${process.pid}.json`);
   return new Promise((resolve) => {
     // CREWTAVO_SINGLE_COMPANY as this server reads it (on by default in an instance), so the
-    // database refuses a second business too, not just this API.
-    const child = spawn(process.execPath, [migrateScript], { env: { ...process.env, CREWTAVO_SINGLE_COMPANY: env.CREWTAVO_SINGLE_COMPANY ?? "", CREWTAVO_MIGRATE_STATUS: statusFile }, stdio: "inherit" });
+    // database refuses a second business too, not just this API. A further try doesn't wait three
+    // minutes for the database as the first does: it has all the tries it needs, and the setup page
+    // says "starting" for as long as the runner is out.
+    const child = spawn(process.execPath, [migrateScript], {
+      env: { ...process.env, CREWTAVO_SINGLE_COMPANY: env.CREWTAVO_SINGLE_COMPANY ?? "", CREWTAVO_MIGRATE_STATUS: statusFile, ...(again ? { CREWTAVO_MIGRATE_WAIT: "0" } : {}) },
+      stdio: "inherit",
+    });
     child.on("exit", () => {
       let status: { ok?: boolean; firstInstall?: boolean; problem?: Startup["problem"]; detail?: string } = {};
       try {
@@ -153,13 +175,14 @@ async function migrate(): Promise<void> {
       } catch {
         status = { ok: false, problem: "migration_failed", detail: "The migration process stopped without a result." };
       }
+      firstInstall = status.firstInstall ?? firstInstall;
       // Ready can come with a problem that doesn't stop it (newer_database). Error monitoring hears
       // of it too: nobody may be reading this instance's log.
       if (status.ok && status.problem) reportError(new Error(`Crewtavo ${version} started on a database a newer version has updated (${status.detail ?? "no detail"})`), { startup: status.problem });
       setStartup(
         status.ok
           ? { state: "ready", ...(status.problem ? { problem: status.problem, detail: status.detail } : {}) }
-          : { state: "failed", firstInstall: status.firstInstall, problem: status.problem, detail: status.detail },
+          : { state: "failed", firstInstall, problem: status.problem, detail: status.detail },
       );
       resolve();
     });
@@ -202,8 +225,13 @@ function scheduleNext() {
   }, delay);
 }
 
-void migrate().then(() => {
+void migrate().then(async () => {
   void describeRecovery(env).then((line) => line && console.log(line), () => undefined);
+  // A start that failed because the database or its services weren't up is tried again, a little
+  // later each time, until it works: otherwise the server stays up with no background tasks
+  // (reminders, automations, autopay) until someone redeploys. A migration that failed stays failed.
+  if (worthRetrying(startup())) console.error(`Startup: not ready (${startup()?.problem}). Trying again by itself until it is.`);
+  await retryStartup(() => migrate(true));
   if (startup()?.state === "failed" || process.env.CREWTAVO_SCHEDULER === "off") return;
   scheduleNext();
   console.log("Background tasks: running in this process");
