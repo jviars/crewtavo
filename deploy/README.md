@@ -181,16 +181,21 @@ after the release was published.
 
 ### Releasing
 
-On a commit of `main` whose CI passed:
+On a commit of `main`:
 
 ```bash
 git tag v0.1.2
 git push origin v0.1.2
 ```
 
-The workflow publishes `ghcr.io/jviars/crewtavo:0.1.2` (and `crewtavo-db:0.1.2` when
-`deploy/postgres` changed) in about five minutes, moves the moving tags to it, and instances pick it
-up over the next several hours. Write release notes on GitHub for anything an owner should know.
+The workflow first checks that the tagged commit is on `main`, then runs everything CI runs
+([`ci.yml`](../.github/workflows/ci.yml)) for that commit. Only when all of it passes does it publish
+`ghcr.io/jviars/crewtavo:0.1.2` (and `crewtavo-db:0.1.2` when `deploy/postgres` changed) and move the
+moving tags to it, about twenty minutes after the push. Instances pick it up over the next several
+hours. If a check fails, nothing is published and instances stay where they are: fix `main` and
+release the next number, or, when the failure had nothing to do with the code (a download that timed
+out), choose **Re-run failed jobs** on the workflow's run. Write release notes on GitHub for anything
+an owner should know.
 
 The number is up to you (`0.1.2`, `0.2.0`, `1.0.0` all install the same way), but every release
 reaches every instance unattended, so it has to work without anyone doing anything:
@@ -202,9 +207,10 @@ reaches every instance unattended, so it has to work without anyone doing anythi
 - **Fixing a bad release:** release a fix as a new version. Moving `latest` back to an older image
   would run old code against a database the newer one has already migrated.
 
-To publish a fix for owners who stayed on an older version, tag it from that version's code
-(`v0.1.9` after `v0.2.0`). It gets its version tag only: the moving tags stay on the highest
-version.
+A tag on a commit that isn't on `main` is refused, so a fix can't be released from an older version's
+code on a branch (`v0.1.9` after `v0.2.0`): owners who stayed on an older version get fixes by moving
+to the newest one. A lower number tagged on an older commit of `main` gets its version tag only: the
+moving tags stay on the highest version.
 
 ### Switching to the moving tags
 

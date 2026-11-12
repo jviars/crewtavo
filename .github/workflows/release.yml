@@ -11,6 +11,9 @@ name: Release
 # installs itself whatever its number, 0.2.0 and 1.0.0 included. The moving tags only go to the
 # highest version, so a fix released for an older line (0.1.9 after 0.2.0) doesn't take instances
 # back. See deploy/README.md, "Updates".
+#
+# Instances install a release unattended within hours, so nothing is published until the tagged
+# commit is known to be on main and every check in ci.yml has passed for that exact commit.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -20,7 +23,34 @@ permissions:
   packages: write
 
 jobs:
+  # A tag can be put on any commit. Only main's are released: a tag on a branch, or on a commit that
+  # was never merged, would otherwise reach every instance.
+  on-main:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tagged commit is on main
+        run: |
+          git fetch --quiet origin '+refs/heads/main:refs/remotes/origin/main'
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "$GITHUB_REF_NAME is on commit $(git rev-parse HEAD), which isn't on main. Nothing is published." >&2
+            exit 1
+          fi
+
+  # Every check CI runs, for the tagged commit: a called workflow checks out its caller's ref, the
+  # tag. It needs nothing from the registry, so it doesn't get to write there.
+  ci:
+    needs: on-main
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   images:
+    needs: [on-main, ci]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

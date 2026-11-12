@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs all of this for the tagged commit before it publishes anything
+  # (release.yml), so the checks stay in one place.
+  workflow_call:
 
 jobs:
   check:
@@ -13,7 +16,9 @@ jobs:
         with:
           fetch-depth: 0
       # Crewtavo takes no outside contributions (CONTRIBUTING.md): every commit is its owner's, with no
-      # co-authors. Merges made on GitHub keep the owner as author and GitHub as committer.
+      # co-authors. Merges made on GitHub keep the owner as author and GitHub as committer. A release
+      # counts as a push too (called from release.yml, the event is the tag's push), so the tagged
+      # commit's history is checked again before anything is published.
       - name: Authorship
         if: github.event_name == 'push'
         run: |
