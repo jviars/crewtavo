@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { assistantAppFor, disconnect, loadConnections, setAccess, type AssistantConnection } from "./assistantConnections";
+import { assistantAppFor, disconnect, endTeamConnection, loadConnections, loadTeamConnections, setAccess, type AssistantConnection, type TeamConnection } from "./assistantConnections";
 
 /** The assistants the signed-in person has connected; `poll` checks again every so many milliseconds. */
 export function useAssistantConnections(poll: number | false = false) {
@@ -60,6 +60,7 @@ export function AssistantAccess() {
         Look things up only, whatever each person allows
       </label>
       <span className="muted small">Each person signs in with their own Crewtavo account, and an assistant can only see and do what that person's role allows.</span>
+      {session.role === "owner" && <TeamAssistants />}
       <details className="more-options">
         <summary>Recent assistant activity</summary>
         {calls.isPending ? (
@@ -80,6 +81,66 @@ export function AssistantAccess() {
           </div>
         )}
       </details>
+    </div>
+  );
+}
+
+/**
+ * Every assistant anyone on the team has connected, for the owner alone: who connected which, what
+ * they let it change, and Disconnect, which ends it for that person as their own Disconnect would.
+ * Turning assistants off above stops them all at once; this is for ending one for good.
+ */
+export function TeamAssistants() {
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const key = ["team-assistant-connections", session.company.id];
+  const team = useQuery({ queryKey: key, queryFn: loadTeamConnections });
+  const end = useMutation({
+    meta: { success: "Disconnected" },
+    mutationFn: (c: TeamConnection) => endTeamConnection(c),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: key });
+      // The owner's own are in this list too.
+      queryClient.invalidateQueries({ queryKey: ["assistant-connections", session.userId] });
+    },
+  });
+  const askEnd = async (c: TeamConnection) => {
+    const mine = c.userId === session.userId;
+    const title = `Disconnect ${c.name} from ${mine ? "your" : `${c.person}'s`} sign-in?`;
+    const body = `It stops working with Crewtavo for ${mine ? "you" : c.person}. ${mine ? "You" : "They"} can connect it again, and it starts out only reading.`;
+    if (await confirm({ title, body, confirmLabel: "Disconnect", danger: true })) end.mutate(c);
+  };
+
+  return (
+    <div className="stack-sm">
+      <strong>Your team's connected assistants</strong>
+      <span className="muted small">Everyone who has connected an assistant, and what they let it change. Only you, as an owner, see this list.</span>
+      {team.isPending ? (
+        <Skeleton height={52} radius={8} />
+      ) : team.error ? (
+        <span className="muted small">{(team.error as Error).message}</span>
+      ) : !team.data.length ? (
+        <span className="muted small">Nobody has connected one yet.</span>
+      ) : (
+        <div className="card" style={{ boxShadow: "none" }}>
+          {team.data.map((c) => (
+            <div key={`${c.userId} ${c.clientId}`} className="card-row" style={{ gap: 10, flexWrap: "wrap" }}>
+              <span className="app-icon" data-size="sm" aria-hidden="true">
+                {c.logo ? <img src={c.logo} alt="" /> : <span className="app-icon-letter">{c.name.slice(0, 1)}</span>}
+              </span>
+              <span className="grow" style={{ minWidth: 0 }}>
+                <strong>{c.person}</strong> · {c.name}
+                <span className="muted small" style={{ display: "block" }}>
+                  Connected {timeAgo(c.connectedAt)} · {describeAssistantAccess(c.access)}
+                </span>
+              </span>
+              <Button size="sm" variant="ghost" loading={end.isPending && end.variables === c} disabled={end.isPending} onClick={() => askEnd(c)} aria-label={`Disconnect ${c.name} from ${c.person}'s sign-in`}>
+                Disconnect
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /** Apps page: catalog with status, OAuth connect/callback/disconnect, API keys, and AI helpers. */
-import { ADMINS } from "@crewtavo/core";
+import { ADMINS, type Role } from "@crewtavo/core";
 import { marketingOn } from "@crewtavo/core/marketing";
 import { projectNumber } from "@crewtavo/core/reviews";
 import { websiteOf } from "@crewtavo/core/website";
@@ -11,7 +11,8 @@ import { confirmPassword, requireCompany, requireUser } from "../lib/auth";
 import { runInBackground } from "../lib/background";
 import { randomId, signToken, verifyToken } from "../lib/crypto";
 import { renderEmail } from "../lib/email";
-import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson } from "../lib/http";
+import { endConnection, teamConnections } from "../lib/assistants";
+import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson, uuid } from "../lib/http";
 import { emailReady, sendEmail } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 import { companyAnthropicKey, complete, countAiAsk } from "../services/ai";
@@ -41,6 +42,9 @@ import { checkAccess, chooseLocation, endReviewSync, firstSyncProgress, problemM
 import { checkMeta, chooseMetaPage, confirmMetaLive, connectMeta, metaAppState, metaKeptSettings, metaPages, signOutMeta } from "../services/metaConnect";
 
 export const apps = new Hono<AppEnv>();
+
+/** Who sees and ends everyone's AI assistant connections: the owner alone. */
+const OWNERS: readonly Role[] = ["owner"];
 
 const STATE_COOKIE = "crewtavo_oauth_nonce";
 const callbackUrl = (base: string, provider: string) => `${base}/api/apps/${provider}/callback`;
@@ -742,4 +746,29 @@ apps.post("/kb/ask", requireUser, requireCompany(), async (c) => {
     maxTokens: 1500,
   });
   return c.json({ answer, sources: hits.map((h) => ({ id: h.id, title: h.title })) });
+});
+
+/**
+ * Every AI assistant the team has connected, for the owner (Settings → AI assistants): who
+ * connected which, since when, and what they let it change. People see only their own in the
+ * database, so the server asks with its own key once it knows an owner is asking.
+ */
+apps.get("/assistants/connections", requireUser, requireCompany(OWNERS), async (c) => c.json({ connections: await teamConnections(adminClient(c.env), c.var.companyId) }));
+
+/**
+ * The owner ends one of them, as the person's own Disconnect does: it loses what it could change,
+ * and Auth forgets the person approved it, so it can't get a new token. On record in the activity.
+ */
+apps.post("/assistants/connections/end", requireUser, requireCompany(OWNERS), async (c) => {
+  const body = await readJson(c, z.object({ user_id: uuid, client_id: z.string().min(1).max(200) }));
+  const { companyId, userId } = c.var;
+  const admin = adminClient(c.env);
+  const connection = (await teamConnections(admin, companyId)).find((x) => x.user_id === body.user_id && x.client_id === body.client_id);
+  if (!connection) throw new HttpError(404, "That assistant isn't connected anymore.");
+  await endConnection(admin, companyId, connection.user_id, connection.client_id);
+  const { data: owner } = await admin.from("profiles").select("full_name").eq("user_id", userId).maybeSingle();
+  const summary = `${owner?.full_name || "An owner"} disconnected ${connection.name} from ${connection.user_id === userId ? "their own" : `${connection.full_name}'s`} sign-in`;
+  const recorded = await admin.from("activity").insert({ company_id: companyId, actor_id: userId, verb: "member.assistant_ended", subject_type: "member", subject_id: connection.user_id, summary });
+  if (recorded.error) console.error("Couldn't record an ended assistant connection", companyId, recorded.error.message);
+  return c.json({ ended: true });
 });

@@ -222,20 +222,6 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
-                },"backups": {
-                  Row: {
-                    "bytes": number | null,"error": string | null,"finished_at": string | null,"heartbeat_at": string,"id": string,"kind": string,"parts": number | null,"started_at": string,"status": string,"warned_at": string | null
-                  }
-                  ComputedFields: never
-                  Insert: {
-                    "bytes"?: number | null,"error"?: string | null,"finished_at"?: string | null,"heartbeat_at"?: string,"id"?: string,"kind"?: string,"parts"?: number | null,"started_at"?: string,"status"?: string,"warned_at"?: string | null
-                  }
-                  Update: {
-                    "bytes"?: number | null,"error"?: string | null,"finished_at"?: string | null,"heartbeat_at"?: string,"id"?: string,"kind"?: string,"parts"?: number | null,"started_at"?: string,"status"?: string,"warned_at"?: string | null
-                  }
-                  Relationships: [
-                    
-                  ]
                 },"calendar_events": {
                   Row: {
                     "all_day": boolean,"busy": boolean,"company_id": string,"description": string | null,"ends_at": string | null,"ends_on": string,"id": string,"key": string,"location": string | null,"source_id": string,"starts_at": string | null,"starts_on": string,"synced_at": string,"title": string,"url": string | null
@@ -1752,14 +1738,14 @@ isOneToOne: false
                   ]
                 },"pay_period_lines": {
                   Row: {
-                    "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"marked_at": string | null,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"piece_amount": number,"reference": string | null,"updated_at": string,"user_id": string
+                    "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"piece_amount": number,"reference": string | null,"updated_at": string,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount"?: number,"break_hours"?: number,"company_id": string,"created_at"?: string,"hours"?: number,"id"?: string,"marked_at"?: string | null,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id": string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id": string
+                    "amount"?: number,"break_hours"?: number,"company_id": string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id": string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id": string
                   }
                   Update: {
-                    "amount"?: number,"break_hours"?: number,"company_id"?: string,"created_at"?: string,"hours"?: number,"id"?: string,"marked_at"?: string | null,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id"?: string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id"?: string
+                    "amount"?: number,"break_hours"?: number,"company_id"?: string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id"?: string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
                     {
@@ -2952,38 +2938,18 @@ isOneToOne: false
                   ]
                 },"sync_links": {
                   Row: {
-                    "account_id": string | null,"company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token": string | null,"synced_at": string
+                    "company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token": string | null,"synced_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_id"?: string | null,"company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token"?: string | null,"synced_at"?: string
+                    "company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token"?: string | null,"synced_at"?: string
                   }
                   Update: {
-                    "account_id"?: string | null,"company_id"?: string,"entity"?: string,"external_id"?: string,"local_id"?: string,"provider"?: string,"sync_token"?: string | null,"synced_at"?: string
+                    "company_id"?: string,"entity"?: string,"external_id"?: string,"local_id"?: string,"provider"?: string,"sync_token"?: string | null,"synced_at"?: string
                   }
                   Relationships: [
                     {
       foreignKeyName: "sync_links_company_id_fkey"
-      columns: ["company_id"]
-isOneToOne: false
-      referencedRelation: "companies"
-      referencedColumns: ["id"]
-    }
-                  ]
-                },"sync_links_parked": {
-                  Row: {
-                    "account_id": string,"company_id": string,"entity": string,"external_id": string,"local_id": string,"parked_at": string,"provider": string,"sync_token": string | null,"synced_at": string
-                  }
-                  ComputedFields: never
-                  Insert: {
-                    "account_id": string,"company_id": string,"entity": string,"external_id": string,"local_id": string,"parked_at"?: string,"provider": string,"sync_token"?: string | null,"synced_at": string
-                  }
-                  Update: {
-                    "account_id"?: string,"company_id"?: string,"entity"?: string,"external_id"?: string,"local_id"?: string,"parked_at"?: string,"provider"?: string,"sync_token"?: string | null,"synced_at"?: string
-                  }
-                  Relationships: [
-                    {
-      foreignKeyName: "sync_links_parked_company_id_fkey"
       columns: ["company_id"]
 isOneToOne: false
       referencedRelation: "companies"
@@ -3414,6 +3380,9 @@ isOneToOne: false
 "approve_hub_quote":
 { Args: { "p_approval": Json,"p_company": string,"p_expected_total"?: number,"p_option"?: string,"p_quote": string,"p_selected": (string)[] }; Returns: boolean
                            },
+"assistant_switch":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
 "automated_campaign_states":
 { Args: { "p_company": string }; Returns: Json
                            },
@@ -3619,9 +3588,6 @@ isOneToOne: false
         isOneToOne: false
         isSetofReturn: true
       } },
-"claim_backup":
-{ Args: { "p_kind": string,"p_since"?: string,"p_tries"?: number }; Returns: string
-                           },
 "claim_campaign_recipients":
 { Args: { "p_campaign": string,"p_limit"?: number }; Returns: {
               "campaign_id": string,
@@ -3742,9 +3708,9 @@ isOneToOne: false
 "clock_upkeep":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
-"collected_by_day":
-{ Args: { "p_company": string,"p_from": string,"p_to": string }; Returns: {
-              "collected": number,"day": string,"payments": number
+"company_assistant_connections":
+{ Args: { "p_company": string }; Returns: {
+              "areas": (string)[],"client_id": string,"connected_at": string,"full_name": string,"level": string,"logo": string,"name": string,"user_id": string
             }[]
                            },
 "company_basics":
@@ -3834,6 +3800,9 @@ isOneToOne: false
 "emit_visit_reminders":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
+"end_assistant_connection":
+{ Args: { "p_client": string,"p_company": string,"p_user": string }; Returns: boolean
+                           },
 "end_review_sync":
 { Args: { "p_company": string,"p_remove": boolean }; Returns: Json
                            },
@@ -3888,11 +3857,6 @@ isOneToOne: false
                            },
 "inactive_client_count":
 { Args: { "p_company": string,"p_days": number }; Returns: number
-                           },
-"invoice_summary":
-{ Args: { "p_company": string,"p_today": string }; Returns: {
-              "collected": number,"collected_before": number,"owed": number,"owed_before": number,"owed_count": number,"past_due": number,"past_due_before": number,"past_due_count": number,"payments": number
-            }[]
                            },
 "job_application":
 { Args: { "p_answers"?: Json,"p_details"?: Json,"p_email"?: string,"p_files"?: Json,"p_form": string,"p_id": string,"p_name"?: string,"p_phone"?: string,"p_web_visit"?: Json }; Returns: Json
@@ -4124,55 +4088,6 @@ isOneToOne: false
               "jobs": number,"state": string
             }[]
                            },
-"jobs_with_visits_to_invoice":
-{ Args: { "p_company": string }; Returns: {
-              "active_months": (number)[] | null,
-"autopay": boolean,
-"autopay_since": string | null,
-"billing_mode": string,
-"client_id": string,
-"company_id": string,
-"created_at": string,
-"created_by": string | null,
-"custom_fields": NonNullable<Json>,
-"default_crew_id": string | null,
-"ends_on": string | null,
-"id": string,
-"instructions": string | null,
-"invoice_day": number | null,
-"invoice_schedule": string | null,
-"kind": string,
-"monthly_since": string | null,
-"number": number | null,
-"paused_at": string | null,
-"pauses": NonNullable<Json>,
-"permit_number": string | null,
-"po_number": string | null,
-"pricing": string | null,
-"property_id": string | null,
-"quote_id": string | null,
-"recurrence_rule": string | null,
-"resume_on": string | null,
-"resumed_at": string | null,
-"retainage_pct": number,
-"salesperson_id": string | null,
-"source_id": string | null,
-"starts_on": string | null,
-"status": string,
-"title": string,
-"updated_at": string,
-"visit_duration_min": number,
-"visit_start_time": string | null,
-"visit_time_fixed": boolean,
-"warranty_until": string | null,
-"weather_rules": NonNullable<Json>
-            }[]
-                          SetofOptions: {
-        from: "*"
-        to: "jobs"
-        isOneToOne: false
-        isSetofReturn: true
-      } },
 "last_referral_ask":
 { Args: { "p_client": string,"p_company": string }; Returns: string
                            },
@@ -4312,9 +4227,6 @@ isOneToOne: false
 { Args: { "p_amounts": (number)[],"p_company": string,"p_invoices": (string)[] }; Returns: {
               "invoice_id": string,"outcome": string,"reason": string
             }[]
-                           },
-"requeue_accounting":
-{ Args: { "p_account": string,"p_company": string,"p_provider": string }; Returns: number
                            },
 "resolve_social_network":
 { Args: { "p_by": string,"p_company": string,"p_network": string,"p_permalink": string,"p_post": string,"p_posted": boolean }; Returns: string
@@ -4464,9 +4376,6 @@ isOneToOne: false
 { Args: { "p_company": string,"p_user": string }; Returns: {
               "company_limit": number,"company_used": number,"user_is_owner": boolean,"user_limit": number,"user_used": number
             }[]
-                           },
-"stripe_fees":
-{ Args: { "p_company": string,"p_since": string }; Returns: number
                            },
 "stripe_import_invoice":
 { Args: { "p_company": string,"p_data": Json,"p_quiet"?: boolean }; Returns: string

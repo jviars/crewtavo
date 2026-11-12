@@ -3,7 +3,7 @@ import { AuthClient } from "@supabase/supabase-js";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv, Env } from "../env";
-import { ASSISTANT_NO_API, isRead } from "./assistants";
+import { ASSISTANT_NO_API, assistantsOff, companySwitch, isRead } from "./assistants";
 import { dbError, HttpError, uuid } from "./http";
 import { allow } from "./limit";
 import { sealAuthToken } from "./signInGuard";
@@ -18,7 +18,8 @@ export function bearerToken(header: string | undefined): string | null {
 /**
  * Verifies the Supabase access token (signature, expiry) and attaches a client that acts as the
  * user. Works for browser sessions and for MCP access tokens from Supabase's OAuth server; an AI
- * assistant's token only reads here: it changes things with its MCP tools (lib/assistants.ts).
+ * assistant's token only reads here: it changes things with its MCP tools (lib/assistants.ts). And
+ * it reads nothing while the person's business has assistants turned off (companySwitch).
  */
 export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const token = bearerToken(c.req.header("authorization"));
@@ -29,6 +30,11 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   if (error || !sub) throw new HttpError(401, "Your session has expired. Sign in again.");
   const client = typeof data.claims.client_id === "string" && data.claims.client_id ? data.claims.client_id : null;
   if (client && !isRead(c.req.method)) throw new HttpError(403, ASSISTANT_NO_API);
+  // While their business has assistants turned off, an assistant doesn't read here either.
+  if (client) {
+    const held = await companySwitch(db);
+    if (held.state === "off") throw new HttpError(403, assistantsOff(held.company));
+  }
   c.set("userId", sub);
   c.set("token", token);
   c.set("sessionId", typeof data.claims.session_id === "string" ? data.claims.session_id : "");

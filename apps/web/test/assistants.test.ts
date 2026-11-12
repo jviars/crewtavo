@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import chatgptLogo from "../src/assets/apps/chatgpt.svg";
 import claudeLogo from "../src/assets/apps/claude.svg";
 import codexLogo from "../src/assets/apps/codex.svg";
-import { disconnect, loadConnections, setAccess } from "../src/features/apps/assistantConnections";
+import { disconnect, loadConnections, setAccess, toTeamConnection, type TeamConnectionRow } from "../src/features/apps/assistantConnections";
 import { AssistantSettings } from "../src/features/settings/AssistantSettings";
 import { ProfileSettings } from "../src/features/settings/ProfileSettings";
 import { settingsGroups } from "../src/features/settings/sections";
@@ -194,5 +194,48 @@ describe("Settings → AI assistants", () => {
     expect(await tab("field_crew", fakeSupabase([], []).db)).toContain("None yet.");
     const html = await tab("field_crew", fakeSupabase(grants, [], { grantsFail: { message: "Failed to fetch", status: 0 } }).db);
     expect(html).toContain("Your connected assistants couldn&#x27;t be loaded. Try again in a moment.");
+  });
+
+  /** The tab once the team's connections have loaded too, as the server gives them to an owner. */
+  function tabWithTeam(role: string, rows: TeamConnectionRow[]) {
+    as(role);
+    vi.stubGlobal("window", { location: { origin: "https://ops.example.com" } });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Infinity } } });
+    client.setQueryData(["assistant-connections", "user-1"], []);
+    client.setQueryData(["team-assistant-connections", "company-1"], rows.map(toTeamConnection));
+    const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(AssistantSettings)));
+    vi.unstubAllGlobals();
+    return html;
+  }
+  const team: TeamConnectionRow[] = [
+    { user_id: "user-2", full_name: "Ola Office", client_id: "c-1", name: "Claude", logo: null, connected_at: "2026-11-10T15:00:00Z", access: { level: "full", areas: [] } },
+    { user_id: "user-3", full_name: "Cal Crew", client_id: "c-2", name: "Shop helper", logo: "https://example.com/helper.png", connected_at: "2026-11-01T09:00:00Z", access: { level: "areas", areas: ["prices"] } },
+  ];
+
+  it("shows the owner everyone's connected assistants, with who connected each, what they let it change and Disconnect", () => {
+    const html = tabWithTeam("owner", team);
+    expect(html).toContain("Your team&#x27;s connected assistants");
+    expect(html).toContain("<strong>Ola Office</strong> · Claude");
+    expect(html).toContain("<strong>Cal Crew</strong> · Shop helper");
+    expect(html).toContain("Full access");
+    expect(html).toContain("Can change: Price list");
+    expect(html).toContain('aria-label="Disconnect Claude from Ola Office&#x27;s sign-in"');
+    expect(html.match(/>Disconnect</g)).toHaveLength(2);
+    expect(tabWithTeam("owner", [])).toContain("Nobody has connected one yet.");
+  });
+
+  it("keeps that list to the owner: an admin has the company's switches without it, and everyone else neither", () => {
+    const admin = tabWithTeam("admin", team);
+    expect(admin).toContain("Let my team use AI assistants");
+    expect(admin).not.toContain("Your team&#x27;s connected assistants");
+    expect(admin).not.toContain("Ola Office");
+    for (const role of ["office", "estimator", "crew_lead", "field_crew"]) expect(tabWithTeam(role, team), role).not.toContain("Ola Office");
+  });
+
+  it("reads the team's connections as the server sends them, with the real logo for the assistants we know", () => {
+    expect(team.map(toTeamConnection)).toEqual([
+      { userId: "user-2", person: "Ola Office", clientId: "c-1", name: "Claude", logo: claudeLogo, connectedAt: "2026-11-10T15:00:00Z", access: { level: "full", areas: [] } },
+      { userId: "user-3", person: "Cal Crew", clientId: "c-2", name: "Shop helper", logo: "https://example.com/helper.png", connectedAt: "2026-11-01T09:00:00Z", access: { level: "areas", areas: ["prices"] } },
+    ]);
   });
 });

@@ -23,6 +23,21 @@ create table auth.users (
 create table auth.sessions (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users (id) on delete cascade);
 create table auth.refresh_tokens (id bigserial primary key, session_id uuid references auth.sessions (id) on delete cascade, user_id text, token text);
 
+-- Auth's OAuth server (an AI assistant's connection), with the columns our functions read, as
+-- supabase/gotrue v2.197 has them: the apps that registered, who approved which (until revoked), and
+-- the app a sign-in belongs to.
+create table auth.oauth_clients (id uuid primary key default gen_random_uuid(), client_name text, logo_uri text, redirect_uris text, deleted_at timestamptz);
+create table auth.oauth_consents (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  client_id uuid not null references auth.oauth_clients (id) on delete cascade,
+  scopes text not null default '',
+  granted_at timestamptz not null default now(),
+  revoked_at timestamptz,
+  unique (user_id, client_id)
+);
+alter table auth.sessions add column oauth_client_id uuid references auth.oauth_clients (id) on delete cascade;
+
 -- Same contract as Supabase's auth.uid(): the "sub" claim of the request's JWT.
 create function auth.uid() returns uuid language sql stable as $$
   select coalesce(

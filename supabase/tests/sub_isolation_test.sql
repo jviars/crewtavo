@@ -536,7 +536,11 @@ select t1070.check(array(
   -- Adding work on site: the team on the visit only, never a sub (the job's prices are the client's).
   'add_field_line(uuid, uuid, numeric, uuid)',
   'answer_sub_offer(uuid, boolean, text, integer, uuid)', 'apply_promo_code(text, uuid, text, uuid, uuid[])',
-  'apply_quote_options(uuid, jsonb, text, uuid[], jsonb)', 'apply_referral_credit(uuid, uuid)', 'approve_autopay_charge(uuid)', 'automated_campaign_states(uuid)',
+  'apply_quote_options(uuid, jsonb, text, uuid[], jsonb)', 'apply_referral_credit(uuid, uuid)', 'approve_autopay_charge(uuid)',
+  -- The company's switch for AI assistants, for the person's own assistant: on for anyone signed in
+  -- themselves, and a business someone only subs for isn't counted (and tells them nothing).
+  'assistant_switch()',
+  'automated_campaign_states(uuid)',
   'autopay_pause(uuid, boolean)', 'autopay_set_settings(uuid, jsonb)', 'autopay_vouch(uuid, uuid[], text)', 'call_off_autopay_charge(uuid)',
   'campaign_audience(uuid, jsonb)', 'campaign_audience_choices(uuid)', 'campaign_recipient_results(uuid, integer, integer, text)', 'campaign_results(uuid, uuid)',
   'careers_set_enabled(uuid, boolean)',

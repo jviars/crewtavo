@@ -50,8 +50,18 @@ interface Call {
   body: any;
 }
 
-/** Supabase in memory, with the connections above; client-expired's token is refused. */
-function supabase(company: { settings?: object } = {}) {
+/** What the owner sees of the team's connections (company_assistant_connections). */
+const TEAM = [
+  { user_id: "7c1d2e3f-4a5b-4c6d-8e7f-000000000001", full_name: "Ola Office", client_id: "client-full", name: "Claude", logo: null, connected_at: "2026-11-10T15:00:00Z", level: "full", areas: [] },
+  { user_id: "7c1d2e3f-4a5b-4c6d-8e7f-000000000002", full_name: "Cal Crew", client_id: "client-reads", name: " ", logo: "https://example.com/logo.png", connected_at: "2026-11-01T09:00:00Z", level: "read", areas: [] },
+];
+
+/**
+ * Supabase in memory, with the connections above; client-expired's token is refused. `held` is the
+ * company's switch as the database answers an assistant's token (public.assistant_switch), and
+ * `role` the person's.
+ */
+function supabase(company: { settings?: object; held?: object; role?: string } = {}) {
   const calls: Call[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
@@ -69,8 +79,16 @@ function supabase(company: { settings?: object } = {}) {
         if (client === "client-expired") return Response.json({ code: "PGRST303", message: "JWT expired" }, { status: 401 });
         return Response.json(client && CONNECTIONS[client] ? [CONNECTIONS[client]] : []);
       }
+      case "/rest/v1/rpc/assistant_switch":
+        return Response.json(company.held ?? { state: "on" });
+      case "/rest/v1/rpc/company_assistant_connections":
+        return Response.json(TEAM);
+      case "/rest/v1/rpc/end_assistant_connection":
+        return Response.json(true);
+      case "/rest/v1/activity":
+        return new Response(null, { status: 201 });
       case "/rest/v1/memberships":
-        return Response.json([{ company_id: "company-1", role: "owner", role_id: null, company: { timezone: "America/New_York", settings } }]);
+        return Response.json([{ company_id: "company-1", role: company.role ?? "owner", role_id: null, company: { timezone: "America/New_York", settings } }]);
       case "/rest/v1/companies":
         if (method === "PATCH") return Response.json([{ id: "company-1" }]);
         return Response.json([{ name: "Kilo Gardens", slug: "kilo", phone: null, email: null, website: null, address: { line1: "1 Main St", city: "Radford" }, timezone: "America/New_York", settings }]);
@@ -397,5 +415,168 @@ describe("the instance's gateway", () => {
     expect((await guardAssistant(env, ask("GET", "/auth/v1/user", reading), "/auth/v1", send)).status).toBe(200);
     expect((await guardAssistant(env, ask("PUT", "/auth/v1/user", signedIn), "/auth/v1", send)).status).toBe(200);
     expect(sent).toHaveLength(3);
+  });
+});
+
+describe("the company's own switch, wherever an assistant's token is taken", () => {
+  const OFF = { state: "off", company: "Kilo Gardens", company_id: "company-1" };
+  const LOOK_ONLY = { state: "read_only", company: "Kilo Gardens", company_id: "company-1" };
+  const upstream = () => {
+    const sent: Request[] = [];
+    return { sent, send: async (request: Request) => (sent.push(request), Response.json({ ok: true })) };
+  };
+  const ask = (method: string, path: string, bearer: string) =>
+    new Request(`http://localhost:8080${path}`, { method, headers: { Authorization: `Bearer ${bearer}`, apikey: "sb_publishable_test", "Content-Type": "application/json" }, body: method === "GET" || method === "HEAD" ? undefined : "{}" });
+  const prefixOf = (path: string) => (path.startsWith("/rest") ? "/rest/v1" : path.startsWith("/storage") ? "/storage/v1" : "/auth/v1");
+  const call = async (bearer: string, name: string, args: object) =>
+    (await (await app.request("/mcp", { method: "POST", headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) }, env)).json()).result;
+  const me = (bearer: string) => app.request("/api/me", { headers: { Authorization: `Bearer ${bearer}` } }, env);
+
+  it("off: the gateway gives an assistant nothing from the Data API or Storage, not even to read, whatever it was given", async () => {
+    supabase({ held: OFF });
+    const { sent, send } = upstream();
+    for (const bearer of [reading, full]) {
+      for (const [method, path] of [
+        ["GET", "/rest/v1/clients?select=*"],
+        ["GET", "/rest/v1/rpc/search_sops?p_query=gate"],
+        ["POST", "/rest/v1/services"],
+        ["GET", "/storage/v1/object/authenticated/files/company-1/photo.jpg"],
+        ["DELETE", "/storage/v1/object/files/company-1/photo.jpg"],
+      ]) {
+        const res = await guardAssistant(env, ask(method!, path!, bearer), prefixOf(path!), send);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await res.json()).toEqual({
+          code: "assistants_off",
+          message: "AI assistants are turned off for Kilo Gardens. An owner or admin can turn them on in Crewtavo, under Settings → AI assistants.",
+        });
+      }
+    }
+    expect(sent).toHaveLength(0);
+  });
+
+  it("off: people signed in themselves aren't asked about, and an assistant can still ask who it is and refresh its token", async () => {
+    const calls = supabase({ held: OFF });
+    const { sent, send } = upstream();
+    expect((await guardAssistant(env, ask("GET", "/rest/v1/clients?select=*", signedIn), "/rest/v1", send)).status).toBe(200);
+    expect((await guardAssistant(env, ask("POST", "/storage/v1/object/files/company-1/photo.jpg", signedIn), "/storage/v1", send)).status).toBe(200);
+    expect(calls.some((c) => c.path === "/rest/v1/rpc/assistant_switch")).toBe(false);
+    expect((await guardAssistant(env, ask("GET", "/auth/v1/user", full), "/auth/v1", send)).status).toBe(200);
+    expect((await guardAssistant(env, ask("POST", "/auth/v1/oauth/token", full), "/auth/v1", send)).status).toBe(200);
+    // The question itself goes through: in an instance the server asks it through this gateway.
+    expect((await guardAssistant(env, ask("GET", "/rest/v1/rpc/assistant_switch", full), "/rest/v1", send)).status).toBe(200);
+    expect(sent).toHaveLength(5);
+  });
+
+  it("look things up only: the gateway lets an assistant read and refuses every change, full access or not", async () => {
+    const calls = supabase({ held: LOOK_ONLY });
+    const { sent, send } = upstream();
+    for (const [method, path] of [["POST", "/rest/v1/services"], ["PATCH", "/rest/v1/clients?id=eq.1"], ["POST", "/rest/v1/rpc/merge_clients"], ["DELETE", "/storage/v1/object/files/company-1/photo.jpg"]]) {
+      const res = await guardAssistant(env, ask(method!, path!, full), prefixOf(path!), send);
+      expect(res.status, `${method} ${path}`).toBe(403);
+      expect(await res.json()).toEqual({
+        code: "assistants_read_only",
+        message: "Assistants can only look things up for Kilo Gardens, not make changes. An owner or admin can change this in Crewtavo, under Settings → AI assistants.",
+      });
+    }
+    expect(sent).toHaveLength(0);
+    expect(calls.some((c) => c.path === "/rest/v1/assistant_connections")).toBe(false);
+    expect((await guardAssistant(env, ask("GET", "/rest/v1/clients?select=*", full), "/rest/v1", send)).status).toBe(200);
+    expect((await guardAssistant(env, ask("GET", "/storage/v1/object/authenticated/files/company-1/photo.jpg", full), "/storage/v1", send)).status).toBe(200);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("on, or when the database can't be asked: the gateway goes by what each person gave their assistant, as before", async () => {
+    for (const held of [{ state: "on" }, [], { code: "PGRST202", message: "Could not find the function" }]) {
+      supabase({ held });
+      const { sent, send } = upstream();
+      expect((await guardAssistant(env, ask("GET", "/rest/v1/clients?select=*", reading), "/rest/v1", send)).status).toBe(200);
+      expect((await guardAssistant(env, ask("POST", "/rest/v1/services", prices), "/rest/v1", send)).status).toBe(200);
+      expect((await guardAssistant(env, ask("POST", "/rest/v1/services", reading), "/rest/v1", send)).status).toBe(403);
+      expect(sent).toHaveLength(2);
+    }
+  });
+
+  it("off: the API doesn't answer an assistant either, and still answers the person", async () => {
+    supabase({ held: OFF });
+    const res = await me(full);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "AI assistants are turned off for Kilo Gardens. An owner or admin can turn them on in Crewtavo, under Settings → AI assistants." });
+    // Past the door (this pretend database has no profile to give, so the route itself says 404).
+    const calls = supabase({ held: OFF });
+    expect((await me(signedIn)).status).toBe(404);
+    expect(calls.some((c) => c.path === "/rest/v1/rpc/assistant_switch")).toBe(false);
+    // Look things up only: it reads here as it did (it never could change anything here).
+    supabase({ held: LOOK_ONLY });
+    expect((await me(full)).status).toBe(404);
+  });
+
+  it("off: an MCP tool says so, runs nothing, and the refusal is in the log the owner sees", async () => {
+    // The person's other business has them off, though this one's own setting is on.
+    const calls = supabase({ held: { state: "off", company: "Lima Lawns", company_id: "company-2" } });
+    const res = await call(full, "list_clients", {});
+    expect(res).toMatchObject({ isError: true, content: [{ type: "text", text: "AI assistants are turned off for Lima Lawns. An owner or admin can turn them on in Crewtavo, under Settings → AI assistants." }] });
+    expect(calls.some((c) => c.path === "/rest/v1/clients" || c.path === "/rest/v1/memberships")).toBe(false);
+    expect(calls.find((c) => c.path === "/rest/v1/assistant_calls")?.body).toMatchObject({ company_id: "company-2", tool: "list_clients", ok: false, oauth_client: "client-full" });
+  });
+
+  it("look things up only: an MCP tool that reads works, and one that changes things says who set it", async () => {
+    const calls = supabase({ held: { state: "read_only", company: "Lima Lawns", company_id: "company-2" } });
+    expect((await call(full, "get_company_settings", {})).isError).toBeUndefined();
+    expect((await call(full, "add_note", note)).content[0].text).toBe(
+      "Assistants can only look things up for Lima Lawns, not make changes. An owner or admin can change this in Crewtavo, under Settings → AI assistants.",
+    );
+    expect(calls.some((c) => c.method !== "GET" && c.path === "/rest/v1/messages")).toBe(false);
+  });
+});
+
+describe("the team's connected assistants, for the owner", () => {
+  const headers = (bearer: string) => ({ Authorization: `Bearer ${bearer}`, "X-Company-Id": "0d0c0b0a-0000-4000-8000-000000000001", "Content-Type": "application/json" });
+  const list = (bearer = signedIn) => app.request("/api/assistants/connections", { headers: headers(bearer) }, env);
+  const end = (body: object, bearer = signedIn) => app.request("/api/assistants/connections/end", { method: "POST", headers: headers(bearer), body: JSON.stringify(body) }, env);
+
+  it("lists everyone's, with who connected it and what they let it change, asked with the server's key", async () => {
+    const calls = supabase();
+    const res = await list();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      connections: [
+        { user_id: TEAM[0]!.user_id, full_name: "Ola Office", client_id: "client-full", name: "Claude", logo: null, connected_at: "2026-11-10T15:00:00Z", access: { level: "full", areas: [] } },
+        // An app that registered without a name.
+        { user_id: TEAM[1]!.user_id, full_name: "Cal Crew", client_id: "client-reads", name: "AI assistant", logo: "https://example.com/logo.png", connected_at: "2026-11-01T09:00:00Z", access: { level: "read", areas: [] } },
+      ],
+    });
+    expect(calls.find((c) => c.path === "/rest/v1/rpc/company_assistant_connections")?.body).toEqual({ p_company: "0d0c0b0a-0000-4000-8000-000000000001" });
+  });
+
+  it("is the owner's alone: an admin, the office and the crew are refused before anything is read or ended", async () => {
+    for (const role of ["admin", "office", "field_crew"]) {
+      const calls = supabase({ role });
+      expect((await list()).status, role).toBe(403);
+      expect((await end({ user_id: TEAM[0]!.user_id, client_id: "client-full" })).status, role).toBe(403);
+      expect(calls.some((c) => c.path.startsWith("/rest/v1/rpc/company_assistant") || c.path.startsWith("/rest/v1/rpc/end_assistant"))).toBe(false);
+    }
+  });
+
+  it("ends one of them, and puts it on record", async () => {
+    const calls = supabase();
+    const res = await end({ user_id: TEAM[0]!.user_id, client_id: "client-full" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ended: true });
+    expect(calls.find((c) => c.path === "/rest/v1/rpc/end_assistant_connection")?.body).toEqual({ p_company: "0d0c0b0a-0000-4000-8000-000000000001", p_user: TEAM[0]!.user_id, p_client: "client-full" });
+    expect(calls.find((c) => c.method === "POST" && c.path === "/rest/v1/activity")?.body).toMatchObject({
+      verb: "member.assistant_ended", subject_type: "member", subject_id: TEAM[0]!.user_id, summary: expect.stringMatching(/ disconnected Claude from Ola Office's sign-in$/),
+    });
+  });
+
+  it("ends nothing that isn't one of the team's connections, and takes nothing from an assistant", async () => {
+    let calls = supabase();
+    expect((await end({ user_id: TEAM[0]!.user_id, client_id: "client-someone-elses" })).status).toBe(404);
+    expect((await end({ user_id: "7c1d2e3f-4a5b-4c6d-8e7f-0000000000ff", client_id: "client-full" })).status).toBe(404);
+    expect(calls.some((c) => c.path === "/rest/v1/rpc/end_assistant_connection")).toBe(false);
+    calls = supabase();
+    const res = await end({ user_id: TEAM[0]!.user_id, client_id: "client-full" }, full);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: ASSISTANT_NO_API });
+    expect(calls.some((c) => c.path === "/rest/v1/rpc/end_assistant_connection")).toBe(false);
   });
 });

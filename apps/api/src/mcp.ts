@@ -19,7 +19,7 @@ import { z } from "zod";
 import { rows, TOOLS, type ToolContext } from "./assistant-tools";
 import type { AppEnv, Env } from "./env";
 import { ownOrigin } from "./lib/address";
-import { connectionAccess, NO_ASSISTANTS_FOR_SUBS } from "./lib/assistants";
+import { assistantsLookOnly, assistantsOff, companySwitch, connectionAccess, NO_ASSISTANTS_FOR_SUBS } from "./lib/assistants";
 import { authMetadata } from "./lib/authMetadata";
 import { bearerToken } from "./lib/auth";
 import { appUrl } from "./lib/http";
@@ -156,11 +156,21 @@ mcp.post("/mcp", async (c) => {
         return c.json(result(id, { isError: true, content: [{ type: "text", text: `Invalid arguments. ${problems.slice(0, 10).join("; ")}${problems.length > 10 ? `; and ${problems.length - 10} more` : ""}` }] }));
       }
       let ctx: ToolContext | null = null;
+      // The switch as the database holds an assistant's token to it: the strictest of the person's
+      // businesses (lib/assistants.ts). Off, the database gives the token nothing, so the tool is
+      // refused here, where the call can still be logged for the business that turned them off.
+      const held = oauthClient ? await companySwitch(db) : null;
+      if (held?.state === "off") {
+        const text = assistantsOff(held.company);
+        if (held.companyId) await audit(c, { companyId: held.companyId }, userId, oauthClient, name, false, text.slice(0, 200));
+        return c.json(result(id, { isError: true, content: [{ type: "text", text }] }));
+      }
       try {
         const access = oauthClient ? ((await connectionAccess(db, oauthClient)) ?? READ_ONLY_ACCESS) : null;
         ctx = await toolContext(c.env, db, userId, await ownOrigin(c), access, (parsed.data as { company_id?: string }).company_id);
         if (!ctx.assistants.enabled) throw new Error("AI assistants are turned off for this company. An owner or admin can turn them on in Crewtavo, under Settings → AI assistants.");
         if (ctx.assistants.read_only && t.area) throw new Error("Assistants can only look things up for this company, not make changes. An owner or admin can change this in Crewtavo, under Settings → AI assistants.");
+        if (held?.state === "read_only" && t.area) throw new Error(assistantsLookOnly(held.company));
         if (access && t.area && !mayChange(access, t.area, t.destructive)) throw new Error(assistantRefusal(t.area, t.destructive, access));
         const value = await t.run(ctx, parsed.data);
         await audit(c, ctx, userId, oauthClient, name, true, summarize(parsed.data));
@@ -211,7 +221,7 @@ function summarize(args: unknown) {
   return parts.join(", ").slice(0, 300) || null;
 }
 
-async function audit(c: Context<AppEnv>, ctx: ToolContext, userId: string, oauthClient: string | null, tool: string, ok: boolean, detail: string | null) {
+async function audit(c: Context<AppEnv>, ctx: Pick<ToolContext, "companyId">, userId: string, oauthClient: string | null, tool: string, ok: boolean, detail: string | null) {
   try {
     await adminClient(c.env).from("assistant_calls").insert({ company_id: ctx.companyId, user_id: userId, oauth_client: oauthClient, tool, ok, detail });
   } catch (error) {

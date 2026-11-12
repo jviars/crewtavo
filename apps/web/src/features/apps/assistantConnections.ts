@@ -10,7 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import chatgptLogo from "@/assets/apps/chatgpt.svg";
 import claudeLogo from "@/assets/apps/claude.svg";
 import codexLogo from "@/assets/apps/codex.svg";
-import { ApiError, unwrap } from "@/lib/api";
+import { api, ApiError, unwrap } from "@/lib/api";
 
 type Db = SupabaseClient<Database>;
 
@@ -69,6 +69,46 @@ export async function loadConnections(db: Db): Promise<AssistantConnection[]> {
       };
     })
     .sort((a, b) => b.connectedAt.localeCompare(a.connectedAt));
+}
+
+/** One assistant someone on the team connected, as the owner sees it. */
+export interface TeamConnection extends AssistantConnection {
+  userId: string;
+  person: string;
+}
+
+/** A row of GET /assistants/connections (the server's teamConnections). */
+export interface TeamConnectionRow {
+  user_id: string;
+  full_name: string;
+  client_id: string;
+  name: string;
+  logo: string | null;
+  connected_at: string;
+  access: AssistantAccess;
+}
+
+export const toTeamConnection = (r: TeamConnectionRow): TeamConnection => ({
+  userId: r.user_id,
+  person: r.full_name,
+  clientId: r.client_id,
+  name: r.name,
+  logo: assistantLogo(r.name) ?? (r.logo || null),
+  connectedAt: r.connected_at,
+  access: toAssistantAccess(r.access),
+});
+
+/**
+ * Every assistant the team has connected, newest first. The owner's alone: people see only their
+ * own in the database, so the server reads these for an owner who asks.
+ */
+export async function loadTeamConnections(): Promise<TeamConnection[]> {
+  return (await api.get<{ connections: TeamConnectionRow[] }>("/assistants/connections")).connections.map(toTeamConnection);
+}
+
+/** The owner ends one of them, as the person's own Disconnect does. */
+export async function endTeamConnection(connection: Pick<TeamConnection, "userId" | "clientId">): Promise<void> {
+  await api.post("/assistants/connections/end", { user_id: connection.userId, client_id: connection.clientId });
 }
 
 export async function setAccess(db: Db, userId: string, clientId: string, access: AssistantAccess): Promise<void> {
