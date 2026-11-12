@@ -87,7 +87,9 @@ export function useStatusTap(send: (change: VisitStatusChange) => void) {
 /**
  * Start or stop the signed-in person's clock for a visit. Only one clock runs at a time. `at` is
  * when it happened, which matters when the tap was made offline and is only being sent now, and
- * `place` is where the phone was then.
+ * `place` is where the phone was then. The clock it stops here gets the place too; one this phone
+ * didn't see (started on another phone a moment ago) is stopped by the database as the new one
+ * starts, which never turns the start away (20261112000410_one_running_clock.sql).
  */
 export async function clockVisit(companyId: string, userId: string, visit: { id: string; job_id: string | null }, action: "start" | "stop", at = new Date().toISOString(), place?: ClockPlace) {
   const db = supabase();
