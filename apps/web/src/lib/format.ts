@@ -1,15 +1,7 @@
 import { taxPercent } from "@crewtavo/core/money";
 
-/** Currencies a business can pick (Settings → Company and sign-up). */
-export const CURRENCIES = [
-  { code: "USD", name: "US dollar" },
-  { code: "CAD", name: "Canadian dollar" },
-  { code: "AUD", name: "Australian dollar" },
-  { code: "NZD", name: "New Zealand dollar" },
-  { code: "GBP", name: "British pound" },
-  { code: "EUR", name: "Euro" },
-  { code: "ZAR", name: "South African rand" },
-];
+/** Currencies a business can pick (Settings → Company and sign-up): the API takes the same list. */
+export { CURRENCIES } from "@crewtavo/core/money";
 
 let currency = "USD";
 let money = new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 });

@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { getPreset, greetingName, LEVEL_PERMISSIONS, memberPermissions, TERMS_VERSION } from "@crewtavo/core";
+import { CURRENCIES, getPreset, greetingName, LEVEL_PERMISSIONS, memberPermissions, TERMS_VERSION } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -224,6 +224,27 @@ describe("setting up a business", () => {
     const bad = await make("dollars");
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ error: "Pick a currency from the list, like USD." });
+  });
+
+  it("refuses a currency the app doesn't offer, before anything is made", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      calls.push(url.pathname);
+      if (url.pathname === "/auth/v1/user") return Response.json({ id: "user-1", aud: "authenticated", role: "authenticated" });
+      return Response.json(url.pathname === "/rest/v1/rpc/create_company" ? "company-1" : []);
+    });
+    const make = (currency: string) =>
+      request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ name: "Maple Lawn", timezone: "Asia/Tokyo", currency, terms_version: TERMS_VERSION }) });
+    // Yen has no cents, and Stripe is sent every amount in cents.
+    for (const code of ["JPY", "jpy", "KWD", "XXX"]) {
+      const res = await make(code);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "Pick a currency from the list, like USD." });
+    }
+    expect(calls).not.toContain("/rest/v1/rpc/create_company");
+    // Each one Settings → Company and sign-up offer is taken.
+    for (const { code } of CURRENCIES) expect((await make(code)).status).toBe(201);
   });
 
   it("puts each preset checklist with the price list items it names, by their new ids", async () => {

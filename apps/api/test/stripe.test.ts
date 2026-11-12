@@ -1,9 +1,11 @@
+import { CURRENCIES } from "@crewtavo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { hmacSha256Hex } from "../src/lib/crypto";
 import {
   cents,
+  centsCurrency,
   importedLines,
   paymentMethod,
   STRIPE_VERSION,
@@ -201,6 +203,26 @@ describe("stripe api", () => {
     expect(await stripeApi("sk_test_1", "POST", "/v1/customers", { email: "pat@example.com" }).catch((e) => e)).toBeInstanceOf(StripeError);
     // No idempotency key: it may have gone through, so it isn't sent again.
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing in a currency it can't count in cents", async () => {
+    const fetch = vi.fn(async () => Response.json({ id: "in_1" }));
+    vi.stubGlobal("fetch", fetch);
+    // Yen has no cents (¥5,000 sent as 500000 would be ¥500,000), dinars have thousandths, and nobody has checked "xxx".
+    for (const currency of ["jpy", "JPY", "krw", "kwd", "xxx"]) {
+      const error = await stripeApi("sk_test_1", "POST", "/v1/invoiceitems", { customer: "cus_1", currency, amount: 500000 }, { idempotencyKey: "k1" }).catch((e) => e);
+      expect(error).toBeInstanceOf(StripeError);
+      expect(error).toMatchObject({ status: 400, code: "currency_not_supported", param: "currency" });
+      expect((error as StripeError).message).toBe(`Crewtavo can't bill through Stripe in ${currency.toUpperCase()}: it only knows currencies counted in cents, like USD. Change the currency in Settings → Company.`);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    // Every currency a business can pick goes through, and so do the others its smallest charge is known for.
+    for (const { code } of CURRENCIES) expect(await stripeApi("sk_test_1", "POST", "/v1/invoices", { customer: "cus_1", currency: code.toLowerCase() })).toEqual({ id: "in_1" });
+    for (const currency of ["mxn", "sek", "chf"]) expect(centsCurrency(currency)).toBe(currency);
+    expect(centsCurrency("CAD")).toBe("cad");
+    expect(fetch).toHaveBeenCalledTimes(CURRENCIES.length);
+    // Reading from Stripe isn't held back: what's there in another currency can still be looked at.
+    expect(await stripeApi("sk_test_1", "GET", "/v1/invoices", { currency: "jpy" })).toEqual({ id: "in_1" });
   });
 
   it("retries a read that timed out", async () => {

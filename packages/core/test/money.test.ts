@@ -3,6 +3,8 @@ import { snapshotLines } from "../src/estimates";
 import {
   chosenTotals,
   countsOn,
+  CURRENCIES,
+  currencyOffered,
   inOptionBase,
   lineTotal,
   optionBaseTotal,
@@ -290,5 +292,19 @@ describe("options", () => {
       }
     }
     expect(bad.slice(0, 3)).toEqual([]);
+  });
+});
+
+describe("currencies a business can pick", () => {
+  it("are all counted in hundredths, as invoices and Stripe charges are", () => {
+    // Intl knows each currency's decimals: 2 for dollars, pounds, euros and rand; 0 for yen; 3 for Kuwaiti dinars.
+    const decimals = (code: string) => new Intl.NumberFormat("en-US", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits;
+    expect(CURRENCIES.map((c) => [c.code, decimals(c.code)])).toEqual(CURRENCIES.map((c) => [c.code, 2]));
+    expect([decimals("JPY"), decimals("KWD")]).toEqual([0, 3]);
+  });
+
+  it("are the only ones offered, in either case", () => {
+    expect(["USD", "cad", "Eur"].map(currencyOffered)).toEqual([true, true, true]);
+    expect(["JPY", "KWD", "XXX", "dollars", "", null, undefined].map(currencyOffered)).toEqual([false, false, false, false, false, false, false]);
   });
 });

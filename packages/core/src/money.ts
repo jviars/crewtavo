@@ -311,6 +311,25 @@ export function optionTierLabels(options: ReadonlyArray<{ id: string; tier?: str
 }
 
 /**
+ * Currencies a business can pick (Settings → Company and sign-up), which is all the API takes when a
+ * business is set up. Every one counts in hundredths, as the money columns and Stripe's amounts do:
+ * one without cents (the yen) or with thousandths (the Kuwaiti dinar) can't be added here until
+ * invoices and Stripe charges handle it (apps/api/src/services/stripe.ts cents).
+ */
+export const CURRENCIES = [
+  { code: "USD", name: "US dollar" },
+  { code: "CAD", name: "Canadian dollar" },
+  { code: "AUD", name: "Australian dollar" },
+  { code: "NZD", name: "New Zealand dollar" },
+  { code: "GBP", name: "British pound" },
+  { code: "EUR", name: "Euro" },
+  { code: "ZAR", name: "South African rand" },
+];
+
+/** Whether a currency code is one a business can pick, in either case: "cad" is, "JPY" isn't. */
+export const currencyOffered = (code: string | null | undefined) => CURRENCIES.some((c) => c.code === String(code ?? "").toUpperCase());
+
+/**
  * Why a payment can't be recorded against an invoice's balance, or null: it has to be more than
  * zero and not more than what's owed (a refund is a payment of its own, recorded in Crewtavo).
  */

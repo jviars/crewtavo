@@ -68,6 +68,8 @@ export async function stripeApi<T>(
   params: Record<string, Param> = {},
   options: { idempotencyKey?: string } = {},
 ): Promise<T> {
+  // Nothing is billed in a currency cents() can't convert: refused here, before it's sent.
+  if (method === "POST" && typeof params.currency === "string") centsCurrency(params.currency);
   const form = stripeForm(params).toString();
   const url = `https://api.stripe.com${path}${method !== "POST" && form ? `?${form}` : ""}`;
   const headers: Record<string, string> = { Authorization: `Bearer ${key}`, "Stripe-Version": STRIPE_VERSION };
@@ -284,8 +286,37 @@ export interface StripePayout {
 // Money in both directions
 // ---------------------------------------------------------------------------------------------
 
-/** Dollars (numeric columns arrive as numbers or strings) to cents. */
+/**
+ * Dollars (numeric columns arrive as numbers or strings) to cents. Right only for a currency Stripe
+ * counts in hundredths (centsCurrency): everything sent to Stripe with a currency is checked first.
+ */
 export const cents = (amount: number | string | null | undefined) => Math.round(Number(amount ?? 0) * 100);
+
+/**
+ * The currencies cents() is right for: Stripe counts them in hundredths (docs.stripe.com/currencies),
+ * as the money columns do. Every one a business can pick is here (core CURRENCIES), with the others
+ * whose smallest charge is known below. Left out on purpose: currencies without cents (JPY, KRW),
+ * where times 100 would bill 100 times too much, ones with thousandths (KWD), and any code nobody has
+ * checked. Add one only after reading Stripe's page for it.
+ */
+const IN_CENTS = new Set([
+  "usd", "cad", "aud", "nzd", "gbp", "eur", "zar",
+  "aed", "ars", "bgn", "brl", "chf", "cop", "czk", "dkk", "hkd", "huf", "idr", "ils", "inr", "mxn", "myr", "nok", "php", "pln", "ron", "rub", "sek", "sgd", "thb",
+]);
+
+/**
+ * A currency as Stripe takes it ("usd"), or an error when cents() can't convert it. The error is
+ * thrown as Stripe's own refusal of a currency would be (a 400 naming the parameter), so each caller
+ * handles it as it handles that: nothing was sent, nothing was charged, and the office is told why.
+ */
+export function centsCurrency(currency: string): string {
+  const code = currency.toLowerCase();
+  if (IN_CENTS.has(code)) return code;
+  throw new StripeError(
+    `Crewtavo can't bill through Stripe in ${currency.toUpperCase()}: it only knows currencies counted in cents, like USD. Change the currency in Settings → Company.`,
+    400, "currency_not_supported", "currency", undefined, "invalid_request_error",
+  );
+}
 
 /**
  * The least Stripe charges, in cents (50 in most currencies). Stripe marks an invoice for less as

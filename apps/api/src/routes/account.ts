@@ -1,5 +1,5 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
-import { ADMINS, adminLevel, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, PERMISSIONS, presetSummaries, ROLE_LABELS, ROLES, signInPhone, STAFF, subSettings, TERMS_VERSION, WITH_SUBS, type Permission, type Role, type TradePreset } from "@crewtavo/core";
+import { ADMINS, adminLevel, currencyOffered, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, PERMISSIONS, presetSummaries, ROLE_LABELS, ROLES, signInPhone, STAFF, subSettings, TERMS_VERSION, WITH_SUBS, type Permission, type Role, type TradePreset } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv, Env } from "../env";
@@ -240,7 +240,9 @@ account.post("/companies", requireUser, async (c) => {
       name: z.string().trim().min(1).max(200),
       trade_preset: z.string().default("general"),
       timezone: z.string().default("America/New_York"),
-      currency: z.string().regex(/^[A-Za-z]{3}$/, "Pick a currency from the list, like USD.").default("USD"),
+      // Only the ones Settings → Company and sign-up offer (core CURRENCIES): Stripe is sent every
+      // amount in cents, so a currency without them, like JPY, would be charged 100 times too much.
+      currency: z.string().refine(currencyOffered, "Pick a currency from the list, like USD.").default("USD"),
       terms_version: z.string().max(40).optional(),
     }),
   );
