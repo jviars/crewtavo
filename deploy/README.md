@@ -39,7 +39,15 @@ every deploy generates its own and the person deploying fills in nothing.
 | `SUPABASE_REST_URL` | `http://${{rest.RAILWAY_PRIVATE_DOMAIN}}:3000` |
 | `SUPABASE_STORAGE_URL` | `http://${{storage.RAILWAY_PRIVATE_DOMAIN}}:5000` |
 | `RAILWAY_HEALTHCHECK_TIMEOUT_SEC` | `600` |
+| `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | `30` |
 
+- **Stopping:** when an update takes over, Railway tells the old version to stop and, without
+  `RAILWAY_DEPLOYMENT_DRAINING_SECONDS`, kills it that instant, cutting off requests and background
+  tasks (a charge, a send) half-way. With it the old version gets 30 seconds, and stops as soon as
+  what was under way has finished (`shutdown` in `apps/api/src/server.ts` waits up to 25).
+  `docker-compose.yml` allows the same with `stop_grace_period`. An instance made before this
+  variable was in the template doesn't have it, and a template change never reaches an existing
+  instance: its owner adds it under the `crewtavo` service's **Variables**.
 - **Visitors' addresses:** nothing to set. On Railway, rate limits and quote approvals go by the
   `X-Real-IP` header Railway's edge sets on every request (`apps/api/src/lib/visitor.ts`), and the
   gateway passes the same address on to `auth` and `storage`. `CREWTAVO_VISITOR_IP` is for other

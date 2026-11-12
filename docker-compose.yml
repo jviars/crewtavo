@@ -111,6 +111,10 @@ services:
     build: .
     restart: unless-stopped
     depends_on: { db: { condition: service_healthy } }
+    # Asked to stop, Crewtavo finishes the requests and background tasks under way first
+    # (apps/api/src/server.ts). Docker gives it 30 seconds for that, as Railway does
+    # (RAILWAY_DEPLOYMENT_DRAINING_SECONDS in .railway/railway.ts), rather than its usual 10.
+    stop_grace_period: 30s
     # Only on this computer (CREWTAVO_BIND), for the web server in front to forward to: Crewtavo
     # believes X-Forwarded-For from Docker's network, and on every address Docker would hand some
     # outside connections over from there too (docs/deploy.md, Visitors' addresses).

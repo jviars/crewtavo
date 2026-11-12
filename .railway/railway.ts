@@ -58,6 +58,10 @@ export default defineRailway(() => {
       SUPABASE_AUTH_URL: "http://${{auth.RAILWAY_PRIVATE_DOMAIN}}:9999",
       SUPABASE_REST_URL: "http://${{rest.RAILWAY_PRIVATE_DOMAIN}}:3000",
       SUPABASE_STORAGE_URL: "http://${{storage.RAILWAY_PRIVATE_DOMAIN}}:5000",
+      // When an update takes over, Railway tells the old version to stop and, by default, kills it
+      // that instant, mid-request and mid-task. This gives it 30 seconds; it stops as soon as its
+      // requests and background tasks have finished (shutdown in apps/api/src/server.ts).
+      RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "30",
       // Optional features (email, texting, payments, maps...): add their variables here.
     },
   });

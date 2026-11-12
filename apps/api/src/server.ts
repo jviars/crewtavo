@@ -35,7 +35,7 @@ import { reportError } from "./lib/monitoring";
 import { describeRecovery } from "./lib/recovery";
 import { startMonitoring } from "./lib/monitoring-node";
 import { stackServices, withStack } from "./lib/stack";
-import { retryStartup, setStartup, startup, worthRetrying, type Startup } from "./lib/startup";
+import { retryStartup, setStartup, startup, whenIdle, worthRetrying, type Startup } from "./lib/startup";
 import { CRON_TASKS, runTask, type TaskName } from "./tasks";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -196,6 +196,8 @@ async function migrate(again = false): Promise<void> {
 // ---------------------------------------------------------------------------------------------
 const running = new Set<TaskName>();
 let timer: ReturnType<typeof setTimeout> | undefined;
+/** Set once the server has been asked to stop (shutdown, below): nothing new starts after that. */
+let stopping = false;
 
 async function tick() {
   const now = new Date();
@@ -231,20 +233,42 @@ void migrate().then(async () => {
   // later each time, until it works: otherwise the server stays up with no background tasks
   // (reminders, automations, autopay) until someone redeploys. A migration that failed stays failed.
   if (worthRetrying(startup())) console.error(`Startup: not ready (${startup()?.problem}). Trying again by itself until it is.`);
-  await retryStartup(() => migrate(true));
-  if (startup()?.state === "failed" || process.env.CREWTAVO_SCHEDULER === "off") return;
+  await retryStartup(() => migrate(true), undefined, () => stopping);
+  if (stopping || startup()?.state === "failed" || process.env.CREWTAVO_SCHEDULER === "off") return;
   scheduleNext();
   console.log("Background tasks: running in this process");
   // Started with a new web address (Settings → Web address)? Say so now rather than at the next tick.
   runTask("address", env).catch((error) => console.error("Task address failed", error));
 });
 
-function shutdown(signal: string) {
+/**
+ * How long stopping waits for the requests and background tasks under way: a little under the 30
+ * seconds Railway (RAILWAY_DEPLOYMENT_DRAINING_SECONDS in .railway/railway.ts) and Docker
+ * (stop_grace_period in docker-compose.yml) give the process before they kill it.
+ */
+const DRAIN_MS = 25_000;
+
+/**
+ * Asked to stop, which every update does to the version it replaces: no more background tasks are
+ * started and no more connections taken, then it waits for what's under way, so a request isn't cut
+ * off and a task isn't killed half-way through a charge or a send. It stops as soon as that's done.
+ */
+async function shutdown(signal: string) {
+  // Asked a second time (Ctrl-C again): stop now.
+  if (stopping) process.exit(0);
+  stopping = true;
   console.log(`${signal} received, shutting down`);
   if (timer) clearTimeout(timer);
-  listener.close(() => process.exit(0));
-  // Give in-flight requests and tasks a few seconds, then exit regardless.
-  setTimeout(() => process.exit(0), 8_000).unref();
+  let closed = false;
+  listener.close(() => (closed = true));
+  const idle = await whenIdle(() => {
+    // A connection kept open between requests (a browser's, Railway's proxy's) would hold the server
+    // open until it timed out. One with a request under way is left alone until it has answered.
+    (listener as HttpServer).closeIdleConnections();
+    return closed && running.size === 0;
+  }, DRAIN_MS);
+  if (!idle) console.log(`Still busy after ${DRAIN_MS / 1000} seconds (${[...running].join(", ") || "open requests"}); stopping anyway`);
+  process.exit(0);
 }
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

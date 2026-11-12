@@ -124,6 +124,12 @@ Going back to a version older than one your Crewtavo has already run doesn't und
 database has moved on, and parts of the older version may not work with it. It still starts, and
 says so in its log and at `/api/health` (`"problem":"newer_database"`).
 
+When an update takes over, the old version finishes the requests and background tasks it had under
+way before it stops, if Railway gives it the time. Open the `crewtavo` service's **Variables**: if
+`RAILWAY_DEPLOYMENT_DRAINING_SECONDS` isn't there (it isn't on a Crewtavo deployed before the
+template had it), add it with the value `30`. Without it Railway stops the old version at once,
+which can cut off a request or a task half-way.
+
 **Locked out?** See [Getting back in](#getting-back-in).
 
 **Making the template** (once, by whoever publishes Crewtavo): see [deploy/README.md](../deploy/README.md).

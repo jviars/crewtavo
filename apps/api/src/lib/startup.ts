@@ -58,3 +58,16 @@ export async function retryStartup(
     await again();
   }
 }
+
+/**
+ * For stopping: resolves true once `idle()` says nothing is under way, looking every `every` ms,
+ * or false when `limit` ms have gone by and something still is.
+ */
+export async function whenIdle(idle: () => boolean, limit: number, every = 100): Promise<boolean> {
+  const deadline = Date.now() + limit;
+  while (!idle()) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, every));
+  }
+  return true;
+}

@@ -1,10 +1,11 @@
 /**
  * Starting up when the database or its services aren't there yet (lib/startup.ts): server.ts tries
  * again by itself, a little later each time, until the instance is ready, so background tasks come
- * back without anyone redeploying. A migration that failed stays failed.
+ * back without anyone redeploying. A migration that failed stays failed. And stopping: the server
+ * waits for the requests and tasks under way, up to a limit.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { retryDelay, retryStartup, setStartup, startup, worthRetrying, type MigrationProblem, type Startup } from "../src/lib/startup";
+import { retryDelay, retryStartup, setStartup, startup, whenIdle, worthRetrying, type MigrationProblem, type Startup } from "../src/lib/startup";
 
 afterEach(() => setStartup(null));
 
@@ -83,5 +84,26 @@ describe("trying a failed start again", () => {
     await start.run(() => start.pauses.length >= 2);
     expect(start.count()).toBe(1);
     expect(startup()?.state).toBe("failed");
+  });
+});
+
+describe("waiting for work under way before stopping", () => {
+  it("doesn't wait when nothing is", async () => {
+    const before = Date.now();
+    expect(await whenIdle(() => true, 10_000)).toBe(true);
+    expect(Date.now() - before).toBeLessThan(50);
+  });
+
+  it("waits until what was under way has finished", async () => {
+    let looks = 0;
+    expect(await whenIdle(() => ++looks >= 4, 10_000, 1)).toBe(true);
+    expect(looks).toBe(4);
+  });
+
+  it("gives up at the limit, and says so", async () => {
+    const before = Date.now();
+    expect(await whenIdle(() => false, 40, 5)).toBe(false);
+    expect(Date.now() - before).toBeGreaterThanOrEqual(40);
+    expect(Date.now() - before).toBeLessThan(1_000);
   });
 });
