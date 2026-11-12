@@ -203,9 +203,21 @@ async function requestBlob(path: string, options: RequestOptions = {}): Promise<
   return res.blob();
 }
 
+/** A file the API only gives for something sent with the request (a backup, for the owner's password). */
+async function requestDownload(path: string, body: unknown, options: RequestOptions = {}): Promise<Blob> {
+  let res = await send("POST", path, body, options);
+  if (res.status === 401 && client && (await refreshSignIn()) === "ok") res = await send("POST", path, body, options);
+  if (!res.ok) {
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(json.error ?? "Something went wrong. Try again.", res.status);
+  }
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>("GET", path, undefined, options),
   blob: (path: string, options?: RequestOptions) => requestBlob(path, options),
+  download: (path: string, body: unknown, options?: RequestOptions) => requestDownload(path, body, options),
   post: <T>(path: string, body: unknown = {}, options?: RequestOptions) => request<T>("POST", path, body, options),
   patch: <T>(path: string, body: unknown, options?: RequestOptions) => request<T>("PATCH", path, body, options),
   put: <T>(path: string, body: unknown, options?: RequestOptions) => request<T>("PUT", path, body, options),

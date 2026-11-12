@@ -1,5 +1,6 @@
 /**
- * Settings → Your data: everything the business keeps here as one .zip, to keep or to take to another
+ * Settings → Your data: the nightly database backups (BackupsCard), everything the business keeps here
+ * as one .zip of spreadsheets, to keep or to take to another
  * app (exportData.ts), and the open work brought over from Jobber (ImportJobberDialog). Owners only.
  */
 import { useMutation } from "@tanstack/react-query";
@@ -9,6 +10,7 @@ import { downloadBlob } from "@/lib/csv";
 import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/session";
 import { startTask } from "@/lib/tasks";
+import { BackupsCard } from "./BackupsCard";
 import { exportEverything } from "./exportData";
 import { ImportJobberDialog } from "./ImportJobberDialog";
 
@@ -68,6 +70,7 @@ export function DataSettings() {
           </Button>
         </div>
       </div>
+      <BackupsCard />
       <div className="card card-pad stack-sm" style={{ gap: 12 }}>
         <strong>Moving to Jobber</strong>
         <ol className="app-steps">
