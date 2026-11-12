@@ -1302,10 +1302,11 @@ describe("automation runs", () => {
     expect(await processAutomations(env, { limit: 50, baseUrl: "https://app.test" })).toMatchObject({ done: 1 });
     const visit = call(task.queries.find((q) => q.table === "visits" && verb(q) === "insert")!, "insert")![1] as { title: string };
     expect(visit.title).toMatch(/^Follow up on https:\/\/app\.test\/hub\/\S+$/);
-    // A task's title stops at 200 characters, which cuts the link's signature, so what it was minted as is read straight from it.
-    const tasked = JSON.parse(Buffer.from(tokenOf(visit.title).split(".")[0]!, "base64url").toString());
-    expect(tasked).toMatchObject({ c: COMPANY, t: "invoice", id: "invoice-1", via: "office" });
-    expect(tasked).not.toHaveProperty("own");
+    // A task's title stops at 200 characters, which cuts the link short (its signature, and now the
+    // time it was made), so what it was minted as is read straight from the start of it.
+    const tasked = Buffer.from(tokenOf(visit.title).split(".")[0]!, "base64url").toString();
+    expect(tasked).toContain(`{"c":"${COMPANY}","t":"invoice","id":"invoice-1","via":"office",`);
+    expect(tasked).not.toContain('"own"');
 
     // A note from a rule about a client (a new one, say): the office's copy of their Hub home.
     const welcome = sentRun("client", [{ type: "add_note", body: "Welcome {{link}}" }]);

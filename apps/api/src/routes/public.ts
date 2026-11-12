@@ -67,7 +67,7 @@ import { firstName } from "../lib/email";
 import { fromBase64Url, signToken, verifyToken } from "../lib/crypto";
 import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
-import { clientLink, linkPreview, readClientLink, REVIEW_TOKEN, type ClientLink, type LinkKind } from "../lib/links";
+import { clientLink, linkPreview, linksReplaced, readClientLink, REVIEW_TOKEN, type ClientLink, type LinkKind } from "../lib/links";
 import { storedFile } from "../lib/storedFile";
 import { adminClient } from "../lib/supabase";
 import { clientIp } from "../lib/visitor";
@@ -81,17 +81,44 @@ export const publicRoutes = new Hono<AppEnv>();
 async function link(c: Parameters<typeof appUrl>[0], kinds: LinkKind[] = ["quote", "invoice", "client"]) {
   const payload = await readClientLink(c.env, c.req.param("token") ?? "");
   if (!payload || !kinds.includes(payload.t)) throw new HttpError(404, "This link has expired or isn't valid. Ask for a new one.");
+  await refuseReplaced(c, payload);
   return payload;
+}
+
+/**
+ * Stops a quote, invoice or client link the office has replaced: "Reset this client's links" on the
+ * client's page (clients.links_reset_at) ends every one made before it, so a link that was passed on
+ * can be cut off without touching anyone else's. Checked on every request, whatever the link is
+ * for. Unsubscribe, review and referral links never look: a client can always unsubscribe. A record
+ * that's gone is left to the route, which says so in its own words.
+ */
+async function refuseReplaced(c: Parameters<typeof appUrl>[0], l: ClientLink) {
+  if (l.t !== "quote" && l.t !== "invoice" && l.t !== "client") return;
+  const admin = adminClient(c.env);
+  let clientId: string | null = l.id;
+  if (l.t !== "client") {
+    const record = await admin.from(l.t === "quote" ? "quotes" : "invoices").select("client_id").eq("company_id", l.c).eq("id", l.id).maybeSingle();
+    if (record.error) throw dbError(record.error);
+    clientId = record.data?.client_id ?? null;
+  }
+  if (!clientId) return;
+  const client = await admin.from("clients").select("links_reset_at").eq("company_id", l.c).eq("id", clientId).maybeSingle();
+  if (client.error) throw dbError(client.error);
+  if (!linksReplaced(l, client.data?.links_reset_at)) return;
+  const { data: company } = await admin.from("companies").select("name").eq("id", l.c).maybeSingle();
+  throw new HttpError(410, `This link has been replaced. Ask ${company?.name || "the business"} for a new one.`);
 }
 
 /**
  * Who a Hub link was made for (lib/links.ts), as an agreement records it (link_via): "office" for a
  * copy the office made of the client's link, and every link minted from one; else the client's own.
  * Links minted from a link keep it, and keep the client's own mark (own), so an office copy or an
- * unmarked link can't become the client's own by opening an invoice from the client's home.
+ * unmarked link can't become the client's own by opening an invoice from the client's home. They
+ * keep when it was made too (at; 0 for a link from before links carried one), so a link minted from
+ * an old link ends with it when the office resets the client's links.
  */
 const viaOf = (l: Pick<ClientLink, "via">): "client" | "office" => (l.via === "office" ? "office" : "client");
-const keepVia = (l: Pick<ClientLink, "via" | "own">) => (l.via === "office" ? { via: "office" as const } : l.own === 1 ? { own: 1 as const } : {});
+const keepVia = (l: Pick<ClientLink, "via" | "own" | "at">) => ({ ...(l.via === "office" ? { via: "office" as const } : l.own === 1 ? { own: 1 as const } : {}), at: l.at ?? 0 });
 
 /**
  * Who a Hub link counts as for the two things only the client may do: say yes to a card they didn't
@@ -1192,7 +1219,7 @@ publicRoutes.post("/webhooks/stripe/:company", async (c) => {
 // ---------------------------------------------------------------------------------------------
 
 /** The client's Hub home. Minted from an office copy of a link (`from`), it stays one; from the client's own (own), so does it. */
-const homeLink = (c: Parameters<typeof appUrl>[0], companyId: string, clientId: string, from: Pick<ClientLink, "via" | "own">) =>
+const homeLink = (c: Parameters<typeof appUrl>[0], companyId: string, clientId: string, from: Pick<ClientLink, "via" | "own" | "at">) =>
   clientLink(c.env, appUrl(c), { c: companyId, t: "client", id: clientId, ...keepVia(from) });
 const firstNames = (rows: Array<{ user_id: string }>, names: Map<string, string>) => rows.map((r) => names.get(r.user_id)).filter(Boolean) as string[];
 

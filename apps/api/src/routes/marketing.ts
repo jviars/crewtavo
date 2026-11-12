@@ -43,6 +43,7 @@ import { requireCompany, requireUser } from "../lib/auth";
 import { firstName, isEmail, renderEmail } from "../lib/email";
 import { appUrl, asJson, dbError, HttpError, must, param, readJson, uuid } from "../lib/http";
 import { clientLink } from "../lib/links";
+import { reportError } from "../lib/monitoring";
 import { emailReady, sendEmail } from "../lib/notify";
 import { adminClient } from "../lib/supabase";
 import { renderTemplate } from "@crewtavo/core";
@@ -442,4 +443,32 @@ marketing.get("/referrals/link/:id", requireUser, requireCompany(SALES), async (
 marketing.get("/clients/:id/hub-link", requireUser, requireCompany(SALES), async (c) => {
   const client = must(await c.var.db.from("clients").select("id").eq("id", param(c, "id")).eq("company_id", c.var.companyId).maybeSingle(), "Client not found.");
   return c.json({ link: await clientLink(c.env, appUrl(c), { c: c.var.companyId, t: "client", id: client.id, via: "office" }) });
+});
+
+/**
+ * "Reset this client's links" (the office): every quote, invoice and Client Hub link made for this
+ * client before now stops opening, the office's copies on the timeline included, so a link that
+ * was forwarded to someone else can be cut off without touching any other client's. Links made from
+ * now on work as usual; unsubscribe, review and referral links are left alone. Only the server sets
+ * the time (clients.links_reset_at), from the clock that stamps the links, and a note on the
+ * client's timeline says who did it.
+ */
+marketing.post("/clients/:id/links/reset", requireUser, requireCompany(OFFICE), async (c) => {
+  const { companyId, userId } = c.var;
+  const client = must(await c.var.db.from("clients").select("id").eq("id", param(c, "id")).eq("company_id", companyId).maybeSingle(), "Client not found.");
+  const admin = adminClient(c.env);
+  const resetAt = new Date().toISOString();
+  const reset = await admin.from("clients").update({ links_reset_at: resetAt }).eq("company_id", companyId).eq("id", client.id);
+  if (reset.error) throw dbError(reset.error);
+  const { data: profile } = await admin.from("profiles").select("full_name").eq("user_id", userId).maybeSingle();
+  const note = await admin.from("messages").insert({
+    company_id: companyId, client_id: client.id, channel: "note", direction: "internal", sent_by: userId,
+    body: `${profile?.full_name || "Someone in the office"} reset this client's links. Quote, invoice and Client Hub links sent before this no longer open.`,
+  });
+  // The links are reset either way: a missing note is ours to look into, not the office's to retry.
+  if (note.error) {
+    console.error("Couldn't note a link reset on the client's timeline", note.error.message);
+    reportError(new Error(`Couldn't note a link reset on the client's timeline: ${note.error.message}`), { feature: "client-links" });
+  }
+  return c.json({ reset_at: resetAt });
 });

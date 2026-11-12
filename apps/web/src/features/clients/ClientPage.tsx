@@ -29,6 +29,7 @@ import { EditClientDialog } from "./ClientForm";
 import { AddContact, ContactsCard, useClientContacts } from "./ContactsCard";
 import { PropertyDialog, type AccessRow, type PropertyRow } from "./PropertyDialog";
 import { PropertyEquipment } from "./PropertyEquipment";
+import { RESET_LINKS_BODY, RESET_LINKS_LABEL, resetLinksPath } from "./resetLinks";
 import { MergeClientsDialog } from "./MergeClientsDialog";
 import { Timeline } from "./Timeline";
 import { PhotosCard } from "../files/PhotosCard";
@@ -145,6 +146,12 @@ export function ClientPage() {
     mutationFn: () => api.get<{ link: string }>(`/clients/${id}/hub-link`),
     onSuccess: (r) => copyText(r.link, "Client Hub link copied"),
   });
+  const resetLinks = useMutation({
+    meta: { success: "Links reset" },
+    mutationFn: () => api.post<{ reset_at: string }>(resetLinksPath(id)),
+    // The reset is noted on their timeline.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client", id, "messages"] }),
+  });
   const referralLink = useMutation({
     mutationFn: () => api.get<{ link: string }>(`/referrals/link/${id}`),
     onSuccess: (r) => copyText(r.link, "Referral link copied"),
@@ -208,6 +215,11 @@ export function ClientPage() {
     if (await confirm({ title: `Delete ${c.display_name}?`, body: "Their properties, requests, notes and contacts are deleted too. This can't be undone.", confirmLabel: "Delete client", danger: true })) remove.mutate();
   };
 
+  /** For a link that went to someone it shouldn't have: the links already out stop, and new ones work. */
+  const resetClientLinks = async () => {
+    if (await confirm({ title: `Reset ${c.display_name}'s links?`, body: RESET_LINKS_BODY, confirmLabel: "Reset links", danger: true })) resetLinks.mutate();
+  };
+
   /** Takes the property off the page at once; it's deleted when the Undo toast leaves. */
   const removeLater = (p: (typeof c.properties)[number]) => {
     const key = ["client", id];
@@ -256,6 +268,7 @@ export function ClientPage() {
                 items={[
                   { label: "Edit client", icon: "edit", onSelect: () => setDialog("edit") },
                   { label: "Copy Client Hub link", icon: "link", onSelect: () => hubLink.mutate() },
+                  { label: RESET_LINKS_LABEL, icon: "refresh", onSelect: resetClientLinks, hidden: !isOffice },
                   { label: "Send autopay invite by email", icon: "card", onSelect: () => autopayInvite.mutate("email"), disabled: !c.email, hidden: !seesMoney || !autopayOn || !session.config.features.email },
                   { label: "Send autopay invite by text", icon: "card", onSelect: () => autopayInvite.mutate("sms"), disabled: !c.phone || textsOff(c), hidden: !seesMoney || !autopayOn || !session.config.features.sms },
                   { separator: true, hidden: !marketing },

@@ -5,9 +5,9 @@ import { chosenTotals } from "@crewtavo/core/money";
 import { addDays, localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { encryptJson } from "../src/lib/crypto";
+import { encryptJson, signToken } from "../src/lib/crypto";
 import { HttpError } from "../src/lib/http";
-import { clientLink, readClientLink } from "../src/lib/links";
+import { clientLink, linksReplaced, readClientLink } from "../src/lib/links";
 import { StripeError } from "../src/services/stripe";
 import { drawnPng } from "./fixtures/drawn";
 
@@ -2370,5 +2370,108 @@ describe("checklists in the Client Hub", () => {
     const home = await (await hub({ t: "client", id: CLIENT })).json();
     expect(home.past_visits[0].checklists).toEqual([]);
     expect(JSON.stringify(home)).not.toContain("Gutters");
+  });
+});
+
+describe("resetting a client's links", () => {
+  const BASE = "https://ops.example.com";
+  const tokenOf = (url: string) => url.split(/\/(?:hub|u|refer)\//)[1]!;
+  const open = (url: string, path = "") => app.request(`/api/hub/${tokenOf(url)}${path}`, {}, env);
+  /** A link from before links carried when they were made, as every link already out is. */
+  const oldLink = async (t: "invoice" | "client", id: string) => `${BASE}/hub/${await signToken(env, { c: ROOFER, t, id, exp: Math.floor(Date.now() / 1000) + 3600 })}`;
+  /** The person signed in, with their role in the business. */
+  const signIn = (role: string) => {
+    vi.spyOn(adminClient(env).auth, "getClaims").mockResolvedValue({ data: { claims: { sub: SALES } }, error: null } as never);
+    state.tables.memberships![0]!.role = role;
+  };
+  const reset = (client = CLIENT) => app.request(`/api/clients/${client}/links/reset`, { method: "POST", headers: { Authorization: "Bearer session", "X-Company-Id": ROOFER } }, env);
+  const moment = () => new Promise((resolve) => setTimeout(resolve, 5));
+  const REPLACED = "This link has been replaced. Ask Radford Lawn Care for a new one.";
+
+  it("ends every quote, invoice and client link made before it, and leaves the ones made after working", async () => {
+    mowed();
+    const before = await Promise.all((["quote", "invoice", "client"] as const).map((t) => clientLink(env, BASE, { c: ROOFER, t, id: t === "quote" ? QUOTE : t === "invoice" ? MOW : CLIENT, own: 1 })));
+    const old = await oldLink("invoice", MOW);
+    for (const url of [...before, old]) expect((await open(url)).status).toBe(200);
+
+    await moment();
+    signIn("office");
+    const res = await reset();
+    expect(res.status).toBe(200);
+    const resetAt = state.tables.clients![0]!.links_reset_at as string;
+    expect(await res.json()).toEqual({ reset_at: resetAt });
+    await moment();
+
+    for (const url of [...before, old]) {
+      const refused = await open(url);
+      expect(refused.status).toBe(410);
+      expect((await refused.json()).error).toBe(REPLACED);
+    }
+    // Not only the page: nothing can be done with one either.
+    const message = await app.request(`/api/hub/${tokenOf(before[2]!)}/message`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "Hello" }) }, env);
+    expect(message.status).toBe(410);
+    expect(state.tables.messages!.filter((m) => m.direction === "in")).toEqual([]);
+
+    // A link made after the reset opens, and so do the ones the Hub makes from it.
+    const home = await open(await clientLink(env, BASE, { c: ROOFER, t: "client", id: CLIENT, via: "office" }));
+    expect(home.status).toBe(200);
+    expect((await open((await home.json()).invoices[0].link)).status).toBe(200);
+  });
+
+  it("says who did it on the client's timeline", async () => {
+    signIn("office");
+    await reset();
+    expect(state.tables.messages).toMatchObject([{
+      company_id: ROOFER, client_id: CLIENT, channel: "note", direction: "internal", sent_by: SALES,
+      body: "Mike Torres reset this client's links. Quote, invoice and Client Hub links sent before this no longer open.",
+    }]);
+  });
+
+  it("is the office's to press, for their own clients", async () => {
+    signIn("estimator");
+    expect((await reset()).status).toBe(403);
+    signIn("field_crew");
+    expect((await reset()).status).toBe(403);
+    signIn("office");
+    expect((await reset("00000000-0000-4000-8000-0000000000aa")).status).toBe(404);
+    expect(state.tables.clients![0]!.links_reset_at).toBeUndefined();
+    expect(state.tables.messages ?? []).toEqual([]);
+  });
+
+  it("keeps when a link was made in every link the Hub makes from it, so none outlives a reset", async () => {
+    mowed();
+    const payload = (url: string) => readClientLink(env, tokenOf(url));
+    const made = Date.parse("2026-11-01T12:00:00Z");
+    const home = await (await open(await clientLink(env, BASE, { c: ROOFER, t: "client", id: CLIENT, own: 1, at: made }))).json();
+    const invoice = await (await open(await clientLink(env, BASE, { c: ROOFER, t: "invoice", id: MOW, own: 1, at: made }))).json();
+    for (const url of [home.invoices[0].link, home.quotes[0].link, invoice.home]) expect((await payload(url))?.at).toBe(made);
+    // From a link with no time, they count as made before any reset.
+    const old = await (await open(await oldLink("client", CLIENT))).json();
+    expect((await payload(old.invoices[0].link))?.at).toBe(0);
+    // A link made now says so.
+    expect((await payload(await clientLink(env, BASE, { c: ROOFER, t: "client", id: CLIENT })))?.at).toBeGreaterThan(Date.now() - 5000);
+
+    state.tables.clients![0]!.links_reset_at = "2026-11-02T09:00:00Z";
+    for (const url of [home.invoices[0].link, home.quotes[0].link, invoice.home, old.invoices[0].link]) expect((await open(url)).status).toBe(410);
+    expect(linksReplaced({ at: made }, "2026-11-02T09:00:00Z")).toBe(true);
+    expect(linksReplaced({ at: made }, "2026-10-31T09:00:00Z")).toBe(false);
+    expect(linksReplaced({}, null)).toBe(false);
+  });
+
+  it("leaves other clients' links alone, and this client's unsubscribe and referral links", async () => {
+    mowed();
+    const OTHER = "00000000-0000-4000-8000-0000000000ab";
+    state.tables.clients!.push({ id: OTHER, company_id: ROOFER, display_name: "Sam Other", properties: [] });
+    const made = Date.parse("2026-11-01T12:00:00Z");
+    const [theirs, unsub, refer] = await Promise.all([
+      clientLink(env, BASE, { c: ROOFER, t: "client", id: OTHER, own: 1, at: made }),
+      clientLink(env, BASE, { c: ROOFER, t: "unsub", id: CLIENT, at: made }),
+      clientLink(env, BASE, { c: ROOFER, t: "refer", id: CLIENT, at: made }),
+    ]);
+    state.tables.clients![0]!.links_reset_at = "2026-11-02T09:00:00Z";
+    expect((await open(theirs)).status).toBe(200);
+    expect((await app.request(`/api/public/unsubscribe/${tokenOf(unsub)}`, {}, env)).status).toBe(200);
+    expect((await app.request(`/api/public/unsubscribe/${tokenOf(unsub)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }, env)).status).toBe(200);
+    expect((await app.request(`/api/public/refer/${tokenOf(refer)}`, {}, env)).status).toBe(200);
   });
 });

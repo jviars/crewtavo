@@ -27,6 +27,11 @@ export interface ClientLink {
   // one. Only a link with it can say yes to a card it didn't save or tip on a saved card: one
   // without it (every link minted before it was added) can do all else the client's own can.
   own?: 1;
+  // When the link was made, in milliseconds since epoch; a link minted from another keeps that
+  // one's time (0 when it had none), so it can't outlive a reset. The office can reset one client's
+  // links (clients.links_reset_at): a quote, invoice or client link made before the reset, or one
+  // from before links carried a time, then stops opening (linksReplaced). Other kinds don't look.
+  at?: number;
 }
 
 const PATHS: Record<LinkKind, string> = {
@@ -44,7 +49,8 @@ export const linkLifetimeDays = (kind: LinkKind) => LIFETIME_DAYS[kind];
 
 export async function clientLink(env: Env, baseUrl: string, link: Omit<ClientLink, "exp">, days?: number): Promise<string> {
   const lifetime = days ?? LIFETIME_DAYS[link.t];
-  const token = await signToken(env, { ...link, exp: Math.floor(Date.now() / 1000) + lifetime * 86_400 });
+  const now = Date.now();
+  const token = await signToken(env, { ...link, at: link.at ?? now, exp: Math.floor(now / 1000) + lifetime * 86_400 });
   return `${baseUrl.replace(/\/$/, "")}${PATHS[link.t]}${token}`;
 }
 
@@ -81,6 +87,17 @@ export function sentToClient(channel: "email" | "sms", to: string | null | undef
 }
 
 export const readClientLink = (env: Env, token: string) => verifyToken<ClientLink>(env, token);
+
+/**
+ * Whether the office has reset the client's links since this one was made (clients.links_reset_at,
+ * set by POST /clients/:id/links/reset): made before the reset, or before links carried a time.
+ * Never without a reset, so links already out keep opening until someone asks for one.
+ */
+export function linksReplaced(link: Pick<ClientLink, "at">, resetAt: string | null | undefined): boolean {
+  if (!resetAt) return false;
+  const reset = Date.parse(resetAt);
+  return Number.isFinite(reset) && (link.at ?? 0) < reset;
+}
 
 /** A review ask's short link token (review_requests.link_token): 12 letters and digits. */
 export const REVIEW_TOKEN = /^[0-9A-Za-z]{12}$/;
