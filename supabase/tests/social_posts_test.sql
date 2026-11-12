@@ -90,6 +90,8 @@ update public.companies set timezone = 'America/New_York' where id = :'co';
 insert into public.properties (company_id, client_id, line1, city) values (:'co', :'ana', '14 Oak St', 'Radford') returning id as ana_home \gset
 insert into public.jobs (company_id, client_id, property_id, title) values (:'co', :'ana', :'ana_home', 'Spring cleanup') returning id as job \gset
 insert into public.visits (company_id, job_id, property_id, title, scheduled_on) values (:'co', :'job', :'ana_home', 'Spring cleanup', current_date) returning id as visit \gset
+-- Cal is on the visit: field crew see the photos of their own work (20261112000110_crew_contacts.sql).
+insert into public.visit_assignees (company_id, visit_id, user_id) values (:'co', :'visit', :'cal');
 insert into public.invoices (company_id, client_id) values (:'co', :'bea') returning id as bea_invoice \gset
 insert into public.jobs (company_id, client_id, title) values (:'other', :'olga', 'Mowing') returning id as other_job \gset
 
