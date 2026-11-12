@@ -178,11 +178,11 @@ begin
 
   elsif p_kind = 'visits' then
     for r in
-      select v.id, coalesce(v.completed_at::date, v.scheduled_on) as day
+      select v.id, coalesce(private.visit_day(null, v.completed_at, v_tz), v.scheduled_on) as day
       from public.visits v
       where v.job_id = j.id and v.status = 'completed' and v.invoice_id is null and v.kind = 'job'
         and (p_month is null or private.visit_day(v.scheduled_on, v.completed_at, v_tz) between v_start and v_end)
-      order by coalesce(v.completed_at::date, v.scheduled_on)
+      order by coalesce(private.visit_day(null, v.completed_at, v_tz), v.scheduled_on)
     loop
       insert into public.invoice_line_items (company_id, invoice_id, service_id, name, description, quantity, unit, unit_price, taxable, sort, discount_quote_id)
       select j.company_id, v_invoice, li.service_id, li.name, 'Visit on ' || to_char(r.day, 'Mon DD, YYYY'), li.quantity, li.unit, li.unit_price, li.taxable, v_sort + li.sort, li.discount_key
