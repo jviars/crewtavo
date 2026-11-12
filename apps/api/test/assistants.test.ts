@@ -14,6 +14,10 @@ import { TOOLS } from "../src/assistant-tools";
 import type { Env } from "../src/env";
 import { ASSISTANT_NO_API, ASSISTANT_READ_ONLY, assistantClient, guardAssistant } from "../src/lib/assistants";
 import { gateway } from "../src/lib/gateway";
+import { reportError } from "../src/lib/monitoring";
+
+// What's reported to us is kept, so a test can see that a failure was.
+vi.mock("../src/lib/monitoring", async (importOriginal) => ({ ...(await importOriginal<typeof import("../src/lib/monitoring")>()), reportError: vi.fn() }));
 
 const env: Env = {
   SUPABASE_URL: "http://127.0.0.1:8080",
@@ -61,7 +65,7 @@ const TEAM = [
  * company's switch as the database answers an assistant's token (public.assistant_switch), and
  * `role` the person's.
  */
-function supabase(company: { settings?: object; held?: object; role?: string } = {}) {
+function supabase(company: { settings?: object; held?: object; role?: string; logFails?: boolean } = {}) {
   const calls: Call[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
@@ -105,6 +109,7 @@ function supabase(company: { settings?: object; held?: object; role?: string } =
       case "/rest/v1/rpc/set_weather_rules":
         return Response.json(body.p_rules);
       case "/rest/v1/assistant_calls":
+        if (company.logFails) return Response.json({ code: "23514", message: "new row violates a check on assistant_calls" }, { status: 400 });
         return new Response(null, { status: 201 });
       case "/rest/v1/profiles":
         return new Response(null, { status: 204 });
@@ -526,6 +531,61 @@ describe("the company's own switch, wherever an assistant's token is taken", () 
       "Assistants can only look things up for Lima Lawns, not make changes. An owner or admin can change this in Crewtavo, under Settings → AI assistants.",
     );
     expect(calls.some((c) => c.method !== "GET" && c.path === "/rest/v1/messages")).toBe(false);
+  });
+});
+
+describe("the log of what assistants did", () => {
+  const call = async (bearer: string, name: string, args: object) =>
+    (await (await app.request("/mcp", { method: "POST", headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) }, env)).json()).result;
+
+  it("tells us when a call couldn't be written to it, and still gives the assistant what the tool answered", async () => {
+    vi.mocked(reportError).mockClear();
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const calls = supabase({ logFails: true });
+    // The note is added; only its line in the log is refused.
+    const res = await call(records, "add_note", note);
+    expect(res.isError).toBeUndefined();
+    expect(res.structuredContent).toEqual({ result: { id: "message-1", created_at: "2026-10-18T12:00:00Z" } });
+    expect(calls.some((c) => c.method === "POST" && c.path === "/rest/v1/assistant_calls")).toBe(true);
+    expect(reportError).toHaveBeenCalledTimes(1);
+    const [error, context] = vi.mocked(reportError).mock.calls[0]!;
+    expect((error as Error).message).toBe("Couldn't log an assistant call: new row violates a check on assistant_calls");
+    // Which tool and business, never what the call carried.
+    expect(context).toEqual({ feature: "assistants", tool: "add_note", company_id: "company-1" });
+    expect(JSON.stringify(context)).not.toContain("Gate code");
+    expect(quiet).toHaveBeenCalled();
+    quiet.mockRestore();
+  });
+
+  it("says nothing to us when the log takes the call", async () => {
+    vi.mocked(reportError).mockClear();
+    supabase();
+    await call(records, "add_note", note);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+});
+
+describe("the functions the assistant's tools call with the person's token", () => {
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+  const dir = fileURLToPath(new URL("../src/assistant-tools", import.meta.url));
+  // Called by the tools themselves, and by the two services they share with the office's screens.
+  const sources = [...readdirSync(dir).filter((f) => f.endsWith(".ts")).map((f) => readFileSync(join(dir, f), "utf8")), read("../src/services/sales.ts")];
+  const called = [...new Set(sources.flatMap((source) => [...source.matchAll(/\b(?:ctx|s)\.db\s*\.rpc\(\s*"(\w+)"/g)].map((m) => m[1]!)))].sort();
+  const test = read("../../../supabase/tests/assistants_off_everywhere_test.sql");
+  const list = (name: string) => new RegExp(`^\\\\set ${name} '\\{([a-z_,]+)\\}'$`, "m").exec(test)![1]!.split(",");
+
+  it("are all in the database's test, which holds each to writing for its area or only reading", () => {
+    expect(called).toContain("duplicate_quote");
+    expect(called).toContain("quote_exact_sent");
+    expect([...list("writes"), ...list("reads")].sort()).toEqual(called);
+  });
+
+  it("that write are the ones the database lets an assistant write with", () => {
+    const migrations = fileURLToPath(new URL("../../../supabase/migrations", import.meta.url));
+    const sql = readdirSync(migrations).filter((f) => f.endsWith(".sql")).sort().map((f) => readFileSync(join(migrations, f), "utf8")).filter((s) => s.includes("function private.assistant_rpc_area(")).at(-1)!;
+    const body = sql.slice(sql.lastIndexOf("function private.assistant_rpc_area("));
+    const listed = [...body.slice(0, body.indexOf("$$;")).matchAll(/when '(\w+)' then '\w+'/g)].map((m) => m[1]!).sort();
+    expect(listed).toEqual(list("writes").sort());
   });
 });
 

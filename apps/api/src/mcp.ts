@@ -24,6 +24,7 @@ import { authMetadata } from "./lib/authMetadata";
 import { bearerToken } from "./lib/auth";
 import { appUrl } from "./lib/http";
 import { allow } from "./lib/limit";
+import { reportError } from "./lib/monitoring";
 import { adminClient, userClient, type Db } from "./lib/supabase";
 
 export const mcp = new Hono<AppEnv>();
@@ -223,8 +224,14 @@ function summarize(args: unknown) {
 
 async function audit(c: Context<AppEnv>, ctx: Pick<ToolContext, "companyId">, userId: string, oauthClient: string | null, tool: string, ok: boolean, detail: string | null) {
   try {
-    await adminClient(c.env).from("assistant_calls").insert({ company_id: ctx.companyId, user_id: userId, oauth_client: oauthClient, tool, ok, detail });
+    // The database's answer comes back as a value, not a throw: a refused insert is a failure too.
+    const { error } = await adminClient(c.env).from("assistant_calls").insert({ company_id: ctx.companyId, user_id: userId, oauth_client: oauthClient, tool, ok, detail });
+    if (error) throw new Error(error.message);
   } catch (error) {
-    console.error("Couldn't log an assistant call", error);
+    // The tool already ran, so the assistant still gets its answer. A gap in the log the owner
+    // reads is ours to hear about (the tool and company, never what the call carried).
+    const why = error instanceof Error ? error.message : String(error);
+    console.error("Couldn't log an assistant call", tool, why);
+    reportError(new Error(`Couldn't log an assistant call: ${why}`), { feature: "assistants", tool, company_id: ctx.companyId });
   }
 }

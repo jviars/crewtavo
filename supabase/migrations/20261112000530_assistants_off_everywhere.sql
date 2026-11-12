@@ -66,8 +66,60 @@ language sql stable security definer set search_path = '' as $$
   ) and private.assistant_switch() ->> 'state' = 'on')
 $$;
 
+-- ---------------------------------------------------------------------------------------------
+-- What only an assistant with full access may do, and the functions its tools call
+-- ---------------------------------------------------------------------------------------------
+
+-- "Deleting needs full access" only looked at DELETE requests. Three other things an assistant's
+-- tools mark the same way (apps/api/src/assistant-tools: void_invoice, write_off_invoice,
+-- merge_clients) could be done through the Data API by one given only the Invoices area: voiding or
+-- writing off an invoice is a change to its status, and merging two clients is a function. Now
+-- they need full access here too.
+
+-- The functions an assistant may call that remove something for good.
+create function private.assistant_rpc_deletes(p_function text) returns boolean
+language sql immutable set search_path = '' as $$
+  select p_function in ('merge_clients')
+$$;
+revoke all on function private.assistant_rpc_deletes(text) from public;
+grant execute on function private.assistant_rpc_deletes(text) to authenticated, service_role;
+
+-- Voiding an invoice, or writing it off, is the office giving up on being paid for it.
+create function private.assistant_invoice_guard() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if private.assistant_client() is null then return new; end if;
+  if new.status in ('void', 'written_off') and new.status is distinct from old.status and not private.assistant_may_change('invoices', true) then
+    raise exception 'This assistant can''t void or write off an invoice. Only an assistant with full access can, in Crewtavo, under Settings → AI assistants.'
+      using errcode = '42501';
+  end if;
+  return new;
+end $$;
+revoke all on function private.assistant_invoice_guard() from public;
+create trigger assistant_guard before update of status on public.invoices
+  for each row execute function private.assistant_invoice_guard();
+
+-- Two functions the assistant's tools call weren't here, so they ran in a request that can't write
+-- and always failed for a real assistant: duplicate_quote (create_quote from a quote template) and
+-- quote_exact_sent (send_quote, when the exact price follows a yes to the range). As in
+-- 20261106000410_company_settings_merge.sql, with those two added under quotes.
+create or replace function private.assistant_rpc_area(p_function text) returns text
+language sql immutable set search_path = '' as $$
+  select case p_function
+    when 'convert_quote_to_job' then 'quotes'
+    when 'create_invoice_for_job' then 'invoices'
+    when 'duplicate_quote' then 'quotes'
+    when 'merge_clients' then 'invoices'
+    when 'merge_company_settings' then 'company'
+    when 'quote_exact_sent' then 'quotes'
+    when 'set_checklist_services' then 'checklists'
+    when 'set_weather_rules' then 'prices'
+  end
+$$;
+
 -- As in 20261103000200_assistant_document_styles.sql, with the company's switch first: off refuses
--- every request (but the one that asks about the switch), and read only refuses every change.
+-- every request (but the one that asks about the switch), and read only refuses every change. And
+-- a function that removes something for good is held to what deleting needs.
 create or replace function hooks.before_request() returns void
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -95,9 +147,15 @@ begin
     return;
   end if;
   if v_path like '/rpc/%' then
-    -- A function that writes for its area, or one that answers but can't write.
+    -- A function that writes for its area, or one that answers but can't write. One that removes
+    -- something for good (merging two clients deletes one) needs what deleting a row needs.
     v_area := private.assistant_rpc_area(substr(v_path, 6));
-    if v_area is null or not private.assistant_may_change(v_area, false) then
+    v_delete := v_area is not null and private.assistant_rpc_deletes(substr(v_path, 6));
+    if v_delete and not private.assistant_may_change(v_area, true) and private.assistant_may_change(v_area, false) then
+      raise exception using errcode = 'PT403',
+        message = 'This assistant can''t delete things. Only an assistant with full access can, in Crewtavo, under Settings → AI assistants.';
+    end if;
+    if v_area is null or not private.assistant_may_change(v_area, v_delete) then
       perform set_config('transaction_read_only', 'on', true);
     end if;
     return;

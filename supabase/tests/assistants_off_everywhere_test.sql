@@ -247,4 +247,101 @@ select t530.check((select count(*) = 2 and bool_and(c.client_id <> :'chatgpt') f
 rollback;
 
 \o
+\echo 'What needs full access, and the functions the tools call'
+\o /dev/null
+
+-- Nora's Claude again, given only what the checks below say. November Lawns has a draft invoice, a
+-- sent one, and a quote template.
+select id as client from public.clients where company_id = :'co' \gset
+insert into public.invoices (company_id, client_id) values (:'co', :'client') returning id as inv \gset
+insert into public.invoices (company_id, client_id) values (:'co', :'client') returning id as inv2 \gset
+insert into public.quotes (company_id, title, is_template) values (:'co', 'Spring cleanup', true) returning id as template \gset
+
+-- ===== Voiding and writing off an invoice ======================================================
+update public.assistant_connections set level = 'areas', areas = '{invoices,quotes}' where user_id = :'nora';
+begin;
+set local role authenticated;
+select t530.check(t530.hook(:'nora', :'claude', 'PATCH', '/invoices') = 'none', 'an assistant given invoices may change an invoice');
+select t530.check(t530.error_of(format('update public.invoices set notes = %L where id = %L', 'Net 15', :'inv')) = 'none', 'and does');
+select t530.check(t530.error_of(format('update public.invoices set status = %L where id = %L', 'void', :'inv'))
+  = '42501: This assistant can''t void or write off an invoice. Only an assistant with full access can, in Crewtavo, under Settings → AI assistants.',
+  'but it can''t void one: that needs full access, as deleting does');
+select t530.check(t530.error_of(format('update public.invoices set status = %L where id = %L', 'written_off', :'inv2')) like '42501: This assistant can''t void or write off an invoice.%',
+  'or write one off');
+select t530.check((select bool_and(status = 'draft') from public.invoices where id in (:'inv', :'inv2')), 'both are as they were');
+rollback;
+update public.assistant_connections set level = 'full', areas = '{}' where user_id = :'nora';
+begin;
+set local role authenticated;
+select t530.as_request(:'nora', :'claude', 'PATCH', '/invoices');
+select t530.check(t530.error_of(format('update public.invoices set status = %L where id = %L', 'void', :'inv')) = 'none', 'one with full access voids it');
+select t530.check((select status = 'void' from public.invoices where id = :'inv'), 'and it is void');
+rollback;
+begin;
+set local role authenticated;
+select t530.as_request(:'nora', null, 'PATCH', '/invoices');
+select t530.check(t530.error_of(format('update public.invoices set status = %L where id = %L', 'void', :'inv')) = 'none', 'and so does Nora herself');
+rollback;
+
+-- ===== Merging two clients, which deletes one ==================================================
+update public.assistant_connections set level = 'areas', areas = '{invoices,quotes}' where user_id = :'nora';
+begin;
+set local role authenticated;
+select t530.check(t530.hook(:'nora', :'claude', 'POST', '/rpc/merge_clients')
+  = 'PT403: This assistant can''t delete things. Only an assistant with full access can, in Crewtavo, under Settings → AI assistants.',
+  'an assistant given invoices can''t merge two clients: it deletes one, and is told so');
+rollback;
+update public.assistant_connections set level = 'areas', areas = '{clients}' where user_id = :'nora';
+begin;
+set local role authenticated;
+select t530.as_request(:'nora', :'claude', 'POST', '/rpc/merge_clients');
+select hooks.before_request();
+select t530.check(current_setting('transaction_read_only') = 'on', 'one without invoices still gets a request that can''t write, as before');
+rollback;
+update public.assistant_connections set level = 'full', areas = '{}' where user_id = :'nora';
+begin;
+set local role authenticated;
+select t530.as_request(:'nora', :'claude', 'POST', '/rpc/merge_clients');
+select hooks.before_request();
+select t530.check(current_setting('transaction_read_only') = 'off', 'one with full access may merge');
+rollback;
+
+-- ===== The functions the tools call ============================================================
+-- Every function an assistant's tools call with the person's token (apps/api/test/assistants.test.ts
+-- reads these two lists and checks them against the tools). One that writes must be listed for its
+-- area, or it runs in a request that can't write and always fails. The rest only answer.
+\set writes '{convert_quote_to_job,create_invoice_for_job,duplicate_quote,merge_clients,merge_company_settings,quote_exact_sent,set_checklist_services,set_weather_rules}'
+\set reads '{campaign_audience,campaign_results,client_duplicates,dashboard,job_pay_costs,marketing_summary,promo_code_usage,review_stats,search_sops,social_photos}'
+select t530.check((select bool_and(exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f)) from unnest((:'writes'::text[]) || (:'reads'::text[])) f),
+  'every function the tools call is there');
+select t530.check((select coalesce(string_agg(f, ', '), '') from unnest(:'writes'::text[]) f where private.assistant_rpc_area(f) is null) = '',
+  'every one that writes is listed for its area');
+select t530.check((select coalesce(string_agg(f, ', '), '') from unnest(:'reads'::text[]) f
+  where private.assistant_rpc_area(f) is not null or exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = f and p.provolatile = 'v')) = '',
+  'and every other one can only read');
+select t530.check(private.assistant_rpc_area('duplicate_quote') = 'quotes' and private.assistant_rpc_area('quote_exact_sent') = 'quotes', 'a quote from a template, and an exact price sent, are changes to quotes');
+
+-- A quote from a template, for real: it used to stop with "cannot execute INSERT in a read-only transaction".
+update public.assistant_connections set level = 'areas', areas = '{quotes}' where user_id = :'nora';
+begin;
+set local role authenticated;
+select t530.as_request(:'nora', :'claude', 'POST', '/rpc/duplicate_quote');
+select hooks.before_request();
+select t530.check(current_setting('transaction_read_only') = 'off', 'an assistant given quotes may make one from a template');
+select public.duplicate_quote(:'template', null, :'client') as made \gset
+select t530.check((select client_id = :'client' and not is_template and title = 'Spring cleanup' from public.quotes where id = :'made'), 'and the quote is made');
+select t530.as_request(:'nora', :'claude', 'POST', '/rpc/quote_exact_sent');
+select hooks.before_request();
+select t530.check(current_setting('transaction_read_only') = 'off', 'sending the exact price can start its follow-up too');
+rollback;
+update public.assistant_connections set level = 'areas', areas = '{clients}' where user_id = :'nora';
+begin;
+set local role authenticated;
+select t530.as_request(:'nora', :'claude', 'POST', '/rpc/duplicate_quote');
+select hooks.before_request();
+select t530.check(current_setting('transaction_read_only') = 'on', 'one without quotes can''t');
+rollback;
+update public.assistant_connections set level = 'full', areas = '{}' where user_id = :'nora';
+
+\o
 \echo 'All assistant switch tests passed.'
