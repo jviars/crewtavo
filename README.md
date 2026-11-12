@@ -82,6 +82,11 @@ self-host, you can instead connect the business's own mailbox there (Gmail, Goog
 Microsoft 365, Zoho, Yahoo, iCloud or any SMTP server). `RESEND_API_KEY` and `EMAIL_FROM` on the
 **crewtavo** service still work too, for any business that hasn't connected its own.
 
+**Backups:** Crewtavo backs up its database every night, on every Railway plan, and keeps the last
+week's and month's. They're kept in the same Railway project, so download one from **Settings →
+Your data** now and then and keep it somewhere else. Photos and files aren't in a backup.
+[Restoring one](docs/deploy.md#restoring-a-backup) into a new instance is a few steps.
+
 ## Self-host
 
 Crewtavo runs anywhere Docker does: your laptop, an office server or a VPS. It's the same five
@@ -131,8 +136,12 @@ Only the `crewtavo` container is published, and only on the server itself (port 
 default 8080, on `CREWTAVO_BIND`, default `127.0.0.1`), so visitors come in through the web server.
 It forwards sign-in, data and files to the other containers over Docker's private network.
 
-**Backups:** the data lives in two Docker volumes, `crewtavo-instance_db-data` (the database) and
-`crewtavo-instance_storage-data` (photos and documents). Back up both, along with `.env.instance`.
+**Backups:** Crewtavo backs up its database every night; download one from **Settings → Your data**
+now and then and keep it on another computer
+([restoring one](docs/deploy.md#restoring-a-backup) is `npm run instance -- restore <file>`). The
+data itself lives in two Docker volumes, `crewtavo-instance_db-data` (the database) and
+`crewtavo-instance_storage-data` (photos and documents). Back up both for the photos too, along
+with `.env.instance`.
 
 </details>
 

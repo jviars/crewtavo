@@ -103,9 +103,12 @@ in with Railway?** in step 1), the steps are:
 
 The screen lists these steps with links, and notices when they're done.
 
-**Backups:** Railway's volume backups (open the `db` or `storage` volume, then **Backups**) need
-Railway's Pro plan. Railway doesn't back up storage buckets at all, so once files are in a bucket,
-the volume's backups stop covering anything added since (see
+**Backups:** Crewtavo backs up its own database every night, on every Railway plan (see
+[Database backups](#database-backups)), and the owner downloads a backup from **Settings → Your
+data** to keep a copy outside Railway. Photos and files aren't in it. Railway's volume backups
+(open the `db` or `storage` volume, then **Backups**) cover those too but need Railway's Pro plan,
+and Railway doesn't back up storage buckets at all, so once files are in a bucket, the volume's
+backups stop covering anything added since (see
 [Moving files to a bucket](#moving-files-to-a-bucket)). Whatever someone deletes in Crewtavo waits
 30 days in the Trash first (see [Crewtavo - Drive](#crewtavo---drive)).
 
@@ -175,9 +178,12 @@ pick their own address, and everyone who doesn't shares the web server's. Port 8
 answer on every address; now it only answers on the server itself. If your web server runs on
 another machine, see [Visitors' addresses](#visitors-addresses).
 
-**Backups:** back up the `crewtavo-instance_db-data` and `crewtavo-instance_storage-data` Docker
-volumes, and `.env.instance`. Files stay on the `storage-data` volume: moving them to a bucket is
-for instances on Railway.
+**Backups:** Crewtavo backs up its own database every night (see
+[Database backups](#database-backups)); download one from **Settings → Your data** now and then
+and keep it on another computer. For photos and files too, back up the
+`crewtavo-instance_db-data` and `crewtavo-instance_storage-data` Docker volumes, and
+`.env.instance`. Files stay on the `storage-data` volume: moving them to a bucket is for instances
+on Railway.
 
 For working on Crewtavo's code, the faster loop is in the README's **Develop** section.
 
@@ -518,9 +524,115 @@ so raising a limit or emptying the Trash counts straight away.
 **Warnings:** the `storage` task (every 6 hours, on Railway or not) tells owners and admins, by the
 bell, when the company's files reach 80% and then 95% of the limit (or that storage is full, when
 it's already at the limit), and by email and push unless they've turned it off in Settings →
-Profile, where it's the **Railway** topic on Railway and the **Storage** topic elsewhere. Each is sent once;
+Profile, where it's the **Railway** topic on Railway and the **Storage and backups** topic elsewhere. Each is sent once;
 when use drops back under (the Trash was emptied, or the limit raised), it's sent again the next
 time it's reached.
+
+## Database backups
+
+Every instance backs up its own database, on Railway (any plan) and with Docker, with nothing to
+set up (`apps/api/src/services/backups.ts`). The owner sees them under **Settings → Your data →
+Database backups**.
+
+- **What's in one:** the whole database: clients, quotes, jobs, invoices, payments, the team,
+  everyone's sign-in, settings and connected apps (still encrypted). It's one file made by
+  `pg_dump`, compressed. The demo business's is 3 MB and takes about two seconds to make; it grows
+  with the business's records, not its photos.
+- **What isn't:** photos and files (visit photos, receipts, plans, documents). They live on the
+  `storage` service's volume or bucket, and are only covered if that's backed up separately: Railway's
+  volume backups (Pro plan), or a copy of the Docker volume. A restore without them shows them as
+  missing.
+- **When:** every night after 2 in the morning, by the business's time zone. A night that fails is
+  tried twice more, an hour apart. A new instance makes its first within an hour of being set up,
+  and so does every instance after updating to the version that brought backups. **Back up now**
+  makes one at any time.
+- **How many are kept:** the last of each of the 7 most recent days, and of each of the 4 most
+  recent weeks: about 9 files. Older ones are deleted.
+- **Where they're kept:** in the instance's own Storage, in a private bucket named `backups` that
+  only the server reads (no signed-in person's key can, the owner's included), in pieces of 16 MB.
+  They take room on the `storage` volume (or in the bucket, after files moved there) but don't
+  count toward the company's storage limit. **They're on the same Railway project (or server) as
+  the database they back up**, so if the project is deleted or the account is lost, they go with
+  it. Download one now and then and keep it somewhere else: that's the copy that survives.
+- **Downloading:** only the owner, and the list, each download and Back up now ask for their
+  password. A download goes in the activity and on every owner's bell. The file holds everything,
+  pay rates and clients' details included, so keep it somewhere safe.
+- **Warnings:** the owners hear, by the bell and by email and push (the **Railway** topic; **Storage
+  and backups** off Railway), when a night's backup has failed all three tries, and when there's
+  been no good backup for over two days. Settings → Your data says why the last one failed.
+- **Where it doesn't run:** an instance started without Crewtavo's Docker image (no `pg_dump`), or
+  a Crewtavo pointed at a database it doesn't run itself. Settings → Your data says so.
+
+A backup made on Postgres 17 restores into Postgres 17 or newer. If the `db` service is ever moved to
+a newer major version than the `crewtavo` image's `pg_dump`, backups fail and the owners are told.
+
+## Restoring a backup
+
+A backup goes into a **new** Crewtavo instance, which then has everything the old one had when the
+backup was made: the same business, people, passwords and data. You need:
+
+- the backup file you downloaded (`crewtavo-backup-….dump`);
+- the old instance's `JWT_SECRET` (and `ENCRYPTION_KEY`, if you had set one). Without it the restore
+  still works and everyone can sign in, but connected apps (Stripe, QuickBooks, Google, the business's
+  mailbox, Railway) have to be connected again, the owner's key file stops working, and links
+  already sent to clients (quotes, invoices, the Client Hub) stop opening;
+- [Docker](https://docs.docker.com/get-docker/) on your computer.
+
+Photos and files aren't in the backup. If you also have the old `storage` volume (or its bucket),
+attach it to the new instance's `storage` service before step 1; otherwise they show as missing.
+
+`scripts/restore.mjs` does the work. It refuses an instance that already has a business in it
+unless you add `--replace`, and it either restores everything or changes nothing.
+
+### With Docker
+
+1. On the computer that will run Crewtavo, get the code as in [With Docker](#with-docker):
+   `git clone https://github.com/jviars/crewtavo.git`, then `cd crewtavo`.
+2. Put your saved `.env.instance` in that folder. If you only saved `JWT_SECRET`, run
+   `npm run instance` once to make a new `.env.instance`, then replace its `JWT_SECRET=` line with
+   yours.
+3. Restore, naming the backup file:
+
+   ```bash
+   npm run instance -- restore ~/Downloads/crewtavo-backup-20261112-0805.dump
+   ```
+
+   It starts the instance, puts the backup in, and starts everything again. It takes a few minutes
+   the first time.
+4. Open the address it prints and sign in with the email and password you used before.
+
+To put a backup back into an instance that already has your business in it (undoing a mistake),
+add `--replace` at the end. Everything entered since that backup is lost.
+
+### On Railway
+
+1. Press **Deploy on Railway** in the [README](../README.md) to make a new project, and wait until
+   its address shows the page that asks you to create the owner account. Don't create one.
+2. In the new project, open the **crewtavo** service, then **Variables**. Change `JWT_SECRET` to the
+   old instance's value (and add `ENCRYPTION_KEY` if you had one), then press **Deploy** so every
+   service restarts with it.
+3. Open the **db** service. Under **Variables**, copy `POSTGRES_PASSWORD`. Under **Settings →
+   Networking**, add a **TCP Proxy** for port `5432` and copy the address it gives, which looks like
+   `shuttle.proxy.rlwy.net:12345`.
+4. On your computer, open a terminal in the folder that holds the backup file and run this as one
+   line, with your file's name, the password and the address in place of the capitals:
+
+   ```bash
+   docker run --rm -v "$PWD:/backup" ghcr.io/jviars/crewtavo:latest node scripts/restore.mjs /backup/FILE.dump --db "postgres://postgres:PASSWORD@ADDRESS/postgres?sslmode=disable"
+   ```
+
+   (In Windows PowerShell, write `${PWD}` instead of `$PWD`.) It ends with
+   `restore: done` and how many clients it now holds.
+5. Back in the **db** service's **Settings → Networking**, remove the TCP Proxy.
+6. Restart the **crewtavo**, **auth**, **rest** and **storage** services (the ⋮ menu on each
+   service's latest deployment, then **Restart**).
+7. Open the new project's address and sign in with the email and password you used before. Then
+   connect Railway again when Crewtavo asks, and point your own domain at the new project under
+   **Settings → Web address**.
+
+While the TCP Proxy is on, the database can be reached from the internet with its password, and
+the backup travels to Railway unencrypted (the database's own connections aren't encrypted; the
+password itself is never sent in the clear). Do steps 3 to 5 in one sitting, on a network you trust.
 
 ## Getting back in
 

@@ -4,6 +4,7 @@
  *   dist/server/server.mjs              web app + API + scheduler (apps/api/src/server.ts)
  *   dist/server/public/                 the built web app
  *   dist/server/scripts/migrate.mjs     applies database migrations (node scripts/migrate.mjs)
+ *   dist/server/scripts/restore.mjs     puts a database backup into an instance (node scripts/restore.mjs)
  *   dist/server/supabase/migrations/    the migrations it applies
  *   dist/server/assets/                 the review card's renderer (resvg.wasm), fonts and their licences, and the PDF's built-in fonts
  *   dist/server/package.json            where the PDF's maker finds its built-in fonts
@@ -27,6 +28,8 @@ mkdirSync(join(out, "scripts"), { recursive: true });
 if (process.env.CREWTAVO_SKIP_WEB_BUILD !== "1") run("npm run build -w @crewtavo/web");
 cpSync(join(root, "apps/web/dist"), join(out, "public"), { recursive: true });
 cpSync(join(root, "supabase/migrations"), join(out, "supabase/migrations"), { recursive: true });
+// Restoring a backup needs nothing but Node, pg_restore and psql, so it goes in as it is.
+cpSync(join(root, "scripts/restore.mjs"), join(out, "scripts/restore.mjs"));
 // The review card (apps/api/src/lib/reviewCard.ts) reads these next to the bundle: no node_modules there.
 cpSync(join(root, "apps/api/assets/fonts"), join(out, "assets/fonts"), { recursive: true });
 cpSync(join(root, "apps/api/assets/licenses"), join(out, "assets/licenses"), { recursive: true });
