@@ -40,7 +40,8 @@ const args = process.argv.slice(2);
 const replace = args.includes("--replace");
 const dbAt = args.indexOf("--db");
 const given = dbAt >= 0 ? args[dbAt + 1] : undefined;
-const file = args.find((a, i) => !a.startsWith("--") && i !== dbAt + 1);
+// The file is the argument that isn't an option, or --db's address.
+const file = args.find((a, i) => !a.startsWith("--") && !(dbAt >= 0 && i === dbAt + 1));
 if (!file) stop("name the backup file: node scripts/restore.mjs <backup.dump> [--db <database address>] [--replace]");
 
 // The file is a pg_dump custom-format archive: those start with "PGDMP".
@@ -150,7 +151,7 @@ notify pgrst, 'reload schema';
 
 // pg_restore turns the backup into SQL and psql runs it, all in one transaction: an error anywhere
 // undoes everything, the drops included.
-const psql = spawn("psql", ["--no-password", "-X", "--quiet", "--single-transaction", "-v", "ON_ERROR_STOP=1", "-f", "-"], { env: admin, stdio: ["pipe", "inherit", "pipe"] });
+const psql = spawn("psql", ["--no-password", "-X", "--quiet", "--single-transaction", "-v", "ON_ERROR_STOP=1", "-f", "-"], { env: admin, stdio: ["pipe", "ignore", "pipe"] });
 let problems = "";
 psql.stderr.setEncoding("utf8").on("data", (text) => {
   problems = (problems + text).slice(-4000);
