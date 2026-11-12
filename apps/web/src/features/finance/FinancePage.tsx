@@ -20,9 +20,10 @@ import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { localDate } from "@crewtavo/core/time";
 import { Breakdown, Change, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Column, type Part } from "./Charts";
-import { agingBuckets, jobProfit, previousRange, serviceFigures } from "@crewtavo/core/reports";
+import { agingBuckets, previousRange, serviceFigures } from "@crewtavo/core/reports";
+import { byJobs, jobRates, loadProfit } from "./jobCosts";
 import { bucketize, bucketizeShifted, bucketsFor, resolveRange, shortDate, type Range } from "./range";
-import { both, pct, plural, RangeHeader, rangeQuery, SectionHead, sum, TabBody, timeRates, useRangeParams, type Rates } from "./shared";
+import { both, pct, plural, RangeHeader, rangeQuery, SectionHead, sum, TabBody, useRangeParams } from "./shared";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -621,27 +622,7 @@ function Profit({ range }: { range: Range }) {
   const query = useQuery({
     queryKey: ["finance", cid, "profit", range.from, range.to],
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      const db = supabase();
-      const [jobs, settings] = await Promise.all([
-        everyRow(() => db.from("jobs").select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost, unit_labor_cost)").eq("company_id", cid).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end)),
-        db.from("companies").select("settings").eq("id", cid).single(),
-      ]);
-      const ids = jobs.map((j) => j.id);
-      const [time, expenses, rates, crewPay] = ids.length
-        ? await Promise.all([
-            everyRow(() => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", ids.slice(0, 300))),
-            everyRow(() => db.from("expenses").select("job_id, amount").in("job_id", ids.slice(0, 300))),
-            timeRates(costs, { job_ids: ids.slice(0, 300) }),
-            // Sub and crew pay that's agreed, done or paid: for those with job costs, nothing for anyone else.
-            costs ? db.rpc("job_pay_costs", { p_jobs: ids.slice(0, 300) }).then(unwrap) : Promise.resolve([]),
-          ])
-        : [[], [], {} as Rates, []];
-      const target = Number(((unwrap(settings).settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
-      // Costed as AI assistants' job_profit costs it (packages/core/src/reports.ts).
-      const costed = jobProfit(jobs, time, expenses, (t) => Number(rates[t.id] ?? 0), target, crewPay).jobs.map((j) => ({ ...j, margin: j.margin_percent }));
-      return { jobs: costed, target };
-    },
+    queryFn: () => loadProfit({ companyId: cid, range, costs }),
   });
   return (
     <TabBody query={query}>
@@ -708,16 +689,14 @@ function Services({ range }: { range: Range }) {
         everyRow(() => db.from("services").select("id, name, category, unit_cost, labor_cost").eq("company_id", cid)),
       ]);
       if (!costs) return serviceFigures(sold, items);
-      // 200 jobs a request keeps the address short enough (and /time/rates takes 300 at most).
       const ids = [...new Set(sold.flatMap((l) => (l.invoice?.job_id ? [l.invoice.job_id] : [])))];
-      const byJobs = async <T,>(read: (jobs: string[]) => PromiseLike<T[]>) => (await Promise.all(Array.from({ length: Math.ceil(ids.length / 200) }, (_, i) => read(ids.slice(i * 200, i * 200 + 200))))).flat();
       const [jobLines, time, expenses, rates, crewPay] = await Promise.all([
         // Everything the jobs have been invoiced, whenever: their labor is split across all of it.
-        byJobs((jobs) => everyRow(() => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).in("invoice.job_id", jobs).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)"))),
-        byJobs((jobs) => everyRow(() => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", jobs))),
-        byJobs((jobs) => everyRow(() => db.from("expenses").select("job_id, amount").in("job_id", jobs))),
-        byJobs((jobs) => timeRates(true, { job_ids: jobs }).then((r) => [r])).then((r): Rates => Object.assign({}, ...r)),
-        byJobs((jobs) => db.rpc("job_pay_costs", { p_jobs: jobs }).then(unwrap)),
+        byJobs(ids, (jobs) => everyRow(() => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).in("invoice.job_id", jobs).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)"))),
+        byJobs(ids, (jobs) => everyRow(() => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", jobs))),
+        byJobs(ids, (jobs) => everyRow(() => db.from("expenses").select("job_id, amount").in("job_id", jobs))),
+        jobRates(true, ids),
+        byJobs(ids, (jobs) => db.rpc("job_pay_costs", { p_jobs: jobs }).then(unwrap)),
       ]);
       return serviceFigures(sold, items, { jobLines, time, expenses, rateOf: (t) => Number(rates[t.id] ?? 0), crewPay });
     },

@@ -17,10 +17,7 @@ import { PRESETS, resolveRange, shortDate, type PresetKey, type Range } from "./
 export interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null } | null; sub?: { id: string; name: string } }
 export { memberName } from "../subs/memberName";
 
-export type Rates = Record<string, number>;
-/** The pay rate approved time was costed at, by entry, for people with job costs (only the server reads it). */
-export const timeRates = (costs: boolean, filter: { job_ids: string[] } | { from: string; to: string }): Promise<Rates> =>
-  costs ? api.post<Rates>("/time/rates", filter) : Promise.resolve({});
+export { timeRates, type Rates } from "./jobCosts";
 
 export const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
 export const hrs = (n: number) => (n > 0 && n < 1 ? `${Math.max(1, Math.round(n * 60))} min` : `${formatNumber(n, n < 10 && n % 1 ? 1 : 0)} h`);
