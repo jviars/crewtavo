@@ -6,7 +6,7 @@
  */
 import { optionLabels, optionTotals, quoteTotals } from "@crewtavo/core/money";
 import { describe, expect, it } from "vitest";
-import { addOnLabel, lineSums, movedSorts, nextSort, placeName, visibleLines, type Line } from "../src/features/quotes/LineItems";
+import { addOnLabel, lineSums, movedSorts, nextSort, placeName, priceListColumns, visibleLines, type Line } from "../src/features/quotes/LineItems";
 
 const A = "aaaaaaaa-0000-4000-8000-000000000001";
 const B = "bbbbbbbb-0000-4000-8000-000000000002";
@@ -169,5 +169,17 @@ describe("what the lines shown come to", () => {
   it("leaves out an add-on the client didn't pick on a quote without options", () => {
     const plain = [line("Sealcoat", 1, 1500), line("Crack fill", 1, 300, { optional: true, selected: false })];
     expect(lineSums(plain, { withOptions: true }).price).toBe(1500);
+  });
+});
+
+describe("what the line editor reads of the price list", () => {
+  const columns = (seesCosts: boolean) => priceListColumns(seesCosts).split(", ");
+  it("asks for an item's cost only for someone with Job costs and profit", () => {
+    expect(columns(true)).toContain("unit_cost");
+    expect(columns(false)).not.toContain("unit_cost");
+    expect(priceListColumns(false)).not.toMatch(/cost/);
+  });
+  it("and for everything else a new line needs either way", () => {
+    for (const seesCosts of [true, false]) expect(columns(seesCosts)).toEqual(expect.arrayContaining(["id", "name", "description", "unit", "unit_price", "taxable", "formula", "category"]));
   });
 });

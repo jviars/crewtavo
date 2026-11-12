@@ -64,6 +64,14 @@ export const isPromoLine = (table: Table, line: Pick<Line, "discount_quote_id" |
   (table === "job_line_items" && Boolean(line.discount_key)) || (table === "invoice_line_items" && Boolean(line.discount_quote_id));
 
 const COPY_FIELDS = ["name", "description", "quantity", "unit", "unit_price", "taxable", "service_id"] as const;
+/**
+ * What the line editor reads of the price list. An item's cost is only asked for by someone who
+ * may see costs (Job costs and profit). Without it, a line they add from the price list goes on
+ * with no cost and the database gives it the item's (20261112000420_rates_behind_job_costs.sql).
+ */
+const PRICE_LIST_COLUMNS = "id, name, description, unit, unit_price, taxable, formula, category";
+export const priceListColumns = (seesCosts: boolean) => (seesCosts ? (`${PRICE_LIST_COLUMNS}, unit_cost` as const) : PRICE_LIST_COLUMNS);
+interface PriceListItem { id: string; name: string; description: string | null; unit: string; unit_price: number; unit_cost?: number | null; taxable: boolean; formula: string | null; category: string | null }
 /** The workflow color of the record the lines are on, for their toasts. */
 const TONES: Record<Table, ToastTone> = { quote_line_items: "quote", job_line_items: "job", invoice_line_items: "invoice" };
 
@@ -156,7 +164,8 @@ export function LineItems({
   const { company } = session;
   const tone = TONES[table];
   const listRef = useListAnimation<HTMLDivElement>();
-  const showCosts = hasRole(session, "admin", "office", "estimator") && can(session, "job_costs") && table !== "invoice_line_items";
+  const seesCosts = hasRole(session, "admin", "office", "estimator") && can(session, "job_costs");
+  const showCosts = seesCosts && table !== "invoice_line_items";
   // Only a quote's lines are ever on an option.
   const offers = table === "quote_line_items" && options.length > 0 && optionId !== null;
   const viewing = offers ? optionId : null;
@@ -165,10 +174,10 @@ export function LineItems({
   // Where a new line goes: the option looked at, or every option.
   const [addToEvery, setAddToEvery] = useState(false);
   const services = useQuery({
-    queryKey: ["services", company.id],
+    queryKey: ["services", company.id, seesCosts ? "with-costs" : "without-costs"],
     enabled: editable,
     staleTime: 5 * 60_000,
-    queryFn: async () => unwrap(await supabase().from("services").select("id, name, description, unit, unit_price, unit_cost, taxable, formula, category").eq("company_id", company.id).eq("active", true).order("sort")),
+    queryFn: async () => unwrap(await supabase().from("services").select(priceListColumns(seesCosts)).eq("company_id", company.id).eq("active", true).order("sort")) as unknown as PriceListItem[],
   });
 
   const [openId, setOpenId] = useState<string | null>(null);
@@ -185,7 +194,8 @@ export function LineItems({
       const row: Record<string, unknown> = s
         ? { service_id: s.id, name: s.name, description: s.description, unit: s.unit, unit_price: s.unit_price, taxable: s.taxable, quantity: 1 }
         : { name: "New item", quantity: 1, unit: "ea", unit_price: 0 };
-      if (table !== "invoice_line_items" && s) row.unit_cost = s.unit_cost;
+      // Sent only when this person was given it; otherwise the database fills it in from the item.
+      if (table !== "invoice_line_items" && s && s.unit_cost !== undefined) row.unit_cost = s.unit_cost;
       if (table === "quote_line_items" && s) row.formula = s.formula;
       const followed = table === "quote_line_items" && s && followMarkup !== null ? await followedPriceOf(s.id, followMarkup) : null;
       if (followed !== null) row.unit_price = followed;

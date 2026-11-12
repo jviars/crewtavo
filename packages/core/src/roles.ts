@@ -88,6 +88,16 @@ export function memberPermissions(role: Role, customPermissions?: readonly strin
   return customPermissions ? allowed.filter((p) => customPermissions.includes(p)) : [...allowed];
 }
 
+/**
+ * Who is shown people's pay rates: the office with Job costs and profit (Pay, job costing), and the
+ * owner or an admin who manages people, since they set the rates (Settings → People; the database
+ * lets them, memberships' policies). Nobody else: GET /api/team leaves the rates out for them.
+ */
+export function seesPayRates(role: string, permissions: readonly string[]): boolean {
+  if (role === "owner") return true;
+  return (OFFICE as readonly string[]).includes(role) && (permissions.includes("job_costs") || ((ADMINS as readonly string[]).includes(role) && permissions.includes("team")));
+}
+
 /** The areas behind the Stripe key, the company's email (Apps or Settings) and the team. */
 export const ADMIN_AREAS: readonly Permission[] = ["apps", "settings", "team"];
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isPlaceholderEmail } from "../src/email";
-import { adminLevel, canMakeResetLink, EVERYONE, isStaff, LEVEL_PERMISSIONS, LEVEL_SUMMARY, memberPermissions, ROLE_LABELS, ROLES, STAFF, WITH_SUBS } from "../src/roles";
+import { adminLevel, canMakeResetLink, EVERYONE, isStaff, LEVEL_PERMISSIONS, LEVEL_SUMMARY, memberPermissions, ROLE_LABELS, ROLES, seesPayRates, STAFF, WITH_SUBS } from "../src/roles";
 import { isSubLogin, signInLinkMessages, smsLink, subAccessText, subLoginEmail, subLoginMark } from "../src/subs";
 
 describe("the Subcontractor level", () => {
@@ -86,5 +86,22 @@ describe("a sub's sign-in", () => {
     expect(isSubLogin({ provider: "email" })).toBe(false);
     expect(isSubLogin(null)).toBe(false);
     expect(isSubLogin({ crewtavo_sub: 7 })).toBe(false);
+  });
+});
+
+describe("who is shown pay rates", () => {
+  it("the office with Job costs and profit, and the people who set them", () => {
+    expect(seesPayRates("owner", [])).toBe(true);
+    expect(seesPayRates("office", ["job_costs", "timesheets"])).toBe(true);
+    expect(seesPayRates("admin", ["job_costs"])).toBe(true);
+    // An admin who manages people sets pay rates in Settings, so they're shown them.
+    expect(seesPayRates("admin", ["team"])).toBe(true);
+  });
+  it("not the office without job costs, whatever else they do, nor anyone below the office", () => {
+    expect(seesPayRates("office", ["timesheets", "invoices", "reports", "subs"])).toBe(false);
+    expect(seesPayRates("admin", ["invoices", "apps"])).toBe(false);
+    // "team" only counts for admins: the office level can't have it.
+    expect(seesPayRates("office", ["team"])).toBe(false);
+    for (const role of ["estimator", "crew_lead", "field_crew", "subcontractor"]) expect(seesPayRates(role, ["job_costs", "team"])).toBe(false);
   });
 });

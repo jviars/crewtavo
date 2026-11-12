@@ -1,5 +1,5 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
-import { ADMINS, adminLevel, currencyOffered, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, PERMISSIONS, presetSummaries, ROLE_LABELS, ROLES, signInPhone, STAFF, subSettings, TERMS_VERSION, WITH_SUBS, type Permission, type Role, type TradePreset } from "@crewtavo/core";
+import { ADMINS, adminLevel, currencyOffered, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, PERMISSIONS, presetSummaries, ROLE_LABELS, seesPayRates, ROLES, signInPhone, STAFF, subSettings, TERMS_VERSION, WITH_SUBS, type Permission, type Role, type TradePreset } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv, Env } from "../env";
@@ -412,9 +412,11 @@ account.get("/team", requireUser, requireCompany(), async (c) => {
   const subNames = new Map(
     subIds.length ? must(await adminClient(c.env).from("subcontractors").select("id, name").eq("company_id", companyId).in("id", subIds)).map((x) => [x.id, x.name]) : [],
   );
-  // Pay rates are for the office (the column isn't readable by members directly); crews see names and roles.
+  // Pay rates are for the office with Job costs and profit, and for whoever sets them (seesPayRates;
+  // the column isn't readable by members directly). Everyone else gets names and roles, with
+  // labor_rate null.
   const rates = new Map<string, number | null>();
-  if (["owner", "admin", "office"].includes(c.var.role)) {
+  if (seesPayRates(c.var.role, c.var.permissions)) {
     const rows = must(await adminClient(c.env).from("memberships").select("user_id, labor_rate").eq("company_id", companyId));
     for (const r of rows) rates.set(r.user_id, r.labor_rate);
   }

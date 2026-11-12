@@ -1,4 +1,4 @@
-import { ADMINS, canMakeResetLink, LEVEL_SUMMARY, type Role } from "@crewtavo/core/roles";
+import { ADMINS, canMakeResetLink, LEVEL_SUMMARY, seesPayRates, type Role } from "@crewtavo/core/roles";
 import { formatBytes } from "@crewtavo/core/storage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -159,7 +159,8 @@ export function TeamSettings() {
                       )}
                     </td>
                     <td className="num">
-                      <MoneyInput value={Number(m.labor_rate ?? 0)} max={1000} width={110} label={`Labor cost for ${name}`} onSave={(v) => void saving.track(rate.mutateAsync({ userId: m.user_id, labor_rate: v || null }))} />
+                      {/* Someone who isn't given pay rates has none to show here, and $0 would be a lie. */}
+                      {!seesPayRates(session.role, session.permissions) ? <span className="muted small" title="Pay rates are for people who manage the team or have Job costs and profit.">Hidden</span> : <MoneyInput value={Number(m.labor_rate ?? 0)} max={1000} width={110} label={`Labor cost for ${name}`} onSave={(v) => void saving.track(rate.mutateAsync({ userId: m.user_id, labor_rate: v || null }))} />}
                       {pieceRates && (
                         <div>
                           <button type="button" className="link-btn small" onClick={() => setRatesFor(m)}>

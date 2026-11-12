@@ -559,3 +559,17 @@ describe("piece pay in pay periods", () => {
     expect((await named.json()).error).toMatch(/Subs are paid by the job/);
   });
 });
+
+describe("pay rates on the team", () => {
+  it("go with the team to the office with job costs (and whoever sets them): without, everyone's rate is left out", async () => {
+    serve({ tables: oscar() });
+    const rates = async (who: string) => Object.fromEntries(((await (await as(who, "/team")).json()) as Array<{ user_id: string; labor_rate: number | null }>).map((m) => [m.user_id, m.labor_rate]));
+    expect(await rates(PAYROLL)).toMatchObject({ [CREW]: 20, [DEE]: 25 });
+    expect(await rates(OWNER)).toMatchObject({ [CREW]: 20, [DEE]: 25 });
+    // Office, but their role has no Job costs and profit: the people, not what they're paid.
+    const without = await rates(SUBS);
+    expect(Object.keys(without)).toEqual(expect.arrayContaining([CREW, DEE, PAYROLL]));
+    expect(Object.values(without).every((rate) => rate === null)).toBe(true);
+    expect(Object.values(await rates(CREW)).every((rate) => rate === null)).toBe(true);
+  });
+});
