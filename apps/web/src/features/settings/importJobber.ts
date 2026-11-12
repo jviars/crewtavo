@@ -15,6 +15,7 @@ import { localDate } from "@crewtavo/core/time";
 import { api, supabase, unwrap } from "@/lib/api";
 import { parseCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/errors";
+import { everyRow } from "@/lib/paging";
 import { queryClient } from "@/lib/queryClient";
 import { startTask } from "@/lib/tasks";
 import { customFieldsKey } from "../customFields/CustomFields";
@@ -42,25 +43,18 @@ export async function readFile(file: File): Promise<ChosenFile> {
 
 interface Here { clients: Array<ExistingClient & KnownClient>; properties: KnownProperty[]; imported: { [K in JobberWorkKind]: Set<string> } }
 
-/** Every row, in pages of 1,000. */
-async function all<T>(page: (from: number, to: number) => PromiseLike<Parameters<typeof unwrap>[0] & { data: T[] | null }>): Promise<T[]> {
-  const out: T[] = [];
-  for (let from = 0; ; from += 1000) {
-    const rows = unwrap(await page(from, from + 999)) as T[];
-    out.push(...rows);
-    if (rows.length < 1000) return out;
-  }
-}
+/** An import is checked against everything already here, however much that is. */
+const ALL = { most: Infinity };
 
 /** The clients, properties and Jobber records already here. */
 async function loadHere(companyId: string): Promise<Here> {
   const db = supabase();
   const [clients, properties, quotes, invoices, jobs] = await Promise.all([
-    all((a, b) => db.from("clients").select("id, display_name, email, status, custom_fields").eq("company_id", companyId).range(a, b)),
-    all((a, b) => db.from("properties").select("id, client_id, line1, city").eq("company_id", companyId).range(a, b)),
-    all((a, b) => db.from("quotes").select("source_id").eq("company_id", companyId).not("source_id", "is", null).range(a, b)),
-    all((a, b) => db.from("invoices").select("source_id").eq("company_id", companyId).not("source_id", "is", null).range(a, b)),
-    all((a, b) => db.from("jobs").select("source_id").eq("company_id", companyId).not("source_id", "is", null).range(a, b)),
+    everyRow(() => db.from("clients").select("id, display_name, email, status, custom_fields").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("properties").select("id, client_id, line1, city").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("quotes").select("source_id").eq("company_id", companyId).not("source_id", "is", null), ALL),
+    everyRow(() => db.from("invoices").select("source_id").eq("company_id", companyId).not("source_id", "is", null), ALL),
+    everyRow(() => db.from("jobs").select("source_id").eq("company_id", companyId).not("source_id", "is", null), ALL),
   ]);
   const ids = (rows: Array<{ source_id: string | null }>) => new Set(rows.map((r) => r.source_id!));
   return {

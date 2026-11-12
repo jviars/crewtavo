@@ -22,21 +22,12 @@ import { localDate, localTime } from "@crewtavo/core/time";
 import { api, supabase, unwrap } from "@/lib/api";
 import { toCsv } from "@/lib/csv";
 import { todayIn } from "@/lib/format";
+import { everyRow } from "@/lib/paging";
 import type { Session } from "@/lib/session";
 import { zip } from "@/lib/zip";
 
-const PAGE = 1000;
-type DbError = { message: string; code?: string; details?: string | null; hint?: string | null };
-
-/** Every row a query finds, a page at a time (the database sends at most 1,000 at once). */
-async function everyRow<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: DbError | null }>): Promise<T[]> {
-  const rows: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const batch = unwrap(await page(from, from + PAGE - 1));
-    rows.push(...batch);
-    if (batch.length < PAGE) return rows;
-  }
-}
+/** This is the download of everything, so each read goes on to its last row however many there are. */
+const ALL = { most: Infinity };
 
 interface Member { user_id: string; role: Role; active: boolean; labor_rate: number | null; profile: { full_name: string; email: string | null; phone: string | null } | null; sub?: { id: string; name: string } }
 type Column<T> = readonly [label: string, value: (row: T) => unknown];
@@ -73,21 +64,21 @@ export async function exportEverything(session: Session, step: (what: string) =>
 
   step("Reading clients…");
   const [clients, contacts, properties, requests, members, fieldDefs] = await Promise.all([
-    everyRow((from, to) => db.from("clients").select("id, display_name, company_name, email, phone, status, lead_source, referred_by, tags, notes, billing_address, marketing_opt_out, review_opt_out, sms_opt_out_at, tax_exempt, tax_exempt_note, payment_terms_days, created_at, custom_fields").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("client_contacts").select("id, client_id, name, role, email, phone, is_primary, notify_email, notify_sms").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("properties").select("id, client_id, label, line1, line2, city, region, postal_code, country, lot_size_sqft, tags, notes, lat, lng, created_at, custom_fields").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("requests").select("id, number, title, client_id, property_id, status, source, details, assigned_to, created_at").eq("company_id", companyId).order("id").range(from, to)),
+    everyRow(() => db.from("clients").select("id, display_name, company_name, email, phone, status, lead_source, referred_by, tags, notes, billing_address, marketing_opt_out, review_opt_out, sms_opt_out_at, tax_exempt, tax_exempt_note, payment_terms_days, created_at, custom_fields").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("client_contacts").select("id, client_id, name, role, email, phone, is_primary, notify_email, notify_sms").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("properties").select("id, client_id, label, line1, line2, city, region, postal_code, country, lot_size_sqft, tags, notes, lat, lng, created_at, custom_fields").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("requests").select("id, number, title, client_id, property_id, status, source, details, assigned_to, created_at").eq("company_id", companyId), ALL),
     api.get<Member[]>("/team?with_subs=1"),
-    everyRow((from, to) => db.from("custom_field_definitions").select("id, record_type, key, label, type, choices, show_on_pdf, show_in_portal, sort, archived_at").eq("company_id", companyId).order("sort").order("id").range(from, to)),
+    everyRow(() => db.from("custom_field_definitions").select("id, record_type, key, label, type, choices, show_on_pdf, show_in_portal, sort, archived_at").eq("company_id", companyId), { ...ALL, order: "sort" }),
   ]);
 
   step("Reading quotes and jobs…");
   const [quoteRows, options, quoteLines, jobs, jobLines] = await Promise.all([
-    everyRow((from, to) => db.from("quotes").select("id, number, title, client_id, property_id, status, option_id, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, message, lost_reason, salesperson_id, created_at, sent_at, approved_at, valid_until, custom_fields").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("quote_options").select("id, quote_id, name, tier").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("quote_line_items").select("id, quote_id, option_id, sort, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("jobs").select("id, number, title, client_id, property_id, quote_id, kind, status, starts_on, ends_on, recurrence_rule, active_months, paused_at, resume_on, billing_mode, pricing, invoice_schedule, invoice_day, instructions, po_number, permit_number, warranty_until, visit_start_time, visit_duration_min, created_at, custom_fields").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("job_line_items").select("id, job_id, sort, name, description, quantity, unit, unit_price, unit_cost, taxable").eq("company_id", companyId).order("id").range(from, to)),
+    everyRow(() => db.from("quotes").select("id, number, title, client_id, property_id, status, option_id, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, message, lost_reason, salesperson_id, created_at, sent_at, approved_at, valid_until, custom_fields").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("quote_options").select("id, quote_id, name, tier").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("quote_line_items").select("id, quote_id, option_id, sort, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("jobs").select("id, number, title, client_id, property_id, quote_id, kind, status, starts_on, ends_on, recurrence_rule, active_months, paused_at, resume_on, billing_mode, pricing, invoice_schedule, invoice_day, instructions, po_number, permit_number, warranty_until, visit_start_time, visit_duration_min, created_at, custom_fields").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("job_line_items").select("id, job_id, sort, name, description, quantity, unit, unit_price, unit_cost, taxable").eq("company_id", companyId), ALL),
   ]);
 
   // Quote templates (the quotes with no client) aren't quotes anyone got, so they're left out.
@@ -95,32 +86,32 @@ export async function exportEverything(session: Session, step: (what: string) =>
 
   step("Reading visits and invoices…");
   const [visits, assignees, crews, crewMembers, invoices, invoiceLines, payments] = await Promise.all([
-    everyRow((from, to) => db.from("visits").select("id, job_id, request_id, property_id, kind, title, status, scheduled_on, starts_at, ends_at, crew_id, notes, completed_at, invoice_id").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("visit_assignees").select("visit_id, user_id").eq("company_id", companyId).order("visit_id").order("user_id").range(from, to)),
-    everyRow((from, to) => db.from("crews").select("id, name, lead_user_id, active").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("crew_members").select("crew_id, user_id").eq("company_id", companyId).order("crew_id").order("user_id").range(from, to)),
-    everyRow((from, to) => db.from("invoices").select("id, number, subject, client_id, job_id, kind, status, issued_on, due_on, subtotal, discount_amount, credit_amount, tax_rate, tax_amount, total, amount_paid, balance_due, retainage_amount, notes, sent_at, written_off_at, minimum_charge, late_fee_at, custom_fields").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("invoice_line_items").select("id, invoice_id, sort, name, description, quantity, unit, unit_price, taxable, kind, time_entry_ids, material_ids").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("payments").select("id, client_id, invoice_id, amount, tip_amount, fee_amount, method, processor, processor_ref, received_at, notes").eq("company_id", companyId).order("id").range(from, to)),
+    everyRow(() => db.from("visits").select("id, job_id, request_id, property_id, kind, title, status, scheduled_on, starts_at, ends_at, crew_id, notes, completed_at, invoice_id").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("visit_assignees").select("visit_id, user_id").eq("company_id", companyId), { ...ALL, key: ["visit_id", "user_id"] }),
+    everyRow(() => db.from("crews").select("id, name, lead_user_id, active").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("crew_members").select("crew_id, user_id").eq("company_id", companyId), { ...ALL, key: ["crew_id", "user_id"] }),
+    everyRow(() => db.from("invoices").select("id, number, subject, client_id, job_id, kind, status, issued_on, due_on, subtotal, discount_amount, credit_amount, tax_rate, tax_amount, total, amount_paid, balance_due, retainage_amount, notes, sent_at, written_off_at, minimum_charge, late_fee_at, custom_fields").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("invoice_line_items").select("id, invoice_id, sort, name, description, quantity, unit, unit_price, taxable, kind, time_entry_ids, material_ids").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("payments").select("id, client_id, invoice_id, amount, tip_amount, fee_amount, method, processor, processor_ref, received_at, notes").eq("company_id", companyId), ALL),
   ]);
 
   step("Reading time, expenses and equipment…");
   const [services, timeEntries, expenses, equipment, equipmentLogs, equipmentPapers, subs, propertyAssets, visitAssets] = await Promise.all([
-    everyRow((from, to) => db.from("services").select("id, category, name, description, unit, unit_price, unit_cost, labor_cost, taxable, active, add_to_every_job, sort").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("time_entries").select("id, user_id, started_at, ended_at, category, job_id, notes, approved_at").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("expenses").select("id, incurred_on, vendor, category, description, amount, job_id, equipment_id, user_id, reimbursable, reimbursed_at").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("equipment").select("id, name, kind, make, model, year, serial, plate, status, meter, meter_reading, meter_read_on, purchased_on, crew_id, notes").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("equipment_logs").select("id, equipment_id, done_on, kind, title, meter_reading, notes, user_id").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("equipment_documents").select("id, equipment_id, kind, name, expires_on, notes").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("subcontractors").select("id, name, contact_name, email, phone, trade, tax_classification, active, notes, address").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("property_assets").select("id, property_id, name, make, model, serial, installed_on, warranty_until, location, notes, status").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("visit_assets").select("visit_id, asset_id").eq("company_id", companyId).order("visit_id").order("asset_id").range(from, to)),
+    everyRow(() => db.from("services").select("id, category, name, description, unit, unit_price, unit_cost, labor_cost, taxable, active, add_to_every_job, sort").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("time_entries").select("id, user_id, started_at, ended_at, category, job_id, notes, approved_at").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("expenses").select("id, incurred_on, vendor, category, description, amount, job_id, equipment_id, user_id, reimbursable, reimbursed_at").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("equipment").select("id, name, kind, make, model, year, serial, plate, status, meter, meter_reading, meter_read_on, purchased_on, crew_id, notes").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("equipment_logs").select("id, equipment_id, done_on, kind, title, meter_reading, notes, user_id").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("equipment_documents").select("id, equipment_id, kind, name, expires_on, notes").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("subcontractors").select("id, name, contact_name, email, phone, trade, tax_classification, active, notes, address").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("property_assets").select("id, property_id, name, make, model, serial, installed_on, warranty_until, location, notes, status").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("visit_assets").select("visit_id, asset_id").eq("company_id", companyId), { ...ALL, key: ["visit_id", "asset_id"] }),
   ]);
 
   step("Reading checklists…");
   const [checklists, filled] = await Promise.all([
-    everyRow((from, to) => db.from("checklist_templates").select("id, name, items").eq("company_id", companyId).order("id").range(from, to)),
-    everyRow((from, to) => db.from("checklist_responses").select("id, visit_id, template_id, answers, completed_at, completed_by").eq("company_id", companyId).order("id").range(from, to)),
+    everyRow(() => db.from("checklist_templates").select("id, name, items").eq("company_id", companyId), ALL),
+    everyRow(() => db.from("checklist_responses").select("id, visit_id, template_id, answers, completed_at, completed_by").eq("company_id", companyId), ALL),
   ]);
 
   // People by name: the team, then anyone who has left but is still on old visits and timesheets.

@@ -16,12 +16,13 @@ import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { formatDate, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
+import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { localDate } from "@crewtavo/core/time";
 import { Breakdown, Change, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Column, type Part } from "./Charts";
 import { agingBuckets, jobProfit, previousRange, serviceFigures } from "@crewtavo/core/reports";
 import { bucketize, bucketizeShifted, bucketsFor, resolveRange, shortDate, type Range } from "./range";
-import { both, fetchAll, pct, plural, RangeHeader, rangeQuery, SectionHead, sum, TabBody, timeRates, useRangeParams, type Rates } from "./shared";
+import { both, pct, plural, RangeHeader, rangeQuery, SectionHead, sum, TabBody, timeRates, useRangeParams, type Rates } from "./shared";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -85,16 +86,15 @@ function usePayments(range: Range) {
     queryKey: ["finance", company.id, "payments", range.from, range.to],
     placeholderData: keepPreviousData,
     queryFn: () =>
-      fetchAll((a, b) =>
-        supabase()
-          .from("payments")
-          .select("id, amount, fee_amount, tip_amount, method, received_at, notes, client:clients(id, display_name, email), invoice:invoices(id, number, issued_on)")
-          .eq("company_id", company.id)
-          .gte("received_at", range.start)
-          .lt("received_at", range.end)
-          .order("received_at", { ascending: false })
-          .order("id")
-          .range(a, b),
+      everyRow(
+        () =>
+          supabase()
+            .from("payments")
+            .select("id, amount, fee_amount, tip_amount, method, received_at, notes, client:clients(id, display_name, email), invoice:invoices(id, number, issued_on)")
+            .eq("company_id", company.id)
+            .gte("received_at", range.start)
+            .lt("received_at", range.end),
+        { order: { column: "received_at", ascending: false } },
       ),
   });
 }
@@ -184,10 +184,10 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
     queryFn: async () => {
       const db = supabase();
       const [before, invoices, open, quotes, payouts] = await Promise.all([
-        fetchAll((a, b) => db.from("payments").select("amount, fee_amount, received_at").eq("company_id", cid).gte("received_at", prev.start).lt("received_at", prev.end).range(a, b)),
-        fetchAll((a, b) => db.from("invoices").select("total, issued_on").eq("company_id", cid).not("status", "in", "(draft,void)").gte("issued_on", prev.from).lte("issued_on", range.to).range(a, b)),
-        fetchAll((a, b) => db.from("invoices").select("id, number, balance_due, due_on, client:clients(id, display_name)").eq("company_id", cid).in("status", ["sent", "partially_paid", "overdue"]).range(a, b)),
-        fetchAll((a, b) => db.from("quotes").select("status, total, sent_at").eq("company_id", cid).gte("sent_at", prev.start).lt("sent_at", range.end).range(a, b)),
+        everyRow(() => db.from("payments").select("amount, fee_amount, received_at").eq("company_id", cid).gte("received_at", prev.start).lt("received_at", prev.end)),
+        everyRow(() => db.from("invoices").select("total, issued_on").eq("company_id", cid).not("status", "in", "(draft,void)").gte("issued_on", prev.from).lte("issued_on", range.to)),
+        everyRow(() => db.from("invoices").select("id, number, balance_due, due_on, client:clients(id, display_name)").eq("company_id", cid).in("status", ["sent", "partially_paid", "overdue"])),
+        everyRow(() => db.from("quotes").select("status, total, sent_at").eq("company_id", cid).gte("sent_at", prev.start).lt("sent_at", range.end)),
         db.from("payouts").select("amount, status, arrival_on").eq("company_id", cid).order("arrival_on", { ascending: false }).limit(12),
       ]);
       return { before, invoices, open, quotes, payouts: unwrap(payouts) };
@@ -399,7 +399,7 @@ function RevenueGoal() {
       const yearRange = resolveRange("year", today, tz);
       const [settings, payments] = await Promise.all([
         db.from("companies").select("settings").eq("id", company.id).single(),
-        fetchAll((a, b) => db.from("payments").select("amount").eq("company_id", company.id).gte("received_at", yearRange.start).range(a, b)),
+        everyRow(() => db.from("payments").select("amount").eq("company_id", company.id).gte("received_at", yearRange.start)),
       ]);
       const s = (unwrap(settings).settings ?? {}) as Record<string, unknown>;
       return { settings: s, goal: Number(s.revenue_goal ?? 0), margin: Number(s.margin_target ?? 0), ytd: sum(payments, (p) => Number(p.amount)) };
@@ -498,10 +498,10 @@ function Payments({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [invoices, open, writtenOff, payouts] = await Promise.all([
-        fetchAll((a, b) => db.from("invoices").select("total, tax_amount").eq("company_id", cid).not("status", "in", "(draft,void)").gte("issued_on", range.from).lte("issued_on", range.to).range(a, b)),
-        fetchAll((a, b) => db.from("invoices").select("balance_due, due_on, client:clients(id, display_name)").eq("company_id", cid).in("status", ["sent", "partially_paid", "overdue"]).range(a, b)),
+        everyRow(() => db.from("invoices").select("total, tax_amount").eq("company_id", cid).not("status", "in", "(draft,void)").gte("issued_on", range.from).lte("issued_on", range.to)),
+        everyRow(() => db.from("invoices").select("balance_due, due_on, client:clients(id, display_name)").eq("company_id", cid).in("status", ["sent", "partially_paid", "overdue"])),
         // Bad debt: what was left on invoices written off in the range.
-        fetchAll((a, b) => db.from("invoices").select("balance_due").eq("company_id", cid).eq("status", "written_off").gte("written_off_at", range.start).lt("written_off_at", range.end).range(a, b)),
+        everyRow(() => db.from("invoices").select("balance_due").eq("company_id", cid).eq("status", "written_off").gte("written_off_at", range.start).lt("written_off_at", range.end)),
         db.from("payouts").select("id", { count: "exact", head: true }).eq("company_id", cid),
       ]);
       if (payouts.error) throw payouts.error;
@@ -624,14 +624,14 @@ function Profit({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [jobs, settings] = await Promise.all([
-        fetchAll((a, b) => db.from("jobs").select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost, unit_labor_cost)").eq("company_id", cid).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end).range(a, b)),
+        everyRow(() => db.from("jobs").select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost, unit_labor_cost)").eq("company_id", cid).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end)),
         db.from("companies").select("settings").eq("id", cid).single(),
       ]);
       const ids = jobs.map((j) => j.id);
       const [time, expenses, rates, crewPay] = ids.length
         ? await Promise.all([
-            fetchAll((a, b) => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", ids.slice(0, 300)).range(a, b)),
-            fetchAll((a, b) => db.from("expenses").select("job_id, amount").in("job_id", ids.slice(0, 300)).range(a, b)),
+            everyRow(() => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", ids.slice(0, 300))),
+            everyRow(() => db.from("expenses").select("job_id, amount").in("job_id", ids.slice(0, 300))),
             timeRates(costs, { job_ids: ids.slice(0, 300) }),
             // Sub and crew pay that's agreed, done or paid: for those with job costs, nothing for anyone else.
             costs ? db.rpc("job_pay_costs", { p_jobs: ids.slice(0, 300) }).then(unwrap) : Promise.resolve([]),
@@ -704,8 +704,8 @@ function Services({ range }: { range: Range }) {
       const db = supabase();
       // serviceFigures leaves out drafts, voids and part billings too; this just reads fewer rows.
       const [sold, items] = await Promise.all([
-        fetchAll((a, b) => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).gte("invoice.issued_on", range.from).lte("invoice.issued_on", range.to).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)").order("id").range(a, b)),
-        fetchAll((a, b) => db.from("services").select("id, name, category, unit_cost, labor_cost").eq("company_id", cid).order("id").range(a, b)),
+        everyRow(() => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).gte("invoice.issued_on", range.from).lte("invoice.issued_on", range.to).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)")),
+        everyRow(() => db.from("services").select("id, name, category, unit_cost, labor_cost").eq("company_id", cid)),
       ]);
       if (!costs) return serviceFigures(sold, items);
       // 200 jobs a request keeps the address short enough (and /time/rates takes 300 at most).
@@ -713,9 +713,9 @@ function Services({ range }: { range: Range }) {
       const byJobs = async <T,>(read: (jobs: string[]) => PromiseLike<T[]>) => (await Promise.all(Array.from({ length: Math.ceil(ids.length / 200) }, (_, i) => read(ids.slice(i * 200, i * 200 + 200))))).flat();
       const [jobLines, time, expenses, rates, crewPay] = await Promise.all([
         // Everything the jobs have been invoiced, whenever: their labor is split across all of it.
-        byJobs((jobs) => fetchAll((a, b) => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).in("invoice.job_id", jobs).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)").order("id").range(a, b))),
-        byJobs((jobs) => fetchAll((a, b) => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", jobs).order("id").range(a, b))),
-        byJobs((jobs) => fetchAll((a, b) => db.from("expenses").select("job_id, amount").in("job_id", jobs).order("id").range(a, b))),
+        byJobs((jobs) => everyRow(() => db.from("invoice_line_items").select(SERVICE_LINES).eq("company_id", cid).in("invoice.job_id", jobs).not("invoice.status", "in", "(draft,void)").not("invoice.kind", "in", "(deposit,progress,retainage)"))),
+        byJobs((jobs) => everyRow(() => db.from("time_entries").select("id, job_id, started_at, ended_at").in("job_id", jobs))),
+        byJobs((jobs) => everyRow(() => db.from("expenses").select("job_id, amount").in("job_id", jobs))),
         byJobs((jobs) => timeRates(true, { job_ids: jobs }).then((r) => [r])).then((r): Rates => Object.assign({}, ...r)),
         byJobs((jobs) => db.rpc("job_pay_costs", { p_jobs: jobs }).then(unwrap)),
       ]);

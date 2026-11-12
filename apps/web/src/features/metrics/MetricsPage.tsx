@@ -12,12 +12,13 @@ import { NoAccess } from "@/components/ui/States";
 import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { supabase } from "@/lib/api";
 import { formatDate, formatMoney, formatNumber, todayIn } from "@/lib/format";
+import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { CATEGORY_LABELS } from "../field/fieldData";
 import { leadSource } from "../marketing/website";
 import { HBars, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart } from "../finance/Charts";
 import { bucketize, bucketsFor, hoursBetween, type Range } from "../finance/range";
-import { fetchAll, hrs, memberName, pct, plural, RangeHeader, sum, TabBody, timeRates, useRangeParams, useTeam } from "../finance/shared";
+import { hrs, memberName, pct, plural, RangeHeader, sum, TabBody, timeRates, useRangeParams, useTeam } from "../finance/shared";
 
 const TABS = [
   { key: "sales", label: "Sales" },
@@ -58,8 +59,8 @@ function Sales({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [quotes, clients] = await Promise.all([
-        fetchAll((a, b) => db.from("quotes").select("id, status, total, sent_at, approved_at, salesperson_id, created_by, lost_reason, client:clients(lead_source, requests(web_visit))").eq("company_id", cid).gte("sent_at", range.start).lt("sent_at", range.end).range(a, b)),
-        fetchAll((a, b) => db.from("clients").select("id, lead_source, status, requests(web_visit)").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end).range(a, b)),
+        everyRow(() => db.from("quotes").select("id, status, total, sent_at, approved_at, salesperson_id, created_by, lost_reason, client:clients(lead_source, requests(web_visit))").eq("company_id", cid).gte("sent_at", range.start).lt("sent_at", range.end)),
+        everyRow(() => db.from("clients").select("id, lead_source, status, requests(web_visit)").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end)),
       ]);
       return { quotes, clients };
     },
@@ -169,8 +170,8 @@ function Work({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [visits, requests, jobs] = await Promise.all([
-        fetchAll((a, b) => db.from("visits").select("completed_at, kind").eq("company_id", cid).eq("status", "completed").gte("completed_at", range.start).lt("completed_at", range.end).range(a, b)),
-        fetchAll((a, b) => db.from("requests").select("status, created_at").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end).range(a, b)),
+        everyRow(() => db.from("visits").select("completed_at, kind").eq("company_id", cid).eq("status", "completed").gte("completed_at", range.start).lt("completed_at", range.end)),
+        everyRow(() => db.from("requests").select("status, created_at").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end)),
         db.from("jobs").select("id", { count: "exact", head: true }).eq("company_id", cid).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end),
       ]);
       if (jobs.error) throw jobs.error;
@@ -217,7 +218,7 @@ function Team({ range }: { range: Range }) {
     placeholderData: keepPreviousData,
     queryFn: async () => {
       const [rows, rates] = await Promise.all([
-        fetchAll((a, b) => supabase().from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("company_id", cid).gte("started_at", range.start).lt("started_at", range.end).range(a, b)),
+        everyRow(() => supabase().from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("company_id", cid).gte("started_at", range.start).lt("started_at", range.end)),
         timeRates(can(session, "job_costs"), { from: range.start, to: range.end }),
       ]);
       // A running timer counts up to now. Breaks the company doesn't pay for aren't paid hours.
@@ -304,10 +305,10 @@ function Clients({ range }: { range: Range }) {
     queryFn: async () => {
       const db = supabase();
       const [created, active, leads, jobs, referred] = await Promise.all([
-        fetchAll((a, b) => db.from("clients").select("created_at, lead_source, requests(web_visit)").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end).range(a, b)),
+        everyRow(() => db.from("clients").select("created_at, lead_source, requests(web_visit)").eq("company_id", cid).gte("created_at", range.start).lt("created_at", range.end)),
         db.from("clients").select("id", { count: "exact", head: true }).eq("company_id", cid).eq("status", "active"),
         db.from("clients").select("id", { count: "exact", head: true }).eq("company_id", cid).eq("status", "lead"),
-        fetchAll((a, b) => db.from("jobs").select("status, updated_at, client:clients(id, display_name, status, email, marketing_opt_out)").eq("company_id", cid).neq("status", "archived").range(a, b)),
+        everyRow(() => db.from("jobs").select("status, updated_at, client:clients(id, display_name, status, email, marketing_opt_out)").eq("company_id", cid).neq("status", "archived")),
         referrals ? db.rpc("referral_stats", { p_company: cid, p_from: range.start, p_to: range.end }) : Promise.resolve({ data: null, error: null }),
       ]);
       for (const r of [active, leads, referred]) if (r.error) throw r.error;

@@ -17,6 +17,7 @@ import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, textFilter, unwrap } from "@/lib/api";
 import { inChunks, reportBulk } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { NewClientDialog, useClientTags } from "./ClientForm";
@@ -329,16 +330,6 @@ export function ClientsPage() {
   );
 }
 
-/** Every page of a PostgREST read, 1000 rows at a time. */
-async function allPages<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
-  const rows: T[] = [];
-  for (let from = 0; ; from += 1000) {
-    const batch = unwrap(await page(from, from + 999)) as T[];
-    rows.push(...batch);
-    if (batch.length < 1000) return rows;
-  }
-}
-
 /**
  * Send autopay invites to many clients at once: every active client not on autopay, or those with
  * one tag, by email or by text. The server skips anyone invited in the last 7 days and stops at the
@@ -355,12 +346,13 @@ function AutopayInvitesDialog({ onClose }: { onClose: () => void }) {
     queryKey: ["clients", company.id, "autopay-invites", tag],
     queryFn: async () => {
       const [clients, agreed] = await Promise.all([
-        allPages<{ id: string; email: string | null; phone: string | null }>((from, to) => {
-          let q = supabase().from("clients").select("id, email, phone").eq("company_id", company.id).eq("status", "active").order("id").range(from, to);
+        // Everyone it could go to, however many: the server takes them a chunk at a time.
+        everyRow(() => {
+          let q = supabase().from("clients").select("id, email, phone").eq("company_id", company.id).eq("status", "active");
           if (tag) q = q.contains("tags", [tag]);
           return q;
-        }),
-        allPages<{ client_id: string }>((from, to) => supabase().from("autopay_authorizations").select("client_id").eq("company_id", company.id).is("revoked_at", null).order("client_id").range(from, to)),
+        }, { most: Infinity }),
+        everyRow(() => supabase().from("autopay_authorizations").select("client_id").eq("company_id", company.id).is("revoked_at", null), { most: Infinity }),
       ]);
       const on = new Set(agreed.map((a) => a.client_id));
       return clients.filter((c) => !on.has(c.id));

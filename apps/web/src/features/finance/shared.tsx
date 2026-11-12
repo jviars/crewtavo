@@ -1,6 +1,6 @@
 /**
  * What Finance and Metrics share: the date range in the address bar and its picker, the tab bar,
- * the loading and error wrapper around a tab, and reading every row of a long result.
+ * and the loading and error wrapper around a tab.
  */
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -9,24 +9,13 @@ import { Icon } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
-import { api, unwrap } from "@/lib/api";
+import { api } from "@/lib/api";
 import { formatNumber, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { PRESETS, resolveRange, shortDate, type PresetKey, type Range } from "./range";
 
 export interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null } | null; sub?: { id: string; name: string } }
 export { memberName } from "../subs/memberName";
-
-/** Supabase returns at most 1,000 rows per request; page through larger result sets. */
-export async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
-  const out: T[] = [];
-  for (let i = 0; i < 25; i++) {
-    const rows = unwrap(await page(i * 1000, i * 1000 + 999) as never) as T[];
-    out.push(...rows);
-    if (rows.length < 1000) break;
-  }
-  return out;
-}
 
 export type Rates = Record<string, number>;
 /** The pay rate approved time was costed at, by entry, for people with job costs (only the server reads it). */
