@@ -4,7 +4,7 @@ import { fileURLToPath, URL } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chargeInChunks, chargeOutcomeText, chargeSummary, chargeTotal } from "../src/features/invoices/charges";
 import { ChargeCardsDialog } from "../src/features/invoices/InvoiceTools";
 import { InvoicePage } from "../src/features/invoices/InvoicePage";
@@ -330,6 +330,16 @@ describe("a failed charge while the client's own bank payment is on its way", ()
 });
 
 describe("a charge moved back to be tried on a card the client agreed to since", () => {
+  // The invoice here is due 2026-11-10. Past that day the page adds its "past due" note, with a
+  // reminder of its own, so this is read on a day before it rather than on whatever today is.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-01T15:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("says it's charged to that card right away, not that it failed", () => {
     const html = invoicePage("failed", { failures: 0, last_error: "Your card was declined." });
     expect(html).toContain("Charged automatically to Chase ending 6789 right away.");
