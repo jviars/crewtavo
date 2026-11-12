@@ -210,12 +210,12 @@ commit;
 -- ===== Receipts in Storage =====================================================================
 insert into storage.objects (bucket_id, name, owner) values
   ('files', :'co' || '/receipts/fuel.jpg', 'b1000000-0000-0000-0000-000000000002'),
-  ('files', :'co' || '/visits/' || :'visit_a' || '/after.jpg', 'b1000000-0000-0000-0000-000000000002');
+  ('files', :'co' || '/visit/' || :'visit_a' || '/after.jpg', 'b1000000-0000-0000-0000-000000000002');
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "b1000000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
 select t16.check((select count(*) from storage.objects where name like :'co' || '/receipts/%') = 0, 'an employee can''t list other people''s receipts');
-select t16.check((select count(*) from storage.objects where name like :'co' || '/visits/%') = 1, 'but sees visit photos as before');
+select t16.check((select count(*) from storage.objects where name like :'co' || '/visit/%') = 1, 'but sees their visit''s photos as before');
 commit;
 begin;
 set local role authenticated;

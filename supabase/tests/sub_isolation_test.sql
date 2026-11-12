@@ -1109,8 +1109,13 @@ select t1070.check((select count(*) from public.memberships where company_id = :
   'and see the subs on the team''s visits: their sign-ins and profiles');
 select t1070.check(not exists (select 1 from public.subcontractors) and not exists (select 1 from public.sub_documents) and not exists (select 1 from public.sub_paperwork)
   and not exists (select 1 from storage.objects where name like '%/subs/%'), 'but not their paperwork, which is the office''s');
-select t1070.check((select count(*) from storage.objects where name like :'co' || '/visit/%') = 4 and (select count(*) from storage.objects where name like :'co' || '/plans/%') = 3,
-  'the team reads stored files as before');
+-- Stored files follow the tables (20261112000100_crew_files.sql): field crew read the photos of the
+-- two visits they're on and their job's plan marked for the crew, not the signed contract or the
+-- plan of a job they aren't on.
+select t1070.check(t1070.sorted(array(select name from storage.objects where name like :'co' || '/visit/%' or name like :'co' || '/plans/%')) = t1070.sorted(array[
+  :'co' || '/visit/' || :'v1' || '/d1070000-0000-0000-0000-0000000000a1.jpg', :'co' || '/visit/' || :'v2' || '/d1070000-0000-0000-0000-0000000000a2.jpg',
+  :'co' || '/plans/d1070000-0000-0000-0000-0000000000b1.pdf']),
+  'field crew read their own visits'' photos and the plans marked for the crew on their jobs');
 select set_config('request.jwt.claims', '{"sub": "d1070000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 select t1070.check((select count(*) from public.subcontractors) = 3 and (select count(*) from public.sub_paperwork) = 6 and (select count(*) from public.time_entries) = 5,
   'the office sees every sub, their paperwork status (turned-off ones aside) and everyone''s time');

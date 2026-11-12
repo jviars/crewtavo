@@ -158,11 +158,11 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "ca110000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
 insert into storage.objects (bucket_id, name, owner) values
   ('files', :'co' || '/applicants/b0b00000-0000-0000-0000-000000000001/resume.pdf', 'ca110000-0000-0000-0000-000000000002'),
-  ('files', :'co' || '/visit/aaaa0000-0000-0000-0000-000000000001/photo.jpg', 'ca110000-0000-0000-0000-000000000002');
+  ('files', :'co' || '/equipment/aaaa0000-0000-0000-0000-000000000001/photo.jpg', 'ca110000-0000-0000-0000-000000000002');
 select cat.check((select count(*) = 1 from storage.objects where name like '%/applicants/%'), 'office staff store and open a résumé');
 select set_config('request.jwt.claims', '{"sub": "ca110000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
 select cat.check((select count(*) = 0 from storage.objects where name like '%/applicants/%'), 'the crew can''t open it');
-select cat.check((select count(*) = 1 from storage.objects where name like '%/visit/%'), 'but still see the rest of the team''s files');
+select cat.check((select count(*) = 1 from storage.objects where name like '%/equipment/%'), 'but still see the team''s own files');
 select cat.expect_error(format('insert into storage.objects (bucket_id, name, owner) values (%L, %L, %L)', 'files', :'co' || '/applicants/b0b00000-0000-0000-0000-000000000001/fake.pdf', 'ca110000-0000-0000-0000-000000000003'),
   'nor store one');
 delete from storage.objects where name like '%/applicants/%';
