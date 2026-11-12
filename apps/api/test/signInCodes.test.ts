@@ -12,6 +12,7 @@ import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { encryptJson } from "../src/lib/crypto";
 import { forgetMailbox } from "../src/lib/notify";
+import { visitorBlock } from "../src/lib/visitor";
 import {
   CODE_EXPIRED,
   CODE_WRONG,
@@ -25,7 +26,6 @@ import {
   TOO_MANY_CODES,
   TOO_MANY_TRIES,
   TOO_MANY_WRONG,
-  visitorBlock,
 } from "../src/services/signInCodes";
 
 const base: Env = {

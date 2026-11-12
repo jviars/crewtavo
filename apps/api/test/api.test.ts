@@ -763,4 +763,29 @@ describe("rate limits", () => {
     expect(await allowStrict(env, "text-code:all", 200, 3600)).toBe(false);
     expect(await allow(env, "promo:203.0.113.9", 10, 600)).toBe(true);
   });
+
+  it("counts an IPv6 visitor by their /64, whichever limit it is", async () => {
+    const calls = rpc(() => Response.json(true));
+    const counted = async (key: string, count = allow) => {
+      calls.length = 0;
+      await count(env, key, 10, 600);
+      return (calls[0]!.body as { p_key: string }).p_key;
+    };
+    // One visitor has every address in their /64, so each of them counts as the same visitor.
+    expect(await counted("promo:2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe("promo:2001:db8:1:2::/64");
+    expect(await counted("promo:2001:db8:1:2::9")).toBe("promo:2001:db8:1:2::/64");
+    expect(await counted("pay:ip:2001:db8:1:2:ffff::1")).toBe("pay:ip:2001:db8:1:2::/64");
+    expect(await counted("paperwork-upload:ip:2001:db8::1")).toBe("paperwork-upload:ip:2001:db8:0:0::/64");
+    expect(await counted("document-pdf:::1")).toBe("document-pdf:0:0:0:0::/64");
+    expect(await counted("text-code:ip:2001:db8:1:2::7", allowStrict)).toBe("text-code:ip:2001:db8:1:2::/64");
+    // The /64 next door is someone else.
+    expect(await counted("promo:2001:db8:1:3::9")).toBe("promo:2001:db8:1:3::/64");
+    // A key that already has the /64 (sign-in codes), an IPv4 visitor and every other kind of key stay as they are.
+    for (const key of [
+      "text-code:ip:2001:db8:1:2::/64", "promo:203.0.113.9", "form:ip:unknown", "recover:all", "recover:email:ana@example.com",
+      "pay:invoice:6f1c2a9e-8f0b-4c1d-9a57-3f2b6c1d0e4a", "password:6f1c2a9e-8f0b-4c1d-9a57-3f2b6c1d0e4a:0b7e5d2c-1a3f-4e6b-8c9d-2f4a6b8c0d1e",
+    ]) {
+      expect(await counted(key)).toBe(key);
+    }
+  });
 });

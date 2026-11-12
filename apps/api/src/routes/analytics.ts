@@ -21,7 +21,7 @@ import { requireCompany, requireUser } from "../lib/auth";
 import { appUrl, asJson, dbError, HttpError, must, readJson } from "../lib/http";
 import { reportError } from "../lib/monitoring";
 import { adminClient } from "../lib/supabase";
-import { clientIp } from "../lib/visitor";
+import { clientIp, visitorBlock } from "../lib/visitor";
 import {
   AddressError, analyticsSettings, checkWebsite, PAGE_VIEWS_PER_ADDRESS, PAGE_VIEWS_PER_SERVER, snippet, trackerScript, underLimit, websiteAddress, websiteOf,
   type WebsiteCheck,
@@ -52,7 +52,8 @@ pageViews.post("/v", async (c) => {
   // People who asked not to be tracked, and robots, aren't counted (the script stops most first).
   if (c.req.header("dnt") === "1" || c.req.header("sec-gpc") === "1" || isBot(agent)) return done();
   const ip = clientIp(c);
-  if (!underLimit(`ip:${ip}`, PAGE_VIEWS_PER_ADDRESS) || !underLimit("server", PAGE_VIEWS_PER_SERVER)) return done();
+  // The limit counts an IPv6 visitor by their /64; the page view below is still theirs alone.
+  if (!underLimit(`ip:${visitorBlock(ip)}`, PAGE_VIEWS_PER_ADDRESS) || !underLimit("server", PAGE_VIEWS_PER_SERVER)) return done();
   const text = await c.req.text();
   if (text.length > 5000) return done();
   let sent: z.infer<typeof sentView>;

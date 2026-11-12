@@ -499,6 +499,15 @@ describe("public submissions", () => {
     expect(await visitorKey({ ...forged, "X-Real-IP": "203.0.113.9" }, connectedFrom("100.64.0.7", railway))).toBe("form:ip:203.0.113.9");
   });
 
+  it("counts an IPv6 visitor by their /64, and looks for their website visit by their own address", async () => {
+    const db = database();
+    expect((await post("/public/forms/acme/quote", lead, {}, connectedFrom("2001:db8:1:2:aaaa:bbbb:cccc:dddd"))).status).toBe(201);
+    expect((await post("/public/forms/acme/quote", lead, {}, connectedFrom("2001:db8:1:2::9"))).status).toBe(201);
+    // Both addresses are in one /64, which one visitor has to themselves: one count for the two.
+    expect(db.limits().filter(([key]) => key.startsWith("form:ip:"))).toEqual([["form:ip:2001:db8:1:2::/64", 10, 3600], ["form:ip:2001:db8:1:2::/64", 10, 3600]]);
+    expect(db.calls.filter((c) => c.path === "rpc/web_visit_for").map((c) => c.body.p_ip)).toEqual(["2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::9"]);
+  });
+
   const arrived = new Set<string>();
   const plansQuestion = { key: "plans", label: "Plans or photos", type: "files", required: false };
 

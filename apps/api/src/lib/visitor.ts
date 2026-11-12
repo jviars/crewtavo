@@ -73,6 +73,23 @@ export function clientIp(c: Context<AppEnv>): string {
   return visitorIp(c.env, c.req.raw.headers, connectionOf(c.env));
 }
 
+/**
+ * A visitor's address as limits and codes count it. An IPv6 visitor usually has a whole /64 to
+ * themselves (a phone changes address within it often), so the /64 counts as one visitor; otherwise
+ * anyone could get round the per-visitor limits with a new address each time. Rate limits count
+ * every address this way (lib/limit.ts); what's kept or shown as the visitor's address (a quote's
+ * approval, a card's consent, a page view) stays the address itself.
+ */
+export function visitorBlock(ip: string): string {
+  if (isIP(ip) !== 6) return ip;
+  const [head = "", tail] = ip.split("::");
+  const groups = (part: string) => (part ? part.split(":").flatMap((g) => (g.includes(".") ? ["0", "0"] : [g])) : []);
+  const front = groups(head);
+  const back = tail === undefined ? [] : groups(tail);
+  const all = [...front, ...Array(Math.max(8 - front.length - back.length, 0)).fill("0"), ...back];
+  return `${all.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
+}
+
 /** An address as one spelling (no port, brackets or IPv4-in-IPv6 prefix), or null when it isn't one. */
 function normalized(value: string | undefined): string | null {
   if (!value) return null;

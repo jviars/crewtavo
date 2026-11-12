@@ -28,7 +28,6 @@
  * can't be counted refuses (allowStrict). Guessing is limited too: 5 wrong tries a code, 15 a day a
  * number, address or account.
  */
-import { isIP } from "node:net";
 import { emailKey, isSubLogin, phoneE164, SIGN_IN_CODE_DIGITS, signInCodeEmail, signInCodeText } from "@crewtavo/core";
 import type { Env } from "../env";
 import { keyedHash } from "../lib/crypto";
@@ -39,6 +38,7 @@ import { reportError } from "../lib/monitoring";
 import { sealAuthToken } from "../lib/signInGuard";
 import { anyMailbox, emailConfigured, emailReady, sendEmail, sendSms, smsConfigured } from "../lib/notify";
 import { adminClient } from "../lib/supabase";
+import { visitorBlock } from "../lib/visitor";
 import { logoImage } from "./logo";
 
 /** How often, as [attempts, seconds]: asking for a code, and trying one. */
@@ -96,20 +96,6 @@ export const signInPhoneHash = (env: Env, e164: string) => keyedHash(env, `sign-
 export const signInEmailHash = (env: Env, key: string) => keyedHash(env, `sign-in-email:${key}`);
 const visitorHash = (env: Env, ip: string) => keyedHash(env, `sign-in-visitor:${visitorBlock(ip)}`);
 
-/**
- * A visitor's address as limits and codes count it. An IPv6 visitor usually has a whole /64 to
- * themselves (a phone changes address within it often), so the /64 counts as one visitor; otherwise
- * anyone could get round the per-visitor limits with a new address each time.
- */
-export function visitorBlock(ip: string): string {
-  if (isIP(ip) !== 6) return ip;
-  const [head = "", tail] = ip.split("::");
-  const groups = (part: string) => (part ? part.split(":").flatMap((g) => (g.includes(".") ? ["0", "0"] : [g])) : []);
-  const front = groups(head);
-  const back = tail === undefined ? [] : groups(tail);
-  const all = [...front, ...Array(Math.max(8 - front.length - back.length, 0)).fill("0"), ...back];
-  return `${all.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
-}
 /** The account a number or address with no sign-in has its code hashed for: nobody's. */
 const NOBODY = "nobody";
 

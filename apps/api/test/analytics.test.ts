@@ -227,8 +227,10 @@ describe("the script", () => {
 });
 
 describe("page views", () => {
-  const view = (body: unknown, extra: Record<string, string> = {}) =>
-    app.request("/v", { method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8", "User-Agent": SAFARI, ...extra }, body: typeof body === "string" ? body : JSON.stringify(body) }, env);
+  // A visitor at `address`, with nothing in front of the server (lib/visitor.ts).
+  const connectedFrom = (address: string) => ({ ...env, incoming: { socket: { remoteAddress: address } } as unknown as IncomingMessage });
+  const view = (body: unknown, extra: Record<string, string> = {}, bindings: Env | ReturnType<typeof connectedFrom> = env) =>
+    app.request("/v", { method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8", "User-Agent": SAFARI, ...extra }, body: typeof body === "string" ? body : JSON.stringify(body) }, bindings);
 
   it("are counted in the business's database, with where the visit came from", async () => {
     const db = fakeDb({ rpc: { web_record_hit: () => true } });
@@ -269,6 +271,18 @@ describe("page views", () => {
     const db = fakeDb({ rpc: { web_record_hit: () => true } });
     for (let i = 0; i < PAGE_VIEWS_PER_ADDRESS + 5; i++) await view({ u: `https://greenlawn.example/p${i}` });
     expect(db.rpcs).toHaveLength(PAGE_VIEWS_PER_ADDRESS);
+  });
+
+  it("count an IPv6 visitor's addresses as one address, by their /64, and each view by its own", async () => {
+    const db = fakeDb({ rpc: { web_record_hit: () => true } });
+    // One visitor has every address in their /64: a new one each time is still the same visitor.
+    for (let i = 0; i < PAGE_VIEWS_PER_ADDRESS + 5; i++) await view({ u: `https://greenlawn.example/p${i}` }, {}, connectedFrom(`2001:db8:1:2::${(i + 1).toString(16)}`));
+    expect(db.rpcs).toHaveLength(PAGE_VIEWS_PER_ADDRESS);
+    // What's counted as a visit goes by the address itself, as before.
+    expect(db.rpcs.slice(0, 2).map((r) => r.args.p_ip)).toEqual(["2001:db8:1:2::1", "2001:db8:1:2::2"]);
+    // The /64 next door is someone else.
+    await view({ u: "https://greenlawn.example/" }, {}, connectedFrom("2001:db8:1:3::1"));
+    expect(db.rpcs).toHaveLength(PAGE_VIEWS_PER_ADDRESS + 1);
   });
 
   it("don't fail the website when the database does", async () => {
