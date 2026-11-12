@@ -21,4 +21,42 @@ describe("reading a page at a time", () => {
     const readers = files.filter((f) => /\b(everyRow|firstRows)\(/.test(f.code) && f.name !== "lib/paging.ts").map((f) => f.name);
     expect(readers).toEqual(expect.arrayContaining(["features/clients/importClients.ts", "features/finance/FinancePage.tsx", "features/metrics/MetricsPage.tsx", "features/settings/exportData.ts", "features/settings/importJobber.ts", "features/timesheets/weekData.ts"]));
   });
+
+  it("sorts each table by a column it has: its id, or the key the read names", () => {
+    // The tables' columns, from the types made from the migrations.
+    const types = readFileSync(fileURLToPath(new URL("../../../packages/core/src/database.types.ts", import.meta.url)), "utf8");
+    const columns = (table: string) => new RegExp(`"${table}": \\{\\n\\s+Row: \\{\\n(.*)\\n`).exec(types)?.[1] ?? null;
+    const reads = files.flatMap((f) =>
+      [...f.code.matchAll(/\b(?:everyRow|firstRows)\(/g)].flatMap((call) => {
+        // This read's own text, its query and options: up to the bracket that closes it.
+        let [end, open] = [call.index + call[0].length, 1];
+        for (; open > 0 && end < f.code.length; end++) open += f.code[end] === "(" ? 1 : f.code[end] === ")" ? -1 : 0;
+        const text = f.code.slice(call.index, end);
+        const table = /\.from\("([a-z_]+)"\)/.exec(text)?.[1];
+        return table ? [{ where: `${f.name}: ${table}`, table, keyed: /\bkey:/.test(text) }] : [];
+      }),
+    );
+    expect(reads.length).toBeGreaterThanOrEqual(60);
+    for (const read of reads) {
+      const row = columns(read.table);
+      expect(row, read.where).not.toBeNull();
+      if (!read.keyed) expect(row, `${read.where} has no id: name its key`).toContain('"id": ');
+    }
+    // The ones without an id that are read today, each by the columns that tell its rows apart.
+    expect(reads.filter((r) => r.keyed).map((r) => r.table).sort()).toEqual(["crew_members", "visit_assets", "visit_assignees"]);
+  });
+});
+
+describe("asking for more than 1,000 rows in one request", () => {
+  // Reads that still ask for more than the database sends, and so stop at 1,000 without saying:
+  // each wants lib/paging.ts. The list is here so that it only gets shorter.
+  const KNOWN = [
+    "features/drive/data.ts", "features/equipment/equipmentData.ts", "features/home/HomePage.tsx", "features/invoices/AddWorkDialog.tsx", "features/invoices/InvoiceTools.tsx", "features/invoices/PayoutsPage.tsx",
+    "features/jobs/JobPayCard.tsx", "features/kb/InsightsPage.tsx", "features/kb/kbData.ts", "features/subs/SubsPage.tsx", "features/subs/payData.ts", "features/subs/subsData.ts",
+  ];
+
+  it("isn't written anywhere new", () => {
+    const asking = files.filter((f) => [...f.code.matchAll(/\.limit\(([\d_]+)/g)].some((m) => Number(m[1]!.replaceAll("_", "")) > 1000)).map((f) => f.name);
+    expect(asking.filter((name) => !KNOWN.includes(name))).toEqual([]);
+  });
 });
