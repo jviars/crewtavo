@@ -18,6 +18,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e",
     "test": "npm run test --workspaces --if-present",
     "test:db": "./scripts/test-db.sh",
+    "test:upgrade": "./scripts/test-upgrade.sh",
     "test:e2e": "node scripts/e2e-lifecycle.mjs",
     "test:browser": "playwright test",
     "db:types": "./scripts/gen-types.sh",

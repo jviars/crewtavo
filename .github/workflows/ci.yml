@@ -38,6 +38,24 @@ jobs:
       - run: npm run test:db
       - run: npm run build:server
 
+  # A database with rows in it, as the previous release left it, takes every migration added since
+  # (scripts/test-upgrade.sh). test:db above only migrates an empty database, so a migration that
+  # fails on existing rows would otherwise first fail on someone's instance.
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # All of the history: the script finds the previous release by its tag and takes its files.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:upgrade
+
   # A whole Crewtavo instance, as the Railway template creates it (docker-compose.yml): it must
   # start, apply every migration and reach the "create the owner account" step on its own.
   instance:

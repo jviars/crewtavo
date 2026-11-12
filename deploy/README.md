@@ -201,7 +201,12 @@ The number is up to you (`0.1.2`, `0.2.0`, `1.0.0` all install the same way), bu
 reaches every instance unattended, so it has to work without anyone doing anything:
 
 - **Migrations:** the previous version keeps serving while the new one migrates, so a migration has
-  to leave the database usable by the previous version (add first, remove in a later release).
+  to leave the database usable by the previous version (add first, remove in a later release). It
+  also has to work on the rows instances already hold, not only on an empty database. CI checks that
+  (`npm run test:upgrade`): it builds the database as the previous release left it, fills it with
+  the rows that release's own database tests make, and applies every migration added since, the way
+  an instance does. A migration that has been released is never edited, which the same check
+  enforces: instances have applied it and won't apply it again.
 - **Settings:** a new variable needs a default. If the new version can't start without it, every
   instance stays on the previous version until its owner adds it.
 - **Fixing a bad release:** release a fix as a new version. Moving `latest` back to an older image
