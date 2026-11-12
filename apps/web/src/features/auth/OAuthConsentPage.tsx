@@ -3,7 +3,13 @@
  * asks to connect. Configure this path (/oauth/consent) under Authentication > OAuth Server. A new
  * connection only reads until the person chooses what it can change (Settings → AI assistants).
  * A sub's sign-in can't connect one (the server refuses it too).
+ *
+ * Any app can sign itself up under any name and logo, so the screen shows where the connection
+ * really leads (the host the sign-in server will send the person's access to), cautions when that
+ * isn't Claude's or ChatGPT's own address, and says plainly what the app will be able to read:
+ * everything the person can see (oauthConsent.ts).
  */
+import { describeAssistantAccess, toAssistantAccess } from "@crewtavo/core/assistants";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -14,9 +20,9 @@ import { EmptyState } from "@/components/ui/States";
 import { supabase } from "@/lib/api";
 import { onlySubs, useSessionIfAny } from "@/lib/session";
 import { authMessage, AuthLayout } from "./LoginPage";
+import { CAN_READ, CANT_CHANGE, consentDestination, keepsAccess } from "./oauthConsent";
 import styles from "./auth.module.css";
 
-const CAN = ["Clients, requests, quotes and jobs", "Schedule", "Knowledge base"];
 const NO_ASSISTANTS_FOR_SUBS = "AI assistants are for a business's own team. A subcontractor's sign-in can't use one.";
 
 export function OAuthConsentPage() {
@@ -41,6 +47,18 @@ export function OAuthConsentPage() {
         return null;
       }
       return data;
+    },
+  });
+
+  // What this person gave the app before, if they connected it earlier (no row: it only reads).
+  const clientId = details.data && "client" in details.data ? details.data.client.id : null;
+  const given = useQuery({
+    queryKey: ["oauth-consent-access", clientId],
+    enabled: Boolean(clientId) && !onlySub,
+    retry: false,
+    queryFn: async () => {
+      const { data } = await supabase().from("assistant_connections").select("level, areas").eq("client_id", clientId!).maybeSingle();
+      return toAssistantAccess(data);
     },
   });
 
@@ -84,24 +102,39 @@ export function OAuthConsentPage() {
       </div>,
     );
 
-  const { client, user } = details.data;
-  const logo = (client as { logo_uri?: string }).logo_uri;
+  const { client, user, redirect_uri } = details.data;
+  const name = client.name?.trim() || "an app";
+  // The address can't be faked; the name and logo can (oauthConsent.ts). So an app only gets its own
+  // logo and a plain "Connect Claude?" when it leads where Claude or ChatGPT really are.
+  const destination = consentDestination(redirect_uri);
+  const known = destination.kind === "known";
+  const logo = known ? (client as { logo_uri?: string }).logo_uri : undefined;
+  // Connected before and given more than reading: it keeps that, so the screen doesn't say otherwise.
+  const kept = given.data && given.data.level !== "read" ? describeAssistantAccess(given.data) : null;
   return shell(
     <div className="stack" style={{ gap: 18 }}>
       <div className={styles.apps} aria-hidden="true">
-        <span className={styles.appTile}>{logo ? <img src={logo} alt="" /> : client.name.slice(0, 1)}</span>
+        <span className={styles.appTile}>{logo ? <img src={logo} alt="" /> : name.slice(0, 1)}</span>
         <span className={styles.dots}>•••</span>
         <span className={styles.appTile} style={{ background: "var(--solid)", color: "var(--on-solid)" }}><Icon name="layers" size={24} /></span>
       </div>
       <div className="stack-sm" style={{ gap: 6, textAlign: "center" }}>
-        <h1 className={styles.title}>Connect {client.name}?</h1>
+        <h1 className={styles.title}>{known ? `Connect ${name}?` : `Connect an app called ${name}?`}</h1>
         <p className="muted" style={{ margin: 0 }}>Signed in as <strong style={{ color: "var(--ink)" }}>{user.email}</strong></p>
       </div>
-      <span className="muted small strong" style={{ marginBottom: -10 }}>Can look at</span>
-      <ul className={styles.scopes} aria-label="Can look at">
-        {CAN.map((c) => <li key={c}><Icon name="check" size={14} strokeWidth={2} />{c}</li>)}
+      <div className={known ? "callout" : "callout callout-warning"} role={known ? undefined : "alert"} data-destination={destination.kind}>
+        <Icon name={known ? "check" : "alert"} size={16} />
+        <span className="grow stack-sm" style={{ gap: 2 }}>
+          <span className="small strong">It connects to</span>
+          <strong className={styles.host}>{destination.host}</strong>
+          <span className="small">{destination.note}</span>
+        </span>
+      </div>
+      <span className="muted small strong" style={{ marginBottom: -10 }}>It will be able to read</span>
+      <ul className={styles.scopes} aria-label="It will be able to read">
+        <li><Icon name="check" size={14} strokeWidth={2} />{CAN_READ}</li>
       </ul>
-      <span className="muted small" style={{ marginTop: -8 }}>It starts out read only. Choose what it can change in Crewtavo, under Settings → AI assistants.</span>
+      <span className="muted small" style={{ marginTop: -8 }}>{kept ? keepsAccess(kept) : CANT_CHANGE}</span>
       {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}
       <div className="stack-sm" style={{ gap: 8 }}>
         <Button variant="primary" size="lg" loading={busy === "allow"} disabled={busy !== null} onClick={() => decide(true)}>Allow access</Button>
