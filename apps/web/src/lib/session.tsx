@@ -20,7 +20,8 @@ import { TermsPage } from "@/features/legal/License";
 import { RailwaySetupPage } from "@/features/setup/RailwaySetupPage";
 import { api, ApiError, companyFeatures, loadConfig, setActiveCompany, supabase, type AppConfig } from "./api";
 import { setCurrency } from "./format";
-import { forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, pendingFieldActions, startOfflineCache } from "./offline";
+import { forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, pendingFieldActions, signOutWarning, startOfflineCache } from "./offline";
+import { photosNotSent } from "./offlinePhotos";
 import { setSessionExpiredHandler } from "./queryClient";
 import { toast } from "./toast";
 import { flushUndos } from "./undo";
@@ -285,12 +286,11 @@ export function SessionProvider({ children, requireCompany = true }: { children:
    * field actions are still waiting to send.
    */
   const signOut = useCallback(async () => {
-    const waiting = pendingFieldActions(queryClient);
+    const warning = signOutWarning(pendingFieldActions(queryClient), userId ? photosNotSent(userId) : 0);
     const ok =
-      !waiting ||
+      !warning ||
       (await confirm({
-        title: waiting === 1 ? "1 update hasn't sent yet" : `${waiting} updates haven't sent yet`,
-        body: "They're saved on this phone and go out when you have signal. Signing out now deletes them.",
+        ...warning,
         confirmLabel: "Sign out anyway",
         danger: true,
       }));
@@ -304,7 +304,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
     if (!signedOut) toast.error("Couldn't sign out. Try again when you have signal.");
     signingOut.current = false;
     return signedOut;
-  }, [queryClient]);
+  }, [queryClient, userId]);
 
   const value = useMemo<Session | null>(() => {
     if (!config.data || !auth || !me.data || !membership || cacheFor !== auth.user.id) return null;

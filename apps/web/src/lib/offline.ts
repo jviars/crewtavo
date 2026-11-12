@@ -6,7 +6,9 @@
  * to read: answering an offer needs signal). Office screens aren't kept:
  * they hold prices and client details that don't belong on a crew phone. Cleared when the person signs
  * out; when the app signs them out (an expired sign-in), only their unsent field actions are kept,
- * for when they sign back in.
+ * and their photos, for when they sign back in.
+ *
+ * Photos added to a visit wait the same way, in storage that holds pictures (lib/offlinePhotos.ts).
  *
  * They go out while Crewtavo is on the screen: as it opens, when the connection is back, and when it
  * comes back on the screen. Put away, one already waiting there waits (React Query carries on with a
@@ -18,6 +20,7 @@
 import type { Role } from "@crewtavo/core/roles";
 import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type MutationFunction, type QueryClient } from "@tanstack/react-query";
 import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } from "./errors";
+import { forgetPhonePhotos, photosWaiting, startPhotoQueue, subscribePhonePhotos } from "./offlinePhotos";
 
 // React Query assumes it's online until it hears otherwise; a phone that opens the app with no
 // signal is offline from the start, so field actions queue instead of failing.
@@ -280,7 +283,8 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   restore(queryClient, userId);
 
   let told = -1;
-  const count = () => queryClient.getMutationCache().getAll().filter(queued).length;
+  // Photos kept on the phone wait like field actions, and the worker's notice counts them too.
+  const count = () => queryClient.getMutationCache().getAll().filter(queued).length + photosWaiting(userId);
   /** `again`: with some waiting, asks again to hear when there's signal, even if the count is the same. */
   const tell = (again = false, waiting = count()) => {
     if (waiting !== told || (again && waiting > 0)) tellServiceWorker(userId, waiting);
@@ -334,6 +338,9 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
   if (typeof window !== "undefined") window.addEventListener("pagehide", flush);
   recounts.add(recount);
+  const stopPhotos = startPhotoQueue(queryClient, userId, cannotReachServer);
+  // Counted a moment after a photo changes, so one that goes up at once is never told as waiting.
+  const stopCountingPhotos = subscribePhonePhotos(() => queueMicrotask(() => running.has(self) && tell()));
   queryClient.resumePausedMutations().catch(() => undefined);
   // Counted once they've resumed: one put back that's on its way again at once isn't waiting.
   tell();
@@ -343,6 +350,8 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
     if (saveFirst) flush();
     stopQueries();
     stopMutations();
+    stopPhotos();
+    stopCountingPhotos();
     recounts.delete(recount);
     clearTimeout(timer);
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
@@ -360,6 +369,7 @@ export function forgetOfflineCache(userId: string) {
   remove(storageKey(userId));
   // Who they are and their companies, kept by lib/session.tsx for opening the app with no signal.
   remove(`crewtavo.me.${userId}`);
+  forgetPhonePhotos(userId);
   tellServiceWorker(userId, 0);
 }
 
@@ -383,8 +393,23 @@ export function keepQueuedFieldActions(queryClient: QueryClient, userId: string)
   }
   if (!mutations.length) remove(key);
   else write(key, { mutations, queries: [] });
-  tellServiceWorker(userId, mutations.length);
+  // Their photos stay where they are, on the phone, and go up when they sign back in.
+  tellServiceWorker(userId, mutations.length + photosWaiting(userId));
 }
 
 /** Field actions not sent yet (waiting for a connection, their turn or a new sign-in, or on their way), for "3 updates waiting to send". */
 export const pendingFieldActions = (queryClient: QueryClient) => queryClient.getMutationCache().getAll().filter(unsent).length;
+
+/**
+ * What signing out on purpose would delete from this phone, said before it does: field actions and
+ * photos that haven't sent. Null when there's nothing.
+ */
+export function signOutWarning(updates: number, photos: number): { title: string; body: string } | null {
+  if (!updates && !photos) return null;
+  const parts = [updates ? (updates === 1 ? "1 update" : `${updates} updates`) : "", photos ? (photos === 1 ? "1 photo" : `${photos} photos`) : ""].filter(Boolean);
+  const one = updates + photos === 1;
+  return {
+    title: `${parts.join(" and ")} ${one ? "hasn't" : "haven't"} sent yet`,
+    body: `${one ? "It's waiting on this phone and goes" : "They're waiting on this phone and go"} out when you have signal. Signing out now deletes ${one ? "it" : "them"}.`,
+  };
+}

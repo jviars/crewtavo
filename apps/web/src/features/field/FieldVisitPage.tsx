@@ -12,7 +12,7 @@
  */
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import { onlineManager, useIsMutating, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ChangeEvent, type RefObject } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, type ChangeEvent, type RefObject } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
@@ -27,13 +27,13 @@ import { PageError } from "@/components/ui/States";
 import { EntityStatus, StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { errorMessage, isAuthError } from "@/lib/errors";
-import { signedUrls, storedType, uploadFile } from "@/lib/files";
+import { signedUrls } from "@/lib/files";
 import { addressLine, formatDateTime, timeAgo } from "@/lib/format";
 import { visitPlace } from "@/lib/maps";
 import { useListAnimation } from "@/lib/motion";
 import { FIELD_SCOPE } from "@/lib/offline";
+import { addVisitPhoto, phonePhotos, removePhonePhoto, subscribePhonePhotos, type PhonePhoto } from "@/lib/offlinePhotos";
 import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
-import { startTask } from "@/lib/tasks";
 import { toast } from "@/lib/toast";
 import { IN_TRASH } from "../drive/trash";
 import { ShareToggle, shareToggleState } from "../marketing/ShareToggle";
@@ -747,7 +747,10 @@ function useVisitPhotos(visitId: string) {
   const { company } = session;
   const queryClient = useQueryClient();
   const key = ["photos", visitId];
-  const [uploading, setUploading] = useState(0);
+  // Being shrunk and written to the phone: a moment, shown as a blank picture.
+  const [adding, setAdding] = useState(0);
+  // Not uploaded yet, kept on the phone meanwhile (lib/offlinePhotos.ts): shown here as they will be.
+  const waiting = useSyncExternalStore(subscribePhonePhotos, phonePhotos).filter((p) => p.userId === session.userId && p.visitId === visitId);
   // Removed and waiting on Undo: kept off the screen even if the list loads again meanwhile.
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
   const list = useQuery({
@@ -758,34 +761,19 @@ function useVisitPhotos(visitId: string) {
       return rows.map((r): Photo => ({ ...r, url: urls[r.path] ?? null }));
     },
   });
-  const upload = useMutation({
-    // With no signal the photos wait here, on the screen as they will be, and go up once it's back
-    // (not kept on the phone like the field actions: closing the app loses them).
-    networkMode: "online",
-    onMutate: (files: File[]) => setUploading((n) => n + files.length),
-    mutationFn: async (files: File[]) => {
-      let stopped = false;
-      const task = startTask({ label: files.length === 1 ? "Adding a photo" : `Adding ${files.length} photos`, total: files.length, cancel: () => (stopped = true) });
-      const problems: string[] = [];
-      let sent = 0;
-      for (const file of files) {
-        if (!stopped) {
-          try {
-            const path = await uploadFile(company.id, `visit/${visitId}`, file);
-            unwrap(await supabase().from("attachments").insert({ company_id: company.id, owner_type: "visit", owner_id: visitId, path, file_name: file.name.slice(0, 200), content_type: storedType(path, file), size_bytes: file.size }));
-          } catch (error) {
-            problems.push(`${file.name}: ${errorMessage(error)}`);
-          }
-          task.progress(++sent);
-          queryClient.invalidateQueries({ queryKey: key });
-        }
-        setUploading((n) => n - 1);
+  const add = async (files: File[]) => {
+    setAdding((n) => n + files.length);
+    for (const file of files) {
+      try {
+        const kept = await addVisitPhoto({ userId: session.userId, companyId: company.id, visitId }, file);
+        // Said as it's taken: with no signal and nowhere to keep it, only the open app holds it.
+        if (!kept && !onlineManager.isOnline()) toast.warning("This phone couldn't save the photo", { description: "Keep Crewtavo open until you have signal, or the photo will be lost." });
+      } catch (error) {
+        toast.error(`${file.name}: ${errorMessage(error)}`);
       }
-      const saved = sent - problems.length;
-      if (problems.length) task.fail(problems.length === 1 ? problems[0]! : `${problems.length} photos didn't upload. ${problems[0]}`);
-      else task.done(saved === 1 ? "Photo added" : `${saved} photos added`);
-    },
-  });
+      setAdding((n) => n - 1);
+    }
+  };
   const refreshPhotos = () => queryClient.invalidateQueries({ queryKey: ["photos", visitId] });
   // Once its Undo has passed, the photo goes to the Trash with its row (the database moves it).
   const remove = useMutation({
@@ -802,8 +790,14 @@ function useVisitPhotos(visitId: string) {
     /** OK to share shown at once, as the field action goes (or waits for signal). */
     showShareable: (id: string, shareable: boolean) => queryClient.setQueryData<Photo[]>(key, (rows) => rows?.map((r) => (r.id === id ? { ...r, shareable } : r))),
     loading: list.isPending,
-    uploading,
-    add: (files: File[]) => upload.mutate(files),
+    adding,
+    waiting,
+    uploading: adding > 0 || waiting.some((p) => p.sending),
+    add: (files: File[]) => void add(files),
+    /** One that hasn't uploaded is only on this phone, so removing it has no Undo: asked first. */
+    removeWaiting: async (p: PhonePhoto) => {
+      if (await confirm({ title: "Remove this photo?", body: "It hasn't uploaded yet, so it will be gone for good.", confirmLabel: "Remove", danger: true })) removePhonePhoto(p.id);
+    },
     // A sub removes only the photos they added.
     canRemove: (p: Photo) => !isSub(session) || p.created_by === session.userId,
     remove: (p: Photo) =>
@@ -851,7 +845,7 @@ function PhotoPicker({ photos }: { photos: VisitPhotos }) {
 function Photos({ photos, clientOptOut }: { photos: VisitPhotos; clientOptOut: boolean }) {
   const session = useSession();
   const grid = useListAnimation<HTMLDivElement>();
-  const count = photos.photos.length;
+  const count = photos.photos.length + photos.waiting.length;
   // OK to share is only offered while Marketing is installed, never to subs (ShareToggle).
   const sharing = photos.photos.some((p) => shareToggleState(session, p, clientOptOut) === "ready");
   const unsupported = photos.photos.filter((p) => shareToggleState(session, p, clientOptOut) === "unsupported").length;
@@ -867,13 +861,31 @@ function Photos({ photos, clientOptOut }: { photos: VisitPhotos; clientOptOut: b
             <ShareToggle photo={p} clientOptOut={clientOptOut} onShown={(shareable) => photos.showShareable(p.id, shareable)} />
           </div>
         ))}
-        {Array.from({ length: photos.uploading }, (_, i) => <div key={`u${i}`} className="thumb" style={{ display: "grid", placeItems: "center" }}><span className="spinner" style={{ width: 20, height: 20, color: "var(--text-3)" }} /></div>)}
+        {photos.waiting.map((p) => <WaitingPhoto key={p.id} photo={p} onRemove={() => void photos.removeWaiting(p)} />)}
+        {Array.from({ length: photos.adding }, (_, i) => <div key={`u${i}`} className="thumb" style={{ display: "grid", placeItems: "center" }}><span className="spinner" style={{ width: 20, height: 20, color: "var(--text-3)" }} /></div>)}
       </div>
       {sharing && <span className="muted small">Tap the corner to mark photos OK to share, and the office can post them. Posts never show the client's name or address. Check the photo doesn't show a house number, a car plate or people's faces.</span>}
       {unsupported > 0 && !clientOptOut && <span className="muted small">{unsupported === photos.photos.length ? (unsupported === 1 ? "This photo" : "These photos") : unsupported === 1 ? "The photo marked Can't share" : "The photos marked Can't share"} can't be marked OK to share: only JPEG and PNG photos can be posted.</span>}
       {count > 0 && clientOptOut && shareToggleState(session, { content_type: "image/jpeg" }) !== "hidden" && <span className="muted small">This client asked us not to post photos of their property.</span>}
       <span style={{ justifySelf: "start" }}><PhotoPicker photos={photos} /></span>
     </section>
+  );
+}
+
+/** A photo that hasn't uploaded yet, shown from the phone, with where it stands. */
+function WaitingPhoto({ photo, onRemove }: { photo: PhonePhoto; onRemove: () => void }) {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    const made = URL.createObjectURL(photo.body);
+    setUrl(made);
+    return () => URL.revokeObjectURL(made);
+  }, [photo.body]);
+  return (
+    <div className="thumb">
+      {url && <img src={url} alt={photo.fileName} />}
+      {!photo.sending && <button type="button" className="thumb-x" aria-label="Remove photo" onClick={onRemove}><Icon name="x" size={12} strokeWidth={2} /></button>}
+      <span className="thumb-note">{photo.problem ? "Didn't upload" : photo.sending ? "Uploading…" : photo.kept ? "Waiting to send" : "Not saved"}</span>
+    </div>
   );
 }
 

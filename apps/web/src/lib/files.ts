@@ -1,6 +1,6 @@
 /** Photo and receipt uploads to the private "files" bucket, under the company's folder. */
 import { supabase } from "./api";
-import { StorageFullError } from "./errors";
+import { ApiError, isRestarting, OFFLINE, StorageFullError } from "./errors";
 
 /** The largest file an upload sends (a photo once it's shrunk). */
 export const MAX_BYTES = 15 * 1024 * 1024;
@@ -175,14 +175,34 @@ export async function uploadBody(file: File, shrink: (file: File) => Promise<Blo
 /** The type of what uploadFile stored at `path`: a photo it shrank went up as a JPEG, whatever it was before. */
 export const storedType = (path: string, file: File) => (path.endsWith(".jpg") ? "image/jpeg" : file.type || "image/jpeg");
 
+/** The ending of the name a file is stored under: its own, or .jpg for a photo that was shrunk. */
+export const storedExtension = (file: File, body: Blob) => (body === file ? (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") : "jpg");
+
 /** Upload a file under <company>/<folder>/ and return its storage path. */
 export async function uploadFile(companyId: string, folder: string, file: File): Promise<string> {
   const body = await uploadBody(file);
-  const ext = body === file ? (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") : "jpg";
+  const ext = storedExtension(file, body);
   const path = `${companyId}/${folder}/${crypto.randomUUID()}.${ext}`;
   const { error } = await supabase().storage.from("files").upload(path, body, { contentType: body.type || file.type || "application/octet-stream", upsert: false });
   if (error) throw uploadRefused(error, "You don't have permission to upload here.");
   return path;
+}
+
+/**
+ * Upload to a path chosen ahead, for a photo that waited on the phone (lib/offlinePhotos.ts): tried
+ * again after an answer that never arrived, it can't be stored twice. A path already taken is that
+ * same upload, so it counts as done. No answer at all is an ApiError like the API's (status 0, or
+ * 502 to 504 while the server restarts), so the photo waits instead of failing.
+ */
+export async function uploadOnce(path: string, body: Blob): Promise<void> {
+  const { error } = await supabase().storage.from("files").upload(path, body, { contentType: body.type || "application/octet-stream", upsert: false });
+  if (!error) return;
+  const status = Number((error as { status?: unknown }).status) || Number((error as { statusCode?: unknown }).statusCode) || 0;
+  if (status === 409 || /already exists|duplicate/i.test(error.message)) return;
+  if (/failed to fetch|networkerror|load failed/i.test(error.message)) throw new ApiError(OFFLINE, 0, "network");
+  if (isRestarting(status)) throw new ApiError("Crewtavo is restarting. Try again in a moment.", status, "restarting");
+  if (/jwt|unauthorized/i.test(error.message) && !/row-level security/i.test(error.message)) throw new ApiError("Your session has expired. Sign in again.", 401);
+  throw uploadRefused(error, "You don't have permission to upload here.");
 }
 
 /**

@@ -617,7 +617,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 /* Fixed colours, not the theme's: it sits on a photo either way. */
 .thumb-share[aria-pressed="true"] .thumb-share-badge { background: #fff; color: #2c611a; box-shadow: 0 0 0 2px #2c611a, 0 1px 4px rgba(0, 0, 0, 0.45); }
 /* A photo that can't be OK to share (HEIC, WebP): said on the photo itself, where the toggle would be. */
-.thumb .thumb-noshare { position: absolute; left: 6px; bottom: 6px; padding: 2px 7px; border-radius: var(--radius-pill); background: rgba(15, 42, 53, 0.78); color: #fff; font-size: var(--fs-12); font-weight: 600; line-height: 18px; pointer-events: none; }
+.thumb .thumb-noshare, .thumb .thumb-note { position: absolute; left: 6px; bottom: 6px; padding: 2px 7px; border-radius: var(--radius-pill); background: rgba(15, 42, 53, 0.78); color: #fff; font-size: var(--fs-12); font-weight: 600; line-height: 18px; pointer-events: none; }
 .thumb-share:focus-visible { outline: none; }
 .thumb-share:focus-visible .thumb-share-badge { box-shadow: var(--ring); }
 /* Picking photos for a post: a check in the corner of each one picked. */

@@ -1076,7 +1076,10 @@ describe("Marketing → Social", () => {
     expect(field).toContain("can't be marked OK to share: only JPEG and PNG photos can be posted.");
     // On the photo itself, where its toggle would be.
     expect(source("../src/features/marketing/ShareToggle.tsx")).toContain('<span className="thumb-noshare" title={SHARE_NOTES.unsupported}>Can\'t share</span>');
-    expect(field).toContain("content_type: storedType(path, file)");
+    // A visit's photos go up from the phone's own queue now (lib/offlinePhotos.ts), which says what each one is the same way.
+    const queue = source("../src/lib/offlinePhotos.ts");
+    expect(queue).toContain("contentType: storedType(path, file)");
+    expect(queue).toContain("content_type: photo.contentType");
     expect(source("../src/lib/files.ts")).toContain('export const storedType = (path: string, file: File) => (path.endsWith(".jpg") ? "image/jpeg" : file.type || "image/jpeg");');
   });
 
