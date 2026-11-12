@@ -332,8 +332,8 @@ describe("time and pay", () => {
     ];
     const pay = paySummary(entries, () => 20, (id) => (id === "u1" ? "Ana" : "Bo"), tz, "short_paid");
     expect(pay.people).toEqual([
-      { user_id: "u1", name: "Ana", hours: 45, break_hours: 0.5, overtime_hours: 5, hourly_amount: 900, piece_amount: 0, amount: 900, unapproved_hours: 0, running: false },
-      { user_id: "u2", name: "Bo", hours: 0, break_hours: 0, overtime_hours: 0, hourly_amount: 0, piece_amount: 0, amount: 0, unapproved_hours: 2, running: true },
+      { user_id: "u1", name: "Ana", hours: 45, break_hours: 0.5, overtime_hours: 5, hourly_amount: 900, piece_amount: 0, amount: 900, unapproved_hours: 0, running: false, already_paid_hours: 0, already_paid_amount: 0 },
+      { user_id: "u2", name: "Bo", hours: 0, break_hours: 0, overtime_hours: 0, hourly_amount: 0, piece_amount: 0, amount: 0, unapproved_hours: 2, running: true, already_paid_hours: 0, already_paid_amount: 0 },
     ]);
     expect(pay).toMatchObject({ hours: 45, amount: 900, piece_amount: 0, overtime_hours: 5, unapproved_hours: 2, running_clocks: 1, overtime_note: null });
   });

@@ -313,8 +313,14 @@ describe("Timesheets → Pay's download", () => {
   it("has hourly, piece and total pay columns", () => {
     expect(PAY_COLUMNS.map((c) => c.label)).toEqual(expect.arrayContaining(["Hourly pay at their rate", "Piece pay", "Total pay"]));
     expect(payRows([person({ paid: { paid_amount: 394.8, method: "check", reference: "1042", paid_at: "2026-10-19T16:00:00Z" } })], (m) => (m === "check" ? "Check" : ""))).toEqual([
-      { person: "Cy", hours: "8.00", overtime: "0.00", breaks: "0.50", hourly: "160.00", piece: "234.80", amount: "394.80", paid: "394.80", method: "Check", reference: "1042", not_approved: "0.00" },
+      { person: "Cy", hours: "8.00", overtime: "0.00", breaks: "0.50", hourly: "160.00", piece: "234.80", amount: "394.80", paid: "394.80", method: "Check", reference: "1042", not_approved: "0.00", already_paid: "0.00" },
     ]);
+  });
+  it("says which hours were paid with another period, so the file adds up as the screen does", () => {
+    expect(PAY_COLUMNS.at(-1)).toEqual({ key: "already_paid", label: "Hours paid with another period" });
+    // Last week was paid on its own; the two weeks' file owes the other 40 hours and says where the rest went.
+    const row = payRows([person({ hours: 40, hourly_amount: 800, piece_amount: 0, amount: 800, already_paid_hours: 40, piece: [] })], () => "")[0]!;
+    expect(row).toMatchObject({ hours: "40.00", amount: "800.00", paid: "", already_paid: "40.00" });
   });
   it("counts someone with only piece pay as owed, and lists the jobs it's from", () => {
     expect(owedFor({ hours: 0, piece_amount: 100 })).toBe(true);

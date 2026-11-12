@@ -359,7 +359,8 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
 - **Pay:** Timesheets → Pay sums each person's approved hours at their rate for a week or any
   dates, adds their piece pay (per square, per job or per day, from their rate card), flags
   overtime and unapproved time, downloads for your payroll service, and records who's been paid and
-  how. Paid time is locked. Subs are paid by the job instead, under Subcontractors. Crewtavo
+  how. Paid time is locked, and hours are paid once: where periods overlap, a later one owes only
+  what the earlier didn't pay. Subs are paid by the job instead, under Subcontractors. Crewtavo
   doesn't move the money.
 - **Every trade:** trade presets ([`packages/core/src/presets`](packages/core/src/presets)) load
   starter services, quote formulas, checklists, booking forms and SOP categories when a company

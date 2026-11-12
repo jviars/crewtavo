@@ -4,13 +4,16 @@
  * has paid them (through its own payroll or bank: Crewtavo moves no money). Subs aren't in them, even
  * with their hours kept: they're paid by the job. Marking someone paid marks their piece
  * pay in the period paid with it, and taking the mark back puts it back to done: the database does
- * both (20261025003003_piece_pay_periods.sql). Timesheets → Pay (routes/pay.ts) and AI assistants'
+ * both (20261025003003_piece_pay_periods.sql). Periods can overlap ("Last week", then "Last 2
+ * weeks"), and hours are paid once: time on a day someone is already marked paid for, under another
+ * period, is shown as already paid and is never owed or recorded again (the database checks that
+ * too, 20261112000400_paid_hours_once.sql). Timesheets → Pay (routes/pay.ts) and AI assistants'
  * pay tools both use these. Pay rates are read with the server's key, so who may ask (office and up
  * with job costs) is checked here.
  */
 import { addDays, breakPay, localDate, OFFICE, paySummary, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
 import type { Env } from "../env";
-import { dbError, HttpError, must } from "../lib/http";
+import { HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { timeRates } from "./payRates";
 import { companyZone } from "./schedule";
@@ -79,10 +82,34 @@ async function subSignIns(s: PayScope): Promise<Set<string>> {
 /** Subs are paid by the job, under Subs: their hours aren't payroll. */
 export const SUBS_NOT_PAYROLL = "Subs are paid by the job, under Subs, not with a pay period. Their hours on Timesheets are only for your records.";
 
+interface PeriodLine { user_id: string; hours: number; overtime_hours: number; break_hours: number; amount: number; paid_amount: number | null; piece_amount: number; method: string | null; reference: string | null; paid_at: string | null }
+
+/** The pay periods with a day between `from` and `to`, with their lines: this one and any that overlap it. */
+async function periodsTouching(s: PayScope, from: string, to: string) {
+  const periods: Array<{ id: string; starts_on: string; ends_on: string; status: string; lines: PeriodLine[] }> = [];
+  for (let page = 0; page < 25; page++) {
+    const batch = must(
+      await s.db
+        .from("pay_periods")
+        .select("id, starts_on, ends_on, status, lines:pay_period_lines(user_id, hours, overtime_hours, break_hours, amount, paid_amount, piece_amount, method, reference, paid_at)")
+        .eq("company_id", s.companyId)
+        .lte("starts_on", to)
+        .gte("ends_on", from)
+        .order("id")
+        .range(page * 1000, page * 1000 + 999),
+    );
+    periods.push(...batch.map((p) => ({ ...p, lines: (p.lines ?? []) as PeriodLine[] })));
+    if (batch.length < 1000) break;
+  }
+  return periods;
+}
+
 /**
  * Each person on the team's hours and pay from `from` to `to` (local dates, inclusive): hourly, piece
  * pay (with the jobs it's for) and the two together, and whether they've been marked paid. Subs'
- * hours are left out: they're paid by the job.
+ * hours are left out: they're paid by the job. Someone not yet paid for these dates shows what's
+ * still owed: their time on days they're marked paid for under another period is already_paid_hours.
+ * Someone marked paid for exactly these dates shows what that payment recorded.
  */
 export async function payPeriodSummary(s: PayScope, from: string, to: string) {
   mayPay(s);
@@ -97,31 +124,41 @@ export async function payPeriodSummary(s: PayScope, from: string, to: string) {
     entries.push(...batch.filter((e) => !subs.has(e.user_id)));
     if (batch.length < 1000) break;
   }
-  const [rates, nameOf, period] = await Promise.all([
-    timeRates(adminClient(s.env), s.companyId, { from: start, to: end }),
-    names(s),
-    s.db.from("pay_periods").select("id, status, paid_at, notes, lines:pay_period_lines(user_id, paid_amount, piece_amount, method, reference, paid_at)").eq("company_id", s.companyId).eq("starts_on", from).eq("ends_on", to).maybeSingle(),
-  ]);
-  if (period.error) throw dbError(period.error);
-  const piece = await periodPiecePay(s, from, to, period.data?.id ?? null);
-  const summary = paySummary(entries, (e) => rates[e.id] ?? 0, nameOf, tz, breakPay(settings), piece);
-  const paid = new Map(((period.data?.lines ?? []) as Array<{ user_id: string; paid_amount: number | null; piece_amount: number; method: string | null; reference: string | null; paid_at: string | null }>).map((l) => [l.user_id, l]));
+  const [rates, nameOf, periods] = await Promise.all([timeRates(adminClient(s.env), s.companyId, { from: start, to: end }), names(s), periodsTouching(s, from, to)]);
+  const period = periods.find((p) => p.starts_on === from && p.ends_on === to) ?? null;
+  const paid = new Map((period?.lines ?? []).filter((l) => l.paid_at).map((l) => [l.user_id, l]));
+  // The days each person is marked paid for under another period. The same rule as the lock on paid
+  // time (private.paid_for): the entry's day, in the company's zone, is in a period they're paid for.
+  const paidDays = new Map<string, Array<{ starts_on: string; ends_on: string }>>();
+  for (const other of periods) {
+    if (other === period) continue;
+    for (const l of other.lines) if (l.paid_at) paidDays.set(l.user_id, [...(paidDays.get(l.user_id) ?? []), other]);
+  }
+  const alreadyPaid = (e: { user_id: string; started_at: string }) => {
+    const day = localDate(new Date(e.started_at), tz);
+    return (paidDays.get(e.user_id) ?? []).some((p) => p.starts_on <= day && day <= p.ends_on);
+  };
+  const piece = await periodPiecePay(s, from, to, period?.id ?? null);
+  const summary = paySummary(entries, (e) => rates[e.id] ?? 0, nameOf, tz, breakPay(settings), piece, { alreadyPaid, paidLines: [...paid.values()] });
   return {
     from,
     to,
     timezone: tz,
-    period_id: period.data?.id ?? null,
-    status: period.data?.status ?? "open",
+    period_id: period?.id ?? null,
+    status: period?.status ?? "open",
     ...summary,
-    people: summary.people.map((p) => ({ ...p, piece: piece.filter((x) => x.user_id === p.user_id), paid: paid.get(p.user_id)?.paid_at ? paid.get(p.user_id) : null })),
+    people: summary.people.map((p) => ({ ...p, piece: piece.filter((x) => x.user_id === p.user_id), paid: paid.get(p.user_id) ?? null })),
   };
 }
 
 /**
- * Record that people were paid for a period (everyone with approved hours or piece pay, or the ones
- * given): the amount (default what their hours and piece pay come to), how, and a reference. Their
- * time and piece pay in it are then locked. Refused while any of them has time that isn't approved or
- * a clock still running, and (by the database) when their piece pay has changed since the summary.
+ * Record that people were paid for a period (everyone with approved hours or piece pay still owed,
+ * or the ones given): the amount (default what their hours and piece pay come to), how, and a
+ * reference. Their time and piece pay in it are then locked. Only what's still owed is recorded:
+ * hours already paid with another period aren't in the line, and someone already marked paid for
+ * this period keeps the line they were paid with (take the mark back to change it). Refused while
+ * any of them has time that isn't approved or a clock still running, and (by the database) when
+ * their piece pay or the hours left to pay have changed since the summary.
  */
 export async function markPaid(s: PayScope, body: { from: string; to: string; user_ids?: readonly string[]; method: (typeof PAY_METHODS)[number]; reference?: string | null; paid_on?: string; amounts?: Readonly<Record<string, number>>; notes?: string | null }) {
   const summary = await payPeriodSummary(s, body.from, body.to);
@@ -130,8 +167,12 @@ export async function markPaid(s: PayScope, body: { from: string; to: string; us
     if (body.user_ids.some((id) => subs.has(id))) throw new HttpError(400, SUBS_NOT_PAYROLL);
   }
   const owed = (p: { hours: number; piece_amount: number }) => p.hours > 0 || p.piece_amount > 0;
-  const people = summary.people.filter((p) => (body.user_ids ? body.user_ids.includes(p.user_id) : owed(p)));
-  if (!people.length) throw new HttpError(400, "Nobody has approved hours or piece pay in that period to mark paid.");
+  const named = summary.people.filter((p) => (body.user_ids ? body.user_ids.includes(p.user_id) : owed(p)));
+  // A paid line is the record of a payment: marking again never writes over it.
+  const people = named.filter((p) => !p.paid);
+  if (!people.length) {
+    throw new HttpError(400, named.length ? "They're already marked paid for that period. Take back the paid mark first to change it." : "Nobody has approved hours or piece pay left to pay in that period.");
+  }
   const waiting = people.filter((p) => p.unapproved_hours > 0 || p.running);
   if (waiting.length) {
     throw new HttpError(400, `Approve everyone's time first: ${waiting.map((p) => `${p.name} (${p.running ? "a clock is still running" : `${p.unapproved_hours} h not approved`})`).join(", ")}.`);

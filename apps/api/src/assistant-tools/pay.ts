@@ -22,7 +22,7 @@ function period(ctx: ToolContext, a: { from?: string; to?: string }) {
 export const payTools = {
   pay_summary: tool({
     description:
-      "A pay period's pay for each person (default last week, Monday to Sunday): approved hours at their rates (breaks aren't paid) plus piece pay (job pay whose work was done in the period); amount is the two together. Also hours over 40 in a week (overtime, for your payroll service; amounts are at straight time), time not approved yet or clocks still running, and who's been marked paid.",
+      "A pay period's pay for each person (default last week, Monday to Sunday): approved hours at their rates (breaks aren't paid) plus piece pay (job pay whose work was done in the period); amount is the two together. Also hours over 40 in a week (overtime, for your payroll service; amounts are at straight time), time not approved yet or clocks still running, and who's been marked paid. Periods can overlap: hours on days someone was already paid for with another period aren't owed again (already_paid_hours), and someone marked paid for these dates shows what that payment recorded.",
     input: z.object({ from: date.optional(), to: date.optional(), ...companyArg }),
     run: async (ctx, a) => {
       const p = period(ctx, a);
@@ -43,7 +43,7 @@ export const payTools = {
   }),
   mark_paid: tool({
     description:
-      "Record that people were paid for a pay period (everyone with approved hours or piece pay, or these user_ids): how (direct_deposit, check, cash, payroll_service, other), a reference (check number, payroll run), the date, and amounts if they differ from their hours and piece pay together. Their time and piece pay in it are then locked. Everyone's time has to be approved first. Confirm with the person before marking.",
+      "Record that people were paid for a pay period (everyone with approved hours or piece pay, or these user_ids): how (direct_deposit, check, cash, payroll_service, other), a reference (check number, payroll run), the date, and amounts if they differ from their hours and piece pay together. Their time and piece pay in it are then locked. Only what's still owed is recorded: hours already paid with another period are left out, and someone already marked paid for the period isn't marked again. Everyone's time has to be approved first. Confirm with the person before marking.",
     input: z.object({
       from: date,
       to: date,
@@ -59,7 +59,7 @@ export const payTools = {
     run: (ctx, a) => markPaid(scope(ctx), a),
   }),
   unmark_paid: tool({
-    description: "Take back a paid mark for a pay period (everyone, or these user_ids), so their time in it can be changed again and their piece pay is owed again.",
+    description: "Take back a paid mark for a pay period (everyone, or these user_ids), so their time in it can be changed again and their piece pay is owed again. Where a later period overlaps it, that one's mark has to be taken back first.",
     input: z.object({ from: date, to: date, user_ids: z.array(z.uuid()).min(1).max(500).optional(), ...companyArg }),
     area: "pay",
     run: (ctx, a) => unmarkPaid(scope(ctx), a),

@@ -172,8 +172,8 @@ describe("piece pay in a pay period", () => {
       { user_id: "u2", total: "480.00" },
     ]);
     expect(pay.people).toEqual([
-      { user_id: "u1", name: "Ana", hours: 45, break_hours: 0, overtime_hours: 5, hourly_amount: 900, piece_amount: 334.8, amount: 1234.8, unapproved_hours: 0, running: false },
-      { user_id: "u2", name: "Bo", hours: 0, break_hours: 0, overtime_hours: 0, hourly_amount: 0, piece_amount: 480, amount: 480, unapproved_hours: 0, running: false },
+      { user_id: "u1", name: "Ana", hours: 45, break_hours: 0, overtime_hours: 5, hourly_amount: 900, piece_amount: 334.8, amount: 1234.8, unapproved_hours: 0, running: false, already_paid_hours: 0, already_paid_amount: 0 },
+      { user_id: "u2", name: "Bo", hours: 0, break_hours: 0, overtime_hours: 0, hourly_amount: 0, piece_amount: 480, amount: 480, unapproved_hours: 0, running: false, already_paid_hours: 0, already_paid_amount: 0 },
     ]);
     expect(pay).toMatchObject({ hours: 45, hourly_amount: 900, piece_amount: 814.8, amount: 1714.8, overtime_hours: 5, overtime_note: PIECE_OVERTIME_NOTE });
     expect(PIECE_OVERTIME_NOTE).toMatch(/worked out from total pay and hours/);

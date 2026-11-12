@@ -122,6 +122,7 @@ export function PayPeriods() {
               </span>
               <span className="tabular">{p.hours.toFixed(2)} h</span>
               {p.overtime_hours > 0 && <span className="muted small tabular">{p.overtime_hours.toFixed(1)} over 40</span>}
+              {(p.already_paid_hours ?? 0) > 0 && <span className="muted small tabular">{p.already_paid_hours!.toFixed(2)} h already paid</span>}
               {p.break_hours > 0 && <span className="muted small tabular">{p.break_hours.toFixed(1)} h unpaid breaks</span>}
               {piece && (
                 <span className="muted small tabular" style={{ minWidth: 150, textAlign: "right" }}>
@@ -135,12 +136,15 @@ export function PayPeriods() {
                 <StatusPill label={p.running ? "Clock running" : `${p.unapproved_hours.toFixed(1)} h to approve`} tone="warning" />
               ) : owedFor(p) ? (
                 <StatusPill label="Not paid yet" tone="muted" />
+              ) : (p.already_paid_hours ?? 0) > 0 ? (
+                <StatusPill label="Already paid" tone="good" />
               ) : null}
             </div>
           ))}
           <p className="muted small" style={{ margin: 12 }}>
             Approved time at each person's pay rate{piece ? ", plus piece pay for work done on jobs in this period" : ""}. {BREAK_RULE[breakPay(session.company.settings)]}{" "}
             {d.overtime_note ?? "Hours over 40 in a week are shown for your payroll service; the amounts here are at straight time."}
+            {d.people.some((p) => (p.already_paid_hours ?? 0) > 0) && " Hours already paid with another period aren't counted again."}
           </p>
         </section>
       )}

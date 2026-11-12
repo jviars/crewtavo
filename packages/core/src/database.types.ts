@@ -1752,14 +1752,14 @@ isOneToOne: false
                   ]
                 },"pay_period_lines": {
                   Row: {
-                    "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"piece_amount": number,"reference": string | null,"updated_at": string,"user_id": string
+                    "amount": number,"break_hours": number,"company_id": string,"created_at": string,"hours": number,"id": string,"marked_at": string | null,"method": string | null,"overtime_hours": number,"paid_amount": number | null,"paid_at": string | null,"paid_by": string | null,"period_id": string,"piece_amount": number,"reference": string | null,"updated_at": string,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount"?: number,"break_hours"?: number,"company_id": string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id": string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id": string
+                    "amount"?: number,"break_hours"?: number,"company_id": string,"created_at"?: string,"hours"?: number,"id"?: string,"marked_at"?: string | null,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id": string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id": string
                   }
                   Update: {
-                    "amount"?: number,"break_hours"?: number,"company_id"?: string,"created_at"?: string,"hours"?: number,"id"?: string,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id"?: string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id"?: string
+                    "amount"?: number,"break_hours"?: number,"company_id"?: string,"created_at"?: string,"hours"?: number,"id"?: string,"marked_at"?: string | null,"method"?: string | null,"overtime_hours"?: number,"paid_amount"?: number | null,"paid_at"?: string | null,"paid_by"?: string | null,"period_id"?: string,"piece_amount"?: number,"reference"?: string | null,"updated_at"?: string,"user_id"?: string
                   }
                   Relationships: [
                     {

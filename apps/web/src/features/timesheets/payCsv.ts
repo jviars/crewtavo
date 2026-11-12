@@ -14,6 +14,8 @@ export interface PayPerson {
   amount: number;
   unapproved_hours: number;
   running: boolean;
+  /** Hours in these dates they were paid for with another period: not in hours or amount, and not owed. */
+  already_paid_hours?: number;
   piece: Array<{ id: string; job_id: string; job_number: number | null; job_title: string; total: number; status: string; earned_on: string | null }>;
   paid: { paid_amount: number | null; piece_amount?: number | null; method: string | null; reference: string | null; paid_at: string | null } | null;
 }
@@ -30,6 +32,7 @@ export const PAY_COLUMNS = [
   { key: "method", label: "How" },
   { key: "reference", label: "Reference" },
   { key: "not_approved", label: "Hours not approved" },
+  { key: "already_paid", label: "Hours paid with another period" },
 ] as const;
 
 export function payRows(people: readonly PayPerson[], methodLabel: (m: string | null) => string) {
@@ -45,10 +48,11 @@ export function payRows(people: readonly PayPerson[], methodLabel: (m: string | 
     method: methodLabel(p.paid?.method ?? null),
     reference: p.paid?.reference ?? "",
     not_approved: p.unapproved_hours.toFixed(2),
+    already_paid: (p.already_paid_hours ?? 0).toFixed(2),
   }));
 }
 
-/** Someone with hours or piece pay in the period: what marking it paid covers. */
+/** Someone with hours or piece pay still owed in the period: what marking it paid covers. */
 export const owedFor = (p: Pick<PayPerson, "hours" | "piece_amount">) => p.hours > 0 || p.piece_amount > 0;
 
 /**

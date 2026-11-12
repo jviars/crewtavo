@@ -61,6 +61,10 @@ function test(row: Row, key: string, value: string): boolean {
       return cell != null && String(cell) >= arg;
     case "lte":
       return cell != null && String(cell) <= arg;
+    case "gt":
+      return cell != null && String(cell) > arg;
+    case "lt":
+      return cell != null && String(cell) < arg;
     case "in":
       return arg.slice(1, -1).split(",").includes(String(cell));
     case "is":
@@ -433,7 +437,7 @@ describe("piece pay in pay periods", () => {
     const tables = period({
       pay_periods: [{
         id: "pp1", company_id: CO, starts_on: "2026-10-12", ends_on: "2026-10-18", status: "open", paid_at: null, notes: null,
-        lines: [{ user_id: CREW, paid_amount: 394.8, piece_amount: 234.8, method: "payroll_service", reference: "Run 42", paid_at: "2026-10-19T16:00:00Z" }],
+        lines: [{ user_id: CREW, hours: 8, overtime_hours: 0, break_hours: 0, amount: 394.8, paid_amount: 394.8, piece_amount: 234.8, method: "payroll_service", reference: "Run 42", paid_at: "2026-10-19T16:00:00Z" }],
       }],
       pay_period_lines: [],
     });
@@ -452,7 +456,56 @@ describe("piece pay in pay periods", () => {
 
     expect((await as(PAYROLL, "/pay/mark-paid", { method: "POST", body: { from: "2026-10-12", to: "2026-10-18", method: "check" } })).status).toBe(200);
     const lines = calls.find((c) => c.path === "pay_period_lines" && c.method === "POST")!.body as Row[];
-    expect(lines.map((l) => [l.user_id, l.piece_amount, l.amount])).toEqual([[CREW, 234.8, 394.8], [DEE, 100, 100]]);
+    // Cy's line is the record of what he was paid: marking the rest doesn't write over it.
+    expect(lines.map((l) => [l.user_id, l.piece_amount, l.amount])).toEqual([[DEE, 100, 100]]);
+    const again = await as(PAYROLL, "/pay/mark-paid", { method: "POST", body: { from: "2026-10-12", to: "2026-10-18", method: "cash", user_ids: [CREW] } });
+    expect(again.status).toBe(400);
+    expect((await again.json()).error).toMatch(/already marked paid for that period/);
+    expect(calls.filter((c) => c.path === "pay_period_lines" && c.method === "POST")).toHaveLength(1);
+  });
+
+  describe("when periods overlap, hours are paid once", () => {
+    // Cy works 40 approved hours at $20 in each of two weeks: Oct 5 to 9 and Oct 12 to 16.
+    const days = (from: number) => [0, 1, 2, 3, 4].map((i) => {
+      const day = `2026-10-${String(from + i).padStart(2, "0")}`;
+      return { id: `t-${day}`, company_id: CO, user_id: CREW, started_at: `${day}T12:00:00Z`, ended_at: `${day}T20:00:00Z`, category: "visit", approved_at: `${day}T21:00:00Z`, labor_rate: 20 };
+    });
+    const lastWeek = { id: "pp-week", company_id: CO, starts_on: "2026-10-05", ends_on: "2026-10-11", status: "paid", paid_at: "2026-10-12T16:00:00Z", notes: null };
+    const paidLine = { user_id: CREW, hours: 40, overtime_hours: 0, break_hours: 0, amount: 800, paid_amount: 800, piece_amount: 0, method: "check", reference: "1041", paid_at: "2026-10-12T16:00:00Z" };
+    const twoWeeks = (periods: Row[]) => oscar({ time_entries: [...days(5), ...days(12)], job_pay: [], pay_periods: periods, pay_period_lines: [] });
+
+    it("last week paid ($800), then the last two weeks: $800 is owed, not $1,600, and that's what marking paid records", async () => {
+      const { calls } = serve({ tables: twoWeeks([{ ...lastWeek, lines: [paidLine] }]) });
+      const summary = await (await as(PAYROLL, "/pay/summary?from=2026-10-05&to=2026-10-18")).json();
+      expect(summary).toMatchObject({ period_id: null, hours: 40, amount: 800, already_paid_hours: 40, already_paid_amount: 800 });
+      expect(summary.people).toMatchObject([{ name: "Cy Crew", hours: 40, amount: 800, already_paid_hours: 40, paid: null }]);
+
+      const res = await as(PAYROLL, "/pay/mark-paid", { method: "POST", body: { from: "2026-10-05", to: "2026-10-18", method: "check", user_ids: [CREW] } });
+      expect(res.status).toBe(200);
+      const lines = calls.find((c) => c.path === "pay_period_lines" && c.method === "POST")!.body as Row[];
+      expect(lines.map((l) => [l.user_id, l.hours, l.amount, l.paid_amount])).toEqual([[CREW, 40, 800, 800]]);
+    });
+
+    it("the week that's paid keeps showing what was paid for it, with the two weeks paid over it since", async () => {
+      const both = { id: "pp-two", company_id: CO, starts_on: "2026-10-05", ends_on: "2026-10-18", status: "paid", paid_at: "2026-10-19T16:00:00Z", notes: null, lines: [{ ...paidLine, reference: "1042", paid_at: "2026-10-19T16:00:00Z" }] };
+      serve({ tables: twoWeeks([{ ...lastWeek, lines: [paidLine] }, both]) });
+      for (const [from, to, reference] of [["2026-10-05", "2026-10-11", "1041"], ["2026-10-05", "2026-10-18", "1042"]]) {
+        const summary = await (await as(PAYROLL, `/pay/summary?from=${from}&to=${to}`)).json();
+        expect(summary.people).toMatchObject([{ hours: 40, amount: 800, already_paid_hours: 0, paid: { paid_amount: 800, reference } }]);
+      }
+      // The week in between that neither was marked for on its own: all of it is already paid, and there's nobody to mark.
+      const second = await (await as(PAYROLL, "/pay/summary?from=2026-10-12&to=2026-10-18")).json();
+      expect(second.people).toMatchObject([{ hours: 0, amount: 0, already_paid_hours: 40, paid: null }]);
+      const res = await as(PAYROLL, "/pay/mark-paid", { method: "POST", body: { from: "2026-10-12", to: "2026-10-18", method: "check" } });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/Nobody has approved hours or piece pay left to pay/);
+    });
+
+    it("a mark that was taken back pays nothing: its days are owed again", async () => {
+      serve({ tables: twoWeeks([{ ...lastWeek, status: "open", lines: [{ ...paidLine, paid_at: null, paid_amount: null }] }]) });
+      const summary = await (await as(PAYROLL, "/pay/summary?from=2026-10-05&to=2026-10-18")).json();
+      expect(summary.people).toMatchObject([{ hours: 80, amount: 1600, already_paid_hours: 0, paid: null }]);
+    });
   });
 
   it("isn't for the office without job costs", async () => {
