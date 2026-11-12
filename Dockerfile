@@ -4,7 +4,11 @@
 #   docker compose up        the whole instance, locally
 #   docker build -t crewtavo .
 
-FROM node:22-alpine AS build
+# The base image is pinned to one exact build (the part after @), so a release is built on the image
+# that was tested, not on whatever node:22-alpine points at that day. To move to a newer one:
+#   docker pull node:22-alpine && docker inspect --format '{{index .RepoDigests 0}}' node:22-alpine
+# then put the sha256 it prints in both FROM lines, and build and test the image before releasing.
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/
@@ -16,7 +20,7 @@ COPY . .
 # default heap in a container.
 RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build:server
 
-FROM node:22-alpine
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
 WORKDIR /app
 # The release this image is (set by .github/workflows/release.yml); /api/health reports it.
 ARG CREWTAVO_VERSION=dev
