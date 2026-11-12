@@ -1,6 +1,7 @@
 /**
  * Pay periods' sums where periods meet: hours paid with one period aren't owed in another that
- * overlaps it, and someone marked paid for a period shows what that payment recorded.
+ * overlaps it, someone marked paid for a period shows what that payment recorded, and a week's
+ * overtime is judged on the whole week when a period cuts it.
  */
 import { describe, expect, it } from "vitest";
 import { paySummary, type PayEntry } from "../src";
@@ -42,5 +43,53 @@ describe("hours are paid once", () => {
     expect(pay).toMatchObject({ hours: 40, amount: 900, already_paid_hours: 0 });
     // And with no time left in the dates at all, the line still shows.
     expect(sum([], { paidLines: [line] }).people).toHaveLength(1);
+  });
+});
+
+describe("overtime when a period cuts a week", () => {
+  // The week of Monday Sep 28, 2026: Wednesday is the 30th, so a month-end cuts it after three days.
+  const day = (date: string, hours: number, extra: Partial<PayEntry> = {}): PayEntry => ({
+    id: date, user_id: "u1", started_at: `${date}T12:00:00Z`, ended_at: new Date(Date.parse(`${date}T12:00:00Z`) + hours * 3_600_000).toISOString(), category: "visit", approved_at: "x", ...extra,
+  });
+  const september = [day("2026-09-28", 10), day("2026-09-29", 10), day("2026-09-30", 10)];
+  const october = [day("2026-10-01", 10), day("2026-10-02", 10)];
+
+  it("a 50-hour week split 30 and 20 by a month-end has its 10 hours of overtime in the second month", () => {
+    expect(sum(september).people[0]).toMatchObject({ hours: 30, overtime_hours: 0 });
+    // Looking at October's days alone, as before, the week's overtime showed in neither month.
+    expect(sum(october).people[0]).toMatchObject({ hours: 20, overtime_hours: 0 });
+    expect(sum(october, { weekBefore: september }).people[0]).toMatchObject({ hours: 20, hourly_amount: 400, overtime_hours: 10 });
+    // The whole week in one period comes to the same 10.
+    expect(sum([...september, ...october]).people[0]).toMatchObject({ hours: 50, overtime_hours: 10 });
+  });
+
+  it("goes to the month the late hours fall in: 45 hours by Wednesday and 5 on Thursday is 5 and 5", () => {
+    const long = [day("2026-09-28", 15), day("2026-09-29", 15), day("2026-09-30", 15)];
+    const thursday = [day("2026-10-01", 5)];
+    expect(sum(long).people[0]).toMatchObject({ hours: 45, overtime_hours: 5 });
+    expect(sum(thursday, { weekBefore: long }).people[0]).toMatchObject({ hours: 5, overtime_hours: 5 });
+  });
+
+  it("counts only approved, paid time before the period, once, and only in that week", () => {
+    const before = [
+      day("2026-09-21", 16), // the week before
+      day("2026-09-28", 10, { approved_at: null }),
+      day("2026-09-29", 10, { category: "break" }),
+      day("2026-09-30", 10, { ended_at: null }),
+      { ...october[0]! }, // sent twice by mistake
+    ];
+    expect(sum(october, { weekBefore: before }).people[0]).toMatchObject({ hours: 20, overtime_hours: 0 });
+    expect(sum(october, { weekBefore: [...before, ...september] }).people[0]).toMatchObject({ overtime_hours: 10 });
+  });
+
+  it("isn't paid twice: hours another period paid count towards the week's 40, and keep their own overtime", () => {
+    // September was paid (Mon to Wed, 45 hours, 5 of them overtime). The week as a period then
+    // owes Thursday and Friday: all 10 of those hours are over 40, and September's 5 aren't counted again.
+    const long = [day("2026-09-28", 15), day("2026-09-29", 15), day("2026-09-30", 15)];
+    const rest = [day("2026-10-01", 5), day("2026-10-02", 5)];
+    const pay = sum([...long, ...rest], { alreadyPaid: (e) => e.started_at < "2026-10-01" });
+    expect(pay.people[0]).toMatchObject({ hours: 10, overtime_hours: 10, already_paid_hours: 45 });
+    // Unpaid, the same week is 55 hours with 15 over: 5 with September's line and 10 here make the same 15.
+    expect(sum([...long, ...rest]).people[0]).toMatchObject({ hours: 55, overtime_hours: 15 });
   });
 });

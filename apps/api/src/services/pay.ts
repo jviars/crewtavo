@@ -11,7 +11,7 @@
  * pay tools both use these. Pay rates are read with the server's key, so who may ask (office and up
  * with job costs) is checked here.
  */
-import { addDays, breakPay, localDate, OFFICE, paySummary, zonedTimeToUtc, type Permission, type Role } from "@crewtavo/core";
+import { addDays, breakPay, localDate, mondayOf, OFFICE, paySummary, zonedTimeToUtc, type PayEntry, type Permission, type Role } from "@crewtavo/core";
 import type { Env } from "../env";
 import { HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
@@ -118,12 +118,20 @@ export async function payPeriodSummary(s: PayScope, from: string, to: string) {
   const start = zonedTimeToUtc(from, "00:00", tz).toISOString();
   const end = zonedTimeToUtc(addDays(to, 1), "00:00", tz).toISOString();
   const subs = await subSignIns(s);
-  const entries: Array<{ id: string; user_id: string; started_at: string; ended_at: string | null; category: string; approved_at: string | null }> = [];
-  for (let page = 0; page < 25; page++) {
-    const batch = must(await s.db.from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("company_id", s.companyId).gte("started_at", start).lt("started_at", end).order("id").range(page * 1000, page * 1000 + 999));
-    entries.push(...batch.filter((e) => !subs.has(e.user_id)));
-    if (batch.length < 1000) break;
-  }
+  const timeBetween = async (since: string, before: string) => {
+    const found: PayEntry[] = [];
+    for (let page = 0; page < 25; page++) {
+      const batch = must(await s.db.from("time_entries").select("id, user_id, started_at, ended_at, category, approved_at").eq("company_id", s.companyId).gte("started_at", since).lt("started_at", before).order("id").range(page * 1000, page * 1000 + 999));
+      found.push(...batch.filter((e) => !subs.has(e.user_id)));
+      if (batch.length < 1000) break;
+    }
+    return found;
+  };
+  const entries = await timeBetween(start, end);
+  // A period that starts mid-week (a month, most often) needs the days of that week before it:
+  // overtime is judged on the whole week (paySummary). They aren't paid or shown here.
+  const weekStart = mondayOf(from);
+  const weekBefore = weekStart < from ? await timeBetween(zonedTimeToUtc(weekStart, "00:00", tz).toISOString(), start) : [];
   const [rates, nameOf, periods] = await Promise.all([timeRates(adminClient(s.env), s.companyId, { from: start, to: end }), names(s), periodsTouching(s, from, to)]);
   const period = periods.find((p) => p.starts_on === from && p.ends_on === to) ?? null;
   const paid = new Map((period?.lines ?? []).filter((l) => l.paid_at).map((l) => [l.user_id, l]));
@@ -139,7 +147,7 @@ export async function payPeriodSummary(s: PayScope, from: string, to: string) {
     return (paidDays.get(e.user_id) ?? []).some((p) => p.starts_on <= day && day <= p.ends_on);
   };
   const piece = await periodPiecePay(s, from, to, period?.id ?? null);
-  const summary = paySummary(entries, (e) => rates[e.id] ?? 0, nameOf, tz, breakPay(settings), piece, { alreadyPaid, paidLines: [...paid.values()] });
+  const summary = paySummary(entries, (e) => rates[e.id] ?? 0, nameOf, tz, breakPay(settings), piece, { alreadyPaid, paidLines: [...paid.values()], weekBefore });
   return {
     from,
     to,

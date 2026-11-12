@@ -56,7 +56,15 @@ export interface PayOptions {
   alreadyPaid?: (entry: PayEntry) => boolean;
   /** The lines of the people marked paid for this very period: they show what was recorded then. */
   paidLines?: readonly PaidLine[];
+  /**
+   * Time from the Monday of the period's first week up to the period's start, when the period
+   * starts mid-week: it isn't in the period, but it counts towards that week's 40 hours.
+   */
+  weekBefore?: readonly PayEntry[];
 }
+
+/** A week's overtime starts after this many approved hours. */
+export const OVERTIME_AFTER_HOURS = 40;
 
 /**
  * Each person's pay for a period: approved hours, with breaks paid as the company pays them
@@ -66,18 +74,35 @@ export interface PayOptions {
  * is at straight time), and what's not approved or still running. Hours already paid with another
  * period (`options.alreadyPaid`) aren't in any of that: they're already_paid_hours. Someone marked
  * paid for this period (`options.paidLines`) shows what they were paid for, as recorded.
+ *
+ * Overtime is judged on the whole week, Monday to Sunday, wherever the period cuts it: an hour is
+ * overtime when it comes after the person's 40th approved hour of that week, in the order worked.
+ * So a week's overtime goes to the period its late hours fall in (50 hours split 30 and 20 by a
+ * month-end: none in the first month, 10 in the second), which needs the week's earlier time
+ * (`options.weekBefore`) but nothing after the period: later hours never make earlier ones overtime.
+ * That's also how it fits with hours being paid once. Overtime belongs to the hours it falls on, so
+ * it's paid, and recorded, with the period that pays those hours. Hours already paid with another
+ * period still count towards the week's 40, but their overtime was that period's and isn't counted
+ * here again.
  */
 export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntry) => number, nameOf: (userId: string) => string, timeZone: string, breaks: BreakPay, piece: readonly PiecePay[] = [], options: PayOptions = {}) {
   const h = (ms: number) => ms / 3_600_000;
-  const people = new Map<string, { user_id: string; name: string; hours: number; break_hours: number; overtime_hours: number; amount: number; piece: number; unapproved_hours: number; running: boolean; already_paid_hours: number; already_paid_amount: number; weeks: Map<string, number> }>();
+  const people = new Map<string, { user_id: string; name: string; hours: number; break_hours: number; overtime_hours: number; amount: number; piece: number; unapproved_hours: number; running: boolean; already_paid_hours: number; already_paid_amount: number; worked: Array<{ week: string; at: number; hours: number; owed: boolean }> }>();
   const rowOf = (userId: string) => {
-    const row = people.get(userId) ?? { user_id: userId, name: nameOf(userId), hours: 0, break_hours: 0, overtime_hours: 0, amount: 0, piece: 0, unapproved_hours: 0, running: false, already_paid_hours: 0, already_paid_amount: 0, weeks: new Map() };
+    const row = people.get(userId) ?? { user_id: userId, name: nameOf(userId), hours: 0, break_hours: 0, overtime_hours: 0, amount: 0, piece: 0, unapproved_hours: 0, running: false, already_paid_hours: 0, already_paid_amount: 0, worked: [] };
     people.set(userId, row);
     return row;
   };
   for (const p of piece) rowOf(p.user_id).piece += Number(p.total);
   const paidHere = new Map((options.paidLines ?? []).map((l) => [l.user_id, l]));
   for (const id of paidHere.keys()) rowOf(id);
+  // Approved, paid time, for the week's count of 40: `owed` when this period is the one paying it.
+  const worked = (e: PayEntry, hours: number, owed: boolean) => rowOf(e.user_id).worked.push({ week: mondayOf(localDate(new Date(e.started_at), timeZone)), at: Date.parse(e.started_at), hours, owed });
+  const inPeriod = new Set(entries.map((e) => e.id));
+  for (const e of options.weekBefore ?? []) {
+    if (inPeriod.has(e.id) || !e.ended_at || !e.approved_at || isUnpaidBreak(e, breaks)) continue;
+    worked(e, Math.max(0, h(Date.parse(e.ended_at) - Date.parse(e.started_at))), false);
+  }
   for (const e of entries) {
     const row = rowOf(e.user_id);
     const settled = options.alreadyPaid?.(e) ?? false;
@@ -91,6 +116,7 @@ export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntr
       if (e.approved_at && !isUnpaidBreak(e, breaks)) {
         row.already_paid_hours += hours;
         row.already_paid_amount += hours * rateOf(e);
+        worked(e, hours, false);
       }
       continue;
     }
@@ -104,16 +130,26 @@ export function paySummary(entries: readonly PayEntry[], rateOf: (entry: PayEntr
     }
     row.hours += hours;
     row.amount += hours * rateOf(e);
-    const week = mondayOf(localDate(new Date(e.started_at), timeZone));
-    row.weeks.set(week, (row.weeks.get(week) ?? 0) + hours);
+    worked(e, hours, true);
   }
+  /** The hours this period pays that come after the 40th of their week. */
+  const overtime = (spans: ReadonlyArray<{ week: string; at: number; hours: number; owed: boolean }>) => {
+    const soFar = new Map<string, number>();
+    let over = 0;
+    for (const span of [...spans].sort((a, b) => a.at - b.at)) {
+      const before = soFar.get(span.week) ?? 0;
+      soFar.set(span.week, before + span.hours);
+      if (span.owed) over += Math.max(0, before + span.hours - OVERTIME_AFTER_HOURS) - Math.max(0, before - OVERTIME_AFTER_HOURS);
+    }
+    return over;
+  };
   const round = (n: number) => Math.round(n * 100) / 100;
-  const lines = [...people.values()].map(({ weeks, piece: pieceAmount, ...p }) => {
+  const lines = [...people.values()].map(({ worked: spans, piece: pieceAmount, ...p }) => {
     const line = {
       ...p,
       hours: round(p.hours),
       break_hours: round(p.break_hours),
-      overtime_hours: round([...weeks.values()].reduce((s, w) => s + Math.max(0, w - 40), 0)),
+      overtime_hours: round(overtime(spans)),
       hourly_amount: round(p.amount),
       piece_amount: round(pieceAmount),
       amount: round(round(p.amount) + round(pieceAmount)),

@@ -508,6 +508,26 @@ describe("piece pay in pay periods", () => {
     });
   });
 
+  it("judges overtime on the whole week when a month-end cuts it: 30 hours in September and 20 in October is 10 over, in October", async () => {
+    // Cy works 10 approved hours a day, Monday Sep 28 to Friday Oct 2.
+    const week = ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"].map((day) => ({
+      id: `t-${day}`, company_id: CO, user_id: CREW, started_at: `${day}T12:00:00Z`, ended_at: `${day}T22:00:00Z`, category: "visit", approved_at: `${day}T23:00:00Z`, labor_rate: 20,
+    }));
+    const { calls } = serve({ tables: oscar({ time_entries: week, job_pay: [], pay_periods: [], pay_period_lines: [] }) });
+    const september = await (await as(PAYROLL, "/pay/summary?from=2026-09-01&to=2026-09-30")).json();
+    expect(september.people).toMatchObject([{ name: "Cy Crew", hours: 30, overtime_hours: 0, amount: 600 }]);
+    const october = await (await as(PAYROLL, "/pay/summary?from=2026-10-01&to=2026-10-31")).json();
+    expect(october.people).toMatchObject([{ name: "Cy Crew", hours: 20, overtime_hours: 10, amount: 400 }]);
+    expect(october).toMatchObject({ hours: 20, overtime_hours: 10 });
+    // October starts on a Thursday, so the week's Monday to Wednesday are read too (midnight in New York).
+    const read = calls.filter((c) => c.path === "time_entries" && c.url.searchParams.getAll("started_at").includes("lt.2026-10-01T04:00:00.000Z"));
+    expect(read.map((c) => c.url.searchParams.getAll("started_at"))).toContainEqual(["gte.2026-09-28T04:00:00.000Z", "lt.2026-10-01T04:00:00.000Z"]);
+    // Marked paid, the line carries it for the payroll service.
+    await as(PAYROLL, "/pay/mark-paid", { method: "POST", body: { from: "2026-10-01", to: "2026-10-31", method: "payroll_service" } });
+    const lines = calls.find((c) => c.path === "pay_period_lines" && c.method === "POST")!.body as Row[];
+    expect(lines.map((l) => [l.hours, l.overtime_hours, l.amount])).toEqual([[20, 10, 400]]);
+  });
+
   it("isn't for the office without job costs", async () => {
     serve({ tables: period() });
     expect((await as(SUBS, "/pay/summary?from=2026-10-12&to=2026-10-18")).status).toBe(403);
