@@ -2,10 +2,11 @@ import { isRole, memberPermissions, STAFF, type Permission, type Role } from "@c
 import { AuthClient } from "@supabase/supabase-js";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
-import type { AppEnv } from "../env";
+import type { AppEnv, Env } from "../env";
 import { ASSISTANT_NO_API, isRead } from "./assistants";
 import { dbError, HttpError, uuid } from "./http";
 import { allow } from "./limit";
+import { sealAuthToken } from "./signInGuard";
 import { stackServices } from "./stack";
 import { adminClient, publishableKey, userClient } from "./supabase";
 
@@ -81,8 +82,9 @@ export function requireCompany(roles: readonly Role[] = STAFF, permission?: Perm
  * URL (localhost on a new project), so it breaks until someone edits the Supabase dashboard.
  * `welcome` shows the "set your password" screen for a person who was invited but never signed in.
  */
-export function emailAuthLink(base: string, tokenHash: string, type: "invite" | "recovery" | "magiclink", welcome = false): string {
-  const params = new URLSearchParams({ token_hash: tokenHash, type });
+export async function emailAuthLink(env: Env, base: string, tokenHash: string, type: "invite" | "recovery" | "magiclink", welcome = false): Promise<string> {
+  // In an instance the token goes out sealed: Auth's token alone isn't redeemed (lib/signInGuard.ts).
+  const params = new URLSearchParams({ token_hash: await sealAuthToken(env, tokenHash, type), type });
   if (welcome) params.set("welcome", "1");
   return `${base}/?${params}`;
 }

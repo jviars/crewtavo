@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { allow } from "../src/lib/limit";
-import { GUESSES, guardSignIn, isGuessable } from "../src/lib/signInGuard";
+import { authRoute, GUESSES, guardLink, guardSignIn, isGuessable, openAuthToken, sealAuthToken, sendsAuthMail } from "../src/lib/signInGuard";
 
 const env: Env = { SUPABASE_URL: "http://127.0.0.1:8080", SUPABASE_SECRET_KEY: "sb_secret_test" };
 
@@ -35,10 +35,10 @@ function gotrue() {
 describe("sign-in guard", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("applies to password sign-in and code checks only", () => {
+  it("applies to password sign-in only", () => {
     const url = (path: string) => new URL(`http://x/auth/v1${path}`);
     expect(isGuessable("POST", url("/token?grant_type=password"), "/auth/v1")).toBe(true);
-    expect(isGuessable("POST", url("/verify"), "/auth/v1")).toBe(true);
+    expect(isGuessable("POST", url("/verify"), "/auth/v1")).toBe(false);
     expect(isGuessable("POST", url("/token?grant_type=refresh_token"), "/auth/v1")).toBe(false);
     expect(isGuessable("GET", url("/verify"), "/auth/v1")).toBe(false);
     expect(isGuessable("GET", url("/user"), "/auth/v1")).toBe(false);
@@ -56,12 +56,10 @@ describe("sign-in guard", () => {
     expect((await guardSignIn(env, signIn({ email: "crew@example.com", password: "right" }), send)).status).toBe(200);
   });
 
-  it("counts wrong codes the same way, and lets emailed links through", async () => {
-    fakeLimiter();
-    const { send } = gotrue();
-    for (let i = 0; i <= GUESSES; i++) await guardSignIn(env, signIn({ type: "magiclink", email: "coded@example.com", token: String(100000 + i) }, "/auth/v1/verify"), send);
-    expect((await guardSignIn(env, signIn({ type: "magiclink", email: "coded@example.com", token: "123456" }, "/auth/v1/verify"), send)).status).toBe(429);
-    expect((await guardSignIn(env, signIn({ type: "magiclink", token_hash: "x".repeat(56), token: "123456" }, "/auth/v1/verify"), send)).status).toBe(200);
+  it("has nothing to sign in with but an email and a password", async () => {
+    const { send, seen } = gotrue();
+    expect((await guardSignIn(env, signIn({ type: "magiclink", token_hash: "x".repeat(56), token: "123456" }), send)).status).toBe(400);
+    expect(seen).toHaveLength(0);
   });
 
   it("doesn't count successful sign-ins", async () => {
@@ -147,5 +145,77 @@ describe("rate limit keys", () => {
     expect(await allow(env, "promo:203.0.113.9", 10, 600)).toBe(false);
     expect(keys[0]).toMatch(/^promo:sha256:[0-9a-f]{64}$/);
     expect(keys[1]).toBe("promo:203.0.113.9");
+  });
+});
+
+describe("emailed links", () => {
+  const instance: Env = { ...env, CREWTAVO_GATEWAY: "1" };
+  const TOKEN = "ab12".repeat(14);
+  const verify = (body: unknown, method = "POST") =>
+    new Request("http://localhost:8080/auth/v1/verify", { method, headers: { "content-type": "application/json" }, ...(method === "POST" ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}) });
+  /** GoTrue: takes any token it's handed, and keeps what it was sent. */
+  function gotrue() {
+    const seen: Array<Record<string, unknown>> = [];
+    const send = async (request: Request) => {
+      seen.push((await request.json()) as Record<string, unknown>);
+      return Response.json({ access_token: "jwt" });
+    };
+    return { send, seen };
+  }
+
+  it("go out with the server's signature in an instance, and as Auth made them without the gateway", async () => {
+    expect(await sealAuthToken(env, TOKEN, "invite")).toBe(TOKEN);
+    const sealed = await sealAuthToken(instance, TOKEN, "invite");
+    expect(sealed).toMatch(new RegExp(`^${TOKEN}\\.[0-9a-f]{40}$`));
+    expect(await openAuthToken(instance, sealed, "invite")).toBe(TOKEN);
+  });
+
+  it("are redeemed as the token Auth made, with nothing else alongside", async () => {
+    const { send, seen } = gotrue();
+    const sealed = await sealAuthToken(instance, TOKEN, "recovery");
+    expect((await guardLink(instance, verify({ type: "recovery", token_hash: sealed, email: "owner@example.com", token: "123456", redirect_to: "https://ops.example.com/" }), send)).status).toBe(200);
+    expect(seen).toEqual([{ type: "recovery", token_hash: TOKEN, redirect_to: "https://ops.example.com/" }]);
+  });
+
+  it("never reach Auth without the signature, however the token is guessed at", async () => {
+    const { send, seen } = gotrue();
+    const sealed = await sealAuthToken(instance, TOKEN, "magiclink");
+    const other = await sealAuthToken({ ...instance, SUPABASE_SECRET_KEY: "sb_secret_other" }, TOKEN, "magiclink");
+    for (const body of [
+      { type: "magiclink", token_hash: TOKEN }, // Auth's token alone, as a guess would be
+      { type: "magiclink", token_hash: `${TOKEN}.` },
+      { type: "magiclink", token_hash: `${TOKEN}.${"0".repeat(40)}` },
+      { type: "magiclink", token_hash: other }, // another server's signature
+      { type: "recovery", token_hash: sealed }, // signed as another kind of link
+      { type: "magiclink", token_hash: sealed.replace(/^ab/, "ac") }, // the signature of a different token
+      { type: "magiclink", token_hash: `${"a".repeat(500)}.${"0".repeat(40)}` },
+      { type: "magiclink", email: "owner@example.com", token: "123456" }, // a code typed with an email
+      { token_hash: sealed },
+      "not json",
+      [{ type: "magiclink", token_hash: sealed }],
+    ]) {
+      const response = await guardLink(instance, verify(body), send);
+      expect(response.status, JSON.stringify(body)).toBe(403);
+      expect(((await response.json()) as { error_code: string }).error_code).toBe("otp_expired");
+    }
+    expect((await guardLink(instance, verify(null, "GET"), send)).status).toBe(403);
+    expect(seen).toHaveLength(0);
+    // The real one still works after all that: nothing was counted against it.
+    expect((await guardLink(instance, verify({ type: "magiclink", token_hash: sealed }), send)).status).toBe(200);
+  });
+
+  it("reads a field's name whatever its case, as Auth does", async () => {
+    const { send, seen } = gotrue();
+    const sealed = await sealAuthToken(instance, TOKEN, "invite");
+    expect((await guardLink(instance, verify({ TYPE: "invite", Token_Hash: sealed }), send)).status).toBe(200);
+    expect(seen).toEqual([{ type: "invite", token_hash: TOKEN }]);
+  });
+
+  it("knows a route by any spelling of its address", () => {
+    const route = (path: string) => authRoute(new URL(`http://x/auth/v1${path}`), "/auth/v1");
+    for (const path of ["/verify", "/verify/", "//verify", "/VERIFY", "/v%65rify", "/verify?token=1"]) expect(route(path), path).toBe("/verify");
+    expect(route("/token")).toBe("/token");
+    for (const path of ["/recover", "/otp", "/magiclink", "/resend"]) expect(sendsAuthMail(route(path)), path).toBe(true);
+    for (const path of ["/token", "/user", "/logout", "/verify", "/authorize"]) expect(sendsAuthMail(route(path)), path).toBe(false);
   });
 });

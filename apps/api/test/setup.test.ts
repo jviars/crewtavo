@@ -60,9 +60,16 @@ describe("readEnv", () => {
 });
 
 describe("emailed auth links", () => {
-  it("open the app with the token, not Supabase's redirect", () => {
-    expect(emailAuthLink("https://ops.example.com", "hash123", "invite")).toBe("https://ops.example.com/?token_hash=hash123&type=invite");
-    expect(emailAuthLink("https://ops.example.com", "h", "recovery", true)).toBe("https://ops.example.com/?token_hash=h&type=recovery&welcome=1");
+  const dev = { SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SECRET_KEY: "sb_secret_test" };
+  it("open the app with the token, not Supabase's redirect", async () => {
+    expect(await emailAuthLink(dev, "https://ops.example.com", "hash123", "invite")).toBe("https://ops.example.com/?token_hash=hash123&type=invite");
+    expect(await emailAuthLink(dev, "https://ops.example.com", "h", "recovery", true)).toBe("https://ops.example.com/?token_hash=h&type=recovery&welcome=1");
+  });
+
+  it("carry the server's signature in an instance, where the gateway redeems nothing else", async () => {
+    const link = new URL(await emailAuthLink({ ...dev, CREWTAVO_GATEWAY: "1" }, "https://ops.example.com", "hash123", "invite"));
+    expect(link.searchParams.get("token_hash")).toMatch(/^hash123\.[0-9a-f]{40}$/);
+    expect(link.searchParams.get("type")).toBe("invite");
   });
 });
 

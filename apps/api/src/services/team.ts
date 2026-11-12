@@ -73,7 +73,7 @@ export async function welcomeLink(env: Env, base: string, email: string): Promis
     console.error("Couldn't create an invite link", error);
     throw new HttpError(500, "Couldn't make the invite link. Try again in a moment.");
   }
-  return emailAuthLink(base, data.properties.hashed_token, "recovery", true);
+  return emailAuthLink(env, base, data.properties.hashed_token, "recovery", true);
 }
 
 /**
@@ -135,7 +135,7 @@ export async function invitePerson(s: TeamScope, body: { email: string; full_nam
       throw new HttpError(400, /already|registered/i.test(error?.message ?? "") ? "That email already has an account. Try again in a moment." : "Couldn't create the invite. Check the email address and try again.");
     }
     userId = data.user.id;
-    link = emailAuthLink(s.baseUrl, data.properties.hashed_token, "invite");
+    link = await emailAuthLink(s.env, s.baseUrl, data.properties.hashed_token, "invite");
   } else if ((await inviteStatus(s.env, s.companyId, userId)).status === "pending") {
     // Invited before but never signed in (the first link expired, or never arrived): a fresh set-up
     // link instead of "sign in as usual", since they don't have a password yet.

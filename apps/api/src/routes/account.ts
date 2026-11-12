@@ -744,7 +744,7 @@ account.post("/auth/email-link", async (c) => {
     console.error("Couldn't create an auth link", error);
     return c.json({ sent: true });
   }
-  const link = emailAuthLink(appUrl(c), data.properties.hashed_token, body.kind);
+  const link = await emailAuthLink(c.env, appUrl(c), data.properties.hashed_token, body.kind);
   const text = body.kind === "recovery"
     ? `Someone asked to reset the password for your ${sender.name} account on Crewtavo. Choose a new password here:\n\n${link}\n\nIf that wasn't you, ignore this email. Your password stays the same.`
     : `Here's your link to sign in to ${sender.name} on Crewtavo. It works once and expires soon:\n\n${link}\n\nIf you didn't ask for it, ignore this email.`;

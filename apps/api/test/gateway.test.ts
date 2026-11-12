@@ -11,7 +11,8 @@ import type { AddressInfo } from "node:net";
 import type { HttpBindings } from "@hono/node-server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { EMAIL_CHANGE_STALE, gateway, PASSWORD_LINK_STALE, safeFile, storesFile, unsizedUpload } from "../src/lib/gateway";
+import { EMAIL_CHANGE_STALE, gateway, NO_S3, PASSWORD_LINK_STALE, safeFile, storesFile, unsizedUpload } from "../src/lib/gateway";
+import { NO_AUTH_MAIL, sealAuthToken } from "../src/lib/signInGuard";
 import { forgetStorageUsage, type StorageSnapshot } from "../src/lib/storageLimits";
 import { STORAGE_PAUSED } from "../src/services/storageBucket";
 
@@ -162,10 +163,18 @@ describe("stored files through the gateway", () => {
     expect(res.headers.get("content-disposition")).toBe('attachment; filename="gl.pdf"');
   });
 
-  it("leaves uploads and the rest of Storage alone", () => {
+  it("leaves uploads alone", () => {
     const html = new Response("x", { headers: { "content-type": "text/html" } });
     expect(safeFile(new Request("http://x/storage/v1/object/files/co/a.html", { method: "POST", body: "x" }), html)).toBe(html);
-    expect(safeFile(new Request("http://x/storage/v1/bucket"), html)).toBe(html);
+  });
+
+  it("treats whatever Storage answers a GET with the same way, at any of its addresses", async () => {
+    for (const path of ["/storage/v1/render/image/authenticated/files/co/a?as=text%2Fhtml", "/storage/v1/bucket?as=text%2Fhtml", "/storage/v1/anything/else?as=image%2Fsvg%2Bxml"]) {
+      const res = await get(path);
+      expect(res.headers.get("x-content-type-options"), path).toBe("nosniff");
+      expect(res.headers.get("content-disposition"), path).toBe("attachment");
+      expect(res.headers.get("content-security-policy"), path).toBe("sandbox; default-src 'none'");
+    }
   });
 });
 
@@ -450,7 +459,7 @@ describe("storage limits at the gateway", () => {
     expect((await create(`${CO}/plans/b.pdf`, 0, { "Upload-Length": "", "Upload-Defer-Length": "1", Authorization: `Bearer ${service}` })).status).toBe(200);
   });
 
-  it("only reads through Storage's S3 address: uploads there would skip the limits", async () => {
+  it("doesn't use Storage's S3 address at all: uploads there would skip the limits, and a file read there could be asked for as a web page", async () => {
     numbers = { companyUsed: 0, companyLimit: null, userUsed: 0, userLimit: null, owner: false, member: true };
     const s3 = (method: string, path: string) =>
       limited().request(path, { method, headers: { Authorization: "AWS4-HMAC-SHA256 Credential=crewtavo/20261028/stub/s3/aws4_request", "x-amz-security-token": ana, ...(method === "PUT" ? { "Content-Length": "4" } : {}) }, ...(method === "PUT" ? { body: "file" } : {}) }, from);
@@ -459,13 +468,18 @@ describe("storage limits at the gateway", () => {
       ["POST", `/storage/v1/s3/files/${CO}/plans/a.pdf?uploads`],
       ["POST", "/storage/v1/s3/files"],
       ["PUT", `/storage/v1/%73%33/files/${CO}/plans/a.pdf`],
+      ["GET", `/storage/v1/s3/files/${CO}/plans/a.pdf`],
+      ["GET", `/storage/v1/s3/files/${CO}/plans/a.html?X-Amz-Signature=x&response-content-type=text%2Fhtml`],
+      ["HEAD", `/storage/v1/s3/files/${CO}/plans/a.pdf`],
+      ["GET", "/storage/v1/s3"],
+      ["GET", `/storage/v1/S3/files/${CO}/plans/a.pdf`],
+      ["GET", `/storage/v1//s3/files/${CO}/plans/a.pdf`],
     ] as const) {
       const res = await s3(method, path);
       expect(res.status, `${method} ${path}`).toBe(403);
-      expect((await res.json()).message).toBe("Crewtavo doesn't take files through Storage's S3 address. Upload them in Crewtavo.");
+      if (method !== "HEAD") expect((await res.json()).message).toBe(NO_S3);
     }
     expect(reached).toEqual([]);
-    expect((await s3("GET", `/storage/v1/s3/files/${CO}/plans/a.pdf`)).status).toBe(200);
   });
 
   it("counts a resumable upload once its last piece is in, not again on top of the database's number", async () => {
@@ -605,5 +619,70 @@ describe("a new password straight through Auth", () => {
     const read = await gateway(env, { auth: base, rest: base, storage: base }, { jwtSecret: SECRET }).request("/auth/v1/user", { headers: { Authorization: `Bearer ${stale}` } }, from);
     expect(read.status).toBe(200);
     expect(reached).toEqual(["PUT /user", "GET /user"]);
+  });
+});
+
+describe("sign-in links through the gateway", () => {
+  const SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
+  const instance: Env = { ...env, CREWTAVO_GATEWAY: "1" };
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const key = (role: string, secret = SECRET) => {
+    const unsigned = `${part({ alg: "HS256", typ: "JWT" })}.${part({ role, iss: "supabase", exp: Math.floor(Date.now() / 1000) + 3600 })}`;
+    return `${unsigned}.${createHmac("sha256", secret).update(unsigned).digest("base64url")}`;
+  };
+  const auth = (path: string, init: { method?: string; body?: unknown; token?: string } = {}) =>
+    gateway(instance, { auth: base, rest: base, storage: base }, { jwtSecret: SECRET }).request(
+      `/auth/v1${path}`,
+      { method: init.method ?? "POST", headers: { "Content-Type": "application/json", ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}) }, ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }) },
+      from,
+    );
+  const TOKEN = "cd34".repeat(14);
+  beforeEach(() => {
+    reached.length = 0;
+  });
+
+  it("redeems a link this server sent, handing Auth the token it made", async () => {
+    const res = await auth("/verify", { body: { type: "invite", token_hash: await sealAuthToken(instance, TOKEN, "invite") } });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(((await res.json()) as { text: string }).text)).toEqual({ type: "invite", token_hash: TOKEN });
+    expect(reached).toEqual(["POST /verify"]);
+  });
+
+  it("never asks Auth about a token without the signature, by any address or method", async () => {
+    for (const [path, init] of [
+      ["/verify", { body: { type: "invite", token_hash: TOKEN } }],
+      ["/verify", { body: { type: "magiclink", email: "owner@example.com", token: "123456" } }],
+      ["/verify/", { body: { type: "invite", token_hash: TOKEN } }],
+      ["/VERIFY", { body: { type: "invite", token_hash: TOKEN } }],
+      ["/v%65rify", { body: { type: "invite", token_hash: TOKEN } }],
+      [`/verify?token=${TOKEN}&type=invite&redirect_to=https://ops.example.com`, { method: "GET" }],
+      // Not even as the server: nothing of its own redeems a link.
+      ["/verify", { body: { type: "invite", token_hash: TOKEN }, token: key("service_role") }],
+    ] as const) {
+      const res = await auth(path, init);
+      expect(res.status, path).toBe(403);
+      expect(((await res.json()) as { error_code: string }).error_code).toBe("otp_expired");
+    }
+    expect(reached).toEqual([]);
+  });
+
+  it("leaves Auth's own emails to the server: a stranger can't have a token made, or a waiting link replaced", async () => {
+    for (const path of ["/recover", "/otp", "/magiclink", "/resend", "/RECOVER", "/recover/", "/%6ftp"]) {
+      for (const token of [undefined, key("anon"), key("authenticated"), key("service_role", "another-secret-of-at-least-32-characters-long")]) {
+        const res = await auth(path, { body: { email: "owner@example.com" }, token });
+        expect(res.status, path).toBe(403);
+        expect(((await res.json()) as { msg: string }).msg).toBe(NO_AUTH_MAIL);
+      }
+    }
+    expect(reached).toEqual([]);
+    expect((await auth("/recover", { body: { email: "owner@example.com" }, token: key("service_role") })).status).toBe(200);
+    expect(reached).toEqual(["POST /recover"]);
+  });
+
+  it("leaves the rest of Auth as it was", async () => {
+    expect((await auth("/token?grant_type=refresh_token", { body: { refresh_token: "r" } })).status).toBe(200);
+    expect((await auth("/user", { method: "GET", token: key("authenticated") })).status).toBe(200);
+    expect((await auth("/logout", { body: {} })).status).toBe(200);
+    expect(reached).toEqual(["POST /token?grant_type=refresh_token", "GET /user", "POST /logout"]);
   });
 });

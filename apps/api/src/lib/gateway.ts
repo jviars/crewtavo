@@ -10,7 +10,7 @@ import { STORAGE_PAUSED, storageWritesPaused } from "../services/storageBucket";
 import { guardAssistant, guardConsent } from "./assistants";
 import { EMAILED_SIGN_INS, signedInWithin } from "./auth";
 import { authMetadata, signsIdTokens, withoutOpenId } from "./authMetadata";
-import { guardSignIn, isGuessable, readUpTo } from "./signInGuard";
+import { authRoute, guardLink, guardSignIn, isGuessable, NO_AUTH_MAIL, readUpTo, sendsAuthMail } from "./signInGuard";
 import type { Stack } from "./stack";
 import { guardStorage, routedPath, snapshotsFrom, verifiedClaims, type SnapshotSource } from "./storageLimits";
 import { adminClient } from "./supabase";
@@ -50,9 +50,16 @@ export function gateway(
     if (plain && !(await signsIdTokens(`${stack.auth.replace(/\/$/, "")}/.well-known/jwks.json`))) incoming = new Request(plain, incoming);
     // ...and only someone on a team connects one (a sub's sign-in can't).
     return guardConsent(env, incoming, "/auth/v1", (consented) =>
-      guardAssistant(env, consented, "/auth/v1", (request) =>
-        isGuessable(request.method, new URL(request.url), "/auth/v1") ? guardSignIn(env, request, send) : guardPasswordChange(request, jwtSecret, send),
-      ),
+      guardAssistant(env, consented, "/auth/v1", async (request) => {
+        const url = new URL(request.url);
+        const route = authRoute(url, "/auth/v1");
+        // An emailed link is redeemed only with this server's signature on its token, and Auth's
+        // own emails (which would make tokens without one, or replace a link someone is waiting
+        // on) are only ever asked for by this server (lib/signInGuard.ts).
+        if (route === "/verify") return guardLink(env, request, send);
+        if (sendsAuthMail(route) && !asServer(request, jwtSecret)) return Response.json({ code: 403, error_code: "validation_failed", msg: NO_AUTH_MAIL }, { status: 403 });
+        return isGuessable(request.method, url, "/auth/v1") ? guardSignIn(env, request, send) : guardPasswordChange(request, jwtSecret, send);
+      }),
     );
   });
   routes.all("/rest/v1/*", (c) => guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c))));
@@ -63,8 +70,8 @@ export function gateway(
     if (storageWritesPaused() && storesFile(c.req.raw)) {
       return c.json({ statusCode: "503", error: "Moving", message: STORAGE_PAUSED }, 503, { "Retry-After": "30" });
     }
-    if (storesThroughS3(c.req.raw)) {
-      return c.json({ statusCode: "403", error: "Forbidden", message: "Crewtavo doesn't take files through Storage's S3 address. Upload them in Crewtavo." }, 403);
+    if (throughS3(c.req.raw)) {
+      return c.json({ statusCode: "403", error: "Forbidden", message: NO_S3 }, 403);
     }
     if (copiesAsPerson(c.req.raw, jwtSecret)) {
       return c.json({ statusCode: "403", error: "Forbidden", message: "Crewtavo copies and moves stored files itself. Upload the file where you want it instead." }, 403);
@@ -157,16 +164,24 @@ export function storesFile(request: Request): boolean {
 /** Storage's S3 address (s3/...), as Storage's router reads the path. */
 const S3 = /^\/storage\/v1\/s3(?:\/|$)/;
 
+export const NO_S3 = "Crewtavo doesn't use Storage's S3 address. Open and upload files in Crewtavo.";
+
 /**
- * A request that may store a file through Storage's S3 address. Storage takes those from anyone
- * signed in (their token as the S3 session token, with the public anon key), and they'd go in
- * past the storage limits (lib/storageLimits.ts), which only know Crewtavo's own ways of
- * uploading. Nothing in Crewtavo uploads that way, so here it's for reading only.
+ * A request to Storage's S3 address, to read or to write. Storage takes those from anyone signed in
+ * (their token as the S3 session token, with the public anon key). An upload there would go in past
+ * the storage limits (lib/storageLimits.ts), and a file read there can be asked for as any type,
+ * web page included, from this server's own address. Nothing in Crewtavo uses it, so it's closed.
  */
-export function storesThroughS3(request: Request): boolean {
-  if (!storesFile(request)) return false;
+export function throughS3(request: Request): boolean {
   const path = routedPath(new URL(request.url).pathname);
-  return path !== null && S3.test(path);
+  // A path that can't be decoded isn't one of Storage's routes at all: Storage turns it down.
+  return path !== null && (S3.test(path) || S3.test(path.toLowerCase().replace(/\/+/g, "/")));
+}
+
+/** Whether a request carries this server's own key (the service role's), not a person's token. */
+function asServer(request: Request, secret: string | null | undefined): boolean {
+  const token = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  return verifiedClaims(token, secret)?.role === "service_role";
 }
 
 /** Storage's copy and move (object/copy, object/move), as its router reads the path. */
@@ -182,8 +197,7 @@ export function copiesAsPerson(request: Request, secret: string | null | undefin
   if (!storesFile(request)) return false;
   const path = routedPath(new URL(request.url).pathname);
   if (path === null || !COPY_OR_MOVE.test(path)) return false;
-  const token = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
-  return verifiedClaims(token, secret)?.role !== "service_role";
+  return !asServer(request, secret);
 }
 
 /** Stored files a browser may show in place: PDFs and photos. Not SVG drawings, which can run scripts. */
@@ -195,10 +209,12 @@ const SHOWN_INLINE = new Set(["application/pdf", "image/jpeg", "image/png", "ima
  * page (a sub's "paperwork", say) would run as the app when the office opened it. Every file is
  * served as exactly its type (nosniff); anything but a PDF or a photo downloads instead of opening,
  * and if it's opened anyway it runs in a sandbox with nothing allowed. (PDFs aren't sandboxed:
- * Chrome won't show a PDF in a sandboxed page.)
+ * Chrome won't show a PDF in a sandboxed page.) Everything Storage answers a GET with is treated
+ * this way, wherever under Storage it came from: which of its addresses serve files is Storage's
+ * to change, and its own answers (lists, statuses) are read by code, which the headers don't touch.
  */
 export function safeFile(request: Request, res: Response): Response {
-  if (!["GET", "HEAD"].includes(request.method) || !new URL(request.url).pathname.startsWith("/storage/v1/object/")) return res;
+  if (!["GET", "HEAD"].includes(request.method)) return res;
   const headers = new Headers(res.headers);
   headers.set("X-Content-Type-Options", "nosniff");
   const type = (headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();

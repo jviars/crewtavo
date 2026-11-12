@@ -36,6 +36,7 @@ import { renderEmail } from "../lib/email";
 import { dbError, HttpError } from "../lib/http";
 import { allowStrict } from "../lib/limit";
 import { reportError } from "../lib/monitoring";
+import { sealAuthToken } from "../lib/signInGuard";
 import { anyMailbox, emailConfigured, emailReady, sendEmail, sendSms, smsConfigured } from "../lib/notify";
 import { adminClient } from "../lib/supabase";
 import { logoImage } from "./logo";
@@ -377,7 +378,8 @@ async function signInLink(env: Env, way: Way, baseUrl: string, login: SubSignIn)
     console.error(`${way.name}: couldn't make the sign-in link`, error);
     throw new HttpError(500, NO_SIGN_IN);
   }
-  return { token_hash: data.properties.hashed_token, type: "magiclink" };
+  // Sealed as an emailed link's token is: the gateway redeems nothing else (lib/signInGuard.ts).
+  return { token_hash: await sealAuthToken(env, data.properties.hashed_token, "magiclink"), type: "magiclink" };
 }
 
 /**

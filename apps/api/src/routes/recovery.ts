@@ -33,7 +33,7 @@ async function resetLink(env: Env, base: string, email: string, userId: string):
     throw new HttpError(500, "Couldn't make the link. Try again in a moment.");
   }
   // Someone who never signed in gets the "set your password" wording.
-  return emailAuthLink(base, data.properties.hashed_token, "recovery", !account.user?.last_sign_in_at);
+  return emailAuthLink(env, base, data.properties.hashed_token, "recovery", !account.user?.last_sign_in_at);
 }
 
 recovery.post("/team/:userId/password-link", requireUser, requireCompany(ADMINS, "team"), async (c) => {

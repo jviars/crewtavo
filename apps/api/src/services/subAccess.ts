@@ -311,7 +311,7 @@ export async function sendSignInLink(s: SubAccessScope, subId: string, send: Sig
     console.error("Couldn't make a sub's sign-in link", error);
     throw new HttpError(500, "Couldn't make the link. Try again in a moment.");
   }
-  out.link = emailAuthLink(s.baseUrl, data.properties.hashed_token, "magiclink");
+  out.link = await emailAuthLink(s.env, s.baseUrl, data.properties.hashed_token, "magiclink");
   const message = signInLinkMessages({ companyName: company.name, subName: sub.name, contactName: sub.contact_name, link: out.link });
 
   if (send === "text") {
