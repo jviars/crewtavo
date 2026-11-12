@@ -17,7 +17,7 @@ import { adminClient, type Db } from "../lib/supabase";
 import { companyAnthropicKey, complete } from "../services/ai";
 import { analyticsSettings } from "../services/analytics";
 import { AbcProblem, chooseAbcAccount, connectAbc, settingsOf as abcSettingsOf } from "../integrations/abcSupply";
-import { describeAccount } from "../integrations/accounting";
+import { describeAccount, retryAccounting } from "../integrations/accounting";
 import { deleteVisitsCalendar, describeGoogleAccount, pushUpcomingVisits } from "../integrations/calendars";
 import { checkFalKey } from "../integrations/fal";
 import { describeGoogleBusiness, findLocation, GoogleBusinessError } from "../integrations/googleBusiness";
@@ -282,6 +282,11 @@ apps.get("/apps/:provider/callback", async (c) => {
     });
     if (error) throw new Error(error.message);
     await saveSecret(c.env, admin, state.company, provider, secret);
+    // The books are back (the sign-in had expired, or other books were connected meanwhile): the
+    // changes for them that the task gave up on go again. Connecting doesn't fail over it.
+    if ((provider === "quickbooks" || provider === "zoho_books") && account.external_account_id) {
+      await retryAccounting(admin, state.company, provider, account.external_account_id).catch((error) => console.error("Couldn't queue accounting changes again", provider, error));
+    }
     // Reconnected while visits go to Google: changes made while it needed reconnecting weren't
     // queued, so bring the visits calendar in line again (visits cancelled or deleted meanwhile
     // come off it too).
@@ -349,6 +354,26 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
   if (error) throw dbError(error);
   if (who && was) runInBackground(c, noteStripeChange(c, who, { before: was.label, after: null, from: was.id, to: null, moved: null }));
   return c.json({ provider, status: "disconnected", ...(provider === "google_business" ? { removed } : {}), ...(shared ? { revoked: false } : {}) });
+});
+
+/**
+ * QuickBooks and Zoho Books, Try again: the changes the task gave up on for the connected books
+ * are queued again, once whatever stopped them is fixed there. The note about them goes when some
+ * were queued; one that fails again brings it back.
+ */
+apps.post("/apps/:provider/retry", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
+  const provider = c.req.param("provider");
+  if (provider !== "quickbooks" && provider !== "zoho_books") throw new HttpError(400, "That app has nothing to try again.");
+  const admin = adminClient(c.env);
+  const { data: row, error } = await admin.from("integrations").select("status, external_account_id").match({ company_id: c.var.companyId, provider }).maybeSingle();
+  if (error) throw dbError(error);
+  if (row?.status !== "connected" || !row.external_account_id) throw new HttpError(409, `Connect ${catalogEntry(provider)?.name ?? "the app"} first.`);
+  const queued = await retryAccounting(admin, c.var.companyId, provider, row.external_account_id);
+  if (queued) {
+    const cleared = await admin.from("integrations").update({ last_error: null }).match({ company_id: c.var.companyId, provider });
+    if (cleared.error) throw dbError(cleared.error);
+  }
+  return c.json({ queued });
 });
 
 /**

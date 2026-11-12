@@ -15,7 +15,7 @@ import stripeLogo from "@/assets/apps/stripe.svg";
 import sveltiaLogo from "@/assets/apps/sveltia.svg";
 import twilioLogo from "@/assets/apps/twilio.svg";
 import zohoLogo from "@/assets/apps/zoho.svg";
-import type { AppRow } from "./catalog";
+import { APP_INFO, type AppRow } from "./catalog";
 
 const LOGOS: Record<string, string> = {
   team_chat: crewtavoLogo,
@@ -84,8 +84,10 @@ export function appBadge(app: AppRow, installed: boolean): { tone: "good" | "dan
 /** An app on the grid: its icon with its name beneath. */
 export function AppTile({ app, installed }: { app: AppRow; installed: boolean }) {
   const badge = appBadge(app, installed);
+  // Not proven everywhere yet (catalog.ts): said under the name, and on its page.
+  const beta = Boolean(APP_INFO[app.id]?.beta);
   return (
-    <Link to={`/apps/${app.id}`} className="app-tile" aria-label={`${app.name}${badge ? `, ${badge.label}` : ""}`}>
+    <Link to={`/apps/${app.id}`} className="app-tile" aria-label={`${app.name}${beta ? ", Beta" : ""}${badge ? `, ${badge.label}` : ""}`}>
       <span className="app-tile-icon">
         <AppIcon id={app.id} name={app.name} />
         {badge && (
@@ -95,6 +97,7 @@ export function AppTile({ app, installed }: { app: AppRow; installed: boolean })
         )}
       </span>
       <span className="app-tile-name">{app.name}</span>
+      {beta && <span className="muted small">Beta</span>}
     </Link>
   );
 }

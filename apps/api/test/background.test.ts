@@ -4,7 +4,7 @@ import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { runAccountingJob, SentButUnrecorded } from "../src/integrations/accounting";
 import { accessToken } from "../src/integrations/tokens";
-import { decryptJson, encryptJson } from "../src/lib/crypto";
+import { decryptJson, encryptJson, signToken } from "../src/lib/crypto";
 import { readClientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
 import { processAutomations, visitTime } from "../src/services/automations";
@@ -411,6 +411,62 @@ describe("accounting sync", () => {
         accessToken(env, db, COMPANY, "zoho_books"),
       ]);
       expect(new Set(tokens.map((t) => t.token)).size).toBe(3);
+    });
+  });
+
+  // After its eight tries the task leaves a change be, and so it stayed, even once the owner had
+  // fixed what was wrong.
+  describe("changes the task gave up on", () => {
+    const headers = { Authorization: "Bearer token", "X-Company-Id": COMPANY, "Content-Type": "application/json" };
+    /** Our side: the member asking, QuickBooks' row as given, and how many changes the database queues again. */
+    const ours = (row: Record<string, unknown> | null, waiting = 2) =>
+      fakeDb(
+        (q) => {
+          if (q.table === "memberships") return { data: { role: "owner", role_id: null } };
+          if (q.table === "integrations" && verb(q) === "select") return { data: row };
+          return { data: null };
+        },
+        (fn) => (fn === "requeue_accounting" ? { data: waiting } : {}),
+      );
+    const again = (rpcs: Array<{ fn: string; args: Record<string, any> }>) => rpcs.filter((r) => r.fn === "requeue_accounting").map((r) => r.args);
+
+    it("go again when the owner connects the same books again", async () => {
+      const { rpcs, queries } = ours(null);
+      vi.stubGlobal("fetch", async (url: string) =>
+        url.includes("/oauth2/v1/tokens/bearer") ? Response.json({ access_token: "access-1", refresh_token: "refresh-1", expires_in: 3600 }) : Response.json({ CompanyInfo: { CompanyName: "Meadows Exteriors" } }),
+      );
+      const state = await signToken(env, { company: COMPANY, user: "user-1", provider: "quickbooks", nonce: "nonce-1", exp: Math.floor(Date.now() / 1000) + 600 });
+      const res = await app.request(`/api/apps/quickbooks/callback?${new URLSearchParams({ state, code: "code-1", realmId: "realm-1" })}`, { headers: { Cookie: "crewtavo_oauth_nonce=nonce-1" } }, env);
+      expect(res.headers.get("location")).toContain("/apps/quickbooks?status=connected");
+      expect(again(rpcs)).toEqual([{ p_company: COMPANY, p_provider: "quickbooks", p_account: "realm-1" }]);
+      // Only once the sign-in is saved: before that they'd fail again.
+      expect(queries.some((q) => q.table === "integration_secrets" && verb(q) === "upsert")).toBe(true);
+    });
+
+    it("go again when the owner asks, and the note about them goes", async () => {
+      const { rpcs, queries } = ours({ status: "connected", external_account_id: "realm-1" });
+      const res = await app.request("/api/apps/quickbooks/retry", { method: "POST", headers }, env);
+      expect(await res.json()).toEqual({ queued: 2 });
+      expect(again(rpcs)).toEqual([{ p_company: COMPANY, p_provider: "quickbooks", p_account: "realm-1" }]);
+      expect(integrationWrites(queries)).toEqual([{ last_error: null }]);
+    });
+
+    it("keep the note when there was nothing to try again", async () => {
+      const { queries } = ours({ status: "connected", external_account_id: "realm-1" }, 0);
+      const res = await app.request("/api/apps/quickbooks/retry", { method: "POST", headers }, env);
+      expect(await res.json()).toEqual({ queued: 0 });
+      expect(integrationWrites(queries)).toEqual([]);
+    });
+
+    it.each([
+      ["quickbooks", { status: "error", external_account_id: "realm-1" }, 409],
+      ["zoho_books", null, 409],
+      ["stripe", { status: "connected", external_account_id: "acct_1" }, 400],
+    ] as const)("aren't tried for %s while it isn't the connected books", async (provider, row, status) => {
+      const { rpcs } = ours(row);
+      const res = await app.request(`/api/apps/${provider}/retry`, { method: "POST", headers }, env);
+      expect(res.status).toBe(status);
+      expect(again(rpcs)).toEqual([]);
     });
   });
 

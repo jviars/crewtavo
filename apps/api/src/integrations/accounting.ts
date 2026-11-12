@@ -84,6 +84,7 @@ async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: s
   };
   let { error } = await ctx.admin.from("sync_links").upsert(link);
   if (error) ({ error } = await ctx.admin.from("sync_links").upsert(link));
+  // By these words requeue_accounting() knows the job as one never to send again.
   if (error) throw new SentButUnrecorded(`Sent ${entity} ${externalId} but couldn't record it: ${error.message}`);
 }
 
@@ -403,6 +404,18 @@ export async function runAccountingJob(env: Env, admin: Db, row: { company_id: s
     .from("integrations")
     .update({ last_sync_at: new Date().toISOString(), status: "connected" })
     .match({ company_id: row.company_id, provider: integration.provider });
+}
+
+/**
+ * Changes the task gave up on for these books go again (public.requeue_accounting): after its
+ * eight tries, or because other books were connected at the time. For when the owner has fixed
+ * what was wrong: on connecting those books again, or Try again on the app's page. Never a change
+ * the books took but whose link wasn't saved. Says how many were queued.
+ */
+export async function retryAccounting(admin: Db, companyId: string, provider: Accounting, account: string): Promise<number> {
+  const { data, error } = await admin.rpc("requeue_accounting", { p_company: companyId, p_provider: provider, p_account: account });
+  if (error) throw new IntegrationError(error.message);
+  return data ?? 0;
 }
 
 /** After connecting: find the QuickBooks company name or the Zoho organization. */

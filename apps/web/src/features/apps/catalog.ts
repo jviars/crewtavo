@@ -229,6 +229,11 @@ export interface AppInfo {
   website: string;
   /** Where Open goes once it's installed, when not the website: a page in Crewtavo, or the app itself. */
   open?: string;
+  /**
+   * An app that works but isn't proven everywhere yet: it's marked Beta on the grid and on its
+   * page, which says this one sentence about what to watch.
+   */
+  beta?: string;
 }
 
 const CALENDAR_HIGHLIGHTS: AppInfo["highlights"] = [
@@ -590,6 +595,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     connectsWith: "Intuit sign-in",
     website: "https://quickbooks.intuit.com/",
     open: "https://qbo.intuit.com/",
+    beta: "This sync hasn't been proven against every kind of QuickBooks account yet, so check the first few invoices in QuickBooks.",
   },
   zoho_books: {
     developer: "Zoho",
@@ -605,6 +611,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     connectsWith: "Zoho sign-in",
     website: "https://www.zoho.com/books/",
     open: "https://books.zoho.com/",
+    beta: "This sync hasn't been proven against every kind of Zoho Books account yet, so check the first few invoices in Zoho Books.",
   },
   stripe: {
     developer: "Stripe",

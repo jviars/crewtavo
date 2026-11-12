@@ -337,6 +337,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
             {actions}
             {((installed && !phase) || unavailable) && <StatusPill label={status.label} tone={status.tone} />}
             {installed && app.id === "stripe" && !app.stripe?.own && <span className="muted small">Set up for this server</span>}
+            {info.beta && <StatusPill label="Beta" tone="info" />}
           </div>
         </div>
       </header>
@@ -347,6 +348,13 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
         {connectsWith && <div><dt>Connects with</dt><dd>{connectsWith}</dd></div>}
         <div><dt>Status</dt><dd>{status.label}</dd></div>
       </dl>
+
+      {info.beta && (
+        <div className="callout" role="note">
+          <Icon name="info" size={20} />
+          <div className="grow">Beta<span style={{ display: "block", fontWeight: 400 }}>{info.beta}</span></div>
+        </div>
+      )}
 
       {callback && (
         <div className={`callout ${callback.ok && !signedInNotReady(callback.pending, app) ? "callout-good" : "callout-warning"}`} role={callback.ok ? "status" : "alert"}>
@@ -418,7 +426,7 @@ function AppListing({ app, all, mcpUrl }: { app: AppRow; all: AppRow[]; mcpUrl: 
       {installed && (
         <>
           {byLinkOnly(app) && <GoogleBySecretAddress app={app} sources={googleSources} />}
-          {app.auth === "oauth" && app.available && app.id !== "google_business" && app.id !== "meta" && (app.status === "disconnected" ? app.id === "google_calendar" && googleSignIn : <AccountCard app={app} />)}
+          {app.auth === "oauth" && app.available && app.id !== "google_business" && app.id !== "meta" && (app.status === "disconnected" ? app.id === "google_calendar" && googleSignIn : <AccountCard app={app} onChanged={refresh} />)}
           {app.id === "meta" && <MetaPanel app={app} onChanged={refresh} />}
           {app.id === "google_business" && <GoogleBusinessPanel app={app} onChanged={refresh} onReconnect={() => connect.mutate()} reconnecting={connect.isPending} />}
           {/* Google Business Profile's and Facebook & Instagram's own panels are the page's setup anchor. */}
@@ -661,7 +669,16 @@ function GoogleBySecretAddress({ app, sources }: { app: AppRow; sources: Calenda
 }
 
 /** The provider account a sign-in app is connected to. */
-function AccountCard({ app }: { app: AppRow }) {
+function AccountCard({ app, onChanged }: { app: AppRow; onChanged: () => void }) {
+  // QuickBooks and Zoho Books: what couldn't be sent goes again, once it's fixed in the books.
+  const retry = useMutation({
+    mutationFn: () => api.post<{ queued: number }>(`/apps/${app.id}/retry`),
+    onSuccess: (res) => {
+      if (res.queued) toast.success(res.queued === 1 ? "Trying 1 change again" : `Trying ${res.queued} changes again`);
+      else toast.info("Nothing is waiting to be tried again.");
+      onChanged();
+    },
+  });
   if (app.status === "disconnected") return null;
   return (
     <section className="card card-pad stack-sm" aria-label="Account" style={{ gap: 6 }}>
@@ -672,6 +689,9 @@ function AccountCard({ app }: { app: AppRow }) {
         </span>
       </div>
       {app.last_error && <span className="small" style={{ color: "var(--danger)", fontWeight: 600 }}>{app.last_error}</span>}
+      {app.last_error && app.status === "connected" && app.category === "Accounting" && (
+        <Button size="sm" icon="refresh" style={{ justifySelf: "start" }} loading={retry.isPending} onClick={() => retry.mutate()}>Try again</Button>
+      )}
       {app.last_sync_at && app.status === "connected" && <span className="muted small">Last synced {timeAgo(app.last_sync_at)}</span>}
     </section>
   );
