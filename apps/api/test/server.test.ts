@@ -117,4 +117,17 @@ describe("the server", () => {
     expect(asset["cache-control"]).toBe("public, max-age=31536000, immutable");
     expect(asset["content-security-policy"]).toBeUndefined();
   });
+
+  it("answers a built file that isn't there with a 404, not with the app's page to keep forever", async () => {
+    // A screen's file from the version before a rollback, or the one after it.
+    for (const path of ["/assets/Visit-9z8y.js", "/assets/index-9z8y.css", "/assets/"]) {
+      expect(await send(path), path).toBe(404);
+      const headers = await headersOf(path);
+      expect(headers["content-type"], path).not.toContain("text/html");
+      expect(headers["cache-control"], path).toBe("no-store");
+    }
+    // Any other address is still the app's page, which works out the screen itself.
+    expect(await send("/jobs/123")).toBe(200);
+    expect((await headersOf("/jobs/123"))["cache-control"]).toBe("no-cache");
+  });
 });

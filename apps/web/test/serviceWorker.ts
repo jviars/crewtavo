@@ -10,27 +10,24 @@ import { vi } from "vitest";
 const ORIGIN = "https://crew.example.com";
 const keyOf = (request: string | { url: string }) => new URL(typeof request === "string" ? request : request.url, ORIGIN).href;
 
-/** Cache Storage, kept in memory. Entries are saved as their text. */
+/** Cache Storage, kept in memory. Entries are saved as their text, and what kind of file each said it was. */
 export class FakeCaches {
   readonly stores = new Map<string, Map<string, string>>();
-  /** The network a cache downloads from (cache.add): the worker's own, once one is loaded with these caches. */
-  network: (request: { url: string }) => Promise<Response> = async () => Promise.reject(new TypeError("Failed to fetch"));
+  private readonly types = new Map<string, string>();
 
   async open(name: string) {
     const store = this.stores.get(name) ?? new Map<string, string>();
     this.stores.set(name, store);
+    const typeKey = (request: string | { url: string }) => `${name} ${keyOf(request)}`;
     return {
-      put: async (request: string | { url: string }, response: Response) => void store.set(keyOf(request), await response.text()),
-      match: async (request: string | { url: string }) => (store.has(keyOf(request)) ? new Response(store.get(keyOf(request))) : undefined),
+      put: async (request: string | { url: string }, response: Response) => {
+        this.types.set(typeKey(request), response.headers.get("content-type") ?? "");
+        store.set(keyOf(request), await response.text());
+      },
+      match: async (request: string | { url: string }) => (store.has(keyOf(request)) ? new Response(store.get(keyOf(request)), { headers: { "content-type": this.types.get(typeKey(request)) ?? "" } }) : undefined),
       delete: async (request: string | { url: string }) => store.delete(keyOf(request)),
       keys: async () => [...store.keys()].map((url) => ({ url })),
       addAll: async (requests: string[]) => requests.forEach((r) => store.set(keyOf(r), `saved ${r}`)),
-      // Like the browser's: a file that didn't download, or wasn't answered OK, isn't kept.
-      add: async (request: string | { url: string }) => {
-        const response = await this.network({ url: keyOf(request) });
-        if (!response.ok) throw new TypeError("Request failed");
-        store.set(keyOf(request), await response.text());
-      },
     };
   }
 
@@ -63,7 +60,6 @@ export function loadServiceWorker(options: { offline?: boolean; caches?: FakeCac
   const listeners = new Map<string, Listener>();
   const caches = options.caches ?? new FakeCaches();
   const network = options.network ?? (async () => Promise.reject(new TypeError("Failed to fetch")));
-  caches.network = network;
   const windows = (options.windows ?? []).map((w) => ({
     ...(typeof w === "string" ? { url: w, visibilityState: "visible", focused: true } : { visibilityState: "visible", focused: false, ...w }),
     focus: vi.fn(async () => undefined),

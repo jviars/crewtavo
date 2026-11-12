@@ -83,6 +83,9 @@ server.use("*", async (c, next) => {
 });
 
 // The web app: fingerprinted assets cache forever; everything else falls back to index.html.
+// Not a file under /assets/ that isn't there, though (one from a version before, or after, this
+// one): that's a 404, never the app's page kept forever under a script's name. The app then
+// reloads once into the version that's running (components/shell/RouteError.tsx).
 // Its pages can't be shown inside another site, so a signed-in screen (Apps → Stripe, say) can't
 // be dressed up to trick a click. Booking forms are left out: businesses put them on their own
 // websites (features/booking/embed.ts), and they're public anyway. The API has its own headers (app.ts).
@@ -99,6 +102,7 @@ server.use("*", async (c, next) => {
   else if (c.res.headers.get("content-type")?.includes("text/html")) c.res.headers.set("Cache-Control", "no-cache");
 });
 server.use("/*", serveStatic({ root: staticDir }));
+server.all("/assets/*", (c) => c.text("Not found", 404, { "Cache-Control": "no-store" }));
 server.get("*", (c) => {
   if (!indexHtml) return c.text("The web app isn't built. Run npm run build:server.", 500);
   return c.html(indexHtml, 200, { "Cache-Control": "no-cache" });

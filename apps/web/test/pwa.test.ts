@@ -9,6 +9,7 @@ import { inflateSync } from "node:zlib";
 import { ROLES } from "@crewtavo/core/roles";
 import { matchPath } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isStaleBuild } from "../src/components/shell/RouteError";
 import { canLogRequests } from "../src/features/requests/RequestsPage";
 import { SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
 import { FakeCaches, loadServiceWorker } from "./serviceWorker";
@@ -618,6 +619,62 @@ describe("opening the app through the service worker (production builds)", () =>
     }
   });
 
+  describe("a built file that isn't there", () => {
+    const script = (path: string) => ({ url: `https://crew.example.com${path}`, method: "GET", mode: "cors" });
+    const js = (body: string) => new Response(body, { headers: { "content-type": "text/javascript; charset=utf-8" } });
+
+    it("is never kept as the page that came back for it, so the screen works again once the file is there", async () => {
+      const caches = new FakeCaches();
+      // A server before this version answers a missing file with the app's page, marked to keep forever.
+      let answer = async () => new Response("<!doctype html><title>Crewtavo</title>", { headers: { "content-type": "text/html; charset=UTF-8", "cache-control": "public, max-age=31536000, immutable" } });
+      const sw = loadServiceWorker({ caches, offline: true, network: () => answer() });
+      const request = script("/assets/Visit-NEW00003.js");
+      expect(await text(await sw.dispatch("fetch", { request }))).toContain("<!doctype html>");
+      await sw.dispatch("message", { data: { type: "cache-assets", urls: [request.url] } });
+      // This version's server says it isn't there.
+      answer = async () => new Response("Not found", { status: 404 });
+      expect(((await sw.dispatch("fetch", { request })) as Response).status).toBe(404);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(caches.entries(APP)).toEqual({});
+
+      // Deployed again: the file is there, and is kept from now on.
+      answer = async () => js("export const Visit = 1;");
+      expect(await text(await sw.dispatch("fetch", { request }))).toBe("export const Visit = 1;");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      answer = async () => Promise.reject(new TypeError("Failed to fetch"));
+      expect(await text(await sw.dispatch("fetch", { request }))).toBe("export const Visit = 1;");
+    });
+
+    it("kept as a page by the version before, is dropped and asked for again", async () => {
+      const caches = new FakeCaches();
+      let answer: () => Promise<Response> = async () => js("export const Visit = 1;");
+      const sw = loadServiceWorker({ caches, offline: true, network: () => answer() });
+      const request = script("/assets/Visit-NEW00003.js");
+      await (await caches.open(APP)).put(request, html("<!doctype html><title>Crewtavo</title>"));
+      expect(await text(await sw.dispatch("fetch", { request }))).toBe("export const Visit = 1;");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(caches.entries(APP)).toEqual({ "/assets/Visit-NEW00003.js": "export const Visit = 1;" });
+
+      // With no signal it fails as a missing file does, rather than as a page that isn't a script.
+      await (await caches.open(APP)).put(request, html("<!doctype html><title>Crewtavo</title>"));
+      answer = async () => Promise.reject(new TypeError("Failed to fetch"));
+      await expect(sw.dispatch("fetch", { request })).rejects.toThrow("Failed to fetch");
+      expect(caches.entries(APP)).toEqual({});
+    });
+  });
+
+  it("a screen whose file is gone after a deploy reloads into the new version, whichever browser says so, its stylesheet included", () => {
+    for (const message of [
+      "Failed to fetch dynamically imported module: https://crew.example.com/assets/Visit-OLD00003.js",
+      "Importing a module script failed.",
+      "error loading dynamically imported module: https://crew.example.com/assets/Visit-OLD00003.js",
+      "Unable to preload CSS for /assets/Visit-OLD00008.css",
+    ]) {
+      expect(isStaleBuild(message), message).toBe(true);
+    }
+    expect(isStaleBuild("Cannot read properties of undefined (reading 'id')")).toBe(false);
+  });
+
   describe("files of older versions", () => {
     const page = '<link rel="stylesheet" href="/assets/index-NEW00002.css"><script type="module" src="/assets/index-NEW00001.js"></script>';
     const files: Record<string, string> = {
@@ -632,7 +689,10 @@ describe("opening the app through the service worker (production builds)", () =>
     /** A phone that has used the version before, with the new version's page just kept. */
     async function phone(online: boolean) {
       const caches = new FakeCaches();
-      const network = async ({ url }: { url: string }) => (online && files[new URL(url).pathname] ? new Response(files[new URL(url).pathname]) : Promise.reject(new TypeError("Failed to fetch")));
+      const network = async (request: string | { url: string }) => {
+        const path = new URL(typeof request === "string" ? request : request.url).pathname;
+        return online && files[path] ? new Response(files[path]) : Promise.reject(new TypeError("Failed to fetch"));
+      };
       const sw = loadServiceWorker({ caches, offline: true, network });
       const cache = await caches.open(APP);
       await cache.put("/", html(page));

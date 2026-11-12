@@ -90,15 +90,26 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/assets/") || /\.(png|svg|ico|woff2?)$/.test(url.pathname)) {
     event.respondWith(
       (async () => {
-        const cached = await caches.match(request);
-        if (cached) return cached;
+        const cache = await caches.open(CACHE);
+        const cached = await cache.match(request);
+        if (cached && !isPage(cached)) return cached;
+        // Kept by a version before this one, from a server that answered a missing file with the
+        // app's page: it goes, and the file is asked for again.
+        if (cached) await cache.delete(request).catch(() => undefined);
         const response = await fetch(request);
-        if (response.ok) (await caches.open(CACHE)).put(request, response.clone()).catch(() => undefined);
+        if (response.ok && !isPage(response)) cache.put(request, response.clone()).catch(() => undefined);
         return response;
       })(),
     );
   }
 });
+
+/**
+ * A page where a script, stylesheet or picture was asked for: never kept in its place. Kept, it
+ * would be handed back for good, and that screen would say "Crewtavo was updated. Reload" until the
+ * phone's site data was cleared.
+ */
+const isPage = (response) => (response.headers.get("content-type") ?? "").includes("text/html");
 
 /** The app's own page, fit to keep: answered OK, as HTML. Not an error page while the server restarts (502, 503), nor a redirect. */
 const isAppPage = (response) => response.ok && (response.headers.get("content-type") ?? "").includes("text/html");
@@ -132,11 +143,17 @@ self.addEventListener("message", (event) => {
   const urls = event.data.urls.filter((u) => typeof u === "string" && new URL(u, self.location.origin).origin === self.location.origin && new URL(u, self.location.origin).pathname.startsWith("/assets/"));
   event.waitUntil(
     caches.open(CACHE).then(async (cache) => {
-      for (const u of urls.slice(0, 300)) if (!(await cache.match(u))) await cache.add(u).catch(() => undefined);
+      for (const u of urls.slice(0, 300)) if (!(await cache.match(u))) await keepFile(cache, u).catch(() => undefined);
       await pruneAssets(cache, urls).catch(() => undefined);
     }),
   );
 });
+
+/** Downloads a built file and keeps it, unless what comes back isn't the file (isPage). */
+async function keepFile(cache, address) {
+  const response = await fetch(address);
+  if (response.ok && !isPage(response)) await cache.put(address, response);
+}
 
 /**
  * Clears the built files of older versions, which would otherwise pile up on the phone for good

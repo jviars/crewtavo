@@ -9,6 +9,13 @@ import { Icon } from "../ui/Icon";
 const RELOAD_KEY = "crewtavo.chunk-reload";
 
 /**
+ * A screen's file is gone: the app was deployed again since this page loaded, and the server says
+ * the old file isn't there (a 404). Each browser words it its own way, and a screen's stylesheet
+ * fails with Vite's own message.
+ */
+export const isStaleBuild = (message: string) => /dynamically imported module|Importing a module script failed|error loading dynamically|Failed to fetch dynamically|Unable to preload CSS/i.test(message);
+
+/**
  * A screen failed to load or crashed. After a deploy, old screen files disappear: reload once.
  * A message meant for people says what happened; one meant for developers is tucked away under
  * "Details for support", ready to copy with the screen and the time.
@@ -18,7 +25,7 @@ export function RouteError({ fullPage }: { fullPage?: boolean }) {
   const { pathname } = useLocation();
   const [at] = useState(() => new Date());
   const message = error instanceof Error ? error.message : isRouteErrorResponse(error) ? error.statusText : String(error);
-  const staleBuild = /dynamically imported module|Importing a module script failed|error loading dynamically|Failed to fetch dynamically/i.test(message);
+  const staleBuild = isStaleBuild(message);
   const notFound = isRouteErrorResponse(error) && error.status === 404;
 
   useEffect(() => {
