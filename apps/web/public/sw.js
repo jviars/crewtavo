@@ -3,17 +3,23 @@
  *   - Push: shows notifications sent by the server (schedule changes, client messages...) and opens
  *     the right screen when one is tapped.
  *   - Offline (production builds, registered as /sw.js?cache=1): the app itself opens with no
- *     signal. Pages come from the network when possible and from the cache when not; the built
- *     files under /assets/ never change, so they're kept. Data and the API are left to the app,
- *     which keeps the crew's day on the phone and queues their changes until they're back online.
- *     Stored files (/storage/) are never kept: a file moved to the Trash or deleted must stop
- *     opening, and each link to one is new.
+ *     signal. Its page comes from the network when that answers in a few seconds, and from the
+ *     copy kept here when not; only the app's own page, answered OK, is kept as that copy (never
+ *     an error page from a restart, nor a page the server makes itself). The built files under
+ *     /assets/ never change, so they're kept, and those of older versions are cleared once a new
+ *     version's page is running. Data and the API are left to the app, which keeps the crew's day
+ *     on the phone and queues their changes until they're back online. Stored files (/storage/)
+ *     are never kept: a file moved to the Trash or deleted must stop opening, and each link to
+ *     one is new.
  *   - Updates waiting: the app sends the crew's queued changes while it's on the screen
  *     (src/lib/offline.ts). Where there's Background Sync (Android), it asks to hear when the phone
  *     has signal; if Crewtavo isn't on the screen then, a notification says how many are waiting
  *     and opens the app.
  */
-// A new name empties what older versions kept (stored pictures, before /storage/ was left out).
+// A new name empties what older versions kept (stored pictures, before /storage/ was left out). It
+// also empties the app's own files, which a phone then has to download again before it can open
+// with no signal: change it only when what's kept must go. A new version of this file takes over
+// on its own (skipWaiting, clients.claim) and carries on with the same cache.
 const CACHE = "crewtavo-app-v2";
 const OFFLINE = new URL(self.location.href).searchParams.get("cache") === "1";
 const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/favicon.svg"];
@@ -22,6 +28,16 @@ const SYNC_TAG = "crewtavo-field-sync";
 const WAITING = "crewtavo-waiting";
 /** Pages for clients (Client Hub, booking forms, referrals): they don't run the crew's app. */
 const CLIENT_PAGES = /^\/(hub|book|u|refer)(\/|$)/;
+/**
+ * Left to the browser, with nothing kept: what the server answers itself (the API, sign-in links
+ * under /auth/, the database and stored files, a website form's thank-you page under /f/) and the
+ * clients' pages.
+ */
+const NOT_THE_APP = /^\/(api|mcp|\.well-known|storage|auth|rest|f|hub|book|u|refer)(\/|$)/;
+/** How long opening the app waits for the network before using the copy kept here: on one bar a page can hang for a minute. */
+const NAVIGATE_WAIT = 4000;
+/** Where the page that old files were last cleared for is noted (pruneAssets). */
+const PRUNED_FOR = "/pruned-for";
 const ours = (w) => new URL(w.url).origin === self.location.origin;
 /** A window running Crewtavo itself, which sends the crew's queued updates. */
 const appWindow = (w) => ours(w) && !CLIENT_PAGES.test(new URL(w.url).pathname);
@@ -48,22 +64,10 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (/^\/(api|mcp|\.well-known|storage|hub|book|u|refer)(\/|$)/.test(url.pathname)) return;
+  if (NOT_THE_APP.test(url.pathname)) return;
 
   if (request.mode === "navigate") {
-    // Network first so a deploy shows up at once; the saved app when there's no signal.
-    event.respondWith(
-      (async () => {
-        try {
-          const fresh = await fetch(request);
-          const cache = await caches.open(CACHE);
-          cache.put("/", fresh.clone()).catch(() => undefined);
-          return fresh;
-        } catch {
-          return (await caches.match("/")) ?? Response.error();
-        }
-      })(),
-    );
+    event.respondWith(openApp(event));
     return;
   }
 
@@ -96,17 +100,81 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+/** The app's own page, fit to keep: answered OK, as HTML. Not an error page while the server restarts (502, 503), nor a redirect. */
+const isAppPage = (response) => response.ok && (response.headers.get("content-type") ?? "").includes("text/html");
+/** Answered for the server while it restarts or deploys, by the proxy in front of it. */
+const isRestarting = (response) => response.status === 502 || response.status === 503 || response.status === 504;
+
+/**
+ * Opening the app. From the network first, so a deploy shows up at once, and that page is kept for
+ * next time. With a copy kept here, the network gets a few seconds: on no answer in that time, or
+ * an error page from a restart, the kept copy opens instead and the crew gets My day from the
+ * phone. An answer that arrives late is still kept.
+ */
+async function openApp(event) {
+  const cache = await caches.open(CACHE);
+  const saved = await cache.match("/");
+  const fresh = fetch(event.request).then(async (response) => {
+    if (isAppPage(response)) await cache.put("/", response.clone()).catch(() => undefined);
+    return response;
+  });
+  if (!saved) return fresh.catch(() => Response.error());
+  event.waitUntil(fresh.catch(() => undefined));
+  const answer = await Promise.race([fresh.catch(() => null), new Promise((resolve) => setTimeout(() => resolve(null), NAVIGATE_WAIT))]);
+  return !answer || isRestarting(answer) ? saved : answer;
+}
+
 // The page lists the files it loaded (and the screens it fetched ahead), so the whole app is
-// saved the first time, not only after a second visit.
+// saved the first time, not only after a second visit. Once they're in, the files of versions
+// before this one are cleared.
 self.addEventListener("message", (event) => {
   if (!OFFLINE || event.data?.type !== "cache-assets" || !Array.isArray(event.data.urls)) return;
   const urls = event.data.urls.filter((u) => typeof u === "string" && new URL(u, self.location.origin).origin === self.location.origin && new URL(u, self.location.origin).pathname.startsWith("/assets/"));
   event.waitUntil(
     caches.open(CACHE).then(async (cache) => {
       for (const u of urls.slice(0, 300)) if (!(await cache.match(u))) await cache.add(u).catch(() => undefined);
+      await pruneAssets(cache, urls).catch(() => undefined);
     }),
   );
 });
+
+/**
+ * Clears the built files of older versions, which would otherwise pile up on the phone for good
+ * (every deploy renames most of them). A file stays when the running page loaded it (`loaded`), or
+ * when this version uses it: its name appears in the kept page, or in a script or stylesheet that
+ * is itself in use (a screen not opened yet is named in the script that would load it).
+ *
+ * Done once per version of the page, and only once every file the page itself names is kept:
+ * before that, the files in use can't be told from the old ones. A page of an older version still
+ * open elsewhere may find a screen gone; it then reloads into the new version, as it would have.
+ */
+async function pruneAssets(cache, loaded) {
+  const page = await cache.match("/");
+  if (!page) return;
+  const html = await page.text();
+  const noted = await cache.match(PRUNED_FOR);
+  if (noted && (await noted.text()) === html) return;
+
+  const nameOf = (address) => new URL(address, self.location.origin).pathname.split("/").pop();
+  const kept = new Map();
+  for (const request of await cache.keys()) if (new URL(request.url).pathname.startsWith("/assets/")) kept.set(nameOf(request.url), request);
+  const namedIn = (text) => (text.match(/[\w@~+.-]+\.\w{2,5}/g) ?? []).filter((name) => kept.has(name));
+  const named = [...html.matchAll(/\/assets\/([\w@~+.-]+)/g)].map((m) => m[1]);
+  if (!named.length || named.some((name) => !kept.has(name))) return;
+
+  const used = new Set(loaded.map(nameOf));
+  const toRead = [html];
+  for (const name of used) if (kept.has(name) && /\.(m?js|css)$/.test(name)) toRead.push(await (await cache.match(kept.get(name))).text());
+  while (toRead.length) {
+    for (const name of namedIn(toRead.pop())) {
+      if (used.has(name)) continue;
+      used.add(name);
+      if (/\.(m?js|css)$/.test(name)) toRead.push(await (await cache.match(kept.get(name))).text());
+    }
+  }
+  for (const [name, request] of kept) if (!used.has(name)) await cache.delete(request);
+  await cache.put(PRUNED_FOR, new Response(html));
+}
 
 self.addEventListener("push", (event) => {
   let message = { title: "Crewtavo", body: "", link: "/", tag: undefined };

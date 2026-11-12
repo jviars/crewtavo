@@ -13,6 +13,8 @@ const keyOf = (request: string | { url: string }) => new URL(typeof request === 
 /** Cache Storage, kept in memory. Entries are saved as their text. */
 export class FakeCaches {
   readonly stores = new Map<string, Map<string, string>>();
+  /** The network a cache downloads from (cache.add): the worker's own, once one is loaded with these caches. */
+  network: (request: { url: string }) => Promise<Response> = async () => Promise.reject(new TypeError("Failed to fetch"));
 
   async open(name: string) {
     const store = this.stores.get(name) ?? new Map<string, string>();
@@ -23,6 +25,12 @@ export class FakeCaches {
       delete: async (request: string | { url: string }) => store.delete(keyOf(request)),
       keys: async () => [...store.keys()].map((url) => ({ url })),
       addAll: async (requests: string[]) => requests.forEach((r) => store.set(keyOf(r), `saved ${r}`)),
+      // Like the browser's: a file that didn't download, or wasn't answered OK, isn't kept.
+      add: async (request: string | { url: string }) => {
+        const response = await this.network({ url: keyOf(request) });
+        if (!response.ok) throw new TypeError("Request failed");
+        store.set(keyOf(request), await response.text());
+      },
     };
   }
 
@@ -54,6 +62,8 @@ export type FakeWindow = string | { url: string; visibilityState?: DocumentVisib
 export function loadServiceWorker(options: { offline?: boolean; caches?: FakeCaches; windows?: FakeWindow[]; permission?: string; network?: (request: { url: string }) => Promise<Response> } = {}) {
   const listeners = new Map<string, Listener>();
   const caches = options.caches ?? new FakeCaches();
+  const network = options.network ?? (async () => Promise.reject(new TypeError("Failed to fetch")));
+  caches.network = network;
   const windows = (options.windows ?? []).map((w) => ({
     ...(typeof w === "string" ? { url: w, visibilityState: "visible", focused: true } : { visibilityState: "visible", focused: false, ...w }),
     focus: vi.fn(async () => undefined),
@@ -72,10 +82,12 @@ export function loadServiceWorker(options: { offline?: boolean; caches?: FakeCac
   runInNewContext(readFileSync(fileURLToPath(new URL("../public/sw.js", import.meta.url)), "utf8"), {
     self: scope,
     caches,
-    fetch: options.network ?? (async () => Promise.reject(new TypeError("Failed to fetch"))),
+    fetch: network,
     URL,
     Response,
     Error,
+    // The test's own clock, so a test can move it on (vi.useFakeTimers).
+    setTimeout: (run: () => void, ms: number) => setTimeout(run, ms),
   });
 
   /** Fires an event at the worker; resolves with what it waited on (rejecting if that failed), or "unhandled". */

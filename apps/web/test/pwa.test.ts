@@ -534,6 +534,138 @@ describe("the service worker, offline (production builds)", () => {
   });
 });
 
+describe("opening the app through the service worker (production builds)", () => {
+  const APP = "crewtavo-app-v2";
+  const html = (body: string, status = 200) => new Response(body, { status, headers: { "content-type": "text/html; charset=UTF-8" } });
+  const open = (path = "/field") => ({ url: `https://crew.example.com${path}`, method: "GET", mode: "navigate" });
+  const text = async (response: unknown) => (response as Response).text();
+
+  it("keeps the app's page for no signal, and never an error page from a restart in its place", async () => {
+    const caches = new FakeCaches();
+    let answer: () => Promise<Response> = async () => html("the app");
+    const sw = loadServiceWorker({ caches, offline: true, network: () => answer() });
+    expect(await text(await sw.dispatch("fetch", { request: open() }))).toBe("the app");
+    expect(caches.entries(APP)["/"]).toBe("the app");
+
+    // The server is restarting for a deploy: the proxy in front of it answers for it.
+    answer = async () => html("502 Bad Gateway", 502);
+    expect(await text(await sw.dispatch("fetch", { request: open() }))).toBe("the app");
+    answer = async () => html("503 Service Unavailable", 503);
+    expect(await text(await sw.dispatch("fetch", { request: open("/") }))).toBe("the app");
+    expect(caches.entries(APP)["/"]).toBe("the app");
+
+    // Out at a job site, no signal: My day opens, not an error page.
+    answer = async () => Promise.reject(new TypeError("Failed to fetch"));
+    expect(await text(await sw.dispatch("fetch", { request: open() }))).toBe("the app");
+  });
+
+  it("with nothing kept yet, passes on what the server said, and keeps only a page answered OK as HTML", async () => {
+    const caches = new FakeCaches();
+    let answer: () => Promise<Response> = async () => html("503 Service Unavailable", 503);
+    const sw = loadServiceWorker({ caches, offline: true, network: () => answer() });
+    expect(await text(await sw.dispatch("fetch", { request: open() }))).toBe("503 Service Unavailable");
+    answer = async () => html("Not found", 404);
+    expect(await text(await sw.dispatch("fetch", { request: open() }))).toBe("Not found");
+    answer = async () => new Response('{"error":"nope"}', { headers: { "content-type": "application/json" } });
+    expect(await text(await sw.dispatch("fetch", { request: open() }))).toBe('{"error":"nope"}');
+    // Moved to a new address (Settings, Web address): the browser follows it, and nothing is kept.
+    answer = async () => new Response(null, { status: 302, headers: { location: "https://new.example.com/field" } });
+    expect(((await sw.dispatch("fetch", { request: open() })) as Response).status).toBe(302);
+    expect(caches.entries(APP)).toEqual({});
+  });
+
+  it("leaves the pages the server makes itself to the browser: a website form's thank-you page, sign-in links, the API", async () => {
+    const caches = new FakeCaches();
+    const network = vi.fn(async () => html("Thanks, we got your message."));
+    const sw = loadServiceWorker({ caches, offline: true, network });
+    await (await caches.open(APP)).put("/", html("the app"));
+    for (const path of ["/f/abc123", "/f/abc123/thanks", "/auth/v1/verify?token=t&type=magiclink", "/rest/v1/visits", "/api/health", "/storage/v1/object/x", "/hub/abc", "/book/acme"]) {
+      expect(await sw.dispatch("fetch", { request: open(path) }), path).toBe("unhandled");
+    }
+    expect(network).not.toHaveBeenCalled();
+    expect(caches.entries(APP)).toEqual({ "/": "the app" });
+  });
+
+  it("on a weak signal, opens the kept app after a few seconds instead of hanging, and keeps the answer when it does arrive", async () => {
+    vi.useFakeTimers();
+    try {
+      const caches = new FakeCaches();
+      let arrive: (response: Response) => void = () => undefined;
+      const sw = loadServiceWorker({ caches, offline: true, network: () => new Promise<Response>((resolve) => (arrive = resolve)) });
+      await (await caches.open(APP)).put("/", html("the app, last week's"));
+      let opened: string | undefined;
+      void sw.dispatch("fetch", { request: open() }).then(async (response) => (opened = await text(response)));
+      await vi.advanceTimersByTimeAsync(3_900);
+      expect(opened).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(opened).toBe("the app, last week's");
+
+      arrive(html("the app, today's"));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(caches.entries(APP)["/"]).toBe("the app, today's");
+
+      // With nothing kept there's nothing to fall back on: it waits for the network.
+      const first = loadServiceWorker({ offline: true, network: () => new Promise<Response>((resolve) => (arrive = resolve)) });
+      opened = undefined;
+      void first.dispatch("fetch", { request: open() }).then(async (response) => (opened = await text(response)));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(opened).toBeUndefined();
+      arrive(html("the app"));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(opened).toBe("the app");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("files of older versions", () => {
+    const page = '<link rel="stylesheet" href="/assets/index-NEW00002.css"><script type="module" src="/assets/index-NEW00001.js"></script>';
+    const files: Record<string, string> = {
+      "/assets/index-NEW00001.js": 'import("./Visit-NEW00003.js");import("./Shared-SAME0004.js");const deps=["assets/Quote-NEW00005.js"]',
+      "/assets/index-NEW00002.css": "body{background:url(/assets/logo-SAME0006.png)}",
+      "/assets/Visit-NEW00003.js": 'import"./vendor-SAME0007.js"',
+    };
+    const old = ["/assets/index-OLD00001.js", "/assets/index-OLD00002.css", "/assets/Visit-OLD00003.js", "/assets/Quote-OLD00005.js"];
+    const shared = ["/assets/Shared-SAME0004.js", "/assets/logo-SAME0006.png", "/assets/vendor-SAME0007.js"];
+    const address = (path: string) => `https://crew.example.com${path}`;
+
+    /** A phone that has used the version before, with the new version's page just kept. */
+    async function phone(online: boolean) {
+      const caches = new FakeCaches();
+      const network = async ({ url }: { url: string }) => (online && files[new URL(url).pathname] ? new Response(files[new URL(url).pathname]) : Promise.reject(new TypeError("Failed to fetch")));
+      const sw = loadServiceWorker({ caches, offline: true, network });
+      const cache = await caches.open(APP);
+      await cache.put("/", html(page));
+      await cache.put("/manifest.webmanifest", new Response("{}"));
+      for (const path of [...old, ...shared]) await cache.put(path, new Response(`contents of ${path}`));
+      return { sw, kept: () => Object.keys(caches.entries(APP)).sort() };
+    }
+
+    it("are cleared once the new version's page is running; what this version uses stays, a screen not opened yet included", async () => {
+      const { sw, kept } = await phone(true);
+      await (await sw.caches.open(APP)).put("/assets/Visit-NEW00003.js", new Response(files["/assets/Visit-NEW00003.js"]));
+      // The page says what it loaded. It was on a visit before the update, and that screen's old file is still in use by it.
+      await sw.dispatch("message", { data: { type: "cache-assets", urls: [address("/assets/index-NEW00001.js"), address("/assets/index-NEW00002.css"), address("/assets/Visit-OLD00003.js")] } });
+      expect(kept()).toEqual(["/", "/assets/Visit-NEW00003.js", "/assets/Visit-OLD00003.js", "/assets/index-NEW00001.js", "/assets/index-NEW00002.css", ...shared, "/manifest.webmanifest", "/pruned-for"].sort());
+
+      // Done once per version: a file kept since isn't looked at again until the page changes.
+      await (await sw.caches.open(APP)).put("/assets/Stray-00000009.js", new Response("x"));
+      await sw.dispatch("message", { data: { type: "cache-assets", urls: [address("/assets/index-NEW00001.js")] } });
+      expect(kept()).toContain("/assets/Stray-00000009.js");
+    });
+
+    it("are left alone while the new version's own files aren't all kept: the files in use can't be told from the old ones yet", async () => {
+      const { sw, kept } = await phone(false);
+      const before = kept();
+      await sw.dispatch("message", { data: { type: "cache-assets", urls: [address("/assets/index-NEW00001.js"), address("/assets/index-NEW00002.css")] } });
+      expect(kept()).toEqual(before);
+      // Nor when the page running is still the old version's (the new page arrived late, on a weak signal).
+      await sw.dispatch("message", { data: { type: "cache-assets", urls: [address("/assets/index-OLD00001.js"), address("/assets/index-OLD00002.css")] } });
+      expect(kept()).toEqual(before);
+    });
+  });
+});
+
 it("the app and the worker agree on the sync tag and where the count is kept", () => {
   const sw = read("public/sw.js");
   expect(sw).toContain(`const SYNC_TAG = "${SYNC_TAG}";`);
