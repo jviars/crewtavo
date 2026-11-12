@@ -49,6 +49,9 @@ services:
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_MAILER_OTP_EXP: 86400
+      # The code behind a link's token: as long as Auth allows. Nobody types it (Crewtavo's own
+      # sign-in codes are its own), and the gateway only redeems tokens the server signed.
+      GOTRUE_MAILER_OTP_LENGTH: 10
       GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
@@ -98,6 +101,8 @@ services:
       GLOBAL_S3_BUCKET: crewtavo
       REQUEST_ALLOW_X_FORWARDED_PATH: "true"
       ENABLE_IMAGE_TRANSFORMATION: "false"
+      # Crewtavo doesn't use Storage's S3 address; the gateway turns it away too.
+      S3_PROTOCOL_ENABLED: "false"
       SERVER_HOST: 0.0.0.0
     volumes:
       - storage-data:/var/lib/storage
