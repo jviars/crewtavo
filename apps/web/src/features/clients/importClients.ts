@@ -10,6 +10,7 @@ import { planImport, type ExistingClient, type ImportClient, type ImportCustomCo
 import { customFieldKey } from "@crewtavo/core/customFields";
 import { api, supabase, unwrap } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { everyRow } from "@/lib/paging";
 import { queryClient } from "@/lib/queryClient";
 import { startTask } from "@/lib/tasks";
 
@@ -83,11 +84,10 @@ export async function importClients(companyId: string, clients: ImportClient[], 
     // Who's already here, and how they're matched: packages/core/src/clientImport.ts.
     const existing: ExistingClient[] = [];
     const valuesOf = new Map<string, Record<string, unknown>>();
-    for (let from = 0; ; from += 1000) {
-      const page = unwrap(await supabase().from("clients").select("id, email, display_name, status, custom_fields").eq("company_id", companyId).range(from, from + 999));
-      existing.push(...page.map((c) => ({ id: c.id, display_name: c.display_name, email: c.email, status: c.status, source_id: ((c.custom_fields ?? {}) as { source_id?: string }).source_id ?? null })));
-      for (const c of page) valuesOf.set(c.id, (c.custom_fields ?? {}) as Record<string, unknown>);
-      if (page.length < 1000) break;
+    // Every client, however many: one a page left out would be added a second time.
+    for (const c of await everyRow(() => supabase().from("clients").select("id, email, display_name, status, custom_fields").eq("company_id", companyId), { most: Infinity })) {
+      existing.push({ id: c.id, display_name: c.display_name, email: c.email, status: c.status, source_id: ((c.custom_fields ?? {}) as { source_id?: string }).source_id ?? null });
+      valuesOf.set(c.id, (c.custom_fields ?? {}) as Record<string, unknown>);
     }
     // The streets the clients it finds already have, so the same address isn't added twice.
     const found = [...new Set(planImport(clients, existing, new Map()).decisions.flatMap((d) => (d.client_id ? [d.client_id] : [])))];

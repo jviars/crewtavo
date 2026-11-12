@@ -18,12 +18,13 @@ export async function currentRates(admin: Db, companyId: string): Promise<Record
 export async function timeRates(admin: Db, companyId: string, filter: { job_ids?: readonly string[]; from?: string; to?: string }): Promise<Record<string, number>> {
   const current = await currentRates(admin, companyId);
   const rates: Record<string, number> = {};
-  // A page at a time (PostgREST returns 1,000 rows at most), up to the 25,000 entries reports read.
-  for (let page = 0; page < 25; page++) {
+  // A page at a time (PostgREST returns 1,000 rows at most) to the last one: an entry left without a
+  // rate is costed at nothing, so stopping part-way would understate labor. id keeps the pages in step.
+  for (let offset = 0; ; offset += 1000) {
     let query = admin.from("time_entries").select("id, user_id, labor_rate").eq("company_id", companyId);
     if (filter.job_ids) query = query.in("job_id", [...filter.job_ids]);
     if (filter.from && filter.to) query = query.gte("started_at", filter.from).lt("started_at", filter.to);
-    const { data, error } = await query.order("id").range(page * 1000, page * 1000 + 999);
+    const { data, error } = await query.order("id").range(offset, offset + 999);
     if (error) throw new Error(error.message);
     for (const r of data ?? []) {
       const rate = r.labor_rate !== null ? Number(r.labor_rate) : current[r.user_id];
