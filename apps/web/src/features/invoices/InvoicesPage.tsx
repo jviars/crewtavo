@@ -1,6 +1,6 @@
 import { autopaySettings } from "@crewtavo/core/autopay";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue, useState, type FormEvent } from "react";
+import { useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -19,6 +19,7 @@ import { downloadCsv, toCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/errors";
 import { addDaysIso, formatDate, formatMoney, todayIn } from "@/lib/format";
 import { useStatusCounts } from "@/lib/listing";
+import { everyRow, firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { AutopayAttention, ChargeCardsDialog, InvoiceSummary, ReadyToInvoice, RemindAllButton } from "./InvoiceTools";
@@ -72,6 +73,63 @@ export async function remindInChunks(
   return result;
 }
 
+/** How many invoices the list shows at first, and how many more each "Load more" brings. */
+const PAGE = 300;
+const LIST_COLUMNS = "id, number, kind, status, subject, issued_on, due_on, total, balance_due, client:clients(display_name)";
+
+/** The invoices a tab shows: its statuses, narrowed by what was typed. `settled`: paid, written off or void. */
+export interface Showing { companyId: string; statuses: readonly string[]; term: string; settled: boolean }
+
+/** What was typed as a filter: the subject has it, or the client's name does. Null for nothing typed, or for a number (an invoice's own). */
+async function typedFilter({ companyId, term }: Showing): Promise<string | null> {
+  if (!term || /^\d+$/.test(term)) return null;
+  const { data } = await supabase().from("clients").select("id").eq("company_id", companyId).ilike("display_name", `%${term}%`).limit(60);
+  const ids = (data ?? []).map((c) => c.id);
+  return [`subject.ilike.%${term}%`, ids.length ? `client_id.in.(${ids.join(",")})` : null].filter(Boolean).join(",");
+}
+
+// Settled ones (paid, written off, void) newest first; ones still owed by when they're due.
+const listOrder = ({ settled }: Showing) => ({ column: settled ? "issued_on" : "due_on", ascending: !settled, nullsFirst: false });
+
+/** The first `limit` invoices of a tab, and how many it has in all (`total`). */
+export async function loadInvoices(showing: Showing, limit: number) {
+  const match = await typedFilter(showing);
+  const { rows, total } = await firstRows(
+    () => {
+      let q = supabase().from("invoices").select(LIST_COLUMNS, { count: "exact" }).eq("company_id", showing.companyId).in("status", [...showing.statuses]);
+      if (showing.term) q = match ? q.or(match) : q.eq("number", Number(showing.term));
+      return q;
+    },
+    limit,
+    { order: listOrder(showing) },
+  );
+  return { rows, total: total ?? rows.length };
+}
+
+/** Every invoice of a tab, for the spreadsheet: all of them, not only the ones the list has loaded. */
+export async function everyInvoice(showing: Showing) {
+  const match = await typedFilter(showing);
+  return everyRow(
+    () => {
+      let q = supabase().from("invoices").select(LIST_COLUMNS).eq("company_id", showing.companyId).in("status", [...showing.statuses]);
+      if (showing.term) q = match ? q.or(match) : q.eq("number", Number(showing.term));
+      return q;
+    },
+    { order: listOrder(showing), most: Infinity },
+  );
+}
+
+/** What every invoice of a tab adds up to, for the list's last line while it hasn't loaded them all. */
+export async function invoiceTotals(showing: Showing) {
+  const match = await typedFilter(showing);
+  const rows = await everyRow(() => {
+    let q = supabase().from("invoices").select("total, balance_due").eq("company_id", showing.companyId).in("status", [...showing.statuses]);
+    if (showing.term) q = match ? q.or(match) : q.eq("number", Number(showing.term));
+    return q;
+  });
+  return { billed: rows.reduce((s, i) => s + Number(i.total), 0), owed: rows.reduce((s, i) => s + Number(i.balance_due), 0) };
+}
+
 export function InvoicesPage() {
   const session = useSession();
   return hasRole(session, "admin", "office") && can(session, "invoices") ? <InvoicesPageScreen /> : <NoAccess title="Invoices" />;
@@ -100,32 +158,46 @@ function InvoicesPageScreen() {
   const remindable = (filter === "open" || filter === "overdue") && session.config.features.email;
   const selectable = remindable || filter === "draft";
 
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [filter, term]);
+  const showing: Showing = { companyId: company.id, statuses, term, settled };
   const invoices = useQuery({
-    queryKey: ["invoices", company.id, filter, term],
+    queryKey: ["invoices", company.id, filter, term, limit],
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      let q = supabase()
-        .from("invoices")
-        .select("id, number, kind, status, subject, issued_on, due_on, total, balance_due, client:clients(display_name)")
-        .eq("company_id", company.id)
-        .in("status", [...statuses])
-        .order(settled ? "issued_on" : "due_on", { ascending: !settled, nullsFirst: false })
-        .limit(300);
-      if (term) {
-        if (/^\d+$/.test(term)) q = q.eq("number", Number(term));
-        else {
-          const { data } = await supabase().from("clients").select("id").eq("company_id", company.id).ilike("display_name", `%${term}%`).limit(60);
-          const ids = (data ?? []).map((c) => c.id);
-          q = q.or([`subject.ilike.%${term}%`, ids.length ? `client_id.in.(${ids.join(",")})` : null].filter(Boolean).join(","));
-        }
-      }
-      return unwrap(await q);
+    queryFn: () => loadInvoices(showing, limit),
+  });
+  const rows = invoices.data?.rows ?? [];
+  const total = invoices.data?.total ?? 0;
+  // The last line adds up every invoice in the tab. While the list hasn't loaded them all, that's read on its own.
+  const partial = rows.length < total;
+  const sums = useQuery({
+    queryKey: ["invoices", company.id, filter, term, "totals"],
+    enabled: partial,
+    meta: { silent: true },
+    queryFn: () => invoiceTotals(showing),
+  });
+  // The spreadsheet has every invoice in the tab, read again from the first to the last.
+  const exportCsv = useMutation({
+    meta: { success: (n: number) => `Exported ${plural(n, "invoice")}` },
+    mutationFn: async () => {
+      const all = await everyInvoice(showing);
+      downloadCsv(
+        `invoices-${filter}-${today}.csv`,
+        toCsv(
+          all.map((i) => ({ ...i, client: i.client?.display_name ?? "" })),
+          [
+            { key: "number", label: "Invoice" }, { key: "client", label: "Client" }, { key: "subject", label: "Subject" }, { key: "status", label: "Status" },
+            { key: "issued_on", label: "Issued" }, { key: "due_on", label: "Due" }, { key: "total", label: "Total" }, { key: "balance_due", label: "Balance due" },
+          ],
+        ),
+      );
+      return all.length;
     },
   });
 
-  const selection = useSelection(selectable ? (invoices.data ?? []).map((i) => i.id) : [], `${filter}|${term}`);
+  const selection = useSelection(selectable ? rows.map((i) => i.id) : [], `${filter}|${term}`);
   const words = (verb: string, one = "invoice") => {
-    const numbers = new Map((invoices.data ?? []).map((i) => [i.id, i.number]));
+    const numbers = new Map(rows.map((i) => [i.id, i.number]));
     return { verb, one, many: `${one}s`, name: (id: string) => `#${numbers.get(id) ?? "?"}` };
   };
   const remind = useMutation({
@@ -164,22 +236,8 @@ function InvoicesPageScreen() {
   });
 
   if (invoices.isPending) return <ListPageSkeleton columns={6} tabs={FILTERS.length} />;
-  const rows = invoices.data ?? [];
-  const owed = rows.reduce((s, i) => s + Number(i.balance_due), 0);
-  const billed = rows.reduce((s, i) => s + Number(i.total), 0);
-
-  const exportCsv = () => {
-    downloadCsv(
-      `invoices-${filter}-${today}.csv`,
-      toCsv(
-        rows.map((i) => ({ ...i, client: i.client?.display_name ?? "" })),
-        [
-          { key: "number", label: "Invoice" }, { key: "client", label: "Client" }, { key: "subject", label: "Subject" }, { key: "status", label: "Status" },
-          { key: "issued_on", label: "Issued" }, { key: "due_on", label: "Due" }, { key: "total", label: "Total" }, { key: "balance_due", label: "Balance due" },
-        ],
-      ),
-    );
-  };
+  // Of every invoice in the tab: added up here once they're all loaded, else as read apart (nothing until that's in).
+  const figures = partial ? sums.data : { billed: rows.reduce((s, i) => s + Number(i.total), 0), owed: rows.reduce((s, i) => s + Number(i.balance_due), 0) };
 
   return (
     <>
@@ -190,7 +248,7 @@ function InvoicesPageScreen() {
             <Menu
               items={[
                 { label: "Stripe deposits", icon: "dollar", onSelect: () => navigate("/payouts") },
-                { label: "Download as spreadsheet", icon: "download", onSelect: exportCsv, disabled: !rows.length },
+                { label: exportCsv.isPending ? "Exporting…" : "Download as spreadsheet", icon: "download", onSelect: () => exportCsv.mutate(), disabled: !rows.length || exportCsv.isPending },
                 { separator: true, hidden: !chargesCards },
                 { label: "Charge cards", icon: "card", onSelect: () => setCharging(true), hidden: !chargesCards },
               ]}
@@ -292,8 +350,11 @@ function InvoicesPageScreen() {
             </tbody>
           </table>
           <div className="list-foot">
-            <span>{rows.length} {rows.length === 1 ? "invoice" : "invoices"} · {formatMoney(billed)} billed</span>
-            <strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(owed)} {filter === "written_off" ? "written off" : "owed"}</strong>
+            <div className="row" style={{ gap: 12 }}>
+              <span>{partial ? `Showing ${rows.length} of ${total}` : plural(rows.length, "invoice")}{figures ? ` · ${formatMoney(figures.billed)} billed` : ""}</span>
+              {partial && <Button size="sm" loading={invoices.isFetching} onClick={() => setLimit((l) => l + PAGE)}>Load more</Button>}
+            </div>
+            {figures && <strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(figures.owed)} {filter === "written_off" ? "written off" : "owed"}</strong>}
           </div>
         </div>
       )}

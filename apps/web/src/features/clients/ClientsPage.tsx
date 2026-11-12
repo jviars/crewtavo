@@ -17,7 +17,7 @@ import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, textFilter, unwrap } from "@/lib/api";
 import { inChunks, reportBulk } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { everyRow } from "@/lib/paging";
+import { everyRow, firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { NewClientDialog, useClientTags } from "./ClientForm";
@@ -35,6 +35,39 @@ const PAGE = 50;
 /** What POST /clients/autopay/invite takes at once. */
 const INVITE_CHUNK = 200;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The first `limit` clients of a tab, by name or newest first, and how many it has in all (`total`).
+ * `term` narrows them to a name, company, email or phone that has it, and `tag` to one tag.
+ */
+export async function loadClients({ companyId, filter, term, tag, sort }: { companyId: string; filter: FilterKey; term: string; tag: string; sort: "name" | "newest" }, limit: number) {
+  const match = textFilter(term, ["display_name", "company_name", "email", "phone"]);
+  const { rows, total } = await firstRows(
+    () => {
+      let q = supabase()
+        .from("clients")
+        .select("id, display_name, company_name, email, phone, status, tags, created_at, properties(line1, city, region), card:autopay_authorizations(id, method:client_payment_methods!inner(status))", { count: "exact" })
+        .eq("company_id", companyId);
+      // Card not set up: active clients with no agreement in force on a card that can be charged (active,
+      // or a bank account being checked). An anti-join: a removed card, or one saved but not agreed to, counts.
+      if (filter === "no_card") q = q.eq("status", "active").is("card.revoked_at", null).in("card.method.status", ["active", "pending"]).is("card", null);
+      else q = filter === "all" ? q.neq("status", "archived") : q.eq("status", filter);
+      if (match) q = q.or(match);
+      if (tag) q = q.contains("tags", [tag]);
+      return q;
+    },
+    limit,
+    { order: { column: sort === "name" ? "display_name" : "created_at", ascending: sort === "name" } },
+  );
+  return { rows, total: total ?? rows.length };
+}
+
+/** Every client with their first property, by name, for the spreadsheet. */
+export const everyClient = (companyId: string) =>
+  everyRow(
+    () => supabase().from("clients").select("display_name, company_name, email, phone, status, lead_source, tags, created_at, properties(line1, city, region, postal_code)").eq("company_id", companyId),
+    { order: "display_name", most: Infinity },
+  );
 
 export function ClientsPage() {
   const session = useSession();
@@ -86,51 +119,21 @@ export function ClientsPage() {
   const clients = useQuery({
     queryKey: listKey,
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      let q = supabase()
-        .from("clients")
-        .select("id, display_name, company_name, email, phone, status, tags, created_at, properties(line1, city, region), card:autopay_authorizations(id, method:client_payment_methods!inner(status))", { count: "exact" })
-        .eq("company_id", session.company.id)
-        .order(sort === "name" ? "display_name" : "created_at", { ascending: sort === "name" })
-        .limit(limit);
-      // Card not set up: active clients with no agreement in force on a card that can be charged (active,
-      // or a bank account being checked). An anti-join: a removed card, or one saved but not agreed to, counts.
-      if (filter === "no_card") q = q.eq("status", "active").is("card.revoked_at", null).in("card.method.status", ["active", "pending"]).is("card", null);
-      else q = filter === "all" ? q.neq("status", "archived") : q.eq("status", filter);
-      const match = textFilter(term, ["display_name", "company_name", "email", "phone"]);
-      if (match) q = q.or(match);
-      if (tag) q = q.contains("tags", [tag]);
-      const { data, error, count } = await q;
-      return { rows: unwrap({ data, error }), total: count ?? 0 };
-    },
+    queryFn: () => loadClients({ companyId: session.company.id, filter, term, tag, sort }, limit),
   });
 
   const exportCsv = useMutation({
     meta: { success: (n: number) => `Exported ${n} ${n === 1 ? "client" : "clients"}` },
     mutationFn: async () => {
-      const rows: Array<Record<string, unknown>> = [];
-      for (let from = 0; ; from += 1000) {
-        const page = unwrap(
-          await supabase()
-            .from("clients")
-            .select("display_name, company_name, email, phone, status, lead_source, tags, created_at, properties(line1, city, region, postal_code)")
-            .eq("company_id", session.company.id)
-            .order("display_name")
-            .range(from, from + 999),
-        );
-        rows.push(
-          ...page.map((c) => ({
-            ...c,
-            tags: c.tags.join("; "),
-            address: c.properties[0]?.line1 ?? "",
-            city: c.properties[0]?.city ?? "",
-            state: c.properties[0]?.region ?? "",
-            zip: c.properties[0]?.postal_code ?? "",
-            created_at: c.created_at.slice(0, 10),
-          })),
-        );
-        if (page.length < 1000) break;
-      }
+      const rows = (await everyClient(session.company.id)).map((c) => ({
+        ...c,
+        tags: c.tags.join("; "),
+        address: c.properties[0]?.line1 ?? "",
+        city: c.properties[0]?.city ?? "",
+        state: c.properties[0]?.region ?? "",
+        zip: c.properties[0]?.postal_code ?? "",
+        created_at: c.created_at.slice(0, 10),
+      }));
       const csv = toCsv(rows, [
         { key: "display_name", label: "Name" }, { key: "company_name", label: "Company" }, { key: "email", label: "Email" }, { key: "phone", label: "Phone" },
         { key: "address", label: "Address" }, { key: "city", label: "City" }, { key: "state", label: "State" }, { key: "zip", label: "ZIP" },

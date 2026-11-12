@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -7,9 +7,10 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ListPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
-import { api, searchTerm, supabase, unwrap } from "@/lib/api";
+import { api, searchTerm, supabase } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
+import { firstRows } from "@/lib/paging";
 import { can, hasRole, useSession, type Session } from "@/lib/session";
 import { NewRequestDialog } from "./NewRequestDialog";
 
@@ -22,6 +23,32 @@ const FILTERS = [
   { key: "archived", label: statusText("request", "archived"), statuses: ["archived"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+/** How many requests the list shows at first, and how many more each "Load more" brings. */
+const PAGE = 200;
+
+/**
+ * The first `limit` requests with some statuses, newest first, and how many there are in all
+ * (`total`). `term` narrows them to a request number, or a title or client that has it;
+ * `fromWebsite` to the ones a website form sent.
+ */
+export async function loadRequests({ companyId, statuses, term, fromWebsite }: { companyId: string; statuses: readonly string[]; term: string; fromWebsite: boolean }, limit: number) {
+  const match = term && !/^\d+$/.test(term) ? await titleOrClientFilter(companyId, term) : null;
+  const { rows, total } = await firstRows(
+    () => {
+      let q = supabase()
+        .from("requests")
+        .select("id, number, title, status, source, website_form_id, assigned_to, created_at, client:clients(id, display_name), property:properties(line1, city)", { count: "exact" })
+        .eq("company_id", companyId)
+        .in("status", [...statuses]);
+      if (fromWebsite) q = q.not("website_form_id", "is", null);
+      if (term) q = match ? q.or(match) : q.eq("number", Number(term));
+      return q;
+    },
+    limit,
+    { order: { column: "created_at", ascending: false } },
+  );
+  return { rows, total: total ?? rows.length };
+}
 
 export const REQUEST_SOURCES: Record<string, string> = { web_form: "Booking form", phone: "Phone", email: "Email", hub: "Client Hub", manual: "In person", assistant: "AI assistant", referral: "Referral" };
 
@@ -61,25 +88,18 @@ export function RequestsPage() {
   const counts = useStatusCounts("requests", session.company.id, Object.fromEntries(FILTERS.map((f) => [f.key, f.statuses])));
   const team = useTeam(session.company.id);
 
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [filter, term, fromWebsite]);
+
   const requests = useQuery({
-    queryKey: ["requests", session.company.id, filter, term, fromWebsite],
+    queryKey: ["requests", session.company.id, filter, term, fromWebsite, limit],
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      let q = supabase()
-        .from("requests")
-        .select("id, number, title, status, source, website_form_id, assigned_to, created_at, client:clients(id, display_name), property:properties(line1, city)")
-        .eq("company_id", session.company.id)
-        .in("status", [...statuses])
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (fromWebsite) q = q.not("website_form_id", "is", null);
-      if (term) q = /^\d+$/.test(term) ? q.eq("number", Number(term)) : q.or(await titleOrClientFilter(session.company.id, term));
-      return unwrap(await q);
-    },
+    queryFn: () => loadRequests({ companyId: session.company.id, statuses, term, fromWebsite }, limit),
   });
 
   if (requests.isPending) return <ListPageSkeleton columns={6} tabs={5} />;
-  const rows = requests.data ?? [];
+  const rows = requests.data?.rows ?? [];
+  const total = requests.data?.total ?? 0;
 
   return (
     <>
@@ -150,6 +170,10 @@ export function RequestsPage() {
               ))}
             </tbody>
           </table>
+          <div className="list-foot">
+            <span>{rows.length < total ? `Showing ${rows.length} of ${total}` : `${rows.length} ${rows.length === 1 ? "request" : "requests"}`}</span>
+            {rows.length < total && <Button size="sm" loading={requests.isFetching} onClick={() => setLimit((l) => l + PAGE)}>Load more</Button>}
+          </div>
         </div>
       )}
       <NewRequestDialog open={creating} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); navigate(`/requests/${id}`); }} />

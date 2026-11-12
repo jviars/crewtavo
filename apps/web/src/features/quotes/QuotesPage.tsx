@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -13,6 +13,7 @@ import { searchTerm, supabase, unwrap } from "@/lib/api";
 import { reportBulk, type BulkResult } from "@/lib/bulk";
 import { formatDate, formatMoney, timeAgo } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
+import { firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { choiceLabel, isSignedQuote } from "../documents/build";
 import { NewQuoteDialog } from "./NewQuoteDialog";
@@ -30,7 +31,33 @@ const FILTERS = [
   { key: "templates", label: "Quote templates", statuses: ["draft"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+/** How many quotes the list shows at first, and how many more each "Load more" brings. */
+const PAGE = 200;
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+/**
+ * The first `limit` quotes (or quote templates) with some statuses, the latest changed first, with
+ * the lines their list price needs, and how many there are in all (`total`). `term` narrows them to
+ * a quote number, or a title or client that has it.
+ */
+export async function loadQuotes({ companyId, statuses, templates, term }: { companyId: string; statuses: readonly string[]; templates: boolean; term: string }, limit: number) {
+  const match = term && !/^\d+$/.test(term) ? await titleOrClientFilter(companyId, term) : null;
+  const { rows, total } = await firstRows(
+    () => {
+      let q = supabase()
+        .from("quotes")
+        .select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), sent_at, valid_until, updated_at, client:clients(display_name), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)", { count: "exact" })
+        .eq("company_id", companyId)
+        .in("status", [...statuses])
+        .eq("is_template", templates);
+      if (term) q = match ? q.or(match) : q.eq("number", Number(term));
+      return q;
+    },
+    limit,
+    { order: { column: "updated_at", ascending: false } },
+  );
+  return { rows: await withOptionLines(rows), total: total ?? rows.length };
+}
 
 /**
  * Under a quote's price when it offers options (`count`): once it's signed, the option they chose
@@ -56,31 +83,23 @@ export function QuotesPage() {
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
   const counts = useStatusCounts("quotes", session.company.id, Object.fromEntries(FILTERS.map((f) => [f.key, f.statuses])));
   const queryClient = useQueryClient();
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [filter, term]);
 
-  const listKey = ["quotes", session.company.id, filter, term];
+  const listKey = ["quotes", session.company.id, filter, term, limit];
   const quotes = useQuery({
     queryKey: listKey,
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      let q = supabase()
-        .from("quotes")
-        .select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), sent_at, valid_until, updated_at, client:clients(display_name), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)")
-        .eq("company_id", session.company.id)
-        .in("status", [...statuses])
-        .eq("is_template", templates)
-        .order("updated_at", { ascending: false })
-        .limit(200);
-      if (term) q = /^\d+$/.test(term) ? q.eq("number", Number(term)) : q.or(await titleOrClientFilter(session.company.id, term));
-      return withOptionLines(unwrap(await q));
-    },
+    queryFn: () => loadQuotes({ companyId: session.company.id, statuses, templates, term }, limit),
   });
 
   // Templates aren't picked: each is a starting point, not a quote to archive with others.
   const selectable = canSell && !templates;
-  const selection = useSelection(selectable ? (quotes.data ?? []).map((q) => q.id) : [], `${filter}|${term}`);
+  const selection = useSelection(selectable ? (quotes.data?.rows ?? []).map((q) => q.id) : [], `${filter}|${term}`);
 
   if (quotes.isPending) return <ListPageSkeleton columns={5} tabs={7} />;
-  const rows = quotes.data ?? [];
+  const rows = quotes.data?.rows ?? [];
+  const count = quotes.data?.total ?? 0;
   // No Send for many at once: each quote is read over before it goes.
   const archive = async () => {
     const chosen = rows.filter((q) => selection.has(q.id));
@@ -97,13 +116,16 @@ export function QuotesPage() {
     });
     if (!ok) return;
     selection.clear();
-    archiveWithUndo<typeof rows>({
+    archiveWithUndo<{ rows: typeof rows; total: number }>({
       key: listKey,
       ids: archivable.map((q) => q.id),
       title: `${plural(archivable.length, "quote")} archived`,
       tone: "quote",
       // Converted or lost shows archived quotes too: there they stay, as archived.
-      hide: (d, gone) => d.map((q) => (gone.has(q.id) ? { ...q, status: "archived" as const } : q)).filter((q) => (statuses as readonly string[]).includes(q.status)),
+      hide: (d, gone) => {
+        const kept = d.rows.map((q) => (gone.has(q.id) ? { ...q, status: "archived" as const } : q)).filter((q) => (statuses as readonly string[]).includes(q.status));
+        return { rows: kept, total: d.total - (d.rows.length - kept.length) };
+      },
       write: async (chunk) =>
         unwrap(await supabase().from("quotes").update({ status: "archived" }).in("id", chunk).eq("is_template", false).not("status", "in", "(archived,converted)").select("id")).map((q) => q.id),
       words,
@@ -205,8 +227,12 @@ export function QuotesPage() {
             </>
           )}
           <div className="list-foot">
-            <span>{rows.length} {templates ? (rows.length === 1 ? "quote template" : "quote templates") : rows.length === 1 ? "quote" : "quotes"}</span>
-            {!templates && <strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(total)}</strong>}
+            <div className="row" style={{ gap: 12 }}>
+              <span>{rows.length < count ? `Showing ${rows.length} of ${count}` : plural(rows.length, templates ? "quote template" : "quote")}</span>
+              {rows.length < count && <Button size="sm" loading={quotes.isFetching} onClick={() => setLimit((l) => l + PAGE)}>Load more</Button>}
+            </div>
+            {/* The total is of the quotes in the list, so it says so while there are more to load. */}
+            {!templates && <strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(total)}{rows.length < count ? " shown" : ""}</strong>}
           </div>
         </div>
       )}

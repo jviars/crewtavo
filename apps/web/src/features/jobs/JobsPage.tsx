@@ -1,6 +1,6 @@
 import { visitPrice } from "@crewtavo/core/promos";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue, useState, type FormEvent } from "react";
+import { useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { choose, confirm } from "@/components/ui/Confirm";
@@ -17,6 +17,7 @@ import { BULK_CHUNK, bulkOutcome, inChunks, reportBulk, type BulkResult } from "
 import { errorMessage } from "@/lib/errors";
 import { formatDate, formatMoney, todayIn } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
+import { firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { NewJobDialog, useCrews } from "./JobDialogs";
@@ -34,7 +35,32 @@ const FILTERS = [
   { key: "archived", label: "Archived", states: ["archived"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+/** How many jobs the list shows at first, and how many more each "Load more" brings. */
+const PAGE = 200;
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+/**
+ * The first `limit` jobs in some states, newest first, and how many there are in all (`total`).
+ * `term` narrows them to a job number, or a title or client that has it; `kind` to one-off or recurring.
+ */
+export async function loadJobs({ companyId, states, kind, term }: { companyId: string; states: readonly string[]; kind: "" | "one_off" | "recurring"; term: string }, limit: number) {
+  const match = term && !/^\d+$/.test(term) ? await titleOrClientFilter(companyId, term) : null;
+  const { rows, total } = await firstRows(
+    () => {
+      let q = supabase()
+        .from("jobs")
+        .select("id, number, title, job_state, kind, default_crew_id, pricing, invoice_schedule, financials:job_financials(contract_total), lines:job_line_items(quantity, unit_price, discount_billing), client:clients(display_name), property:properties(line1, city), visits(id, status, scheduled_on)", { count: "exact" })
+        .eq("company_id", companyId)
+        .in("job_state", [...states]);
+      if (kind) q = q.eq("kind", kind);
+      if (term) q = match ? q.or(match) : q.eq("number", Number(term));
+      return q;
+    },
+    limit,
+    { order: { column: "created_at", ascending: false } },
+  );
+  return { rows, total: total ?? rows.length };
+}
 
 /** What an empty filter says, in the filter's own words. */
 const EMPTY_TITLES: Record<FilterKey, string> = {
@@ -57,43 +83,35 @@ export function JobsPage() {
   const today = todayIn(company.timezone);
   const queryClient = useQueryClient();
   const [assigning, setAssigning] = useState(false);
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [filter, kind, term]);
 
-  const listKey = ["jobs", company.id, filter, kind, term];
+  const listKey = ["jobs", company.id, filter, kind, term, limit];
   const jobs = useQuery({
     queryKey: listKey,
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      let q = supabase()
-        .from("jobs")
-        .select("id, number, title, job_state, kind, default_crew_id, pricing, invoice_schedule, financials:job_financials(contract_total), lines:job_line_items(quantity, unit_price, discount_billing), client:clients(display_name), property:properties(line1, city), visits(id, status, scheduled_on)")
-        .eq("company_id", company.id)
-        .in("job_state", [...states])
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (kind) q = q.eq("kind", kind);
-      if (term) q = /^\d+$/.test(term) ? q.eq("number", Number(term)) : q.or(await titleOrClientFilter(company.id, term));
-      return unwrap(await q);
-    },
+    queryFn: () => loadJobs({ companyId: company.id, states, kind, term }, limit),
   });
 
   // Picking several: archiving them and setting their crew, as a job's menu and details do.
-  const selection = useSelection(canSell ? (jobs.data ?? []).map((j) => j.id) : [], `${filter}|${kind}|${term}`);
+  const selection = useSelection(canSell ? (jobs.data?.rows ?? []).map((j) => j.id) : [], `${filter}|${kind}|${term}`);
 
   if (jobs.isPending) return <ListPageSkeleton columns={5} tabs={FILTERS.length} />;
-  const rows = jobs.data ?? [];
+  const rows = jobs.data?.rows ?? [];
+  const total = jobs.data?.total ?? 0;
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["jobs", company.id] });
   const archive = async () => {
     const ids = selection.ids;
     const numbers = new Map(rows.map((j) => [j.id, j.number]));
     if (!(await confirm({ title: `Archive ${plural(ids.length, "job")}?`, body: "They move to Archived. Each can be reopened from its page.", confirmLabel: "Archive" }))) return;
     selection.clear();
-    archiveWithUndo<typeof rows>({
+    archiveWithUndo<{ rows: typeof rows; total: number }>({
       key: listKey,
       ids,
       title: `${plural(ids.length, "job")} archived`,
       tone: "job",
       // Only the Archived tab shows archived jobs, and Archive isn't offered there.
-      hide: (d, gone) => d.filter((j) => !gone.has(j.id)),
+      hide: (d, gone) => ({ rows: d.rows.filter((j) => !gone.has(j.id)), total: d.total - d.rows.filter((j) => gone.has(j.id)).length }),
       write: async (chunk) => unwrap(await supabase().from("jobs").update({ status: "archived" }).in("id", chunk).neq("status", "archived").select("id")).map((j) => j.id),
       words: { verb: "archived", one: "job", many: "jobs", name: (id) => `#${numbers.get(id) ?? "?"}` },
       refresh,
@@ -180,7 +198,10 @@ export function JobsPage() {
               })}
             </tbody>
           </table>
-          <div className="list-foot"><span>{rows.length} {rows.length === 1 ? "job" : "jobs"}</span></div>
+          <div className="list-foot">
+            <span>{rows.length < total ? `Showing ${rows.length} of ${total}` : plural(rows.length, "job")}</span>
+            {rows.length < total && <Button size="sm" loading={jobs.isFetching} onClick={() => setLimit((l) => l + PAGE)}>Load more</Button>}
+          </div>
         </div>
       )}
       <NewJobDialog open={params.get("new") === "1"} onClose={() => setParams({}, { replace: true })} onCreated={(id) => navigate(`/jobs/${id}`)} />
