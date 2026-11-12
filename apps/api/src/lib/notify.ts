@@ -6,6 +6,8 @@
  *   3. in development, the local Mailpit inbox (MAILPIT_URL).
  * SMS uses Twilio over REST. When nothing is set up, sends are skipped and the caller gets
  * { sent: false } plus the reason; the UI can then offer the link to copy instead.
+ * How each send for a company went is noted (noteSending), so its owners and admins hear on the bell
+ * and by push when its email or texts stop going out, and not only on Settings → Email.
  */
 import { isPersonalMailDomain, isPlaceholderEmail } from "@crewtavo/core/email";
 import type { Env } from "../env";
@@ -86,6 +88,8 @@ let someMailbox: { at: number; value: boolean } | null = null;
 export const forgetMailbox = (companyId: string) => {
   cache.delete(companyId);
   someMailbox = null;
+  // The next email says afresh how sending is going.
+  working.delete(`${companyId}:email`);
 };
 
 /**
@@ -153,6 +157,8 @@ export async function checkMailbox(env: Env, companyId: string, mailbox: Mailbox
     result = { sent: false, reason: error.message };
   }
   await noteMailboxHealth(env, companyId, mailbox, result);
+  // A sign-in that still works doesn't mean emails are going out again, so only a refusal is passed on.
+  if (!result.sent) await noteSending(env, companyId, "email", result);
   return result.sent;
 }
 
@@ -164,12 +170,72 @@ export async function sendEmail(env: Env, message: EmailMessage, companyId?: str
     if (mailbox) {
       const result = await sendWithMailbox(mailbox.settings, mailbox.secret, message);
       await noteMailboxHealth(env, companyId, mailbox, result);
+      await noteSending(env, companyId, "email", result);
       return result;
     }
   }
   if ((!env.RESEND_API_KEY || !env.EMAIL_FROM) && env.MAILPIT_URL) return mailpit(env, { ...message, from: env.EMAIL_FROM });
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return { sent: false, reason: "Email isn't set up yet. An admin can connect the company's email in Settings → Email." };
-  return resendSend(env.RESEND_API_KEY, env.EMAIL_FROM, message);
+  const result = await resendSend(env.RESEND_API_KEY, env.EMAIL_FROM, message);
+  if (companyId) await noteSending(env, companyId, "email", result);
+  return result;
+}
+
+/** A send that worked is reported to the database again after this long; in between, it's taken as still working. */
+const WORKING_MS = 10 * 60_000;
+/** When each company's email and texts were last reported working, by company and channel. */
+const working = new Map<string, number>();
+
+const SENDING_WARNING = {
+  email: {
+    title: "Emails aren't going out",
+    lead: "The last few emails didn't go.",
+    fix: "Quotes, invoices and reminders won't reach anyone by email until it's fixed, in Settings → Email.",
+  },
+  sms: {
+    title: "Texts aren't going out",
+    lead: "The last few texts didn't go.",
+    fix: "Reminders and other texts won't reach anyone until it's fixed. Check the Twilio account, and the Twilio keys this Crewtavo was set up with.",
+  },
+};
+
+/**
+ * Tells the database how a company's email or text went, so its owners and admins hear when sending
+ * stops (public.note_sending): at once when the sign-in is refused, and after a few failures in a
+ * row otherwise, once, on the bell and by push. A send that works clears it. An address or number
+ * that can't be sent to says nothing about the company's sending, so it isn't counted. Never throws:
+ * whether the message went is already known, and this mustn't change it.
+ */
+export async function noteSending(env: Env, companyId: string, channel: "email" | "sms", result: SendResult): Promise<void> {
+  const problem = result.sent ? null : sendProblem(result);
+  if (problem === "unset" || problem === "recipient") return;
+  const key = `${companyId}:${channel}`;
+  if (!problem && Date.now() - (working.get(key) ?? 0) < WORKING_MS) return;
+  // After a failure, the next send that works is always reported, to clear it.
+  if (problem) working.delete(key);
+  try {
+    const words = SENDING_WARNING[channel];
+    const reason = (result.reason ?? "").trim().slice(0, 500);
+    const { error } = await adminClient(env).rpc(
+      "note_sending",
+      problem
+        ? {
+            p_company: companyId, p_channel: channel, p_ok: false, p_error: reason, p_refused: problem === "sign_in",
+            p_title: words.title, p_body: [problem === "sign_in" ? "" : words.lead, reason, words.fix].filter(Boolean).join(" "),
+          }
+        : { p_company: companyId, p_channel: channel, p_ok: true },
+    );
+    if (error) throw new Error(error.message);
+    if (!problem) working.set(key, Date.now());
+  } catch (error) {
+    reportError(error, { feature: "sending-health" });
+  }
+}
+
+/** The company's email or texts were just seen to work (its mailbox connected again): clear any warning now. */
+export async function sendingWorks(env: Env, companyId: string, channel: "email" | "sms"): Promise<void> {
+  working.delete(`${companyId}:${channel}`);
+  await noteSending(env, companyId, channel, { sent: true });
 }
 
 /** Twilio's codes for a number that can't be texted: not a number, not a mobile, unreachable, or it texted STOP. */
@@ -287,7 +353,17 @@ async function mailpit(env: Env, message: EmailMessage & { from?: string }): Pro
   return { sent: true, id: body.ID };
 }
 
-export async function sendSms(env: Env, message: { to: string; body: string }): Promise<SendResult> {
+/**
+ * Send a text. Given the company it's for (sends nobody is watching: notifications, automations,
+ * review asks), how it went is noted, so its owners hear when texts stop going out (noteSending).
+ */
+export async function sendSms(env: Env, message: { to: string; body: string }, companyId?: string | null): Promise<SendResult> {
+  const result = await textOut(env, message);
+  if (companyId) await noteSending(env, companyId, "sms", result);
+  return result;
+}
+
+async function textOut(env: Env, message: { to: string; body: string }): Promise<SendResult> {
   const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: token, TWILIO_FROM_NUMBER: from } = env;
   if ((!sid || !token || !from) && env.MAILPIT_URL) {
     const digits = message.to.replace(/[^0-9]/g, "") || "unknown";

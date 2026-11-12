@@ -2586,6 +2586,26 @@ isOneToOne: false
       referencedColumns: ["company_id","user_id"]
     }
                   ]
+                },"sending_health": {
+                  Row: {
+                    "channel": string,"company_id": string,"failing_since": string,"failures": number,"last_error": string | null,"warned_at": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel": string,"company_id": string,"failing_since"?: string,"failures"?: number,"last_error"?: string | null,"warned_at"?: string | null
+                  }
+                  Update: {
+                    "channel"?: string,"company_id"?: string,"failing_since"?: string,"failures"?: number,"last_error"?: string | null,"warned_at"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "sending_health_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"service_materials": {
                   Row: {
                     "company_id": string,"created_at": string,"id": string,"item_number": string,"length_ft": number | null,"name": string,"per_unit": number,"price_note": string | null,"priced_at": string | null,"service_id": string,"sort": number,"supplier": string,"unit_price": number | null,"uom": string,"uom_name": string | null,"updated_at": string
@@ -4171,6 +4191,9 @@ isOneToOne: false
                            },
 "note_review_access":
 { Args: { "p_body"?: string,"p_claim": string,"p_company": string,"p_kind": string,"p_title"?: string }; Returns: boolean
+                           },
+"note_sending":
+{ Args: { "p_body"?: string,"p_channel": string,"p_company": string,"p_error"?: string,"p_ok": boolean,"p_refused"?: boolean,"p_title"?: string }; Returns: string
                            },
 "postpone_automation_run":
 { Args: { "p_busy"?: boolean,"p_id": number,"p_note"?: string,"p_result": Json,"p_token": string,"p_until": string }; Returns: boolean

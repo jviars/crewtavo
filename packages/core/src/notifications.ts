@@ -70,8 +70,18 @@ export const REVIEW_ACCESS_HINT = "When Google Business Profile needs signing in
 export const SOCIAL_ACCESS_HINT = "When Facebook & Instagram needs signing in again";
 
 /**
+ * The kinds that tell owners and admins the company's email or texts have stopped going out
+ * (public.note_sending). They come under "Other alerts", and never by the channel they're about.
+ */
+export const SENDING_WARNINGS = { email: "email_failing", sms: "texts_failing" } as const;
+
+/**
  * Whether a kind goes by email for someone who has its topic on. A review of 3 stars or more is
  * only for the bell and the phone: an email is for the ones to answer first (review_low). An
- * automatic post scheduled is the same: only one that didn't go is worth an email.
+ * automatic post scheduled is the same: only one that didn't go is worth an email. And a warning
+ * that email isn't going out can't come by email.
  */
-export const byEmail = (kind: string) => kind !== "review" && kind !== "social_scheduled";
+export const byEmail = (kind: string) => kind !== "review" && kind !== "social_scheduled" && kind !== SENDING_WARNINGS.email;
+
+/** Whether a kind goes by text: all but the warning that texts aren't going out. */
+export const byText = (kind: string) => kind !== SENDING_WARNINGS.sms;

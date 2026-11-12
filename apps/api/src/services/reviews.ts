@@ -171,7 +171,7 @@ async function deliver(
     if (channel === "email") {
       result = await emailClient(env, { companyId: d.companyId, company: d.company, client: d.client, subject: d.subject, text: body, baseUrl: d.baseUrl, footer: companyFooter(d.company) });
     } else {
-      result = await sendSms(env, { to: d.client.phone!, body });
+      result = await sendSms(env, { to: d.client.phone!, body }, d.companyId);
       await noteRefusedText(admin, d.client, d.client.phone!, result);
     }
     if (!result.sent) {

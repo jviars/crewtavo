@@ -559,7 +559,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       if (!client.phone) throw new Error(`${client.display_name} has no phone number.`);
       if (textsOff(client)) return new Skip(textsOffReason(client.display_name).replace(/\.$/, ""));
       const body = render(action.body, ctx);
-      const result = await sendSms(env, { to: client.phone, body });
+      const result = await sendSms(env, { to: client.phone, body }, ctx.company.id);
       await noteRefusedText(admin, client, client.phone, result);
       if (!result.sent) throw new Error(result.reason ?? "The text wasn't sent.");
       // The timeline's copy has the office's copies of the client's links (officeVars).

@@ -16,7 +16,7 @@
  * refusing the company's sign-in: after 2, 4, 8... minutes, 8 tries), or is failed with the reason
  * (an address or number that can't be sent to). A later try sends only by the channels still missing.
  */
-import { byEmail, DEFAULT_NOTIFICATION_PREFS, isPlaceholderEmail, notificationTopic, type NotificationChannel, type NotificationTopic } from "@crewtavo/core";
+import { byEmail, byText, DEFAULT_NOTIFICATION_PREFS, isPlaceholderEmail, notificationTopic, type NotificationChannel, type NotificationTopic } from "@crewtavo/core";
 import type { Env } from "../env";
 import { renderEmail } from "../lib/email";
 import { sendEmail, sendProblem, sendSms, smsConfigured } from "../lib/notify";
@@ -142,7 +142,7 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
       const chosen = prefsFor(companyId, userId);
       // What they chose to get by this channel, less what has gone (or been turned down for good) by it.
       const pick = (channel: NotificationChannel) =>
-        lowFirst(items.filter((i) => !state.get(i.id)?.[channel] && chosen[channel].includes(notificationTopic(i.kind) as NotificationTopic) && (channel !== "email" || byEmail(i.kind))));
+        lowFirst(items.filter((i) => !state.get(i.id)?.[channel] && chosen[channel].includes(notificationTopic(i.kind) as NotificationTopic) && (channel !== "email" || byEmail(i.kind)) && (channel !== "sms" || byText(i.kind))));
 
       const forEmail = pick("email");
       // Never to a sub's stand-in address.
@@ -190,7 +190,7 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
           const first = forSms[0]!;
           const more = forSms.length > 1 ? ` (+${forSms.length - 1} more)` : "";
           const link = url(forSms.length > 1 ? batchLink(forSms) : first.link);
-          const result = await sendSms(env, { to: phoneTo, body: `${company.name}: ${first.title}${more}${link ? ` ${link}` : ""}` });
+          const result = await sendSms(env, { to: phoneTo, body: `${company.name}: ${first.title}${more}${link ? ` ${link}` : ""}` }, companyId);
           const reason = result.reason ?? "The text didn't go.";
           if (result.sent) {
             counts.sms++;

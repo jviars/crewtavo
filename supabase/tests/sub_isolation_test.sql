@@ -282,6 +282,8 @@ insert into public.review_syncs (company_id, account, location_id) values (:'co'
 insert into public.reviews (company_id, location_id, review_id, external_name, reviewer_name, rating, posted_at, google_updated_at, client_id, match)
 values (:'co', 'locations/1070', 'r1070', 'accounts/1070/locations/1070/reviews/r1070', 'Ann C.', 5, now(), now(), :'c1', 'hand');
 insert into public.review_match_choices (company_id, location_id, review_id, client_id) values (:'co', 'locations/1070', 'r1070', :'c1');
+-- The company's email has been failing (20261112000540_notifications_sent_then_marked.sql): only the API reads that.
+insert into public.sending_health (company_id, channel, failures, last_error) values (:'co', 'email', 2, 'Couldn''t connect to smtp.example.com on port 465.');
 -- A photo of Ann's marked OK to share, and a social post of it, how it went on Facebook and its picture's link.
 insert into public.attachments (company_id, owner_type, owner_id, path, file_name, content_type, shareable, shareable_at)
 values (:'co', 'client', :'c1', :'co' || '/client/' || :'c1' || '/porch.jpg', 'porch.jpg', 'image/jpeg', true, now()) returning id as porch \gset

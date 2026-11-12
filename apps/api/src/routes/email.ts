@@ -16,7 +16,7 @@ import { runInBackground } from "../lib/background";
 import { encryptJson } from "../lib/crypto";
 import { renderEmail } from "../lib/email";
 import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
-import { emailConfigured, forgetMailbox, loadMailbox, sendEmail, sendWithMailbox, type MailboxSecret, type MailboxSettings } from "../lib/notify";
+import { emailConfigured, forgetMailbox, loadMailbox, sendEmail, sendingWorks, sendWithMailbox, type MailboxSecret, type MailboxSettings } from "../lib/notify";
 import { smtpSend, SmtpError } from "../lib/smtp";
 import { adminClient } from "../lib/supabase";
 import { logoImage } from "../services/logo";
@@ -146,6 +146,8 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
     .upsert({ company_id: c.var.companyId, provider: "email", ciphertext: await encryptJson(c.env, secret), updated_at: new Date().toISOString() });
   if (secretError) throw dbError(secretError);
   forgetMailbox(c.var.companyId);
+  // It just signed in and sent its test: a warning that emails aren't going out is over.
+  await sendingWorks(c.env, c.var.companyId, "email");
   const was = saved?.settings.from_email;
   if (!was) noteMailboxChange(c, who, "email.connected", `connected the company's email (${settings.from_email})`, "The company's email was connected");
   else noteMailboxChange(c, who, "email.changed", `changed the company's email (${was === settings.from_email ? was : `${settings.from_email}, was ${was}`})`, "The company's email was changed");

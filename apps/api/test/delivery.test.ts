@@ -343,3 +343,33 @@ describe("a push", () => {
     expect(gone.tables.notifications![0]).toMatchObject({ delivered_at: "now", delivery_failed_at: null });
   });
 });
+
+describe("a warning that email or texts aren't going out", () => {
+  /** An owner who gets "Other alerts" every way there is. */
+  const owner = (notifications: Row[]) => {
+    const w = world(notifications);
+    w.tables.notification_prefs = [{ company_id: CO, user_id: CAL, email: ["alerts"], sms: ["alerts"], push: ["alerts"] }];
+    return w;
+  };
+
+  it("never comes by the channel it's about: one about email by text and push, one about texts by email and push", async () => {
+    const email = owner([notice({ kind: "email_failing", title: "Emails aren't going out", link: "/settings?tab=email" })]);
+    const sent = serve(email);
+    expect(await deliverNotifications(env)).toEqual({ claimed: 1, email: 0, sms: 1, push: 1, failed: 0 });
+    expect(sent.emails()).toEqual([]);
+    expect(sendPush.mock.calls[0]![2]).toMatchObject({ title: "Emails aren't going out", link: "/settings?tab=email" });
+    expect(email.tables.notifications![0]).toMatchObject({ delivered_at: "now", delivery: { sms: "sent", push: "sent" } });
+
+    const texts = owner([notice({ kind: "texts_failing", title: "Texts aren't going out", link: "/apps/twilio" })]);
+    const other = serve(texts);
+    expect(await deliverNotifications(env)).toEqual({ claimed: 1, email: 1, sms: 0, push: 1, failed: 0 });
+    expect(other.texts()).toEqual([]);
+  });
+
+  it("can be raised by a notification's own email or text not going: each failure is told to the database for the company", async () => {
+    const w = world([notice()], { resend: down, twilio: down });
+    const sent = serve(w);
+    await deliverNotifications(env);
+    expect(sent.rpcs("note_sending").map((n) => [n.p_company, n.p_channel, n.p_ok])).toEqual([[CO, "email", false], [CO, "sms", false]]);
+  });
+});

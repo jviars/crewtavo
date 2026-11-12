@@ -13,6 +13,9 @@
 --
 -- The release before this one keeps calling claim_notifications while an update is under way. It
 -- still works as it did, on notifications the new delivery hasn't touched.
+--
+-- And when a company's email or texts stop going out altogether (a revoked password, a mail server
+-- that's down), its owners and admins are told once, on the bell and by push (the last section).
 
 -- ---------------------------------------------------------------------------------------------
 -- Delivery bookkeeping on notifications
@@ -234,5 +237,76 @@ begin
     values (p_company, p_user, 'schedule', left(p_line, 300), p_line, coalesce('/field/visits/' || p_visit, '/field'));
   end if;
 end $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Telling the owners when email or texts stop going out
+-- ---------------------------------------------------------------------------------------------
+
+-- A mailbox whose password was revoked showed only on Settings → Email, and a mail server that was
+-- down or over its limit showed nowhere, so quotes, invoices and reminders could fail for weeks
+-- before anyone looked. Now the API says how each send went (lib/notify.ts), and the owners and
+-- admins are told once, on the bell and by push, when a company's email or texts stop going out.
+--
+-- A row is here only while a company's email or texts are failing: how many sends in a row, since
+-- when, what the provider last said, and when the owners were told. Only the API reads it.
+create table public.sending_health (
+  company_id uuid not null references public.companies (id) on delete cascade,
+  channel text not null check (channel in ('email', 'sms')),
+  failures integer not null default 0,
+  failing_since timestamptz not null default now(),
+  last_error text,
+  warned_at timestamptz,
+  primary key (company_id, channel)
+);
+alter table public.sending_health enable row level security;
+revoke all on public.sending_health from authenticated, anon;
+
+-- How a send went for a company. A failure counts (one that's about the person it was for, like an
+-- address that doesn't exist, isn't reported here). The owners and admins get one notification, in
+-- the words the API gives, when the sign-in is refused (p_refused), or on the third failure in a row
+-- once it has been failing for 15 minutes: a mail server having a bad minute isn't worth a warning.
+-- It's a notification like any other, so it reaches them on the bell and by push; the API keeps a
+-- warning about email out of email, and one about texts out of texts. A send that works forgets the
+-- failures and marks the warning read, so the next time it stops they're told again.
+-- Returns 'warned', 'cleared' or null.
+create function public.note_sending(p_company uuid, p_channel text, p_ok boolean, p_error text default null, p_refused boolean default false, p_title text default null, p_body text default null)
+returns text language plpgsql security definer set search_path = '' as $$
+declare v public.sending_health; v_kind text; v_warned timestamptz;
+begin
+  if p_channel is null or p_channel not in ('email', 'sms') or p_ok is null then
+    raise exception 'A send is by email or sms, and it went or it didn''t' using errcode = '22023';
+  end if;
+  v_kind := case p_channel when 'email' then 'email_failing' else 'texts_failing' end;
+
+  if p_ok then
+    delete from public.sending_health where company_id = p_company and channel = p_channel returning warned_at into v_warned;
+    if v_warned is null then
+      return null;
+    end if;
+    update public.notifications set read_at = now() where company_id = p_company and kind = v_kind and read_at is null;
+    return 'cleared';
+  end if;
+
+  insert into public.sending_health as h (company_id, channel, failures, last_error)
+  values (p_company, p_channel, 1, left(p_error, 500))
+  on conflict (company_id, channel) do update set failures = h.failures + 1, last_error = excluded.last_error
+  returning * into v;
+  if v.warned_at is not null
+     or not (coalesce(p_refused, false) or (v.failures >= 3 and v.failing_since <= now() - interval '15 minutes')) then
+    return null;
+  end if;
+
+  update public.sending_health set warned_at = now() where company_id = p_company and channel = p_channel;
+  insert into public.notifications (company_id, user_id, kind, title, body, link)
+  select p_company, m.user_id, v_kind,
+         left(coalesce(nullif(trim(p_title), ''), case p_channel when 'email' then 'Emails aren''t going out' else 'Texts aren''t going out' end), 300),
+         nullif(trim(p_body), ''),
+         case p_channel when 'email' then '/settings?tab=email' else '/apps/twilio' end
+    from public.memberships m
+   where m.company_id = p_company and m.active and m.role in ('owner', 'admin');
+  return 'warned';
+end $$;
+revoke execute on function public.note_sending(uuid, text, boolean, text, boolean, text, text) from public, anon, authenticated;
+grant execute on function public.note_sending(uuid, text, boolean, text, boolean, text, text) to service_role;
 
 notify pgrst, 'reload schema';

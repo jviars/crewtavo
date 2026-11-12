@@ -4,6 +4,7 @@ import {
   amountWords,
   changeText,
   byEmail,
+  byText,
   DEFAULT_NOTIFICATION_PREFS,
   insuranceWarning,
   insuranceWarningItems,
@@ -13,6 +14,7 @@ import {
   notificationTopic,
   NOTIFICATION_TOPICS,
   REVIEW_ACCESS_HINT,
+  SENDING_WARNINGS,
   reviewNoticesFor,
   offerClosedMessage,
   offerDate,
@@ -193,6 +195,14 @@ describe("hearing about offers", () => {
     expect(DEFAULT_NOTIFICATION_PREFS.push).toContain("reviews");
     expect(DEFAULT_NOTIFICATION_PREFS.sms).not.toContain("reviews");
     expect([byEmail("review"), byEmail("review_low"), byEmail("review_access"), byEmail("schedule")]).toEqual([false, true, true, true]);
+  });
+
+  it("puts a warning that email or texts aren't going out under Other alerts, and never sends it by the channel it's about", () => {
+    expect([SENDING_WARNINGS.email, SENDING_WARNINGS.sms].map(notificationTopic)).toEqual(["alerts", "alerts"]);
+    expect(DEFAULT_NOTIFICATION_PREFS.push).toContain("alerts");
+    expect([byEmail(SENDING_WARNINGS.email), byText(SENDING_WARNINGS.email)]).toEqual([false, true]);
+    expect([byEmail(SENDING_WARNINGS.sms), byText(SENDING_WARNINGS.sms)]).toEqual([true, false]);
+    expect(byText("jobs")).toBe(true);
   });
 
   // As private.marketing_office and private.apps_admins pick who gets them (supabase/tests/google_reviews_test.sql).
