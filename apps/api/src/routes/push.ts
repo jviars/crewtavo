@@ -6,14 +6,24 @@ import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
 import { adminClient } from "../lib/supabase";
+import { privateHost } from "../lib/publicHttp";
 import { sendPush, vapidKeys } from "../lib/webpush";
 
 export const push = new Hono<AppEnv>();
 
 push.get("/push/key", requireUser, async (c) => c.json({ publicKey: (await vapidKeys(c.env)).publicKey }));
 
+/** A push service's address is on the public internet (lib/webpush.ts checks again as it sends). */
+const publicAddress = (value: string) => {
+  try {
+    return !privateHost(new URL(value));
+  } catch {
+    return false;
+  }
+};
+
 const subscription = z.object({
-  endpoint: z.url().startsWith("https://").max(1000),
+  endpoint: z.url().startsWith("https://").max(1000).refine(publicAddress, "Notifications can't be sent to that address."),
   keys: z.object({ p256dh: z.string().min(20).max(200), auth: z.string().min(8).max(100) }),
   device: z.string().trim().max(200).optional(),
 });

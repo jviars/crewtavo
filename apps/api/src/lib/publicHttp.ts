@@ -95,6 +95,18 @@ export function publicGet(url: URL, headers: Record<string, string>, signal: Abo
 }
 
 /**
+ * Send a POST with `body` to a public address and wait for the response's headers, with the same
+ * check as publicGet. A redirect comes back as it is, for the caller to follow (checked again) or not.
+ */
+export function publicPost(url: URL, headers: Record<string, string>, body: Uint8Array, signal: AbortSignal): Promise<IncomingMessage> {
+  const options = { method: "POST", headers: { ...headers, "Content-Length": String(body.byteLength) }, lookup: publicLookup, agent: false as const, signal };
+  return new Promise((resolve, reject) => {
+    const request = url.protocol === "https:" ? httpsRequest(url, options, resolve) : httpRequest(url, options, resolve);
+    request.on("error", reject).end(body);
+  });
+}
+
+/**
  * A response's body as text, unpacked, up to `maxBytes` (TooLargeError past that). A body cut off
  * partway, or too slow to finish, is an Error too.
  */

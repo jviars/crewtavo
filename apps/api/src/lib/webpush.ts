@@ -2,10 +2,15 @@
  * Web Push: notifications on phones and computers, free, with nothing to sign up for. Messages go
  * to the browser vendor's push service (Apple, Google, Mozilla), signed with this install's VAPID
  * key (RFC 8292) and encrypted for the device (RFC 8291, aes128gcm). The key pair is made on first
- * use and kept, encrypted, in public.app_secrets. Web Crypto only, so it runs on Workers and Node.
+ * use and kept, encrypted, in public.app_secrets. The signing and encrypting are Web Crypto only.
+ *
+ * A device's address is whatever its browser gave when it subscribed, so a message goes to the
+ * public internet only (lib/publicHttp.ts): never this server, its network or its cloud's metadata
+ * service.
  */
 import type { Env } from "../env";
 import { decryptJson, encryptJson, fromBase64Url, toBase64Url } from "./crypto";
+import { privateHost, publicPost } from "./publicHttp";
 import { adminClient } from "./supabase";
 
 export interface PushSubscription {
@@ -109,20 +114,22 @@ async function vapidJwt(keys: VapidKeys, audience: string, subject: string): Pro
 export async function sendPush(env: Env, sub: PushSubscription, message: PushMessage, contact: string): Promise<{ ok: boolean; gone: boolean; status: number }> {
   const keys = await vapidKeys(env);
   const body = await encryptPayload(sub, encoder.encode(JSON.stringify(message)));
-  const jwt = await vapidJwt(keys, new URL(sub.endpoint).origin, contact);
-  const response = await fetch(sub.endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `vapid t=${jwt}, k=${keys.publicKey}`,
-      "Content-Encoding": "aes128gcm",
-      "Content-Type": "application/octet-stream",
-      TTL: "86400",
-      Urgency: "high",
-    },
-    body,
-    // A push service that doesn't answer counts as a failed send, not a stalled delivery run.
-    signal: AbortSignal.timeout(15_000),
-  }).catch(() => null);
+  const endpoint = new URL(sub.endpoint);
+  // Push services are on the public internet, over HTTPS. Anything else is a failed send.
+  if (endpoint.protocol !== "https:" || privateHost(endpoint)) return { ok: false, gone: false, status: 0 };
+  const jwt = await vapidJwt(keys, endpoint.origin, contact);
+  const headers = {
+    Authorization: `vapid t=${jwt}, k=${keys.publicKey}`,
+    "Content-Encoding": "aes128gcm",
+    "Content-Type": "application/octet-stream",
+    TTL: "86400",
+    Urgency: "high",
+  };
+  // A push service that doesn't answer counts as a failed send, not a stalled delivery run.
+  const response = await publicPost(endpoint, headers, body, AbortSignal.timeout(15_000)).catch(() => null);
   if (!response) return { ok: false, gone: false, status: 0 };
-  return { ok: response.ok, gone: response.status === 404 || response.status === 410, status: response.status };
+  const status = response.statusCode ?? 0;
+  response.destroy();
+  // A push service answers where it's asked. A redirect isn't followed, so it's a failed send too.
+  return { ok: status >= 200 && status < 300, gone: status === 404 || status === 410, status };
 }
