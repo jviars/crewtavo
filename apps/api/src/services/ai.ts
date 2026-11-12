@@ -58,6 +58,10 @@ export async function complete(env: Env, options: CompleteOptions): Promise<stri
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "The AI declined that request. Try rephrasing it.");
     }
+    // Out of room partway through: what there is of the answer stops mid-thought, and would read as whole.
+    if (response.stop_reason === "max_tokens") {
+      throw new HttpError(502, "The AI's answer was cut off before it finished. Try again, or ask for something shorter.");
+    }
     const text = response.content
       .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === "text")
       .map((block) => block.text)

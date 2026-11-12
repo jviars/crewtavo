@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { reportError, sentryOptions } from "../src/lib/monitoring";
+import { logUnhandledRejection, startMonitoring } from "../src/lib/monitoring-node";
 
 const env = { SUPABASE_URL: "https://example.supabase.co", ENCRYPTION_KEY: "x" } as Env;
 
@@ -54,6 +55,44 @@ describe("error reporting", () => {
     expect(event!.extra).toEqual({ route: "/api/test/crash", method: "POST" });
     expect(event!.user).toBeUndefined();
     expect(JSON.stringify(event)).not.toMatch(/dana@example\.com|555-0199|eyJ|sb=1/);
+    await Sentry.close();
+  });
+});
+
+describe("a promise that fails with nothing handling it", () => {
+  /** Start the server's monitoring, and give back what it now does with such a promise. */
+  function started(e: Env) {
+    const before = process.listeners("unhandledRejection");
+    const crashes = process.listeners("uncaughtException");
+    startMonitoring(e);
+    const added = process.listeners("unhandledRejection").filter((listener) => !before.includes(listener));
+    // Taken off again, so nothing here is left listening while the tests run.
+    for (const listener of added) process.off("unhandledRejection", listener);
+    for (const listener of process.listeners("uncaughtException")) if (!crashes.includes(listener)) process.off("uncaughtException", listener);
+    return added;
+  }
+  const failure = new Error("Couldn't reach the mail server");
+
+  it("is logged, and the server carries on, when Sentry is off", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // Node stops the process when nothing listens for these.
+    const added = started(env);
+    expect(added).toEqual([logUnhandledRejection]);
+    expect(() => added[0]!(failure, Promise.resolve())).not.toThrow();
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged.mock.calls[0]).toEqual(["A promise failed and nothing handled it:", expect.stringContaining("Couldn't reach the mail server")]);
+    // Whatever was thrown, an error or not.
+    expect(() => added[0]!("timed out", Promise.resolve())).not.toThrow();
+    expect(logged).toHaveBeenLastCalledWith("A promise failed and nothing handled it:", "timed out");
+    logged.mockRestore();
+  });
+
+  it("is logged the same way when Sentry is on, which only reports it", async () => {
+    const added = started({ ...env, CREWTAVO_SENTRY_DSN: "https://public@errors.example.com/1" });
+    // Ours logs; Sentry's own is there to report, and is told not to log or stop the server ("none").
+    expect(added).toContain(logUnhandledRejection);
+    expect(added).toHaveLength(2);
+    expect(Sentry.getClient()?.getIntegrationByName("OnUnhandledRejection")).toBeDefined();
     await Sentry.close();
   });
 });
