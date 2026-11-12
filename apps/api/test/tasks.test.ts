@@ -9,10 +9,11 @@ import { cronMatches } from "../src/lib/cron";
 import { CRON_TASKS, runTask, TASKS } from "../src/tasks";
 
 // Autopay's own work is tested in autopay.test.ts and the Stripe tests; here, only that the tasks call it.
-const autopay = vi.hoisted(() => ({ reconcile: vi.fn(async () => 0), charge: vi.fn(), job: vi.fn() }));
+const autopay = vi.hoisted(() => ({ reconcile: vi.fn(async () => 0), bank: vi.fn(async () => 0), charge: vi.fn(), job: vi.fn() }));
 vi.mock("../src/integrations/stripe", async (original) => ({
   ...(await original<typeof import("../src/integrations/stripe")>()),
   reconcileAutopayProcessing: autopay.reconcile,
+  reconcileBankPayments: autopay.bank,
 }));
 vi.mock("../src/services/autopay", async (original) => ({
   ...(await original<typeof import("../src/services/autopay")>()),
@@ -128,6 +129,7 @@ describe("hourly upkeep", () => {
       throw new Error(`unexpected ${call.path}`);
     });
     autopay.reconcile.mockResolvedValueOnce(2);
+    autopay.bank.mockResolvedValueOnce(1);
     expect(await runTask("followups", env)).toEqual({
       overdue: 0,
       late_fees: 6,
@@ -140,6 +142,7 @@ describe("hourly upkeep", () => {
       subs: { alerts: 2, reminded: { subs: 0, email: 0, sms: 0, failed: 0 } },
       cards: 5,
       autopay_processing: 2,
+      bank_payments: 1,
       clocks: { reminded: 1, stopped: 0 },
       codes: 4,
       problems: ['mark_overdue_invoices: time zone "Not/AZone" not recognized'],
@@ -150,6 +153,7 @@ describe("hourly upkeep", () => {
       "rpc/emit_sub_document_alerts", "rpc/emit_card_expiry_alerts", "rpc/clock_upkeep", "rpc/tidy_sign_in_codes",
     ]);
     expect(autopay.reconcile).toHaveBeenCalledWith(env, expect.anything());
+    expect(autopay.bank).toHaveBeenCalledWith(env, expect.anything());
     expect(error).toHaveBeenCalled();
   });
 
@@ -170,6 +174,17 @@ describe("hourly upkeep", () => {
     const out = (await runTask("followups", env)) as { cards: number; autopay_processing: number; problems: string[] };
     expect(out).toMatchObject({ cards: 0, autopay_processing: 0, problems: ["reconcile_autopay_processing: Stripe didn't answer"] });
     expect(calls.slice(-2).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes"]);
+  });
+
+  it("reads clients' own bank payments back too, and keeps going when Stripe can't be asked", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const calls = serve((call) => (call.path === "rpc/emit_sub_document_alerts" ? [] : call.path === "rpc/clock_upkeep" ? { reminded: 0, stopped: 0 } : call.path.startsWith("rpc/") ? 0 : []));
+    autopay.bank.mockRejectedValueOnce(new Error("Stripe didn't answer"));
+    const out = (await runTask("followups", env)) as { autopay_processing: number; bank_payments: number; problems: string[] };
+    expect(out).toMatchObject({ autopay_processing: 0, bank_payments: 0, problems: ["reconcile_bank_payments: Stripe didn't answer"] });
+    expect(calls.slice(-2).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes"]);
+    autopay.bank.mockResolvedValueOnce(3);
+    expect(((await runTask("followups", env)) as { bank_payments: number }).bank_payments).toBe(3);
   });
 
   it("only promises subs a link the server can send, and keeps going when reminding them fails", async () => {

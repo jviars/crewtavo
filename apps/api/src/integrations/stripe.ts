@@ -2318,6 +2318,59 @@ export async function reconcileAutopayProcessing(env: Env, admin: Db): Promise<n
   return changed;
 }
 
+/**
+ * A bank payment a client starts on Stripe's page (ACH) has usually cleared or bounced within a
+ * week. Past this, what Stripe says about it is asked for rather than waited on.
+ */
+const BANK_PAYMENT_DAYS = 7;
+
+/**
+ * Hourly: a client's own bank payment 'processing' for longer than one takes is read back from
+ * Stripe and applied as its webhook would have been, in case that never came: paid (or voided, or
+ * written off there) as invoice.paid and its like are, and bounced as invoice.payment_failed is.
+ * Until one of those, the invoice can't be paid online and its Stripe sync says "busy", so one
+ * whose webhook was lost waited for good. One Stripe still has on its way is only looked at, never
+ * called off, however old. Autopay's are read back by reconcileAutopayProcessing, and one the key
+ * in use can't reach (another Stripe account, or the other mode) can't be asked about, so it's left
+ * as it is. Returns how many were applied.
+ */
+export async function reconcileBankPayments(env: Env, admin: Db): Promise<number> {
+  const { data, error } = await admin
+    .from("stripe_invoices")
+    .select(`company_id, ${LINKED}`)
+    .eq("status", "processing")
+    .neq("collection", "charge_automatically")
+    .is("detached_at", null)
+    .lt("processing_at", new Date(Date.now() - BANK_PAYMENT_DAYS * 24 * 60 * 60_000).toISOString())
+    .order("processing_at", { ascending: true })
+    .limit(50);
+  fail(error);
+  const contexts = new Map<string, Ctx | null>();
+  let changed = 0;
+  for (const row of data ?? []) {
+    try {
+      if (!contexts.has(row.company_id)) contexts.set(row.company_id, await context(env, admin, row.company_id));
+      const ctx = contexts.get(row.company_id);
+      if (!ctx || !row.stripe_id || !inUse(ctx, row)) continue;
+      const current = await fetchInvoice(ctx.key, row.stripe_id);
+      if (current.status !== "open") {
+        await applyInvoice(ctx, current);
+        changed++;
+        continue;
+      }
+      const intent = current.payment_intent ? await stripeApi<StripePaymentIntent>(ctx.key, "GET", `/v1/payment_intents/${current.payment_intent}`) : null;
+      if (intent?.status !== "requires_payment_method") continue;
+      // It bounced and the webhook never said.
+      await bankPaymentFailed(env, ctx, current);
+      changed++;
+    } catch (problem) {
+      // Not in the Stripe account this key reaches after all: nothing to read back.
+      if (!missing(problem)) console.error("Couldn't read back a bank payment", row.id, problem);
+    }
+  }
+  return changed;
+}
+
 /** An autopay bank payment bounced (invoice.payment_failed on its processing row): the charge needs the client. */
 async function autopayBounced(ctx: Ctx, invoiceId: string, paymentIntent: string | null) {
   // By this row's invoice, never the event's metadata.

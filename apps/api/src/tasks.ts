@@ -6,7 +6,7 @@ import { addDays, jobWeatherRules, lastDate, localDate, occurrenceDates, weather
 import type { Env } from "./env";
 import { runAccountingJob, SentButUnrecorded } from "./integrations/accounting";
 import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
-import { reconcileAutopayProcessing, syncStripeInvoice } from "./integrations/stripe";
+import { reconcileAutopayProcessing, reconcileBankPayments, syncStripeInvoice } from "./integrations/stripe";
 import { reportError } from "./lib/monitoring";
 import { emailConfigured, smsConfigured } from "./lib/notify";
 import { adminClient, type Db } from "./lib/supabase";
@@ -408,6 +408,17 @@ async function hourlyUpkeep(env: Env) {
     console.error("Upkeep step reconcile_autopay_processing failed", message);
     reportError(err, { task: "followups", step: "reconcile_autopay_processing" });
   }
+  // A client's own bank payment on its way for over a week: the same, in case its webhook never
+  // came, so the invoice isn't left unpayable online for good.
+  let bankPayments = 0;
+  try {
+    bankPayments = await reconcileBankPayments(env, admin);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    problems.push(`reconcile_bank_payments: ${message}`);
+    console.error("Upkeep step reconcile_bank_payments failed", message);
+    reportError(err, { task: "followups", step: "reconcile_bank_payments" });
+  }
   // Clocks left running: remind after 10 hours, stop after 16 (per-company limits in settings.clock).
   const clocks = await step("clock_upkeep", admin.rpc("clock_upkeep"));
   // Sign-in codes texted to subs over a day ago (services/signInCodes.ts): long run out, kept until now
@@ -415,7 +426,7 @@ async function hourlyUpkeep(env: Env) {
   const codes = await step("tidy_sign_in_codes", admin.rpc("tidy_sign_in_codes"));
   return {
     overdue: overdue ?? 0, late_fees: lateFees ?? 0, invoice_reminders: invoiceReminders ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, paperwork: paperwork ?? 0, guide_reviews: guideReviews ?? 0, offers: offers ?? 0, subs: { alerts: subAlerts?.length ?? 0, reminded },
-    cards: cards ?? 0, autopay_processing: autopayProcessing, clocks, codes: codes ?? 0, problems,
+    cards: cards ?? 0, autopay_processing: autopayProcessing, bank_payments: bankPayments, clocks, codes: codes ?? 0, problems,
   };
 }
 

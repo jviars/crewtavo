@@ -23,6 +23,7 @@ import {
   importFromStripe,
   PROCESSING_MESSAGE,
   reconcileAutopayProcessing,
+  reconcileBankPayments,
   refreshStripeWebhook,
   refundStripePayment,
   SHARED_STRIPE_IMPORT,
@@ -1534,6 +1535,96 @@ describe("keeping Stripe in step", () => {
     await event("invoice.payment_failed", { id: made!.stripe_id });
     expect(stripeInvoice(made!.stripe_id)!.status).toBe("void");
     expect(rowsFor(INV)[0]).toMatchObject({ status: "void" });
+  });
+
+  describe("a client's bank payment the webhook never settled", () => {
+    const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60_000).toISOString();
+    /** Pat pays the invoice from their bank on Stripe's page `days` ago, and Stripe says it started. */
+    async function bankPayment(days: number) {
+      const key = stripeKey("sk_live_A", "acct_A");
+      await connect(key);
+      await syncStripeInvoice(env, db.db, CO, INV);
+      const [made] = rowsFor(INV);
+      const intent = { id: "pi_bank", status: "processing", last_payment_error: null as Row | null, payment_method: "pm_bank" };
+      side(key).intents.set("pi_bank", intent);
+      Object.assign(stripeInvoice(made!.stripe_id)!, { payment_intent: "pi_bank" });
+      await event("payment_intent.processing", { id: "pi_bank", invoice: made!.stripe_id });
+      Object.assign(rowsFor(INV)[0]!, { processing_at: daysAgo(days) });
+      stripe.sent.splice(0);
+      return { key, stripeId: made!.stripe_id as string, intent };
+    }
+    const asked = () => sentTo("GET", /^\/v1\/(invoices|payment_intents)\//).map((r) => r.path);
+    const paidIn = (invoiceId: string) => (db.tables.payments ?? []).filter((p) => p.invoice_id === invoiceId);
+
+    it("is read back once it has been on its way longer than a bank payment takes, and booked as the webhook would have", async () => {
+      const { stripeId } = await bankPayment(8);
+      // It cleared, and invoice.paid never came: nothing could be paid online and the sync said "busy".
+      expect(await syncStripeInvoice(env, db.db, CO, INV)).toBe("busy");
+      payInStripe(stripeId);
+      expect(await reconcileBankPayments(env, db.db)).toBe(1);
+      expect(rowsFor(INV)[0]).toMatchObject({ status: "paid" });
+      expect(paidIn(INV).map((p) => [p.amount, p.processor, p.processor_ref])).toEqual([[160, "stripe", `pi_${stripeId}`]]);
+      // Nothing is left on its way, and the webhook turning up late books nothing twice.
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+      await event("invoice.paid", { id: stripeId });
+      expect(paidIn(INV)).toHaveLength(1);
+    });
+
+    it("is owed again, with a note for the office, when it bounced", async () => {
+      const { stripeId, intent } = await bankPayment(8);
+      Object.assign(intent, { status: "requires_payment_method", last_payment_error: { code: "insufficient_funds", message: "Not enough money" } });
+      expect(await reconcileBankPayments(env, db.db)).toBe(1);
+      expect(rowsFor(INV)[0]).toMatchObject({ status: "open" });
+      expect(db.tables.messages).toContainEqual(expect.objectContaining({ subject: "Bank payment failed", body: "The bank payment for invoice #42 didn't go through. The invoice is still owed." }));
+      expect(paidIn(INV)).toEqual([]);
+      // The same as invoice.payment_failed arriving, which changes nothing more when it does.
+      const notes = db.tables.messages!.length;
+      await event("invoice.payment_failed", { id: stripeId });
+      expect(db.tables.messages).toHaveLength(notes);
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+    });
+
+    it("is only looked at while Stripe says it's still on its way, however long that is", async () => {
+      await bankPayment(40);
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+      expect(asked()).toHaveLength(2);
+      expect(rowsFor(INV)[0]).toMatchObject({ status: "processing" });
+      expect(db.tables.messages ?? []).toEqual([]);
+    });
+
+    it("isn't asked about within the days a bank payment takes", async () => {
+      const { stripeId } = await bankPayment(6);
+      payInStripe(stripeId);
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+      expect(asked()).toEqual([]);
+      expect(rowsFor(INV)[0]).toMatchObject({ status: "processing" });
+    });
+
+    it("leaves autopay's own to its own check, and what this key can't reach alone", async () => {
+      const { stripeId } = await bankPayment(8);
+      payInStripe(stripeId);
+      Object.assign(rowsFor(INV)[0]!, { collection: "charge_automatically" });
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+      expect(asked()).toEqual([]);
+      // In a Stripe account Crewtavo has left, or in test mode under a live key.
+      Object.assign(rowsFor(INV)[0]!, { collection: "send_invoice", detached_at: daysAgo(1) });
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+      Object.assign(rowsFor(INV)[0]!, { detached_at: null, livemode: false });
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+      expect(asked()).toEqual([]);
+      expect(rowsFor(INV)[0]).toMatchObject({ status: "processing" });
+    });
+
+    it("carries on with the next one when Stripe can't be asked about one", async () => {
+      const { stripeId } = await bankPayment(8);
+      payInStripe(stripeId);
+      stripe.trouble.push({ when: (m: string, p: string) => m === "GET" && p === `/v1/invoices/${stripeId}`, times: 3, status: 500 });
+      expect(await reconcileBankPayments(env, db.db)).toBe(0);
+      expect(rowsFor(INV)[0]).toMatchObject({ status: "processing" });
+      // The next hour, Stripe answers.
+      expect(await reconcileBankPayments(env, db.db)).toBe(1);
+      expect(rowsFor(INV)[0]).toMatchObject({ status: "paid" });
+    });
   });
 
   it("writes an invoice made in Stripe off there when it's written off here, and voids Crewtavo's own payment page", async () => {
