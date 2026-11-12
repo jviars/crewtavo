@@ -4,7 +4,7 @@ import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { runAccountingJob, SentButUnrecorded } from "../src/integrations/accounting";
 import { accessToken } from "../src/integrations/tokens";
-import { encryptJson } from "../src/lib/crypto";
+import { decryptJson, encryptJson } from "../src/lib/crypto";
 import { readClientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
 import { processAutomations, visitTime } from "../src/services/automations";
@@ -344,6 +344,74 @@ describe("accounting sync", () => {
     vi.stubGlobal("fetch", async () => Response.json({ error }, { status }));
     await expect(accessToken(env, db, COMPANY, provider)).rejects.toThrow(error);
     expect(integrationWrites(queries)).toEqual([{ status: "error", last_error: "Sign-in expired. Reconnect on the Apps page." }]);
+  });
+
+  // QuickBooks changes the refresh token as it goes, and stops taking the one before.
+  describe("refreshing a sign-in that's about to run out", () => {
+    /** The stored tokens, kept as the app keeps them: read on a select, replaced on an upsert. */
+    async function stored() {
+      const kept = { ciphertext: await expiring() };
+      const { db, queries } = fakeDb((q) => {
+        if (q.table !== "integration_secrets") return {};
+        if (verb(q) === "upsert") kept.ciphertext = call(q, "upsert")![1].ciphertext;
+        return { data: { ciphertext: kept.ciphertext } };
+      });
+      return { db, queries, kept, now: () => decryptJson<{ access_token: string; refresh_token: string }>(env, kept.ciphertext) };
+    }
+    /** Intuit's token endpoint: each refresh token works once, and gets the next one back. */
+    function intuit() {
+      const used: string[] = [];
+      vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+        const token = (init.body as URLSearchParams).get("refresh_token")!;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        if (used.includes(token)) return Response.json({ error: "invalid_grant" }, { status: 400 });
+        used.push(token);
+        return Response.json({ access_token: `access-${used.length + 1}`, refresh_token: `refresh-${used.length + 1}`, expires_in: 3600 });
+      });
+      return used;
+    }
+
+    it("refreshes once when two things need it at the same moment", async () => {
+      const { db, queries, now } = await stored();
+      const used = intuit();
+      const both = await Promise.all([accessToken(env, db, COMPANY, "quickbooks"), accessToken(env, db, COMPANY, "quickbooks")]);
+      expect(both.map((b) => b.token)).toEqual(["access-2", "access-2"]);
+      expect(used).toEqual(["refresh-1"]);
+      expect(await now()).toMatchObject({ access_token: "access-2", refresh_token: "refresh-2" });
+      expect(integrationWrites(queries)).toEqual([]);
+    });
+
+    it("refreshes again the next time it's needed", async () => {
+      const { db, kept } = await stored();
+      const used = intuit();
+      await accessToken(env, db, COMPANY, "quickbooks");
+      kept.ciphertext = await encryptJson(env, { access_token: "access-2", refresh_token: "refresh-2", expires_at: Date.now() + 60_000 });
+      expect((await accessToken(env, db, COMPANY, "quickbooks")).token).toBe("access-3");
+      expect(used).toEqual(["refresh-1", "refresh-2"]);
+    });
+
+    it("uses the tokens another server just saved when its own refresh is refused", async () => {
+      const { db, queries, kept } = await stored();
+      vi.stubGlobal("fetch", async () => {
+        // The other server got there first: Intuit took refresh-1 from it, and its tokens are saved.
+        kept.ciphertext = await encryptJson(env, { access_token: "theirs", refresh_token: "refresh-2", expires_at: Date.now() + 3_600_000 });
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
+      });
+      expect(await accessToken(env, db, COMPANY, "quickbooks")).toMatchObject({ token: "theirs", secret: { refresh_token: "refresh-2" } });
+      expect(integrationWrites(queries)).toEqual([]);
+    });
+
+    it("never gives one company, or one app, another's refresh", async () => {
+      const { db } = await stored();
+      let asked = 0;
+      vi.stubGlobal("fetch", async () => Response.json({ access_token: `access-${++asked}`, expires_in: 3600 }));
+      const tokens = await Promise.all([
+        accessToken(env, db, COMPANY, "quickbooks"),
+        accessToken(env, db, "00000000-0000-4000-8000-000000000002", "quickbooks"),
+        accessToken(env, db, COMPANY, "zoho_books"),
+      ]);
+      expect(new Set(tokens.map((t) => t.token)).size).toBe(3);
+    });
   });
 
   it("retries changes queued while the app isn't connected instead of dropping them", async () => {

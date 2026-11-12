@@ -120,11 +120,37 @@ export async function loadSecret(env: Env, admin: Db, companyId: string, provide
   return data ? decryptJson<StoredSecret>(env, data.ciphertext) : null;
 }
 
-/** A valid access token, refreshed (and re-saved) when it's within two minutes of expiring. */
-export async function accessToken(env: Env, admin: Db, companyId: string, provider: Provider): Promise<{ token: string; secret: StoredSecret }> {
+type Access = { token: string; secret: StoredSecret };
+
+/** Good for at least two more minutes (or never runs out). */
+const stillGood = (secret: StoredSecret) => !secret.expires_at || secret.expires_at - Date.now() > 120_000;
+
+/** Reads of an app's tokens under way in this server, by company and app. */
+const reading = new Map<string, Promise<Access>>();
+
+/**
+ * A valid access token, refreshed (and re-saved) when it's within two minutes of expiring.
+ *
+ * One read of a company's tokens for an app at a time in this server, shared by everyone who asks
+ * meanwhile (as services/railway.ts does). QuickBooks changes the refresh token as it goes: two
+ * refreshes at once would both send the same one, and whichever saved last could leave the older
+ * answer stored, or be refused and mark the sign-in expired though the other had just saved new tokens.
+ */
+export function accessToken(env: Env, admin: Db, companyId: string, provider: Provider): Promise<Access> {
+  const key = `${companyId}:${provider}`;
+  const going = reading.get(key);
+  if (going) return going;
+  const shared: Promise<Access> = readAccessToken(env, admin, companyId, provider).finally(() => {
+    if (reading.get(key) === shared) reading.delete(key);
+  });
+  reading.set(key, shared);
+  return shared;
+}
+
+async function readAccessToken(env: Env, admin: Db, companyId: string, provider: Provider): Promise<Access> {
   const secret = await loadSecret(env, admin, companyId, provider);
   if (!secret?.access_token) throw new IntegrationError(`${provider} isn't connected`);
-  if (!secret.expires_at || secret.expires_at - Date.now() > 120_000) return { token: secret.access_token, secret };
+  if (stillGood(secret)) return { token: secret.access_token, secret };
   if (!secret.refresh_token) throw new IntegrationError(`${provider} needs to be reconnected`);
 
   try {
@@ -140,6 +166,10 @@ export async function accessToken(env: Env, admin: Db, companyId: string, provid
   } catch (error) {
     // Only a definite no needs a person to reconnect. An outage or timeout throws so the work is retried later.
     if (error instanceof SignInRefused) {
+      // Unless another server refreshed it meanwhile and saved the new tokens: the provider refused
+      // the old refresh token, not the sign-in.
+      const latest = await loadSecret(env, admin, companyId, provider).catch(() => null);
+      if (latest?.access_token && latest.access_token !== secret.access_token && stillGood(latest)) return { token: latest.access_token, secret: latest };
       await admin
         .from("integrations")
         .update({ status: "error", last_error: "Sign-in expired. Reconnect on the Apps page." })
