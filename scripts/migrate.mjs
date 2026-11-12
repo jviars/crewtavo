@@ -12,6 +12,10 @@
  * waits (up to CREWTAVO_MIGRATE_WAIT seconds, default 180) for the database and for the tables those
  * services create (auth.users, storage.buckets), which the migrations build on.
  * CREWTAVO_MIGRATE_STATUS names a file to write the outcome to (see apps/api/src/lib/startup.ts).
+ *
+ * The app is in use while this runs (during an update the previous version is still serving), so a
+ * migration waits ten seconds at most for a table and is tried again if the database was busy. A
+ * database that a newer Crewtavo has already updated is reported, and this one starts anyway.
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -55,16 +59,30 @@ end $$`;
 const TRANSIENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH", "ECONNRESET", "CONNECT_TIMEOUT", "57P03"]);
 const UNREACHABLE = new Set([...TRANSIENT, "SERVICES_NOT_READY"]);
 
+/**
+ * How long a migration waits for a table someone else is using. While it waits, everything else
+ * that wants the table queues behind it, so a migration stuck behind one long query would hold up
+ * the whole app (the previous version is still serving) for as long as that query runs. Past this
+ * it gives up, the file's transaction rolls back, and the file is tried again after a pause.
+ */
+const LOCK_TIMEOUT = "10s";
+/** Errors that mean the database was busy: a lock that didn't come in time, or a deadlock with the app. */
+const BUSY = new Set(["55P03", "40P01"]);
+/** Seconds to wait before each further try at a file the database was too busy for. */
+const BUSY_PAUSES = [2, 5, 10, 20];
+
 function problemOf(error) {
   if (error?.code === "28P01") return "wrong_password";
   if (error?.code === "SERVICES_NOT_READY") return "services_not_ready";
   if (UNREACHABLE.has(error?.code)) return "unreachable";
+  if (BUSY.has(error?.code)) return "busy";
   if (error instanceof TypeError && /url/i.test(error.message)) return "bad_url";
   return "migration_failed";
 }
 
 let sql;
 let firstInstall;
+let newer;
 let current = null;
 try {
   // No TLS on a private network: localhost, a docker compose service name ("db"), or Railway's
@@ -107,17 +125,48 @@ try {
   const applied = new Set((await sql`select version from supabase_migrations.schema_migrations`).map((r) => r.version));
   firstInstall = applied.size === 0;
 
+  // Migrations the database holds that this build has no file for: a newer Crewtavo has already
+  // updated it, and this one is older (its owner set the image back to an earlier version, Railway
+  // rolled a deployment back, or an update failed part-way and the previous version restarted).
+  // It starts anyway, and says so, rather than refusing:
+  //  - Refusing protects nothing. On Railway a start that fails its health check leaves the previous
+  //    deployment serving, and after a restart or a second rollback that is this same older version
+  //    on this same database. Where there is no previous deployment (Docker, or a container Railway
+  //    restarted), the instance would be down, with nobody there to bring it back.
+  //  - One release back is meant to work: during every update the previous version keeps serving
+  //    while the new one migrates, so migrations leave the database usable by it (deploy/README.md,
+  //    Releasing). Going back a release is also all an owner can do about a bad one until its fix is
+  //    out. This build can't tell one release back from ten.
+  //  - Where Crewtavo shares a Supabase project, a migration of the owner's own looks the same here.
+  // The log, /api/health and error monitoring say it (apps/api/src/server.ts).
+  const known = new Set(files.map((file) => file.split("_")[0]));
+  const unknown = [...applied].filter((version) => !known.has(version)).sort();
+  if (unknown.length) {
+    newer = `${unknown.length} newer migration${unknown.length === 1 ? "" : "s"}, up to ${unknown.at(-1)}`;
+    console.warn(`migrate: this version of Crewtavo is older than its database, which holds ${newer}. It keeps running, but parts of it may not work: move to the newest version (ghcr.io/jviars/crewtavo:latest) as soon as you can.`);
+  }
+
   let count = 0;
   for (const file of files) {
     const [version, ...rest] = file.replace(/\.sql$/, "").split("_");
     if (applied.has(version)) continue;
     current = file;
     const body = readFileSync(join(dir, file), "utf8");
-    await sql.begin(async (tx) => {
-      await tx.unsafe(FIRE_TRIGGERS_NOW);
-      await tx.unsafe(body);
-      await tx`insert into supabase_migrations.schema_migrations (version, name, statements) values (${version}, ${rest.join("_")}, ${[body]})`;
-    });
+    for (let tries = 0; ; tries++) {
+      try {
+        await sql.begin(async (tx) => {
+          await tx`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`;
+          await tx.unsafe(FIRE_TRIGGERS_NOW);
+          await tx.unsafe(body);
+          await tx`insert into supabase_migrations.schema_migrations (version, name, statements) values (${version}, ${rest.join("_")}, ${[body]})`;
+        });
+        break;
+      } catch (error) {
+        if (!BUSY.has(error?.code) || tries >= BUSY_PAUSES.length) throw error;
+        console.warn(`migrate: the database was busy in ${file} (${error.message}); trying again in ${BUSY_PAUSES[tries]} seconds`);
+        await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSES[tries] * 1000));
+      }
+    }
     console.log(`migrate: applied ${file}`);
     count++;
   }
@@ -142,11 +191,11 @@ try {
   // PostgREST caches the schema; tell it about the new tables and functions.
   if (count) await sql`notify pgrst, 'reload schema'`;
   console.log(count ? `migrate: ${count} migration(s) applied.` : "migrate: database is up to date.");
-  report({ ok: true, firstInstall, applied: count });
+  report({ ok: true, firstInstall, applied: count, ...(newer ? { problem: "newer_database", detail: newer } : {}) });
 } catch (error) {
   const problem = problemOf(error);
   console.error(`migrate: failed${current ? ` in ${current}` : ""}:`, error.message);
-  report({ ok: false, firstInstall, problem, detail: problem === "migration_failed" ? `${current ?? "setup"}: ${error.message}` : undefined });
+  report({ ok: false, firstInstall, problem, detail: problem === "migration_failed" || problem === "busy" ? `${current ?? "setup"}: ${error.message}` : undefined });
   process.exitCode = 1;
 } finally {
   await sql?.end({ timeout: 5 });

@@ -57,6 +57,8 @@ server.get("/api/health", (c) => {
   const s = startup();
   if (s?.state === "migrating") return c.json({ ok: false, version, starting: true }, 503);
   if (s?.state === "failed" && s.firstInstall === false) return c.json({ ok: false, version, problem: s.problem }, 503);
+  // An older version on a newer database keeps serving (scripts/migrate.mjs says why), and says so here.
+  if (s?.state === "ready" && s.problem) return c.json({ ok: true, version, problem: s.problem });
   return c.json({ ok: true, version });
 });
 server.all("/api/*", api);
@@ -151,7 +153,14 @@ async function migrate(): Promise<void> {
       } catch {
         status = { ok: false, problem: "migration_failed", detail: "The migration process stopped without a result." };
       }
-      setStartup(status.ok ? { state: "ready" } : { state: "failed", firstInstall: status.firstInstall, problem: status.problem, detail: status.detail });
+      // Ready can come with a problem that doesn't stop it (newer_database). Error monitoring hears
+      // of it too: nobody may be reading this instance's log.
+      if (status.ok && status.problem) reportError(new Error(`Crewtavo ${version} started on a database a newer version has updated (${status.detail ?? "no detail"})`), { startup: status.problem });
+      setStartup(
+        status.ok
+          ? { state: "ready", ...(status.problem ? { problem: status.problem, detail: status.detail } : {}) }
+          : { state: "failed", firstInstall: status.firstInstall, problem: status.problem, detail: status.detail },
+      );
       resolve();
     });
   });

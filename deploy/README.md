@@ -172,6 +172,12 @@ are public, and GitHub Actions and the registry are free for public repositories
   **Settings → Source → Configure auto updates**. To stay on one version, they set the image to its
   version tag there (`ghcr.io/jviars/crewtavo:0.2.0`), which then takes only that version's patch
   updates, or none with auto updates off.
+- **Going back:** a version older than the one that last updated the database still starts (an
+  owner setting the image back, a rollback in Railway). One release back is meant to work, and
+  it's all an owner can do about a bad release until its fix is out; refusing would only leave the
+  instance down. It doesn't go unnoticed, though: the log says the database holds migrations this
+  version doesn't know, `/api/health` adds `"problem":"newer_database"`, and error monitoring is
+  told (`scripts/migrate.mjs` has the reasoning).
 
 `https://<instance>/api/health` shows the version an instance runs, for example
 `{"ok":true,"version":"0.1.1"}`; Railway itself only shows the tag, `latest`. The service's
@@ -206,7 +212,10 @@ reaches every instance unattended, so it has to work without anyone doing anythi
   (`npm run test:upgrade`): it builds the database as the previous release left it, fills it with
   the rows that release's own database tests make, and applies every migration added since, the way
   an instance does. A migration that has been released is never edited, which the same check
-  enforces: instances have applied it and won't apply it again.
+  enforces: instances have applied it and won't apply it again. The app is in use while a
+  migration runs, so each one waits ten seconds at most for a table and is tried again a few times
+  if the database was busy (`scripts/migrate.mjs`); one that needs a busy table for long won't get
+  through.
 - **Settings:** a new variable needs a default. If the new version can't start without it, every
   instance stays on the previous version until its owner adds it.
 - **Fixing a bad release:** release a fix as a new version. Moving `latest` back to an older image

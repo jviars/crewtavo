@@ -19,7 +19,7 @@ export interface SetupStatus {
   ready: boolean;
   platform: "railway" | "compose" | "server";
   database: "ok" | "starting" | "not_connected" | "wrong_keys" | "unreachable" | "empty" | "migration_failed";
-  migration: { problem?: "wrong_password" | "unreachable" | "bad_url" | "services_not_ready" | "migration_failed"; detail?: string } | null;
+  migration: { problem?: "wrong_password" | "unreachable" | "bad_url" | "services_not_ready" | "busy" | "newer_database" | "migration_failed"; detail?: string } | null;
   needsOwner: boolean;
 }
 
@@ -112,6 +112,14 @@ function steps(s: SetupStatus): { title: string; summary: string; steps: ReactNo
         return fail("The database address Crewtavo was given isn't valid.", [
           railway ? <>On the <strong>crewtavo</strong> service, check <Code>SUPABASE_DB_URL</Code> under <strong>Variables</strong>. The template sets it; if it was edited, put the template's value back.</> : <>Check <Code>SUPABASE_DB_URL</Code> in <Code>docker-compose.yml</Code>.</>,
           restart,
+        ]);
+      case "busy":
+        return fail("The database was too busy to update: something else was using the tables the update changes. Crewtavo keeps trying by itself.", []);
+      case "newer_database":
+        return fail("This is an older version of Crewtavo than the one that last updated its database.", [
+          railway
+            ? <>In your Railway project, open the <strong>crewtavo</strong> service's <strong>Settings</strong>, and under <strong>Source</strong> set the image to <Code>ghcr.io/jviars/crewtavo:latest</Code>, the newest version. Railway then redeploys it.</>
+            : <>Get the newest Crewtavo (<Code>git pull</Code> in the Crewtavo folder) and run <Code>npm run instance</Code> again.</>,
         ]);
       default:
         return fail("Setting up the database failed. This is a problem in Crewtavo itself, not in anything you did.", [

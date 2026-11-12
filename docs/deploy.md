@@ -118,6 +118,9 @@ release notes say what to do. To see which version you're running, open
 `https://your-address/api/health`. To change when updates install, or to turn them off, open the
 service's **Settings → Source → Configure auto updates**. To stay on one version, change the image
 there from `ghcr.io/jviars/crewtavo:latest` to that version, such as `ghcr.io/jviars/crewtavo:0.2.0`.
+Going back to a version older than one your Crewtavo has already run doesn't undo an update: the
+database has moved on, and parts of the older version may not work with it. It still starts, and
+says so in its log and at `/api/health` (`"problem":"newer_database"`).
 
 **Locked out?** See [Getting back in](#getting-back-in).
 
