@@ -867,7 +867,7 @@ describe("automations", () => {
 // ===== Notices reach the sub at the office's record ==============================================
 
 describe("a sub's notices", () => {
-  const notice = (extra: Row = {}) => ({ id: "n1", company_id: CO, user_id: AL, kind: "jobs", title: "Smith roof, Tue Nov 3, 24 squares, $2,040.", body: "New job offer.", link: "/field/jobs/p1", read_at: null, ...extra });
+  const notice = (extra: Row = {}) => ({ id: "n1", company_id: CO, user_id: AL, kind: "jobs", title: "Smith roof, Tue Nov 3, 24 squares, $2,040.", body: "New job offer.", link: "/field/jobs/p1", read_at: null, delivery_token: "claim-1", ...extra });
   /** Al's sign-in on Apex's stand-in address, with nothing of the office's on his profile. */
   const world = (record: Row = {}, contacts: Row[] | null = null) => {
     const w = withAl();
@@ -877,7 +877,8 @@ describe("a sub's notices", () => {
     w.tables.push_subscriptions = [];
     const sub = w.tables.subcontractors[0]!;
     w.rpcAnswers = {
-      claim_notifications: [notice()],
+      claim_notification_deliveries: [notice()],
+      start_notification_deliveries: [{ id: "n1", delivery: {} }],
       // public.sub_notice_contacts: the record as it is now, for a sign-in made for the sub.
       sub_notice_contacts: contacts ?? [{ user_id: AL, company_id: CO, email: (sub.email as string | null)?.trim().toLowerCase() ?? null, phone: sub.phone }],
     };
@@ -908,7 +909,7 @@ describe("a sub's notices", () => {
     // Not a sign-in made for the sub: the database gives no record contacts for it.
     const w = world({}, []);
     w.tables.profiles = w.tables.profiles!.map((p) => (p.user_id === AL ? { ...p, email: "al@own.test" } : p));
-    w.rpcAnswers!.claim_notifications = [notice({ kind: "subs", title: "Apex declined Smith roof", body: "“Too far.\n\nhttps://evil.example/login\n\nThanks” You can offer it to another sub." })];
+    w.rpcAnswers!.claim_notification_deliveries = [notice({ kind: "subs", title: "Apex declined Smith roof", body: "“Too far.\n\nhttps://evil.example/login\n\nThanks” You can offer it to another sub." })];
     w.tables.notification_prefs = [{ company_id: CO, user_id: AL, email: ["subs"], sms: [], push: [] }];
     const sent = serve(w);
     expect(await deliverNotifications(env)).toMatchObject({ email: 1 });

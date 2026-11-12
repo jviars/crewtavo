@@ -1147,7 +1147,7 @@ describe("matching by hand", () => {
 });
 
 describe("review notifications", () => {
-  const notice = (kind: string, title: string, id: string) => ({ id, company_id: CO, user_id: USER, kind, title, body: null, link: `/marketing?tab=reviews&review=${id}`, read_at: null });
+  const notice = (kind: string, title: string, id: string) => ({ id, company_id: CO, user_id: USER, kind, title, body: null, link: `/marketing?tab=reviews&review=${id}`, read_at: null, delivery_token: "claim-1" });
   const world = (notices: Row[]) =>
     serve({
       tables: {
@@ -1156,7 +1156,7 @@ describe("review notifications", () => {
         profiles: [{ user_id: USER, email: "mia@radford.example", phone: null, full_name: "Mia" }],
         push_subscriptions: [{ id: "phone-1", user_id: USER, endpoint: "https://push.example/1", p256dh: "k", auth: "a" }],
       },
-      rpc: { claim_notifications: () => notices, sub_notice_contacts: () => [] },
+      rpc: { claim_notification_deliveries: () => notices, start_notification_deliveries: (body) => body.p_ids.map((id: string) => ({ id, delivery: {} })), sub_notice_contacts: () => [] },
     });
 
   it("go by push, and by email only for 1 and 2 stars, which come first", async () => {

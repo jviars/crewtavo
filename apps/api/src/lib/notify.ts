@@ -18,7 +18,7 @@ export interface SendResult {
   sent: boolean;
   id?: string;
   reason?: string;
-  /** The provider's HTTP status when it turned the email down: 401/403 is the key, 429 a limit. */
+  /** The provider's HTTP status when it turned the email or text down: 401/403 is the key, 429 a limit. */
   status?: number;
   /** Twilio's error code when it refused a text: 21610 is a number that texted STOP. */
   code?: number;
@@ -172,12 +172,29 @@ export async function sendEmail(env: Env, message: EmailMessage, companyId?: str
   return resendSend(env.RESEND_API_KEY, env.EMAIL_FROM, message);
 }
 
+/** Twilio's codes for a number that can't be texted: not a number, not a mobile, unreachable, or it texted STOP. */
+const TWILIO_BAD_NUMBER = [21211, 21214, 21217, 21610, 21612, 21614];
+
+/**
+ * Why an email or text didn't go, for whoever decides whether to try again: "unset" (nothing is set
+ * up to send with), "recipient" (that one address or number can't be sent to, so another try won't
+ * help and nothing is wrong with the company's sending), "sign_in" (the mailbox, key or account was
+ * refused) or "provider" (anything else: unreachable, a limit, an outage).
+ */
+export function sendProblem(result: SendResult): "unset" | "recipient" | "sign_in" | "provider" {
+  const reason = result.reason ?? "";
+  if (/isn't set up/i.test(reason)) return "unset";
+  if (TWILIO_BAD_NUMBER.includes(result.code ?? 0) || /wouldn't send to that address|isn't a valid email address|email address isn't valid|have no email address/i.test(reason)) return "recipient";
+  if (result.status === 401 || result.status === 403 || /password|sign-in|didn't accept|turned off/i.test(reason)) return "sign_in";
+  return "provider";
+}
+
 /**
  * Show a broken mailbox (changed password, revoked app password, a Resend key that's revoked or not
  * allowed to send) in Settings, and clear it once it works again.
  */
 async function noteMailboxHealth(env: Env, companyId: string, mailbox: Mailbox, result: SendResult) {
-  const failedSignIn = !result.sent && (result.status === 401 || result.status === 403 || /password|sign-in|didn't accept|turned off/i.test(result.reason ?? ""));
+  const failedSignIn = !result.sent && sendProblem(result) === "sign_in";
   const next = result.sent ? "connected" : failedSignIn ? "error" : mailbox.status;
   if (next === mailbox.status) return;
   mailbox.status = next;
@@ -288,6 +305,7 @@ export async function sendSms(env: Env, message: { to: string; body: string }): 
     const detail = (await response.json().catch(() => ({}))) as { message?: string; code?: number };
     return {
       sent: false,
+      status: response.status,
       reason: `The text provider refused it (${response.status}${detail.message ? `: ${detail.message}` : ""}).`,
       ...(typeof detail.code === "number" ? { code: detail.code } : {}),
     };

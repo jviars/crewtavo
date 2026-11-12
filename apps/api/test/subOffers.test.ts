@@ -324,7 +324,12 @@ describe("a sub's own offers", () => {
 
 describe("the offer by text", () => {
   // What send_sub_offer leaves for Al: a notification under his "jobs" topic, linking to the offer.
-  const notice = { id: "n1", company_id: CO, user_id: AL, kind: "jobs", title: "Smith roof, Tue Nov 3, 24 squares, $2,040. Open Crewtavo to accept or decline.", body: "New job offer.", link: `/field/jobs/${PAY}`, read_at: null };
+  const notice = { id: "n1", company_id: CO, user_id: AL, kind: "jobs", title: "Smith roof, Tue Nov 3, 24 squares, $2,040. Open Crewtavo to accept or decline.", body: "New job offer.", link: `/field/jobs/${PAY}`, read_at: null, delivery_token: "claim-1" };
+  /** The notify task's claim on these, each still held when its turn comes and none sent by any channel yet. */
+  const delivering = (notices: Row[]): World["rpc"] => ({
+    claim_notification_deliveries: () => notices,
+    start_notification_deliveries: (body) => notices.filter((n) => body.p_ids.includes(n.id)).map((n) => ({ id: n.id, delivery: {} })),
+  });
   const world = (prefs: Row[] = []): World => ({
     tables: {
       notification_prefs: prefs,
@@ -332,7 +337,7 @@ describe("the offer by text", () => {
       companies: [{ id: CO, name: "Romeo Roofing", email: null }],
       push_subscriptions: [],
     },
-    rpc: { claim_notifications: () => [notice] },
+    rpc: delivering([notice]),
   });
 
   it("goes to a sub with a phone when texting is set up, with a link to the offer, as their settings start", async () => {
@@ -344,12 +349,12 @@ describe("the offer by text", () => {
   it("links two at once to My jobs, and anything else mixed in to the start", async () => {
     const second = { ...notice, id: "n2", title: "Jones gutters, Thu Nov 5, $600. Open Crewtavo to accept or decline.", link: "/field/jobs/other" };
     const both = world();
-    both.rpc = { claim_notifications: () => [notice, second] };
+    both.rpc = delivering([notice, second]);
     const jobs = serve(both);
     await deliverNotifications(texting);
     expect(jobs.texts()).toEqual([expect.objectContaining({ Body: `Romeo Roofing: ${notice.title} (+1 more) https://ops.example.com/field/jobs` })]);
     const mixed = world([{ company_id: CO, user_id: AL, email: [], sms: ["jobs", "schedule"], push: [] }]);
-    mixed.rpc = { claim_notifications: () => [notice, { ...second, kind: "schedule", title: "You're on Tear off", link: "/field/visits/v1" }] };
+    mixed.rpc = delivering([notice, { ...second, kind: "schedule", title: "You're on Tear off", link: "/field/visits/v1" }]);
     const other = serve(mixed);
     await deliverNotifications(texting);
     expect(other.texts()).toEqual([expect.objectContaining({ Body: `Romeo Roofing: ${notice.title} (+1 more) https://ops.example.com/` })]);

@@ -1646,14 +1646,14 @@ isOneToOne: false
                   ]
                 },"notifications": {
                   Row: {
-                    "body": string | null,"company_id": string,"created_at": string,"delivered_at": string | null,"id": string,"kind": string,"link": string | null,"read_at": string | null,"title": string,"user_id": string
+                    "body": string | null,"company_id": string,"created_at": string,"deliver_after": string | null,"delivered_at": string | null,"delivery": NonNullable<Json>,"delivery_attempts": number,"delivery_error": string | null,"delivery_failed_at": string | null,"delivery_locked_until": string | null,"delivery_token": string | null,"id": string,"kind": string,"link": string | null,"read_at": string | null,"title": string,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "body"?: string | null,"company_id": string,"created_at"?: string,"delivered_at"?: string | null,"id"?: string,"kind"?: string,"link"?: string | null,"read_at"?: string | null,"title": string,"user_id": string
+                    "body"?: string | null,"company_id": string,"created_at"?: string,"deliver_after"?: string | null,"delivered_at"?: string | null,"delivery"?: NonNullable<Json>,"delivery_attempts"?: number,"delivery_error"?: string | null,"delivery_failed_at"?: string | null,"delivery_locked_until"?: string | null,"delivery_token"?: string | null,"id"?: string,"kind"?: string,"link"?: string | null,"read_at"?: string | null,"title": string,"user_id": string
                   }
                   Update: {
-                    "body"?: string | null,"company_id"?: string,"created_at"?: string,"delivered_at"?: string | null,"id"?: string,"kind"?: string,"link"?: string | null,"read_at"?: string | null,"title"?: string,"user_id"?: string
+                    "body"?: string | null,"company_id"?: string,"created_at"?: string,"deliver_after"?: string | null,"delivered_at"?: string | null,"delivery"?: NonNullable<Json>,"delivery_attempts"?: number,"delivery_error"?: string | null,"delivery_failed_at"?: string | null,"delivery_locked_until"?: string | null,"delivery_token"?: string | null,"id"?: string,"kind"?: string,"link"?: string | null,"read_at"?: string | null,"title"?: string,"user_id"?: string
                   }
                   Relationships: [
                     {
@@ -3618,12 +3618,45 @@ isOneToOne: false
         isOneToOne: false
         isSetofReturn: true
       } },
+"claim_notification_deliveries":
+{ Args: { "p_limit"?: number,"p_min_age_seconds"?: number }; Returns: {
+              "body": string | null,
+"company_id": string,
+"created_at": string,
+"deliver_after": string | null,
+"delivered_at": string | null,
+"delivery": NonNullable<Json>,
+"delivery_attempts": number,
+"delivery_error": string | null,
+"delivery_failed_at": string | null,
+"delivery_locked_until": string | null,
+"delivery_token": string | null,
+"id": string,
+"kind": string,
+"link": string | null,
+"read_at": string | null,
+"title": string,
+"user_id": string
+            }[]
+                          SetofOptions: {
+        from: "*"
+        to: "notifications"
+        isOneToOne: false
+        isSetofReturn: true
+      } },
 "claim_notifications":
 { Args: { "p_limit"?: number,"p_min_age_seconds"?: number }; Returns: {
               "body": string | null,
 "company_id": string,
 "created_at": string,
+"deliver_after": string | null,
 "delivered_at": string | null,
+"delivery": NonNullable<Json>,
+"delivery_attempts": number,
+"delivery_error": string | null,
+"delivery_failed_at": string | null,
+"delivery_locked_until": string | null,
+"delivery_token": string | null,
 "id": string,
 "kind": string,
 "link": string | null,
@@ -4133,6 +4166,9 @@ isOneToOne: false
 "note_meta_access":
 { Args: { "p_body"?: string,"p_company": string,"p_kind": string,"p_title"?: string }; Returns: boolean
                            },
+"note_notification_channel":
+{ Args: { "p_channel": string,"p_ids": (string)[],"p_outcome": string,"p_token": string }; Returns: number
+                           },
 "note_review_access":
 { Args: { "p_body"?: string,"p_claim": string,"p_company": string,"p_kind": string,"p_title"?: string }; Returns: boolean
                            },
@@ -4312,6 +4348,9 @@ isOneToOne: false
 "set_weather_rules":
 { Args: { "p_company": string,"p_rules": Json }; Returns: Json
                            },
+"settle_notification_deliveries":
+{ Args: { "p_delivered": (string)[],"p_error"?: string,"p_failed"?: (string)[],"p_retry"?: (string)[],"p_token": string }; Returns: number
+                           },
 "sign_in_code_check":
 { Args: { "p_address_hash": string,"p_channel": string,"p_code_hash": string,"p_ip_hash"?: string,"p_user"?: string }; Returns: string
                            },
@@ -4356,6 +4395,11 @@ isOneToOne: false
                            },
 "start_automation_run":
 { Args: { "p_id": number,"p_token": string }; Returns: boolean
+                           },
+"start_notification_deliveries":
+{ Args: { "p_ids": (string)[],"p_token": string }; Returns: {
+              "delivery": Json,"id": string
+            }[]
                            },
 "start_review_reminder":
 { Args: { "p_id": string,"p_next"?: string,"p_token": string }; Returns: boolean
