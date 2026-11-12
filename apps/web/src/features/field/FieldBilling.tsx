@@ -194,10 +194,13 @@ function CashOrCheckDialog({ invoice, onClose, onSaved }: { invoice: { id: strin
   const [checkNumber, setCheckNumber] = useState("");
   const [note, setNote] = useState("");
   const value = Number(amount);
+  // The payment's id, made once: sent twice on a weak signal, it's still one payment (recordPayment.ts).
+  const [paymentId] = useState(() => crypto.randomUUID());
   const save = useMutation({
     meta: { inline: true, success: "Payment recorded", tone: "invoice" },
     mutationFn: () =>
       recordPayment({
+        id: paymentId,
         companyId: session.company.id,
         currency: session.company.currency,
         invoice,

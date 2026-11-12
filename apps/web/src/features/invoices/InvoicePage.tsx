@@ -727,10 +727,13 @@ function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: str
   const [notes, setNotes] = useState("");
   const value = Number(amount);
   const tooMuch = value > invoice.balance + 0.005;
+  // The payment's id, made once: sent twice, it's still one payment (recordPayment.ts).
+  const [paymentId] = useState(() => crypto.randomUUID());
   const save = useMutation({
     meta: { inline: true, success: "Payment recorded", tone: "invoice" },
     mutationFn: () =>
       recordPayment({
+        id: paymentId,
         companyId: session.company.id,
         currency: session.company.currency,
         invoice,

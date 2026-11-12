@@ -6,16 +6,21 @@
  */
 import { memberPermissions, ROLES, STAFF, type Role } from "@crewtavo/core/roles";
 import { onlineManager, QueryClient } from "@tanstack/react-query";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => [] as Array<{ op: string; on: string; args: unknown }>);
+/** What the database answers a payment with: an error for the insert, and the row already there under its id. */
+const answers = vi.hoisted(() => ({ insertError: null as { code: string; message: string } | null, recorded: null as { amount: number } | null }));
 vi.mock("../src/lib/api", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/lib/api")>();
   const done = Promise.resolve({ data: null, error: null });
   const from = (on: string) => {
     const q = {
       update: (args: unknown) => (calls.push({ op: "update", on, args }), q),
-      insert: (args: unknown) => (calls.push({ op: "insert", on, args }), done),
+      insert: (args: unknown) => (calls.push({ op: "insert", on, args }), Promise.resolve({ data: null, error: answers.insertError })),
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: answers.recorded, error: null }) }) }),
       eq: () => done,
     };
     return q;
@@ -96,16 +101,52 @@ describe("cash or check", () => {
   const draft = { id: "i1", client_id: "cl1", balance: 400, draft: true };
 
   it("goes the office's Record payment way: a draft is marked sent, then the payment with its check number", async () => {
-    await recordPayment({ companyId: "c1", currency: "USD", invoice: draft, amount: 150, method: "check", receivedAt: "2026-11-03T15:00:00.000Z", notes: "1042 · Left in the mailbox" });
+    await recordPayment({ id: "p1", companyId: "c1", currency: "USD", invoice: draft, amount: 150, method: "check", receivedAt: "2026-11-03T15:00:00.000Z", notes: "1042 · Left in the mailbox" });
     expect(calls).toEqual([
       { op: "update", on: "invoices", args: { status: "sent" } },
-      { op: "insert", on: "payments", args: { company_id: "c1", invoice_id: "i1", client_id: "cl1", amount: 150, tip_amount: 0, method: "check", received_at: "2026-11-03T15:00:00.000Z", notes: "1042 · Left in the mailbox" } },
+      { op: "insert", on: "payments", args: { id: "p1", company_id: "c1", invoice_id: "i1", client_id: "cl1", amount: 150, tip_amount: 0, method: "check", received_at: "2026-11-03T15:00:00.000Z", notes: "1042 · Left in the mailbox" } },
     ]);
   });
 
   it("turns down more than is owed, or nothing, before anything is written", async () => {
-    await expect(recordPayment({ companyId: "c1", currency: "USD", invoice: draft, amount: 500, method: "cash", receivedAt: "2026-11-03T15:00:00.000Z", notes: null })).rejects.toThrow("That's more than the $400.00 balance.");
-    await expect(recordPayment({ companyId: "c1", currency: "USD", invoice: draft, amount: 0, method: "cash", receivedAt: "2026-11-03T15:00:00.000Z", notes: null })).rejects.toThrow("greater than zero");
+    await expect(recordPayment({ id: "p1", companyId: "c1", currency: "USD", invoice: draft, amount: 500, method: "cash", receivedAt: "2026-11-03T15:00:00.000Z", notes: null })).rejects.toThrow("That's more than the $400.00 balance.");
+    await expect(recordPayment({ id: "p1", companyId: "c1", currency: "USD", invoice: draft, amount: 0, method: "cash", receivedAt: "2026-11-03T15:00:00.000Z", notes: null })).rejects.toThrow("greater than zero");
     expect(calls).toEqual([]);
+  });
+
+  describe("sent twice", () => {
+    const sent = { id: "p1", companyId: "c1", currency: "USD", invoice: { ...draft, draft: false }, amount: 150, method: "cash" as const, receivedAt: "2026-11-03T15:00:00.000Z", notes: null };
+    const duplicate = { code: "23505", message: 'duplicate key value violates unique constraint "payments_pkey"' };
+    afterEach(() => Object.assign(answers, { insertError: null, recorded: null }));
+
+    it("is one payment: every try sends the id the form made, and the one already there counts as recorded", async () => {
+      await recordPayment(sent);
+      Object.assign(answers, { insertError: duplicate, recorded: { amount: 150 } });
+      await expect(recordPayment(sent)).resolves.toBeUndefined();
+      expect(calls.map((c) => (c.args as { id: string }).id)).toEqual(["p1", "p1"]);
+    });
+
+    it("counts as recorded when the payment that's there can't be read back", async () => {
+      Object.assign(answers, { insertError: duplicate, recorded: null });
+      await expect(recordPayment(sent)).resolves.toBeUndefined();
+    });
+
+    it("says so when the amount was changed after the first try went through", async () => {
+      Object.assign(answers, { insertError: duplicate, recorded: { amount: 100 } });
+      await expect(recordPayment(sent)).rejects.toThrow("This payment is already recorded, as $100.00. Close this and check the invoice.");
+    });
+
+    it("shows what the database says when someone else just recorded it", async () => {
+      answers.insertError = { code: "22023", message: "Nothing is left to pay on this invoice. Check its payments: this one may already be recorded" };
+      await expect(recordPayment(sent)).rejects.toThrow("Nothing is left to pay on this invoice. Check its payments: this one may already be recorded");
+    });
+  });
+
+  it("the office's and the field app's forms each make the payment's id once, when they open", () => {
+    for (const file of ["../src/features/invoices/InvoicePage.tsx", "../src/features/field/FieldBilling.tsx"]) {
+      const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+      expect(source).toContain("const [paymentId] = useState(() => crypto.randomUUID());");
+      expect(source).toContain("id: paymentId,");
+    }
   });
 });
