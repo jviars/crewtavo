@@ -546,7 +546,10 @@ select t1070.check(array(
   'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
   'chat_save_roles(uuid, jsonb, jsonb)', 'chat_set_enabled(uuid, boolean)',
   -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.
-  'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)', 'company_basics(uuid)', 'convert_quote_to_job(uuid)',
+  'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)',
+  -- Money added up for Home, Invoices and Deposits (collected_by_day, invoice_summary, stripe_fees): each
+  -- runs as the caller, and a sub reads no payments or invoices, so they get nothing or zeros.
+  'collected_by_day(uuid, date, date)', 'company_basics(uuid)', 'convert_quote_to_job(uuid)',
   'create_company(text, text, text)', 'create_invoice_for_job(uuid, text, numeric, date)', 'dashboard(uuid)', 'dismiss_client_duplicate(uuid, uuid, uuid)',
   'drive_clients(uuid, text, integer)', 'drive_list(uuid, text, uuid, text, integer)', 'drive_restore(text, uuid)', 'drive_root(uuid)',
   'drive_set_enabled(uuid, boolean)', 'drive_trash(uuid)', 'drive_trash_file(uuid)', 'drive_trash_folder(uuid)', 'drive_trash_version(uuid)',
@@ -554,7 +557,7 @@ select t1070.check(array(
   'equipment_conflicts(uuid, uuid[], date, timestamp with time zone, timestamp with time zone, uuid)', 'global_search(uuid, text, integer)',
   'guide_feedback(uuid, boolean, text)', 'guide_quiz(uuid)',
   -- Bringing work over from Jobber: an owner's or admin's, never a sub's.
-  'import_jobber(uuid, text, jsonb)', 'inactive_client_count(uuid, integer)',
+  'import_jobber(uuid, text, jsonb)', 'inactive_client_count(uuid, integer)', 'invoice_summary(uuid, date)',
   -- The checklists a job's items bring up: a sub's, for the jobs of their own visits (as job_scope).
   'job_checklists(uuid)',
   'job_material_costs(uuid)', 'job_pay_accept(uuid, uuid[])', 'job_pay_cancel(uuid)', 'job_pay_costs(uuid[])', 'job_pay_covers(uuid, uuid, uuid)', 'job_pay_mark_done(uuid, date)',
@@ -563,7 +566,9 @@ select t1070.check(array(
   -- Runs with the caller's access: a sub sees the state of their own jobs, from their own visits.
   'job_state(jobs)',
   -- The same, counted per state for the Jobs list's tabs.
-  'job_state_counts(uuid)', 'last_referral_ask(uuid, uuid)', 'last_review_ask(uuid, uuid)',
+  'job_state_counts(uuid)',
+  -- Jobs with finished visits to invoice: runs as the caller, so a sub gets no more than the jobs of their own visits.
+  'jobs_with_visits_to_invoice(uuid)', 'last_referral_ask(uuid, uuid)', 'last_review_ask(uuid, uuid)',
   'marketing_set_enabled(uuid, boolean)', 'marketing_summary(uuid)', 'material_choices(uuid)', 'merge_clients(uuid, uuid, uuid)',
   -- Saving a screen's own settings: runs as the caller, so owners and admins only, never a sub.
   'merge_company_settings(uuid, jsonb)', 'my_crew_ids(uuid)', 'my_sub_offers(boolean, uuid)',
@@ -583,7 +588,7 @@ select t1070.check(array(
   -- Weather rules: the owner and the office with Settings only, never a sub.
   'set_weather_rules(uuid, jsonb)',
   'sign_quote(uuid, jsonb, uuid, numeric)', 'social_photos(uuid, timestamp with time zone, uuid, integer, uuid)',
-  'storage_overview(uuid)', 'storage_set_allowance(uuid, uuid, text, bigint)', 'storage_set_limit(uuid, text, bigint)', 'sub_1099_totals(uuid, integer)', 'sub_wc_audit(uuid, date, date)', 'time_entry_places(uuid, uuid[])',
+  'storage_overview(uuid)', 'storage_set_allowance(uuid, uuid, text, bigint)', 'storage_set_limit(uuid, text, bigint)', 'stripe_fees(uuid, timestamp with time zone)', 'sub_1099_totals(uuid, integer)', 'sub_wc_audit(uuid, date, date)', 'time_entry_places(uuid, uuid[])',
   -- Installs Paving or Roofing: owners and admins who connect apps only, never a sub.
   'trade_app_set_enabled(uuid, text, boolean)',
   'trash_delete_forever(uuid, jsonb)', 'visit_autopay(uuid)', 'visit_contact(uuid)', 'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',

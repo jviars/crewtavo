@@ -4,7 +4,6 @@
  */
 import { laborRates } from "@crewtavo/core/billing";
 import { monthText } from "@crewtavo/core/jobBilling";
-import { localDate } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -18,55 +17,27 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
 import { statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { addDaysIso, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { receivablesTrend } from "@/lib/trends";
 import { Change } from "../finance/change";
 import { chargeBusy, chargeInChunks, chargeLiveText, chargeOutcomeText, chargeSummary, chargeTotal, type ChargeableInvoice, type ChargeResult } from "./charges";
+import { invoiceTotals, readyJobs, type ReadyJob } from "./totals";
 
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 /**
  * What's owed and past due today, and what came in over the past 30 days, each with its change: the
- * balances against 30 days ago, money in against the 30 days before. Balances back then are walked
- * back from today's through the payments since (lib/trends.ts), so they're close rather than exact.
+ * balances against 30 days ago, money in against the 30 days before. The database adds them up
+ * (invoice_summary): balances back then are walked back from today's through the payments since, so
+ * they're close rather than exact.
  */
 export function InvoiceSummary({ onPick }: { onPick: (filter: "open" | "overdue" | "paid") => void }) {
   const { company } = useSession();
-  const tz = company.timezone;
-  const today = todayIn(tz);
-  const monthAgo = addDaysIso(today, -30);
+  const today = todayIn(company.timezone);
   const summary = useQuery({
     queryKey: ["invoices", company.id, "summary"],
-    queryFn: async () => {
-      const [open, history] = await Promise.all([
-        supabase().from("invoices").select("id, status, balance_due, issued_on, due_on").eq("company_id", company.id).in("status", ["sent", "partially_paid", "overdue"]).limit(5000),
-        // Everything received in the past 60 days (and a day either side for time zones): this 30 days and the 30 before.
-        supabase().from("payments").select("amount, received_at, invoice_id").eq("company_id", company.id).gte("received_at", `${addDaysIso(today, -61)}T00:00:00`).limit(5000),
-      ]);
-      const rows = unwrap(open);
-      const late = rows.filter((r) => r.status === "overdue");
-      const payments = unwrap(history);
-      // Invoices paid off since then aren't open any more but were owed 30 days ago.
-      const openIds = new Set(rows.map((r) => r.id));
-      const paidIds = [...new Set(payments.map((p) => p.invoice_id).filter((id): id is string => Boolean(id) && !openIds.has(id!)))];
-      const closed: typeof rows = [];
-      for (let i = 0; i < paidIds.length; i += 200) {
-        closed.push(...unwrap(await supabase().from("invoices").select("id, status, balance_due, issued_on, due_on").in("id", paidIds.slice(i, i + 200)).not("status", "in", "(draft,void)")));
-      }
-      const at = (day: string) => receivablesTrend({ invoices: [...rows, ...closed], payments, today: day, tz, weeks: 1 })[0]!;
-      const now = at(today);
-      return {
-        owed: rows.reduce((sum, r) => sum + Number(r.balance_due), 0),
-        owedCount: rows.length,
-        late: late.reduce((sum, r) => sum + Number(r.balance_due), 0),
-        lateCount: late.length,
-        collected: now.collected,
-        payments: payments.filter((p) => Number(p.amount) > 0 && localDate(new Date(p.received_at), tz) > monthAgo).length,
-        before: at(monthAgo),
-      };
-    },
+    queryFn: () => invoiceTotals(company.id, today),
   });
   const s = summary.data;
   const stat = (label: string, value: number, change: ReactNode, hint: string, filter: "open" | "overdue" | "paid", tone?: "bad") => (
@@ -98,58 +69,13 @@ export function InvoiceSummary({ onPick }: { onPick: (filter: "open" | "overdue"
   );
 }
 
-interface ReadyJob {
-  id: string;
-  number: number;
-  title: string;
-  kind: string;
-  billing_mode: string;
-  pricing: string | null;
-  client: { display_name: string; email: string | null } | null;
-  financials: { contract_total: number } | null;
-  /** A monthly job's months due (their first days), each invoiced on its own. */
-  months?: string[];
-}
-
 /** Before tax: a finished job's contract, a fixed price for each month due, nothing yet for visits. */
 const amountOf = (j: ReadyJob) => (j.pricing === "per_visit" || j.billing_mode === "per_visit" ? 0 : Number(j.financials?.contract_total ?? 0) * (j.months?.length || 1));
 
-/**
- * Jobs waiting for their invoice: finished one-off jobs, per-visit jobs invoiced after each visit
- * with completed visits not yet billed, and monthly jobs whose month is due (due_invoices). Not ones
- * autopay is about to bill and charge (a charge waiting for the job, or being made): invoicing them
- * by hand would only call the charge off.
- */
+/** Jobs waiting for their invoice (totals.ts readyJobs). */
 function useReadyJobs() {
   const { company } = useSession();
-  return useQuery({
-    queryKey: ["invoices", company.id, "ready-jobs"],
-    queryFn: async () => {
-      const select = "id, number, title, kind, billing_mode, pricing, client:clients(display_name, email), financials:job_financials(contract_total)";
-      const [finished, visits, charges, due] = await Promise.all([
-        supabase().from("jobs").select(select).eq("company_id", company.id).eq("status", "requires_invoicing").order("number").limit(200),
-        supabase().from("visits").select("job_id").eq("company_id", company.id).eq("status", "completed").eq("kind", "job").is("invoice_id", null).not("job_id", "is", null).limit(2000),
-        supabase().from("autopay_charges").select("job_id").eq("company_id", company.id).in("status", ["waiting", "charging"]).is("invoice_id", null).not("job_id", "is", null).limit(2000),
-        supabase().from("due_invoices").select("job_id, month").eq("company_id", company.id).order("month").limit(1000),
-      ]);
-      // A server without autopay yet has nothing waiting: the list stays as it was rather than failing.
-      const charged = new Set((charges.error ? [] : (charges.data ?? [])).map((c) => c.job_id));
-      const ready = (unwrap(finished) as unknown as ReadyJob[]).filter((j) => !charged.has(j.id));
-      const visitJobs = [...new Set(unwrap(visits).map((v) => v.job_id!))].filter((id) => !ready.some((j) => j.id === id) && !charged.has(id));
-      if (visitJobs.length) {
-        const perVisit = unwrap(await supabase().from("jobs").select(select).in("id", visitJobs).eq("billing_mode", "per_visit").eq("status", "active")) as unknown as ReadyJob[];
-        ready.push(...perVisit);
-      }
-      // A server without monthly billing yet has none due: the list stays as it was.
-      const months = new Map<string, string[]>();
-      for (const d of due.error ? [] : (due.data ?? [])) if (!charged.has(d.job_id)) months.set(d.job_id!, [...(months.get(d.job_id!) ?? []), d.month!]);
-      if (months.size) {
-        const monthly = unwrap(await supabase().from("jobs").select(select).in("id", [...months.keys()]).eq("status", "active")) as unknown as ReadyJob[];
-        ready.push(...monthly.map((j) => ({ ...j, months: months.get(j.id) })));
-      }
-      return ready;
-    },
-  });
+  return useQuery({ queryKey: ["invoices", company.id, "ready-jobs"], queryFn: () => readyJobs(company.id) });
 }
 
 /**

@@ -1,4 +1,3 @@
-import { addDays, zonedTimeToUtc } from "@crewtavo/core/time";
 import { useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -12,17 +11,17 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
-import { monthToDate } from "@/lib/trends";
 import { groupByEquipment, managesEquipment, nextUp, useEquipmentDue, usePaperwork } from "../equipment/equipmentData";
 import { Change } from "../finance/change";
 import { seesWebsite } from "../marketing/website";
 import { InstallAppCard } from "../field/InstallAppCard";
 import { askedFor, changeLink, usePendingChanges } from "../schedule/changeRequests";
+import { collectedHistory, collectedSince } from "./collected";
 import styles from "./Home.module.css";
 import { SetupCard } from "./SetupCard";
 import type { Dashboard } from "./types";
 import { WebsiteCard } from "./WebsiteCard";
-import { collectedByWeek, type Week } from "./weeks";
+import type { Week } from "./weeks";
 import { WorkflowStrip } from "./WorkflowStrip";
 
 function greeting(timeZone: string) {
@@ -266,15 +265,9 @@ function useCollectedHistory(enabled: boolean) {
     enabled,
     refetchInterval: 60_000,
     meta: { silent: true },
-    queryFn: async () => {
-      const [y, m] = today.split("-").map(Number) as [number, number];
-      const lastMonth = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
-      const firstWeek = addDays(today, -7 * WEEKS);
-      const since = lastMonth < firstWeek ? lastMonth : firstWeek;
-      const rows = unwrap(await supabase().from("payments").select("amount, received_at").eq("company_id", company.id).gte("received_at", zonedTimeToUtc(since, "00:00", tz).toISOString()).limit(5000));
-      const month = monthToDate(rows, today, tz);
-      return { sameDaysLastMonth: month[Number(today.slice(8)) - 1]?.before ?? 0, weeks: collectedByWeek(rows, today, tz, WEEKS) };
-    },
+    // Each day's total comes added up from the database (collected_by_day): there can be more payments than one request hands over.
+    queryFn: async () =>
+      collectedHistory(unwrap(await supabase().rpc("collected_by_day", { p_company: company.id, p_from: collectedSince(today, WEEKS), p_to: today })), today, tz, WEEKS),
   });
 }
 

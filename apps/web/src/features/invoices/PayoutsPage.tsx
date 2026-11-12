@@ -14,9 +14,11 @@ import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { everyRow } from "@/lib/everyRow";
 import { addDaysIso, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { Stat } from "../finance/Charts";
+import { stripeFeesSince } from "./totals";
 
 const STATUS: Record<string, { label: string; tone: Tone }> = {
   paid: { label: "Deposited", tone: "good" },
@@ -45,24 +47,28 @@ function PayoutsScreen() {
       const db = supabase();
       const [payouts, fees] = await Promise.all([
         db.from("payouts").select("id, amount, gross_amount, fee_amount, status, arrival_on, failure_message, itemized_at").eq("company_id", company.id).order("arrival_on", { ascending: false }).limit(200),
-        db.from("payments").select("fee_amount").eq("company_id", company.id).eq("processor", "stripe").gte("received_at", `${since}T00:00:00`).limit(5000),
+        // The database adds these up (stripe_fees): there can be more payments than one request hands over.
+        stripeFeesSince(company.id, since),
       ]);
       const rows = unwrap(payouts);
       const ids = rows.map((p) => p.id);
       const payments = [];
       for (let i = 0; i < ids.length; i += 100) {
+        // A hundred deposits can hold more payments than one request hands over, so they're read to the end.
         payments.push(
-          ...unwrap(
-            await db
+          ...(await everyRow((from, to) =>
+            db
               .from("payments")
-              .select("id, amount, tip_amount, fee_amount, method, received_at, payout_id, invoice:invoices(id, number), client:clients(id, display_name)")
+              .select("id, amount, tip_amount, fee_amount, method, received_at, payout_id, invoice:invoices(id, number), client:clients(id, display_name)", { count: "exact" })
               .eq("company_id", company.id)
               .in("payout_id", ids.slice(i, i + 100))
-              .order("received_at"),
-          ),
+              .order("received_at")
+              .order("id")
+              .range(from, to),
+          )),
         );
       }
-      return { payouts: rows, payments, fees: unwrap(fees).reduce((sum, p) => sum + Number(p.fee_amount), 0) };
+      return { payouts: rows, payments, fees };
     },
   });
 

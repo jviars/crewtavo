@@ -3722,6 +3722,11 @@ isOneToOne: false
 "clock_upkeep":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"collected_by_day":
+{ Args: { "p_company": string,"p_from": string,"p_to": string }; Returns: {
+              "collected": number,"day": string,"payments": number
+            }[]
+                           },
 "company_basics":
 { Args: { "p_company": string }; Returns: {
               "currency": string,"id": string,"logo": string,"name": string,"phone": string,"settings": Json,"timezone": string
@@ -3863,6 +3868,11 @@ isOneToOne: false
                            },
 "inactive_client_count":
 { Args: { "p_company": string,"p_days": number }; Returns: number
+                           },
+"invoice_summary":
+{ Args: { "p_company": string,"p_today": string }; Returns: {
+              "collected": number,"collected_before": number,"owed": number,"owed_before": number,"owed_count": number,"past_due": number,"past_due_before": number,"past_due_count": number,"payments": number
+            }[]
                            },
 "job_application":
 { Args: { "p_answers"?: Json,"p_details"?: Json,"p_email"?: string,"p_files"?: Json,"p_form": string,"p_id": string,"p_name"?: string,"p_phone"?: string,"p_web_visit"?: Json }; Returns: Json
@@ -4094,6 +4104,55 @@ isOneToOne: false
               "jobs": number,"state": string
             }[]
                            },
+"jobs_with_visits_to_invoice":
+{ Args: { "p_company": string }; Returns: {
+              "active_months": (number)[] | null,
+"autopay": boolean,
+"autopay_since": string | null,
+"billing_mode": string,
+"client_id": string,
+"company_id": string,
+"created_at": string,
+"created_by": string | null,
+"custom_fields": NonNullable<Json>,
+"default_crew_id": string | null,
+"ends_on": string | null,
+"id": string,
+"instructions": string | null,
+"invoice_day": number | null,
+"invoice_schedule": string | null,
+"kind": string,
+"monthly_since": string | null,
+"number": number | null,
+"paused_at": string | null,
+"pauses": NonNullable<Json>,
+"permit_number": string | null,
+"po_number": string | null,
+"pricing": string | null,
+"property_id": string | null,
+"quote_id": string | null,
+"recurrence_rule": string | null,
+"resume_on": string | null,
+"resumed_at": string | null,
+"retainage_pct": number,
+"salesperson_id": string | null,
+"source_id": string | null,
+"starts_on": string | null,
+"status": string,
+"title": string,
+"updated_at": string,
+"visit_duration_min": number,
+"visit_start_time": string | null,
+"visit_time_fixed": boolean,
+"warranty_until": string | null,
+"weather_rules": NonNullable<Json>
+            }[]
+                          SetofOptions: {
+        from: "*"
+        to: "jobs"
+        isOneToOne: false
+        isSetofReturn: true
+      } },
 "last_referral_ask":
 { Args: { "p_client": string,"p_company": string }; Returns: string
                            },
@@ -4382,6 +4441,9 @@ isOneToOne: false
 { Args: { "p_company": string,"p_user": string }; Returns: {
               "company_limit": number,"company_used": number,"user_is_owner": boolean,"user_limit": number,"user_used": number
             }[]
+                           },
+"stripe_fees":
+{ Args: { "p_company": string,"p_since": string }; Returns: number
                            },
 "stripe_import_invoice":
 { Args: { "p_company": string,"p_data": Json,"p_quiet"?: boolean }; Returns: string
