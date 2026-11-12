@@ -1,14 +1,15 @@
 /**
  * On field screens: no signal, and how many updates are waiting to send. Photos count once the phone
  * has kept them (lib/offlinePhotos.ts); one it couldn't keep, or one the server turned down, is said
- * apart, so nothing is called saved that isn't.
+ * apart, so nothing is called saved that isn't. The same when the phone has no room left for the
+ * updates themselves (lib/offline.ts): they're held by the open app, and it says to keep it open.
  */
 import { onlineManager, useMutationState } from "@tanstack/react-query";
 import { useEffect, useReducer, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
-import { OFFLINE_MUTATIONS } from "@/lib/offline";
+import { OFFLINE_MUTATIONS, subscribeUnsaved, unsavedFieldActions } from "@/lib/offline";
 import { phonePhotos, removePhonePhoto, retryPhonePhotos, subscribePhonePhotos } from "@/lib/offlinePhotos";
 import { useSession } from "@/lib/session";
 
@@ -31,6 +32,7 @@ export function OfflineNote() {
   // With signal a photo is on its way, and its visit's Photos card shows it going.
   const held = online ? [] : photos.filter((p) => !p.problem);
   const unsaved = held.filter((p) => !p.kept);
+  const unsavedUpdates = useSyncExternalStore(subscribeUnsaved, unsavedFieldActions);
   const paused = useMutationState({
     filters: { predicate: (m) => m.state.isPaused && OFFLINE_MUTATIONS.has(String(m.options.mutationKey?.[0])) },
     select: (m) => {
@@ -39,7 +41,8 @@ export function OfflineNote() {
       return { id: WHOLE.has(key) ? `${key}:${v?.visitId}:${v?.responseId ?? ""}` : String(m.mutationId), at: m.state.submittedAt };
     },
   });
-  const waiting = new Set(paused.map((p) => p.id)).size + held.length - unsaved.length;
+  const updates = new Set(paused.map((p) => p.id)).size;
+  const waiting = Math.max(0, updates - unsavedUpdates) + held.length - unsaved.length;
   const since = paused.length ? Math.min(...paused.map((p) => p.at)) : 0;
   const late = since > 0 && Date.now() - since >= LATE;
   // Looks again once the oldest has waited long enough.
@@ -50,17 +53,26 @@ export function OfflineNote() {
     return () => clearTimeout(timer);
   }, [online, since, late]);
   const removeRefused = async () => {
-    const ok = await confirm({ title: refused.length === 1 ? "Remove this photo?" : `Remove ${refused.length} photos?`, body: "They haven't uploaded, so they will be gone for good.", confirmLabel: "Remove", danger: true });
+    const ok = await confirm({ title: refused.length === 1 ? "Remove this photo?" : `Remove ${refused.length} photos?`, body: refused.length === 1 ? "It hasn't uploaded, so it will be gone for good." : "They haven't uploaded, so they will be gone for good.", confirmLabel: "Remove", danger: true });
     if (ok) refused.forEach((p) => removePhonePhoto(p.id));
   };
   return (
     <>
-      {(!online || (waiting > 0 && late)) && (
+      {(!online || (updates > 0 && late)) && (
         <div className="callout callout-info" role="status">
           <Icon name="wifiOff" size={20} />
           <div className="grow small" style={{ fontWeight: 400 }}>
             <div>{online ? "Sending your updates…" : "No signal"}</div>
-            {waiting ? `${waiting} ${waiting === 1 ? "update is" : "updates are"} saved on this phone and will send when you have signal.` : "You can keep working: your updates are saved on this phone and sent when you have signal."}
+            {waiting ? `${waiting} ${waiting === 1 ? "update is" : "updates are"} saved on this phone and will send when you have signal.` : unsavedUpdates ? "Your updates send when you have signal." : "You can keep working: your updates are saved on this phone and sent when you have signal."}
+          </div>
+        </div>
+      )}
+      {unsavedUpdates > 0 && (
+        <div className="callout callout-warning" role="status">
+          <Icon name="alert" size={20} />
+          <div className="grow small" style={{ fontWeight: 400 }}>
+            <div>This phone is out of room</div>
+            Your last {unsavedUpdates === 1 ? "update isn't" : `${unsavedUpdates} updates aren't`} saved on it. Keep Crewtavo open until you have signal and {unsavedUpdates === 1 ? "it has" : "they have"} sent, or {unsavedUpdates === 1 ? "it" : "they"} will be lost.
           </div>
         </div>
       )}

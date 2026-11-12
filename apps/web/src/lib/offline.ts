@@ -67,10 +67,46 @@ const noting = new WeakSet<object>();
  */
 const recounts = new Set<() => void>();
 
-/** A field action's registered send, noting in `sending` while its request is out. */
-function noteSending(send: MutationFunction<unknown, unknown>): MutationFunction<unknown, unknown> {
+/**
+ * A checklist saves as the crew goes, and each save carries all of its answers, signatures as
+ * pictures included. With no signal those saves pile up: a long day would keep the same checklist
+ * dozens of times over, on the phone and on the way out. Only the latest matters, so an earlier save
+ * is passed over when a later one of the same checklist, with its answers, waits behind it.
+ *
+ * Not across a status tap, though: what the server had when the visit was started or completed stays
+ * as the crew left it then. Everything else keeps its place in line.
+ */
+function passedOver<T>(queue: readonly T[], read: (action: T) => { key: unknown; variables: unknown }): Set<T> {
+  const over = new Set<T>();
+  const later = new Set<unknown>();
+  for (let i = queue.length - 1; i >= 0; i--) {
+    const { key, variables } = read(queue[i]!);
+    if (key === "visit-status") later.clear();
+    if (key !== "checklist-save") continue;
+    const save = variables as { responseId?: string; answers?: unknown } | undefined;
+    if (later.has(save?.responseId)) over.add(queue[i]!);
+    else if (save?.responseId && save.answers) later.add(save.responseId);
+  }
+  return over;
+}
+
+/** Whether the action with these variables has a later save of the same checklist waiting behind it. */
+function laterSaveWaits(queryClient: QueryClient, variables: unknown) {
+  const queue = queryClient.getMutationCache().getAll().filter(unsent);
+  const mine = queue.find((m) => m.state.variables === variables);
+  return mine !== undefined && passedOver(queue, (m) => ({ key: m.options.mutationKey?.[0], variables: m.state.variables })).has(mine);
+}
+
+/**
+ * A field action's registered send, noting in `sending` while its request is out. A checklist save
+ * with a later one behind it isn't sent at all (passedOver): the later one has everything.
+ */
+function noteSending(send: MutationFunction<unknown, unknown>, queryClient: QueryClient): MutationFunction<unknown, unknown> {
   if (noting.has(send)) return send;
   const noted = async (variables: unknown) => {
+    // Not while the phone is out of room: the later save may be only in the open app, and this one,
+    // which the phone does hold, would come off it as sent.
+    if (!unsaved && laterSaveWaits(queryClient, variables)) return undefined;
     sending.add(variables);
     recounts.forEach((recount) => recount());
     try {
@@ -178,23 +214,64 @@ function remove(key: string) {
   }
 }
 
-/**
- * Everything if it fits; otherwise just the unsent actions, without the cached screens; failing
- * even that, nothing. An older copy left in place would send actions again that have gone out since.
- */
-function save(userId: string, state: DehydratedState) {
-  const key = storageKey(userId);
-  if (!write(key, state, BUDGET) && !write(key, { mutations: state.mutations, queries: [] })) remove(key);
-}
+/** What's saved for this person. Throws when it can't be read. */
+const read = (key: string) => JSON.parse(localStorage.getItem(key) ?? "null") as Partial<DehydratedState> | null;
 
 const sameAction = (m: { mutationKey?: unknown; scope?: { id: string }; state: { variables?: unknown } }) =>
   JSON.stringify([m.mutationKey ?? null, m.scope?.id ?? null, m.state.variables ?? null]);
+
+/**
+ * Everything if it fits; otherwise just the unsent actions, without the cached screens. Each
+ * checklist is saved once, with its latest answers (passedOver).
+ *
+ * When even that has no room (the phone's storage for a website is a few megabytes), nothing unsent
+ * is ever taken off the phone to make the write fit: what was saved before and still hasn't gone
+ * stays, and as many of the newer actions as fit are added, in their order. Only what has gone out
+ * since is dropped, since a copy of it left in place would be sent again. Returns how many unsent
+ * actions the phone doesn't hold, so the screens can say so: those live only in the open app.
+ */
+function save(userId: string, state: DehydratedState): number {
+  const key = storageKey(userId);
+  const over = passedOver(state.mutations, (m) => ({ key: m.mutationKey?.[0], variables: m.state.variables }));
+  const mutations = state.mutations.filter((m) => !over.has(m));
+  if (write(key, { ...state, mutations }, BUDGET) || write(key, { mutations, queries: [] })) return 0;
+
+  let stored: DehydratedState["mutations"] = [];
+  try {
+    stored = read(key)?.mutations ?? [];
+  } catch {
+    // Unreadable: nothing of it to keep.
+  }
+  const onPhone = new Map<string, number>();
+  for (const m of stored) onPhone.set(sameAction(m), (onPhone.get(sameAction(m)) ?? 0) + 1);
+  // Checked against every unsent action, the earlier saves of a checklist included: when its latest
+  // answers don't fit, the ones saved before are still better than none.
+  const keep = state.mutations.map((m) => {
+    const id = sameAction(m);
+    const count = onPhone.get(id) ?? 0;
+    if (count) onPhone.set(id, count - 1);
+    return count > 0;
+  });
+  const kept = () => ({ mutations: state.mutations.filter((_, i) => keep[i]), queries: [] });
+  const missing = () => state.mutations.filter((m, i) => !keep[i] && !over.has(m)).length;
+  if (!write(key, kept())) {
+    // Not even a smaller copy can be written. One with nothing unsent in it goes; any other stays.
+    if (!keep.includes(true)) remove(key);
+    return missing();
+  }
+  state.mutations.forEach((m, i) => {
+    if (keep[i] || over.has(m)) return;
+    keep[i] = true;
+    if (!write(key, kept())) keep[i] = false;
+  });
+  return missing();
+}
 
 /** Puts back what was saved. Actions this page already holds (restored by an earlier start, or made since) aren't added again. */
 function restore(queryClient: QueryClient, userId: string) {
   let saved: Partial<DehydratedState> | null;
   try {
-    saved = JSON.parse(localStorage.getItem(storageKey(userId)) ?? "null") as Partial<DehydratedState> | null;
+    saved = read(storageKey(userId));
   } catch {
     return; // Unreadable storage: start fresh.
   }
@@ -257,6 +334,21 @@ function tellServiceWorker(userId: string, waiting: number) {
   });
 }
 
+// Field actions the phone had no room to save: held only by the open app, which says so (OfflineNote).
+let unsaved = 0;
+const unsavedListeners = new Set<() => void>();
+function setUnsaved(count: number) {
+  if (count === unsaved) return;
+  unsaved = count;
+  unsavedListeners.forEach((listener) => listener());
+}
+/** For screens (useSyncExternalStore): how many unsent field actions aren't saved on this phone. */
+export const subscribeUnsaved = (listener: () => void) => {
+  unsavedListeners.add(listener);
+  return () => void unsavedListeners.delete(listener);
+};
+export const unsavedFieldActions = () => unsaved;
+
 interface Running {
   userId: string;
   stop: () => void;
@@ -276,7 +368,7 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   // "online" mode is what makes them wait for signal: every other save fails at once (lib/queryClient.ts).
   for (const key of OFFLINE_MUTATIONS) {
     const defaults = queryClient.getMutationDefaults([key]);
-    queryClient.setMutationDefaults([key], { ...defaults, networkMode: "online", ...FIELD_RETRY, ...(defaults.mutationFn && { mutationFn: noteSending(defaults.mutationFn) }) });
+    queryClient.setMutationDefaults([key], { ...defaults, networkMode: "online", ...FIELD_RETRY, ...(defaults.mutationFn && { mutationFn: noteSending(defaults.mutationFn, queryClient) }) });
   }
   // Kept guides stay in memory a day, not 5 minutes, so one put back from storage is still there when it's opened.
   if (keepQueries) queryClient.setQueryDefaults(["kb"], { gcTime: 24 * 60 * 60_000 });
@@ -302,7 +394,7 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   const saveNow = () => {
     clearTimeout(timer);
     timer = undefined;
-    save(userId, snapshot(queryClient, keepQueries));
+    setUnsaved(save(userId, snapshot(queryClient, keepQueries)));
     tell();
   };
   const saveSoon = () => {
@@ -348,6 +440,7 @@ export function startOfflineCache(queryClient: QueryClient, userId: string, keep
   const end = (saveFirst: boolean) => {
     if (!running.delete(self)) return;
     if (saveFirst) flush();
+    setUnsaved(0);
     stopQueries();
     stopMutations();
     stopPhotos();
@@ -386,13 +479,13 @@ export function keepQueuedFieldActions(queryClient: QueryClient, userId: string)
   } else {
     // Not running (already signed out once, or never started): what's stored is still current.
     try {
-      mutations = (JSON.parse(localStorage.getItem(key) ?? "null") as Partial<DehydratedState> | null)?.mutations ?? [];
+      mutations = read(key)?.mutations ?? [];
     } catch {
       return;
     }
   }
   if (!mutations.length) remove(key);
-  else write(key, { mutations, queries: [] });
+  else save(userId, { mutations, queries: [] });
   // Their photos stay where they are, on the phone, and go up when they sign back in.
   tellServiceWorker(userId, mutations.length + photosWaiting(userId));
 }

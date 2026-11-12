@@ -13,7 +13,7 @@ import { saveVisitNotes, setVisitStatus } from "../src/features/field/fieldActio
 import { api, setActiveCompany, unwrap } from "../src/lib/api";
 import { ApiError, OFFLINE, SESSION_EXPIRED } from "../src/lib/errors";
 import { ROLES } from "@crewtavo/core/roles";
-import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, OFFLINE_MUTATIONS, pendingFieldActions, startOfflineCache, SYNC_TAG, WAITING_CACHE } from "../src/lib/offline";
+import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, OFFLINE_MUTATIONS, pendingFieldActions, startOfflineCache, SYNC_TAG, unsavedFieldActions, WAITING_CACHE } from "../src/lib/offline";
 import { FakeCaches, loadServiceWorker } from "./serviceWorker";
 
 // The phone's storage, which can be made to run out of room.
@@ -279,6 +279,167 @@ describe("saving the queue", () => {
     await settle();
     expect(sent).toBe(1);
     expect(saved("u5")).toBeNull();
+    stop();
+  });
+});
+
+describe("a long day with no signal", () => {
+  /** A drawn signature, as a checklist keeps it: a picture, as text. */
+  const signature = (size: number) => ({ name: "Pat", image: `data:image/png;base64,${"A".repeat(size)}` });
+  const checklist = (responseId: string, answers?: Record<string, unknown>, completedAt: string | null = null) => ({ companyId: "c1", visitId: "v1", responseId, templateId: "t1", ...(answers && { answers }), completedAt });
+  /** What an action is, in a word or two. */
+  const named = (key: unknown, v: { status?: string; responseId?: string; answers?: object; notes?: string; completedAt?: string | null }) =>
+    key === "visit-status" ? v.status : key === "visit-notes" ? "notes" : `${v.responseId} ${Object.keys(v.answers ?? {}).join("+") || "no answers"}${v.completedAt ? " done" : ""}`;
+  const queueOnPhone = (userId: string) => (saved(userId)?.mutations ?? []).map((m) => named((m as unknown as { mutationKey: unknown[] }).mutationKey[0], m.state.variables as never));
+  /** A server that notes what it's sent, in order. */
+  function listening(qc: QueryClient) {
+    const sent: unknown[] = [];
+    for (const key of ["visit-status", "checklist-save", "visit-notes"]) qc.setMutationDefaults([key], { mutationFn: async (v: never) => void sent.push(named(key, v)) });
+    return sent;
+  }
+
+  it("keeps each checklist once on the phone, with its latest answers, however often it saved as the crew went", async () => {
+    const qc = newClient();
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u40", true);
+    void tap(qc, "visit-status", { visitId: "v1", status: "in_progress", at: "2026-10-17T13:20:00.000Z" });
+    void tap(qc, "checklist-save", checklist("r1", { gate: true }));
+    void tap(qc, "checklist-save", checklist("r1", { gate: true, depth: "4" }));
+    void tap(qc, "checklist-save", checklist("r2", { filter: true }));
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    void tap(qc, "checklist-save", checklist("r1", { gate: true, depth: "4", sign: signature(40_000) }));
+    await settle();
+    expect(queueOnPhone("u40")).toEqual(["in_progress", "r2 filter", "notes", "r1 gate+depth+sign"]);
+    // One signature's worth, not three checklists' worth.
+    expect(store.get("crewtavo.offline.v1.u40")!.length).toBeLessThan(45_000);
+
+    // Not across a status tap: what the server gets before Complete stays what the crew had then.
+    void tap(qc, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    void tap(qc, "checklist-save", checklist("r1", { gate: true, depth: "5", sign: signature(40_000) }));
+    // Marked done with nothing of its own waiting says no answers, so the save before it stays.
+    void tap(qc, "checklist-save", checklist("r2", undefined, "2026-10-17T15:21:00.000Z"));
+    await settle();
+    expect(queueOnPhone("u40")).toEqual(["in_progress", "r2 filter", "notes", "r1 gate+depth+sign", "completed", "r1 gate+depth+sign", "r2 no answers done"]);
+    stop();
+  });
+
+  it("sends a checklist's latest save alone, and everything else in the order it was made", async () => {
+    const qc = newClient();
+    const sent = listening(qc);
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u41", true);
+    void tap(qc, "visit-status", { visitId: "v1", status: "in_progress", at: "2026-10-17T13:20:00.000Z" });
+    const first = tap(qc, "checklist-save", checklist("r1", { gate: true }));
+    void tap(qc, "checklist-save", checklist("r2", { filter: true }));
+    void tap(qc, "checklist-save", checklist("r1", { gate: true, depth: "4" }));
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    void tap(qc, "visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" });
+    void tap(qc, "checklist-save", checklist("r1", { gate: true, depth: "4", sign: signature(100) }));
+    await settle();
+
+    onlineManager.setOnline(true);
+    await settle();
+    expect(sent).toEqual(["in_progress", "r2 filter", "r1 gate+depth", "notes", "completed", "r1 gate+depth+sign"]);
+    // The save passed over is done with, like one that went: its screen stops waiting on it.
+    expect(await first).toBe("sent");
+    expect(pendingFieldActions(qc)).toBe(0);
+    expect(saved("u41")!.mutations).toHaveLength(0);
+    stop();
+  });
+
+  it("with no room left on the phone, keeps what it already holds, adds what still fits, and says what isn't saved", async () => {
+    const qc = newClient();
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u42", false);
+    void tap(qc, "visit-status", { visitId: "v1", status: "en_route", at: "2026-10-17T13:00:00.000Z" });
+    void tap(qc, "visit-notes", { visitId: "v1", notes: "Gate was open" });
+    await settle();
+    expect(queueOnPhone("u42")).toEqual(["en_route", "notes"]);
+    expect(unsavedFieldActions()).toBe(0);
+
+    // The phone's storage for the app is nearly full: a checklist with a signature no longer fits.
+    room = store.get("crewtavo.offline.v1.u42")!.length + 600;
+    void tap(qc, "checklist-save", checklist("r1", { sign: signature(5_000) }));
+    await settle();
+    expect(queueOnPhone("u42")).toEqual(["en_route", "notes"]);
+    expect(unsavedFieldActions()).toBe(1);
+
+    // A tap after it does fit, and is saved in its place.
+    void tap(qc, "visit-status", { visitId: "v1", status: "in_progress", at: "2026-10-17T13:20:00.000Z" });
+    await settle();
+    expect(queueOnPhone("u42")).toEqual(["en_route", "notes", "in_progress"]);
+    expect(unsavedFieldActions()).toBe(1);
+
+    // The phone closes Crewtavo. Opened again with signal, what it held goes out, in order.
+    stop();
+    qc.clear();
+    const next = newClient();
+    const sent = listening(next);
+    onlineManager.setOnline(true);
+    const stopNext = startOfflineCache(next, "u42", false);
+    await settle();
+    expect(sent).toEqual(["en_route", "notes", "in_progress"]);
+    expect(unsavedFieldActions()).toBe(0);
+    stopNext();
+  });
+
+  it("with no room left and the app kept open, everything goes out in order, and what went isn't left on the phone to go again", async () => {
+    const qc = newClient();
+    const sent = listening(qc);
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u43", false);
+    void tap(qc, "visit-status", { visitId: "v1", status: "en_route", at: "2026-10-17T13:00:00.000Z" });
+    void tap(qc, "checklist-save", checklist("r1", { gate: true }));
+    await settle();
+    room = store.get("crewtavo.offline.v1.u43")!.length + 100;
+    // The checklist's latest answers don't fit: the ones saved before stay, rather than none.
+    void tap(qc, "checklist-save", checklist("r1", { gate: true, sign: signature(5_000) }));
+    void tap(qc, "visit-status", { visitId: "v1", status: "in_progress", at: "2026-10-17T13:20:00.000Z" });
+    await settle();
+    expect(queueOnPhone("u43")).toEqual(["en_route", "r1 gate"]);
+    expect(unsavedFieldActions()).toBe(2);
+
+    onlineManager.setOnline(true);
+    await settle();
+    // Out of room, the earlier save goes too: it's the one the phone held.
+    expect(sent).toEqual(["en_route", "r1 gate", "r1 gate+sign", "in_progress"]);
+    expect(queueOnPhone("u43")).toEqual([]);
+    expect(unsavedFieldActions()).toBe(0);
+    stop();
+  });
+
+  it("reads a queue saved by the version before, keystroke copies and all, and sends it in order", async () => {
+    // As 0.4.12 wrote it: every save of the checklist, each with all its answers.
+    const action = (key: string, variables: object) => ({ mutationKey: [key], scope: FIELD_SCOPE, state: { context: undefined, data: undefined, error: null, failureCount: 0, failureReason: null, isPaused: true, status: "pending", variables, submittedAt: 1 } });
+    store.set(
+      "crewtavo.offline.v1.u44",
+      JSON.stringify({
+        mutations: [
+          action("visit-status", { visitId: "v1", status: "in_progress", at: "2026-10-17T13:20:00.000Z" }),
+          action("checklist-save", checklist("r1", { gate: true })),
+          action("checklist-save", checklist("r1", { gate: true, depth: "4" })),
+          action("checklist-save", checklist("r1", { gate: true, depth: "4", sign: signature(100) })),
+          action("visit-notes", { visitId: "v1", notes: "Gate was open" }),
+          action("visit-status", { visitId: "v1", status: "completed", at: "2026-10-17T15:20:00.000Z" }),
+        ],
+        queries: [{ queryKey: ["field-visit", "v1"], queryHash: '["field-visit","v1"]', state: { data: { id: "v1", status: "in_progress" }, dataUpdateCount: 1, dataUpdatedAt: 1, error: null, errorUpdateCount: 0, errorUpdatedAt: 0, fetchFailureCount: 0, fetchFailureReason: null, fetchMeta: null, isInvalidated: false, status: "success", fetchStatus: "idle" } }],
+      }),
+    );
+    const qc = newClient();
+    const sent = listening(qc);
+    onlineManager.setOnline(false);
+    const stop = startOfflineCache(qc, "u44", true);
+    expect(pendingFieldActions(qc)).toBe(6);
+    expect(qc.getQueryData(["field-visit", "v1"])).toEqual({ id: "v1", status: "in_progress" });
+    // Saved again by this version: nothing lost, the checklist once.
+    qc.setQueryData(["field-visit", "v1"], { id: "v1", status: "completed" });
+    await settle();
+    expect(queueOnPhone("u44")).toEqual(["in_progress", "r1 gate+depth+sign", "notes", "completed"]);
+
+    onlineManager.setOnline(true);
+    await settle();
+    expect(sent).toEqual(["in_progress", "r1 gate+depth+sign", "notes", "completed"]);
+    expect(saved("u44")!.mutations).toHaveLength(0);
     stop();
   });
 });
