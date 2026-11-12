@@ -2952,18 +2952,38 @@ isOneToOne: false
                   ]
                 },"sync_links": {
                   Row: {
-                    "company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token": string | null,"synced_at": string
+                    "account_id": string | null,"company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token": string | null,"synced_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token"?: string | null,"synced_at"?: string
+                    "account_id"?: string | null,"company_id": string,"entity": string,"external_id": string,"local_id": string,"provider": string,"sync_token"?: string | null,"synced_at"?: string
                   }
                   Update: {
-                    "company_id"?: string,"entity"?: string,"external_id"?: string,"local_id"?: string,"provider"?: string,"sync_token"?: string | null,"synced_at"?: string
+                    "account_id"?: string | null,"company_id"?: string,"entity"?: string,"external_id"?: string,"local_id"?: string,"provider"?: string,"sync_token"?: string | null,"synced_at"?: string
                   }
                   Relationships: [
                     {
       foreignKeyName: "sync_links_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"sync_links_parked": {
+                  Row: {
+                    "account_id": string,"company_id": string,"entity": string,"external_id": string,"local_id": string,"parked_at": string,"provider": string,"sync_token": string | null,"synced_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "account_id": string,"company_id": string,"entity": string,"external_id": string,"local_id": string,"parked_at"?: string,"provider": string,"sync_token"?: string | null,"synced_at": string
+                  }
+                  Update: {
+                    "account_id"?: string,"company_id"?: string,"entity"?: string,"external_id"?: string,"local_id"?: string,"parked_at"?: string,"provider"?: string,"sync_token"?: string | null,"synced_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "sync_links_parked_company_id_fkey"
       columns: ["company_id"]
 isOneToOne: false
       referencedRelation: "companies"
@@ -4292,6 +4312,9 @@ isOneToOne: false
 { Args: { "p_amounts": (number)[],"p_company": string,"p_invoices": (string)[] }; Returns: {
               "invoice_id": string,"outcome": string,"reason": string
             }[]
+                           },
+"requeue_accounting":
+{ Args: { "p_account": string,"p_company": string,"p_provider": string }; Returns: number
                            },
 "resolve_social_network":
 { Args: { "p_by": string,"p_company": string,"p_network": string,"p_permalink": string,"p_post": string,"p_posted": boolean }; Returns: string

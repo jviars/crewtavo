@@ -4,7 +4,7 @@
  */
 import { addDays, jobWeatherRules, lastDate, localDate, occurrenceDates, weatherRisks, zonedTimeToUtc } from "@crewtavo/core";
 import type { Env } from "./env";
-import { runAccountingJob, SentButUnrecorded } from "./integrations/accounting";
+import { OtherBooks, runAccountingJob, SentButUnrecorded } from "./integrations/accounting";
 import { runCalendarJob, syncDueCalendars } from "./integrations/calendars";
 import { reconcileAutopayProcessing, reconcileBankPayments, syncStripeInvoice } from "./integrations/stripe";
 import { reportError } from "./lib/monitoring";
@@ -150,8 +150,10 @@ async function drainOutbox(env: Env) {
     } catch (err) {
       failed++;
       const message = err instanceof Error ? err.message : String(err);
+      // Queued for other books than the ones connected now: it isn't sent to these, however often it's tried.
+      const elsewhere = err instanceof OtherBooks;
       // Sent but not recorded: another try would put a second copy in the books.
-      const giveUp = row.attempts >= 8 || err instanceof SentButUnrecorded;
+      const giveUp = row.attempts >= 8 || err instanceof SentButUnrecorded || elsewhere;
       await admin
         .from("outbox")
         .update({
@@ -162,8 +164,9 @@ async function drainOutbox(env: Env) {
         })
         .eq("id", row.id);
       // One record that never goes through shows on the Apps page, but the app stays connected so
-      // everything else keeps syncing (a refused sign-in marks it in integrations/tokens.ts).
-      if (giveUp) {
+      // everything else keeps syncing (a refused sign-in marks it in integrations/tokens.ts). A change
+      // left behind with other books isn't a problem with the ones connected, so it doesn't show.
+      if (giveUp && !elsewhere) {
         const providers = calendar ? ["google_calendar"] : stripe || autopay ? ["stripe"] : ["quickbooks", "zoho_books"];
         await admin.from("integrations").update({ last_error: message.slice(0, 500) }).eq("company_id", row.company_id).in("provider", providers).eq("status", "connected");
       }

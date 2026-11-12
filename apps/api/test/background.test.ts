@@ -756,6 +756,134 @@ describe("accounting sync", () => {
       expect(calls.map((c) => [c.method, c.url.pathname.split("/").at(-1)])).toEqual([["GET", "customerpayments"], ["POST", "customerpayments"]]);
     });
   });
+
+  // A business tried the sync against QuickBooks' sandbox company, then connected its real one. The
+  // sandbox's ids mean nothing in the real books, or are other records' there.
+  describe("links made in other books", () => {
+    const invoice = {
+      id: "inv-1", number: 1042, client_id: "client-1", issued_on: "2026-10-17", due_on: null, subject: null, tax_rate: 0, tax_amount: 0, discount_amount: 0,
+      invoice_line_items: [{ name: "Mowing", description: null, quantity: 1, unit_price: 45, taxable: false, service_id: null, sort: 0 }],
+    };
+    const payment = { id: "pay-1", client_id: "client-1", invoice_id: "inv-1", amount: 45, method: "card", received_at: "2026-10-17T15:00:00Z" };
+    type Link = { provider: string; account_id: string; entity: string; local_id: string; external_id: string };
+    const sandbox = (entity: string, local_id: string, external_id: string): Link => ({ provider: "quickbooks", account_id: "sandbox-1", entity, local_id, external_id });
+
+    /** Our side: the apps connected (each with its books), and the links, each found only by what the query asks for. */
+    async function ours(links: Link[], connected: Array<{ provider: string; external_account_id: string }> = [{ provider: "quickbooks", external_account_id: "real-1" }], rows: unknown[] = []) {
+      const ciphertext = await encryptJson(env, { access_token: "token", expires_at: Date.now() + 3_600_000 });
+      const { db, queries } = fakeDb(
+        (q) => {
+          if (q.table === "integrations") {
+            if (verb(q) !== "select") return {};
+            const asked = call(q, "in")![2] as string[];
+            const found = connected.filter((i) => asked.includes(i.provider)).sort((a, b) => a.provider.localeCompare(b.provider))[0];
+            return { data: found ? { ...found, settings: {} } : null };
+          }
+          if (q.table === "integration_secrets") return { data: { ciphertext } };
+          if (q.table === "clients") return { data: { id: "client-1", display_name: "Ada Alder", company_name: null, email: null, phone: null } };
+          if (q.table === "invoices") return { data: invoice };
+          if (q.table === "payments") return { data: payment };
+          if (q.table === "sync_links") {
+            if (verb(q) === "upsert") {
+              links.push(call(q, "upsert")![1]);
+              return {};
+            }
+            const match = call(q, "match")![1] as Record<string, string>;
+            const found = links.filter((l) => Object.entries(match).every(([key, value]) => key === "company_id" || l[key as keyof Link] === value));
+            return { data: call(q, "maybeSingle") ? (found[0] ?? null) : found };
+          }
+          return { data: null };
+        },
+        (fn) => (fn === "claim_outbox" ? { data: rows } : {}),
+      );
+      return { db, queries, links };
+    }
+
+    /** QuickBooks: it has nothing of ours yet, makes what it's sent, and keeps every request. */
+    function quickbooks() {
+      const calls: Array<{ method: string; url: URL; body: any }> = [];
+      vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+        const url = new URL(input);
+        const method = init?.method ?? "GET";
+        const body = init?.body ? JSON.parse(String(init.body)) : null;
+        calls.push({ method, url, body });
+        if (method === "GET") return Response.json({ QueryResponse: {} });
+        const kind = url.pathname.split("/").at(-1)!;
+        return Response.json({ [kind[0]!.toUpperCase() + kind.slice(1)]: { Id: `real-${kind}-1`, SyncToken: "0" } });
+      });
+      return calls;
+    }
+
+    it("aren't used: an edited invoice goes to the books connected now as new, not over their invoice with the old id", async () => {
+      const { db, links } = await ours([sandbox("client", "client-1", "7"), sandbox("invoice", "inv-1", "12")]);
+      const calls = quickbooks();
+      await runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1" } });
+      expect(calls.every((c) => c.url.pathname.startsWith("/v3/company/real-1/"))).toBe(true);
+      // No read or update of invoice 12, which in the real books is somebody else's.
+      expect(calls.filter((c) => c.url.pathname.endsWith("/invoice/12") || c.body?.Id)).toEqual([]);
+      const posts = calls.filter((c) => c.method === "POST");
+      expect(posts.map((c) => c.url.pathname.split("/").at(-1))).toEqual(["customer", "invoice"]);
+      // And not for the sandbox's customer 7.
+      expect(posts[1]!.body).toMatchObject({ DocNumber: "1042", CustomerRef: { value: "real-customer-1" } });
+      expect(links.filter((l) => l.account_id === "real-1").map((l) => [l.entity, l.external_id])).toEqual([["client", "real-customer-1"], ["invoice", "real-invoice-1"]]);
+    });
+
+    it("don't stop a payment reaching the books connected now", async () => {
+      const { db, links } = await ours([sandbox("client", "client-1", "7"), sandbox("invoice", "inv-1", "12"), sandbox("payment", "pay-1", "31")]);
+      const calls = quickbooks();
+      await runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.payment", payload: { payment_id: "pay-1" } });
+      const sent = calls.find((c) => c.method === "POST" && c.url.pathname.endsWith("/payment"))!;
+      expect(sent.body).toMatchObject({ CustomerRef: { value: "real-customer-1" }, TotalAmt: 45, Line: [{ LinkedTxn: [{ TxnId: "real-invoice-1" }] }] });
+      expect(links).toContainEqual(expect.objectContaining({ account_id: "real-1", entity: "payment", local_id: "pay-1", external_id: "real-payment-1" }));
+    });
+
+    it("are used again by the books they were made in", async () => {
+      const { db, links } = await ours([sandbox("client", "client-1", "7"), sandbox("invoice", "inv-1", "12")], [{ provider: "quickbooks", external_account_id: "sandbox-1" }]);
+      const calls = quickbooks();
+      await runAccountingJob(env, db, { company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1", provider: "quickbooks", account_id: "sandbox-1" } });
+      expect(calls.map((c) => [c.method, c.url.pathname.split("/").slice(-2).join("/")])).toEqual([["GET", "invoice/12"], ["POST", "sandbox-1/invoice"]]);
+      expect(calls[1]!.body).toMatchObject({ Id: "12", CustomerRef: { value: "7" } });
+      expect(links).toHaveLength(2);
+    });
+
+    const queuedFor = (provider: string, account_id: string) => ({ id: 11, company_id: COMPANY, topic: "accounting.invoice", payload: { invoice_id: "inv-1", provider, account_id }, attempts: 1 });
+
+    it.each([
+      ["another QuickBooks company", [{ provider: "quickbooks", external_account_id: "real-1" }]],
+      ["Zoho Books instead", [{ provider: "zoho_books", external_account_id: "org-1" }]],
+    ])("leave a change queued for the old books unsent with %s connected", async (_, connected) => {
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      const { queries, links } = await ours([], connected, [queuedFor("quickbooks", "sandbox-1")]);
+      expect(await runTask("outbox", env)).toEqual({ claimed: 1, done: 0, failed: 1 });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(links).toEqual([]);
+      // Set aside rather than tried again, and not shown as the connected books' problem.
+      expect(call(queries.find((q) => q.table === "outbox")!, "update")![1]).toMatchObject({ dead_at: expect.any(String), last_error: expect.stringContaining("other books") });
+      expect(integrationWrites(queries)).toEqual([]);
+    });
+
+    it("keep a change queued for books that are signed out waiting, as before", async () => {
+      const { queries } = await ours([], [], [queuedFor("quickbooks", "sandbox-1")]);
+      expect(await runTask("outbox", env)).toEqual({ claimed: 1, done: 0, failed: 1 });
+      expect(call(queries.find((q) => q.table === "outbox")!, "update")![1]).toMatchObject({ dead_at: null, last_error: expect.stringContaining("isn't connected") });
+    });
+
+    it("send a change queued for the books connected now, picking them out when both apps are connected", async () => {
+      const both = [{ provider: "quickbooks", external_account_id: "real-1" }, { provider: "zoho_books", external_account_id: "org-1" }];
+      const { queries, links } = await ours([], both, [queuedFor("zoho_books", "org-1")]);
+      const hosts: string[] = [];
+      vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+        hosts.push(new URL(input).host);
+        if (init?.method !== "POST") return Response.json({ code: 0, invoices: [] });
+        return Response.json({ code: 0, contact: { contact_id: "contact-1" }, invoice: { invoice_id: "zoho-inv-1" } });
+      });
+      expect(await runTask("outbox", env)).toEqual({ claimed: 1, done: 1, failed: 0 });
+      expect(new Set(hosts)).toEqual(new Set(["www.zohoapis.com"]));
+      expect(links.map((l) => [l.provider, l.account_id, l.entity])).toEqual([["zoho_books", "org-1", "client"], ["zoho_books", "org-1", "invoice"]]);
+      expect(call(queries.find((q) => q.table === "outbox")!, "update")![1]).toMatchObject({ done_at: expect.any(String) });
+    });
+  });
 });
 
 describe("automation runs", () => {

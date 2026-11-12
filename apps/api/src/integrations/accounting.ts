@@ -6,6 +6,10 @@ import type { Db } from "../lib/supabase";
  * the books have already is sent again when it changes (a late fee, a minimum charge, an edit:
  * private.enqueue_accounting), through each one's update API, so the books keep up with it.
  *
+ * A link (sync_links) belongs to the books it was made in: the QuickBooks company or Zoho Books
+ * organization connected then. Only links to the books connected now are used, and a change queued
+ * for other books isn't sent to these (20261112000470_accounting_links_per_books.sql).
+ *
  * QuickBooks item mapping lives in integrations.settings:
  *   { "environment": "production" | "sandbox", "item_map": { "<service uuid>": "<QBO Item Id>" }, "default_item_id": "1" }
  */
@@ -26,6 +30,8 @@ interface Ctx {
 
 const QBO_BASE = { production: "https://quickbooks.api.intuit.com", sandbox: "https://sandbox-quickbooks.api.intuit.com" };
 const QBO_MINOR_VERSION = "75";
+const NO_REALM = "QuickBooks company (realm) ID is missing; reconnect QuickBooks.";
+const NO_ORGANIZATION = "Zoho Books organization ID is missing; reconnect Zoho Books.";
 
 async function one<R extends { data: unknown; error: { message: string } | null }>(query: PromiseLike<R>, what: string): Promise<NonNullable<R["data"]>> {
   const { data, error } = await query;
@@ -34,12 +40,22 @@ async function one<R extends { data: unknown; error: { message: string } | null 
   return data as NonNullable<R["data"]>;
 }
 
+/**
+ * The books connected now: the QuickBooks company (realm) or Zoho Books organization. An id from
+ * other books means nothing in these, or worse, is some other record's there.
+ */
+function books(ctx: Ctx): string {
+  const account = ctx.integration.external_account_id;
+  if (!account) throw new IntegrationError(ctx.provider === "quickbooks" ? NO_REALM : NO_ORGANIZATION);
+  return account;
+}
+
 /** A lookup that fails isn't "never sent": carrying on as if it were would send the record twice. */
 async function linked(ctx: Ctx, entity: Entity, localId: string): Promise<string | null> {
   const { data, error } = await ctx.admin
     .from("sync_links")
     .select("external_id")
-    .match({ company_id: ctx.companyId, provider: ctx.provider, entity, local_id: localId })
+    .match({ company_id: ctx.companyId, provider: ctx.provider, account_id: books(ctx), entity, local_id: localId })
     .maybeSingle();
   if (error) throw new IntegrationError(error.message);
   return data?.external_id ?? null;
@@ -59,6 +75,7 @@ async function remember(ctx: Ctx, entity: Entity, localId: string, externalId: s
   const link = {
     company_id: ctx.companyId,
     provider: ctx.provider,
+    account_id: books(ctx),
     entity,
     local_id: localId,
     external_id: externalId,
@@ -75,7 +92,7 @@ async function linkedElsewhere(ctx: Ctx, entity: Entity, externalId: string, loc
   const { data, error } = await ctx.admin
     .from("sync_links")
     .select("local_id")
-    .match({ company_id: ctx.companyId, provider: ctx.provider, entity, external_id: externalId });
+    .match({ company_id: ctx.companyId, provider: ctx.provider, account_id: books(ctx), entity, external_id: externalId });
   if (error) throw new IntegrationError(error.message);
   return (data ?? []).some((link) => link.local_id !== localId);
 }
@@ -101,7 +118,7 @@ export function qboEnvironment(env: Env, settings: Record<string, unknown>, extr
 
 async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknown) {
   const realm = ctx.integration.external_account_id;
-  if (!realm) throw new IntegrationError("QuickBooks company (realm) ID is missing; reconnect QuickBooks.");
+  if (!realm) throw new IntegrationError(NO_REALM);
   const { token, secret } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "quickbooks");
   const env = qboEnvironment(ctx.env, ctx.integration.settings, secret.extra);
   const url = `${QBO_BASE[env]}/v3/company/${realm}/${path}${path.includes("?") ? "&" : "?"}minorversion=${QBO_MINOR_VERSION}`;
@@ -122,7 +139,7 @@ async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknow
 async function zoho(ctx: Ctx, method: "GET" | "POST" | "PUT", path: string, body?: unknown) {
   const { token, secret } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "zoho_books");
   const org = ctx.integration.external_account_id;
-  if (!org) throw new IntegrationError("Zoho Books organization ID is missing; reconnect Zoho Books.");
+  if (!org) throw new IntegrationError(NO_ORGANIZATION);
   // Checked here too: tokens saved before only Zoho's servers were accepted may name another.
   const apiDomain = zohoApiDomain(secret.extra?.api_domain);
   const response = await fetch(`${apiDomain}/books/v3/${path}${path.includes("?") ? "&" : "?"}organization_id=${org}`, {
@@ -328,19 +345,45 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
   return created.payment_id;
 }
 
+/**
+ * The change was queued for other books than the ones connected now (another QuickBooks company or
+ * Zoho organization, or the other app). It isn't sent to these, and trying again won't change that.
+ */
+export class OtherBooks extends IntegrationError {
+  override name = "OtherBooks";
+  constructor() {
+    super("Queued for other books than the ones connected now. It goes when those are connected again.");
+  }
+}
+
+const ACCOUNTING: Accounting[] = ["quickbooks", "zoho_books"];
+
 /** Run one outbox row. Throws on failure so the caller can schedule a retry. */
 export async function runAccountingJob(env: Env, admin: Db, row: { company_id: string; topic: string; payload: Record<string, string> }) {
-  const { data: integration, error } = await admin
-    .from("integrations")
-    .select("provider, external_account_id, settings")
-    .eq("company_id", row.company_id)
-    .in("provider", ["quickbooks", "zoho_books"])
-    .eq("status", "connected")
-    .limit(1)
-    .maybeSingle();
+  // The books the row was queued for (private.enqueue_accounting). A row that doesn't say goes to
+  // whichever accounting app is connected, as they all did before.
+  const madeFor = row.payload.account_id ? { provider: row.payload.provider, account: row.payload.account_id } : null;
+  const connected = (providers: string[]) =>
+    admin
+      .from("integrations")
+      .select("provider, external_account_id, settings")
+      .eq("company_id", row.company_id)
+      .in("provider", providers)
+      .eq("status", "connected")
+      .order("provider")
+      .limit(1)
+      .maybeSingle();
+  const { data: integration, error } = await connected(madeFor?.provider ? [madeFor.provider] : ACCOUNTING);
   if (error) throw new IntegrationError(error.message);
+  if (!integration && madeFor) {
+    // Its own app is signed out. With the other one connected instead, these aren't its books.
+    const other = await connected(ACCOUNTING);
+    if (other.error) throw new IntegrationError(other.error.message);
+    if (other.data) throw new OtherBooks();
+  }
   // Disconnected or waiting to be reconnected since it was queued: fail, so it's retried rather than dropped.
   if (!integration) throw new IntegrationError("The accounting app isn't connected. Reconnect it on the Apps page.");
+  if (madeFor && integration.external_account_id !== madeFor.account) throw new OtherBooks();
 
   const ctx: Ctx = {
     env,
