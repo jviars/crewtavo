@@ -5,12 +5,14 @@
  * their password. pg_dump is stood in for (backupTools), Storage and Auth are stubbed through fetch,
  * and the database is a small stand-in. (What claim_backup does is tested in supabase/tests.)
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { backupNight, backupsToKeep, backupWarning } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import type { Db } from "../src/lib/supabase";
-import { backupStatus, backupTools, DUMP_ARGS, dumpEnvironment, listBackups, openBackup, PART_BYTES, runBackups, tidyBackups, type Dump } from "../src/services/backups";
+import { BACKUP_SCHEMAS, backupStatus, backupTools, DUMP_ARGS, dumpEnvironment, listBackups, openBackup, PART_BYTES, runBackups, tidyBackups, type Dump } from "../src/services/backups";
 
 const current = vi.hoisted(() => ({ db: null as unknown }));
 vi.mock("../src/lib/supabase", async (original) => ({
@@ -254,6 +256,19 @@ describe("the backups task", () => {
     expect(DUMP_ARGS.join(" ")).not.toContain(DB_PASSWORD);
     expect(dumpEnvironment(DB_URL)).toMatchObject({ PGHOST: "db", PGPORT: "5432", PGUSER: "postgres", PGPASSWORD: DB_PASSWORD, PGDATABASE: "postgres", PGSSLMODE: "disable" });
     expect(dumpEnvironment("postgres://postgres:p%40ss@db.example.com/crew")).toMatchObject({ PGPASSWORD: "p@ss", PGDATABASE: "crew", PGSSLMODE: "require" });
+  });
+
+  it("backs up every schema a migration makes, and restores the same ones", () => {
+    // A migration that adds a schema without adding it here would leave its tables out of every backup.
+    const dir = fileURLToPath(new URL("../../../supabase/migrations", import.meta.url));
+    const made = new Set<string>();
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql"))) {
+      for (const [, schema] of readFileSync(`${dir}/${file}`, "utf8").matchAll(/^\s*create schema (?:if not exists )?"?(\w+)"?/gim)) made.add(schema!.toLowerCase());
+    }
+    expect(made.size).toBeGreaterThan(0);
+    expect([...made].filter((schema) => !(BACKUP_SCHEMAS as readonly string[]).includes(schema))).toEqual([]);
+    const restore = readFileSync(fileURLToPath(new URL("../../../scripts/restore.mjs", import.meta.url)), "utf8");
+    expect(JSON.parse(/const SCHEMAS = (\[[^\]]+\]);/.exec(restore)![1]!)).toEqual([...BACKUP_SCHEMAS]);
   });
 
   it("stores the night's dump in pieces with the service key, and only then lists it as good", async () => {
