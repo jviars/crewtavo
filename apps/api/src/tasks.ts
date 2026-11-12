@@ -12,6 +12,7 @@ import { emailConfigured, smsConfigured } from "./lib/notify";
 import { adminClient, type Db } from "./lib/supabase";
 import { runAddressTask } from "./services/address";
 import { rollUpVisits } from "./services/analytics";
+import { runBackups } from "./services/backups";
 import { chargeDueAutopay, runAutopayJob } from "./services/autopay";
 import { checkHosting } from "./services/hosting";
 import { purgeTrash, tidyApplicantFiles, tidyPlanFiles, tidySubFiles, tidyUnrecordedFiles } from "./services/planFiles";
@@ -28,7 +29,7 @@ import { remindSubs } from "./services/subs";
 import { dailyOutlook } from "./services/external";
 import { autoRoutes } from "./services/routes";
 
-export const TASKS = ["automations", "campaigns", "notify", "outbox", "autopay", "calendars", "recurrence", "followups", "weather", "address", "railway", "hosting", "plans", "trash", "storage", "routes", "website", "reviews", "inactive", "review_sync", "social"] as const;
+export const TASKS = ["automations", "campaigns", "notify", "outbox", "autopay", "calendars", "recurrence", "followups", "weather", "address", "railway", "hosting", "plans", "trash", "storage", "routes", "website", "reviews", "inactive", "review_sync", "social", "backups"] as const;
 export type TaskName = (typeof TASKS)[number];
 
 /** Cron expressions -> tasks, run by server.ts's scheduler. */
@@ -58,6 +59,9 @@ export const CRON_TASKS: Record<string, TaskName[]> = {
   "35 4 * * *": ["trash"],
   // Warns owners and admins as files near the storage limit, on Railway or not (services/storageUsage.ts).
   "50 */6 * * *": ["storage"],
+  // The night's database backup, once it's past 2am where the business is; hourly, so a night that
+  // failed is tried again, and the owners hear when backups have stopped (services/backups.ts).
+  "25 * * * *": ["backups"],
 };
 
 export async function runTask(name: TaskName, env: Env): Promise<Record<string, unknown>> {
@@ -115,6 +119,8 @@ export async function runTask(name: TaskName, env: Env): Promise<Record<string, 
       return syncDueReviews(env);
     case "social":
       return postDueSocial(env);
+    case "backups":
+      return runBackups(env, adminClient(env));
   }
 }
 

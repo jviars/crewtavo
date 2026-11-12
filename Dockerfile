@@ -25,6 +25,9 @@ WORKDIR /app
 # The release this image is (set by .github/workflows/release.yml); /api/health reports it.
 ARG CREWTAVO_VERSION=dev
 ENV NODE_ENV=production PORT=8080 CREWTAVO_VERSION=$CREWTAVO_VERSION
+# pg_dump and pg_restore, for the nightly database backup and scripts/restore.mjs. The same major
+# version as the db service (deploy/postgres): pg_dump refuses a server newer than itself.
+RUN apk add --no-cache postgresql17-client
 COPY --from=build --chown=node:node /src/dist/server ./
 COPY --from=build --chown=node:node /src/LICENSE /src/NOTICE /src/TERMS ./
 USER node

@@ -30,6 +30,7 @@
     "./ical": "./src/ical.ts",
     "./automations": "./src/automations.ts",
     "./autopay": "./src/autopay.ts",
+    "./backups": "./src/backups.ts",
     "./billing": "./src/billing.ts",
     "./equipment": "./src/equipment.ts",
     "./privacy": "./src/privacy.ts",

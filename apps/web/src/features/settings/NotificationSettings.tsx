@@ -28,7 +28,7 @@ type Prefs = Record<NotificationChannel, NotificationTopic[]>;
  * limit (Settings → Storage). Off Railway there's only the storage one, so it's called that.
  */
 const hostingWarnings = (session: Session) => hasRole(session, "admin");
-const OFF_RAILWAY_HOSTING = { label: "Storage", hint: "When the company's files near the storage limit" };
+const OFF_RAILWAY_HOSTING = { label: "Storage and backups", hint: "When the company's files near the storage limit, or the nightly backup stops working" };
 
 /**
  * Google reviews go to owners, admins and office staff with the marketing area, and Google Business

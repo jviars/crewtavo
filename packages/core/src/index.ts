@@ -2,6 +2,7 @@ export * from "./address";
 export * from "./assistants";
 export * from "./automations";
 export * from "./autopay";
+export * from "./backups";
 export * from "./billing";
 export * from "./breaks";
 export * from "./campaigns";

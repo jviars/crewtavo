@@ -16,6 +16,7 @@ import { address, addressWellKnown } from "./routes/address";
 import { apps } from "./routes/apps";
 import { automations } from "./routes/automations";
 import { autopay } from "./routes/autopay";
+import { backups } from "./routes/backups";
 import { calendar } from "./routes/calendar";
 import { chat } from "./routes/chat";
 import { documentPdfRoutes } from "./routes/documentPdf";
@@ -112,6 +113,7 @@ app.route("/api", analytics);
 app.route("/api", websiteForms);
 app.route("/api", drive);
 app.route("/api", storage);
+app.route("/api", backups);
 app.route("/", addressWellKnown);
 app.route("/", mcp);
 // Website analytics: the script for the business's website, and its page views (routes/analytics.ts).

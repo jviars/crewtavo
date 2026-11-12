@@ -21,8 +21,9 @@ export const NOTIFICATION_TOPICS = [
   { key: "alerts", label: "Other alerts", hint: "Leads handed to you, and your company's automations, like a quote being approved" },
   { key: "chat", label: "Team chat", hint: "When someone @mentions you or your role" },
   // Owners and admins: Railway's warnings (services/hosting.ts) and storage nearing its limit
-  // (services/storageUsage.ts). Off Railway, Settings → Profile calls it "Storage".
-  { key: "hosting", label: "Railway", hint: "Before the trial runs out, or when the bill goes over the plan or storage fills up" },
+  // (services/storageUsage.ts), and owners: the nightly database backup failing (services/backups.ts).
+  // Off Railway, Settings → Profile calls it "Storage and backups".
+  { key: "hosting", label: "Railway", hint: "Before the trial runs out, or when the bill goes over the plan, storage fills up or the nightly backup stops working" },
 ] as const;
 export type NotificationTopic = (typeof NOTIFICATION_TOPICS)[number]["key"];
 
