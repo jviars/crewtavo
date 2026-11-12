@@ -22,6 +22,7 @@ import { api, ApiError, companyFeatures, loadConfig, setActiveCompany, supabase,
 import { setCurrency } from "./format";
 import { forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, pendingFieldActions, signOutWarning, startOfflineCache } from "./offline";
 import { photosNotSent } from "./offlinePhotos";
+import { setRecentsPerson } from "./recent";
 import { setSessionExpiredHandler } from "./queryClient";
 import { toast } from "./toast";
 import { flushUndos } from "./undo";
@@ -247,6 +248,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
 
   const membership = me.data?.memberships.find((m) => m.company.id === companyId) ?? me.data?.memberships[0];
   setActiveCompany(membership?.company.id ?? null);
+  setRecentsPerson(auth?.user.id ?? null);
   setCurrency(membership?.company.currency);
 
   // Crews and subs keep their day on the phone; queued field actions survive closing the app (lib/offline.ts).

@@ -14,6 +14,7 @@ import { api, setActiveCompany, unwrap } from "../src/lib/api";
 import { ApiError, OFFLINE, SESSION_EXPIRED } from "../src/lib/errors";
 import { ROLES } from "@crewtavo/core/roles";
 import { FIELD_SCOPE, forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, OFFLINE_MUTATIONS, pendingFieldActions, startOfflineCache, SYNC_TAG, unsavedFieldActions, WAITING_CACHE } from "../src/lib/offline";
+import { getRecents, rememberRecent, setRecentsPerson } from "../src/lib/recent";
 import { FakeCaches, loadServiceWorker } from "./serviceWorker";
 
 // The phone's storage, which can be made to run out of room.
@@ -1241,6 +1242,34 @@ describe("signing out", () => {
   it("on purpose, from any screen (the license, setting up a business, choosing a password), leaves nothing of theirs on the phone", () => {
     const callers = sources(SRC).filter((file) => /\.auth\s*\.signOut\(/.test(readFileSync(file, "utf8")));
     expect(callers.map((file) => relative(SRC, file).replaceAll("\\", "/"))).toEqual(["lib/session.tsx"]);
+  });
+});
+
+describe("recently opened records", () => {
+  const client = { kind: "client" as const, id: "cl1", title: "Dana Whitfield", subtitle: "14 Alder Lane, Bend", path: "/clients/cl1" };
+
+  it("are each person's own, and go from the phone when that person signs out, so the next one on a shared tablet doesn't see them", () => {
+    // Kept by the version before, per company alone: nobody's in particular, so dropped rather than shown to whoever is next.
+    store.set("crewtavo.recent.c1", JSON.stringify([{ ...client, title: "Someone's earlier client" }]));
+    setRecentsPerson("u50");
+    expect(getRecents("c1")).toEqual([]);
+    expect(store.has("crewtavo.recent.c1")).toBe(false);
+
+    rememberRecent("c1", client);
+    expect(getRecents("c1")).toEqual([client]);
+
+    // A crewmate signs in on the same tablet (the first one's sign-in expired: nothing was cleared).
+    setRecentsPerson("u51");
+    expect(getRecents("c1")).toEqual([]);
+    rememberRecent("c1", { ...client, id: "cl2", title: "Other client" });
+
+    // The first one signs out on purpose.
+    forgetOfflineCache("u50");
+    expect([...store.keys()]).toEqual(["crewtavo.recent.c1.u51"]);
+    setRecentsPerson("u50");
+    expect(getRecents("c1")).toEqual([]);
+    setRecentsPerson(null);
+    expect(getRecents("c1")).toEqual([]);
   });
 });
 

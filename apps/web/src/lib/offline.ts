@@ -21,6 +21,7 @@ import type { Role } from "@crewtavo/core/roles";
 import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type MutationFunction, type QueryClient } from "@tanstack/react-query";
 import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } from "./errors";
 import { forgetPhonePhotos, photosWaiting, startPhotoQueue, subscribePhonePhotos } from "./offlinePhotos";
+import { forgetRecents } from "./recent";
 
 // React Query assumes it's online until it hears otherwise; a phone that opens the app with no
 // signal is offline from the start, so field actions queue instead of failing.
@@ -462,6 +463,8 @@ export function forgetOfflineCache(userId: string) {
   remove(storageKey(userId));
   // Who they are and their companies, kept by lib/session.tsx for opening the app with no signal.
   remove(`crewtavo.me.${userId}`);
+  // The records they last opened, for the command palette (lib/recent.ts): clients' names and addresses.
+  forgetRecents(userId);
   forgetPhonePhotos(userId);
   tellServiceWorker(userId, 0);
 }
