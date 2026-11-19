@@ -2,8 +2,8 @@
  * The demo's guided tour: a card in the corner that walks a visitor through their sample business,
  * a page at a time, and rings what it's talking about (a link in the sidebar, or a button in the
  * demo bar). It opens by itself the first time the owner arrives, picks up where it was after a
- * reload or a trip to the crew's phone, and the bar's Tour button starts it again. The steps are
- * written for each trade the start screen asks about, with a general set for the rest.
+ * reload or a trip to the crew's phone, and the bar's Tour button starts it again. It's the same
+ * for every trade: what's a trade's own (Snow, Paving, Roofing) it points to in Apps.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -25,7 +25,7 @@ interface Step {
 }
 
 /** A quote of this business's in that state, opened on its own page (or the list, if there's none any more). */
-const quote = (status: "sent" | "draft") => async (companyId: string) => {
+const quote = (status: "sent") => async (companyId: string) => {
   const { data } = await supabase().from("quotes").select("id").eq("company_id", companyId).eq("status", status).order("created_at").limit(1).maybeSingle();
   return data ? `/quotes/${data.id}` : "/quotes";
 };
@@ -38,63 +38,65 @@ const link = (to: string) => `a[href="${to}"]`;
  */
 const schedule = async () => (window.matchMedia?.("(max-width: 760px)").matches ? "/schedule?view=list" : "/schedule");
 
-export function tourSteps(trade: string, business: string): Step[] {
-  const welcome: Step = {
-    title: `Welcome to ${business}`,
-    body: "This is your own sample business, with clients, this week's work, quotes and invoices. Take a one-minute tour, or click around on your own. Nothing you do here reaches anyone.",
-  };
-  const home: Step = {
-    to: "/",
-    target: link("/"),
-    title: "Your day at a glance",
-    body: "Home shows today's visits, and every request, quote, job and invoice in one row, with what needs you first.",
-  };
-  const requests: Step = {
-    to: "/requests",
-    target: link("/requests"),
-    title: "Work coming in",
-    body: "Requests arrive from your website's booking form, a phone call or a client's portal. Priya asked for a price; her estimate visit is on today's schedule.",
-  };
-  const crew: Step = {
-    target: '[data-tour="crew"]',
-    title: "Your crew's phone",
-    body: "Press Crew's phone to see today as Marcus, the crew lead: clock in, the day's stops with directions, checklists and photos. Owner's view brings you back here.",
-  };
-  const client: Step = {
-    target: '[data-tour="client"]',
-    title: "What your clients see",
-    body: "Client's view opens a client's portal: a quote to approve, the next visit, invoices to pay by card or bank, and a button to ask for more work.",
-  };
-  const done: Step = {
-    target: '[data-tour="get"]',
-    title: "That's the tour",
-    body: "Now change anything: add a client, send a quote, move a visit, take a payment. It's yours for 24 hours. When you're ready, Crewtavo is free for your own business.",
-  };
-  const invoices = (body: string): Step => ({ to: "/invoices", target: link("/invoices"), title: "Getting paid", body });
-  const middle: Record<string, Step[]> = {
-    lawn_exterior: [
-      { to: schedule, target: link("/schedule"), title: "The week's route", body: "Weekly and every-other-week mows fill in by themselves from each client's recurring job, with cleanups in between. Drag a visit to move it; Map lays out the route." },
-      { to: quote("sent"), target: link("/quotes"), title: "A quote waiting on Jordan", body: "Jordan's fertilizer program: five rounds, with aeration and overseeding as options he can tick. He approves it from a link, and it becomes a job." },
-      { to: "/snow", target: link("/snow"), title: "Snow removal, built in", body: "Four snow customers with their triggers, salting and storm prices. When the forecast reaches a trigger, the crew hears the night before, and the office schedules the whole storm at once. Season has the last storm: what fell, the pushes and what it billed." },
-      invoices("Meadowbrook HOA's fall cleanup is past due, and Crewtavo can remind them by itself. Payments come by card, bank or check."),
-    ],
-    roofing_exteriors: [
-      { to: schedule, target: link("/schedule"), title: "This week's installs", body: "Lot 14's tear-off is under way today and the shingles go on tomorrow, with inspections in between. Each crew has its color, and weather rules warn you before a wet day." },
-      { to: quote("sent"), target: link("/quotes"), title: "A storm claim, measured on the aerial", body: "Jordan's roof was drawn on the satellite view: squares at 6/12 with eaves, rakes and ridge measured, and the quote filled in from it. Gutters are an option he can add." },
-      invoices("Summit Ridge's deposit on Lot 14 is past due, and Crewtavo can remind them by itself. Payments come by card, bank or check."),
-    ],
-    paving: [
-      { to: schedule, target: link("/schedule"), title: "Paving days and sealcoat days", body: "The Phase 2 roads are on the schedule with weather rules: if it's too cold or rain is coming, Crewtavo warns you before the crew goes out." },
-      { to: quote("draft"), target: link("/quotes"), title: "A takeoff on the aerial", body: "The clubhouse lot was outlined on the satellite view: square feet of sealcoat, cracks, stalls and ADA spaces, and the quote filled in from them." },
-      invoices("Summit Ridge is billed as the work goes, with 10% held back. The progress bill is past due, and Crewtavo can remind them by itself."),
-    ],
-  };
-  const general: Step[] = [
-    { to: schedule, target: link("/schedule"), title: "This week's work", body: "Today's jobs, estimates and a regular customer's visits, by crew. Drag a visit to move it; Map lays out the day's route." },
-    { to: quote("sent"), target: link("/quotes"), title: "A quote waiting on Jordan", body: "Jordan can approve it from a link, tick the optional line, and it becomes a job with its visits." },
-    invoices("One invoice is past due, and Crewtavo can remind the client by itself. Payments come by card, bank or check."),
+/** The tour, the same for every trade: what any field service business does, and Apps for what's its own. */
+export function tourSteps(business: string): Step[] {
+  return [
+    {
+      title: `Welcome to ${business}`,
+      body: "This is your own sample business, with clients, this week's work, quotes and invoices. Take a one-minute tour, or click around on your own. Nothing you do here reaches anyone.",
+    },
+    {
+      to: "/",
+      target: link("/"),
+      title: "Your day at a glance",
+      body: "Home shows today's visits, and every request, quote, job and invoice in one row, with what needs you first.",
+    },
+    {
+      to: "/requests",
+      target: link("/requests"),
+      title: "Work coming in",
+      body: "Requests arrive from your website's booking form, a phone call or a client's portal, and turn into an estimate visit or a quote.",
+    },
+    {
+      to: schedule,
+      target: link("/schedule"),
+      title: "The week's work",
+      body: "Every visit by crew, with recurring work filled in by itself. Drag a visit to move it, and Map lays out the day's route.",
+    },
+    {
+      to: quote("sent"),
+      target: link("/quotes"),
+      title: "A quote waiting on Jordan",
+      body: "Jordan approves it from a link, picks any optional lines, and it becomes a job with its visits. Measure a yard, roof or lot on the aerial and a quote fills itself in.",
+    },
+    {
+      to: "/invoices",
+      target: link("/invoices"),
+      title: "Getting paid",
+      body: "Overdue invoices stand out, and Crewtavo can remind clients by itself. Payments come by card, bank or check.",
+    },
+    {
+      to: "/apps",
+      target: link("/apps"),
+      title: "Apps for your trade",
+      body: "What your trade needs turns on here: snow removal, paving takeoffs, roofing, a website, team chat and more, along with payments, texting, accounting and calendars. In the demo, the ones that connect outside accounts are off.",
+    },
+    {
+      target: '[data-tour="crew"]',
+      title: "Your crew's phone",
+      body: "Press Crew's phone to see today as Marcus, the crew lead: clock in, the day's stops with directions, checklists and photos. Owner's view brings you back here.",
+    },
+    {
+      target: '[data-tour="client"]',
+      title: "What your clients see",
+      body: "Client's view opens a client's portal: a quote to approve, the next visit, invoices to pay by card or bank, and a button to ask for more work.",
+    },
+    {
+      target: '[data-tour="get"]',
+      title: "That's the tour",
+      body: "Now change anything: add a client, send a quote, move a visit, take a payment. It's yours for 24 hours. When you're ready, Crewtavo is free for your own business.",
+    },
   ];
-  return [welcome, home, requests, ...(middle[trade] ?? general), crew, client, done];
 }
 
 type Saved = { step: number } | { done: true };
@@ -139,7 +141,7 @@ export function DemoTour({ step, go }: { step: number | null; go: (step: number 
   const session = useSession();
   const navigate = useNavigate();
   const location = useLocation();
-  const all = useMemo(() => tourSteps(session.company.trade_preset ?? "", session.company.name), [session.company.trade_preset, session.company.name]);
+  const all = useMemo(() => tourSteps(session.company.name), [session.company.name]);
   const current = step === null ? null : all[Math.min(step, all.length - 1)]!;
   const [ring, setRing] = useState<DOMRect | null>(null);
   const primary = useRef<HTMLButtonElement>(null);

@@ -28,10 +28,10 @@ because an instance holds one business unless told otherwise.
   paid), equipment due for service, guides, a sent campaign and review asks. Dates are counted from
   the day it's made, so the schedule is always this week's.
 - **A guided tour** (`apps/web/src/features/demo/Tour.tsx`) opens the first time the owner arrives.
-  A card in the corner goes a page at a time: Home, requests, the schedule, a quote, then the
-  trade's own part (lawn care's Snow page, roofing's measured roof, paving's takeoff), invoices, the
-  crew's phone and the client's view. It rings what it's talking about. It picks up where it was
-  after a reload, and the bar's **Tour** button starts it again.
+  It's the same for every trade. A card in the corner goes a page at a time: Home, requests, the
+  schedule, a quote, invoices, Apps (where a trade's own, like Snow, Paving and Roofing, is turned
+  on), the crew's phone and the client's view. It rings what it's talking about. It picks up where
+  it was after a reload, and the bar's **Tour** button starts it again.
 - **The demo bar** above the app:
   - **Crew's phone** signs in as the crew lead (`/field`), and **Owner's view** comes back.
   - **Client's view** opens the client portal for the client with the latest quote.
