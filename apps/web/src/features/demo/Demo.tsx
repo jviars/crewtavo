@@ -91,7 +91,7 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
       setBusy(null);
       started.current = false;
       // A check is good once: ask for a new one.
-      (window as { turnstile?: { reset(): void } }).turnstile?.reset();
+      turnstile.reset();
     }
   }
 
@@ -106,6 +106,10 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
   const others = (presets.data ?? []).filter((p) => !FEATURED.has(p.id));
   const shown = search.trim() ? searchTrades(others, search) : others;
 
+  // The bot check stays on the page while the business is made (hidden), so a start that fails can
+  // ask for a new answer in the same box.
+  const check = turnstile.required ? <div ref={turnstile.ref} hidden={Boolean(busy)} /> : null;
+
   if (busy) {
     return (
       <AuthLayout>
@@ -114,6 +118,7 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
           <h1 className={authStyles.title}>Setting up your {label(busy)} business</h1>
           <p className="muted" style={{ margin: 0 }}>Clients, quotes, this week's jobs and invoices, ready to click around in. It takes a few seconds.</p>
         </div>
+        {check}
       </AuthLayout>
     );
   }
@@ -165,7 +170,6 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
           </fieldset>
         )}
 
-        {turnstile.required && <div ref={turnstile.ref} />}
         {error && <p role="alert" className="field-error" style={{ margin: 0 }}>{error}</p>}
 
         <ul className={styles.points}>
@@ -177,6 +181,7 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
           By starting a demo you agree to the <a href={TERMS} target="_blank" rel="noreferrer">Crewtavo Terms</a>. Ready for your own? <a href={GET_CREWTAVO}>Get Crewtavo free</a>
         </p>
       </div>
+      {check}
     </AuthLayout>
   );
 }
@@ -276,7 +281,7 @@ export function DemoBar() {
           <Button size="sm" variant="ghost" icon="arrowLeft" aria-label="Owner's view" title="Back to the owner" loading={busy === "switch"} disabled={Boolean(busy)} onClick={() => switchTo("owner")}><span className={styles.text}>Owner's view</span></Button>
         )}
         <Button size="sm" variant="ghost" icon="refresh" aria-label="Start over" title="Delete this business and pick a trade again" loading={busy === "over"} disabled={Boolean(busy)} onClick={startOver}><span className={styles.text}>Start over</span></Button>
-        <a className="btn btn-sm btn-primary" href={GET_CREWTAVO}>Get Crewtavo<span className={styles.text}> free</span></a>
+        <a className="btn btn-sm btn-primary" href={GET_CREWTAVO}>Get Crewtavo<span className={styles.text}>free</span></a>
       </span>
     </div>
   );

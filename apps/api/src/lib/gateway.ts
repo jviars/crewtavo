@@ -74,12 +74,12 @@ export function gateway(
     );
   });
   routes.all("/rest/v1/*", async (c) => {
-    const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who);
+    const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who, connectionOf(c.env));
     if (refused) return refused;
     return guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c)));
   });
   routes.all("/storage/v1/*", async (c) => {
-    const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who);
+    const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who, connectionOf(c.env));
     if (refused) return refused;
     // While storage switches between the volume and a bucket, uploads are turned away for a minute
     // or two so none land in the place being left (services/storageBucket.ts). Opening files,

@@ -8,6 +8,7 @@
  * public internet only (lib/publicHttp.ts): never this server, its network or its cloud's metadata
  * service.
  */
+import { isDemo } from "./demoMode";
 import type { Env } from "../env";
 import { decryptJson, encryptJson, fromBase64Url, toBase64Url } from "./crypto";
 import { privateHost, publicPost } from "./publicHttp";
@@ -112,6 +113,8 @@ async function vapidJwt(keys: VapidKeys, audience: string, subject: string): Pro
 
 /** Send one notification. `gone` means the device unsubscribed: delete it. */
 export async function sendPush(env: Env, sub: PushSubscription, message: PushMessage, contact: string): Promise<{ ok: boolean; gone: boolean; status: number }> {
+  // The public demo sends nothing anywhere (lib/demoMode.ts): a browser can name any address as its push service.
+  if (isDemo(env)) return { ok: true, gone: false, status: 201 };
   const keys = await vapidKeys(env);
   const body = await encryptPayload(sub, encoder.encode(JSON.stringify(message)));
   const endpoint = new URL(sub.endpoint);

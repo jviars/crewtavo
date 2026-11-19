@@ -58,7 +58,6 @@ export function withStack(vars: Vars, port: number): Vars {
     SUPABASE_PUBLISHABLE_KEY: undefined,
     SUPABASE_SECRET_KEY: undefined,
     CREWTAVO_GATEWAY: "1",
-    // One business, unless it's the public demo (CREWTAVO_DEMO=1), which holds one for every visitor.
-    CREWTAVO_SINGLE_COMPANY: vars.CREWTAVO_SINGLE_COMPANY ?? (vars.CREWTAVO_DEMO === "1" ? "0" : "1"),
+    CREWTAVO_SINGLE_COMPANY: vars.CREWTAVO_SINGLE_COMPANY ?? "1",
   };
 }

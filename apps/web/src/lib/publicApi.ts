@@ -18,7 +18,10 @@ export async function publicFetch<T>(path: string, body?: unknown): Promise<T> {
 
 declare global {
   interface Window {
-    turnstile?: { render: (el: HTMLElement, opts: { sitekey: string; callback: (token: string) => void; "expired-callback"?: () => void }) => void };
+    turnstile?: {
+      render: (el: HTMLElement, opts: { sitekey: string; callback: (token: string) => void; "expired-callback"?: () => void }) => string | undefined;
+      reset: (widget?: string) => void;
+    };
   }
 }
 
@@ -27,10 +30,13 @@ export function useTurnstile(ready: boolean) {
   const config = useQuery({ queryKey: ["config"], queryFn: loadConfig, staleTime: Infinity });
   const siteKey = config.data?.turnstileSiteKey;
   const ref = useRef<HTMLDivElement>(null);
+  const widget = useRef<string | undefined>(undefined);
   const [token, setToken] = useState("");
   useEffect(() => {
     if (!siteKey || !ready || !ref.current) return;
-    const render = () => window.turnstile?.render(ref.current!, { sitekey: siteKey, callback: setToken, "expired-callback": () => setToken("") });
+    const render = () => {
+      widget.current = window.turnstile?.render(ref.current!, { sitekey: siteKey, callback: setToken, "expired-callback": () => setToken("") });
+    };
     if (window.turnstile) return render();
     const script = document.createElement("script");
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
@@ -38,5 +44,10 @@ export function useTurnstile(ready: boolean) {
     script.onload = render;
     document.head.appendChild(script);
   }, [siteKey, ready]);
-  return { ref, token, required: Boolean(siteKey) };
+  /** A check's answer is good once: after using it, ask for a new one. */
+  const reset = () => {
+    setToken("");
+    if (widget.current !== undefined) window.turnstile?.reset(widget.current);
+  };
+  return { ref, token, required: Boolean(siteKey), reset };
 }

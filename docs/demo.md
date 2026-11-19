@@ -5,8 +5,10 @@ crewtavo.com's **Try the demo** opens a Crewtavo instance where nobody signs up.
 own sample business in that trade, signed in as its owner. Nobody sees anyone else's business, and
 each one is deleted after 24 hours.
 
-It's an ordinary Crewtavo instance with one setting, `CREWTAVO_DEMO=1`. Everything about the demo
-is off without it, so the code ships in every release and does nothing in a business's own Crewtavo.
+It's an ordinary Crewtavo instance with two settings, `CREWTAVO_DEMO=1` and
+`CREWTAVO_SINGLE_COMPANY=0`. Everything about the demo is off without both. The code ships in every
+release and does nothing in a business's own Crewtavo, even with `CREWTAVO_DEMO` set there by mistake,
+because an instance holds one business unless told otherwise.
 
 ## What a visitor gets
 
@@ -36,19 +38,28 @@ is off without it, so the code ships in every release and does nothing in a busi
 Anyone on the internet gets an owner's sign-in, so the demo (`apps/api/src/lib/demoMode.ts`):
 
 - **Sends nothing.** Email and texts look sent in the app and go nowhere, even if the server has keys.
-  AI, payments, postcards and every connection to an outside account (Stripe, Twilio, Lob, Claude,
-  ChatGPT, Google, Meta, QuickBooks, Zoho, calendars, email, Drive) are refused with "That's turned
-  off in the demo". Background tasks that reach outside (calendar sync, social posts, website
-  checks, Google reviews, postcards) don't run.
+  Push messages aren't sent. AI, payments, postcards and every connection to an outside account
+  (Stripe, Twilio, Lob, Claude, ChatGPT, Google, Meta, QuickBooks, Zoho, calendars, email, Drive) are
+  refused with "That's turned off in the demo". Background tasks that reach outside (calendar sync,
+  social posts, website checks, Google reviews, postcards) don't run.
 - **Makes no accounts but its own.** There are no invites, sub sign-ins, sign-in links or second
-  businesses. The accounts are `@demo.crewtavo.com` with random passwords nobody keeps.
-- **Limits starting a demo:** 6 an hour and 20 a day from one address, and 300 an hour and 2,000 a day
-  in total. Cloudflare Turnstile is added when its keys are set.
-- **Limits changes:** each visitor's address may make 1,200 changes to the database every 10 minutes.
-  Clicking around makes a few a minute; a script filling the database gets stopped.
-- **Holds files down:** 50 MB per business and 10 MB per file, whatever the owner sets in Settings → Storage.
+  businesses. The accounts are `@demo.crewtavo.com` with random passwords nobody keeps. Each one
+  carries the business it was made for, where only the server can write it. Switching people and
+  starting over go by that, so nobody can sign in to another visitor's business.
+- **Limits starting a demo:** 10 an hour and 30 a day from one address, and 300 an hour and 2,000 a
+  day in total. Cloudflare Turnstile is added when its keys are set.
+- **Limits changes:** each visitor's address may make 1,200 changes every 10 minutes, in the app and
+  in the database together, each at most 2 MB. Clicking around makes a few a minute; a script
+  filling the database gets stopped.
+- **Holds files down:** 25 MB per business, 10 MB per file, and 60 uploads an hour from one address,
+  whatever the owner sets in Settings → Storage.
 - **Cleans up:** the `demo` task runs every 10 minutes. It deletes every business whose accounts are
   more than 24 hours old, with its rows, files and accounts. It only touches the demo's own accounts.
+  A business that can't be deleted is reported to error monitoring, and the rest carry on.
+
+Known limits: anything that asks for the current password (giving someone admin access, changing
+your password) can't be done in the demo, since visitors never have one. Looking up addresses and
+the weather still uses the free public services every instance uses.
 
 ## Setting it up on Railway
 
@@ -62,9 +73,9 @@ Anyone on the internet gets an owner's sign-in, so the demo (`apps/api/src/lib/d
      so leave it off until then.
 
    Every push to that branch then rebuilds the demo (about 5–10 minutes).
-3. **Variables** on the **crewtavo** service: add `CREWTAVO_DEMO` = `1`. `CREWTAVO_SINGLE_COMPANY`
-   then defaults to `0`. Leave email, texting, Stripe, AI and Google keys unset. The demo refuses to
-   use them anyway, but there's no reason to have them there.
+3. **Variables** on the **crewtavo** service: add `CREWTAVO_DEMO` = `1` **and**
+   `CREWTAVO_SINGLE_COMPANY` = `0`. Both are needed. Leave email, texting, Stripe, AI and Google keys
+   unset. The demo refuses to use them anyway, but there's no reason to have them there.
 4. **Optional, recommended:** set up Cloudflare Turnstile.
    - In Cloudflare's dashboard, go to **Turnstile → Add widget**, with the hostname `demo.crewtavo.com`.
    - Add `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` to the **crewtavo** service.
@@ -74,7 +85,9 @@ Anyone on the internet gets an owner's sign-in, so the demo (`apps/api/src/lib/d
    `demo.crewtavo.com`. Railway shows a CNAME record; add it in Cloudflare's DNS for crewtavo.com.
    - Leave it **DNS only** (grey cloud). Behind Cloudflare's proxy, every visitor would arrive from
      Cloudflare's addresses, and the per-address limits would count them as one.
-   - If you do proxy it, also set `CREWTAVO_VISITOR_IP` = `cf-connecting-ip`.
+   - Don't set `CREWTAVO_VISITOR_IP` to fix that instead: the Railway address can be reached
+     without going through Cloudflare, so anyone could send their own `CF-Connecting-IP` and dodge
+     the limits.
 7. **Spending:** under **Workspace → Usage → Set Usage Limits**, set a **Hard limit**. $10 is
    Railway's lowest. It's per workspace, so keep the demo in a workspace of its own if anything
    else runs in yours.
@@ -91,5 +104,5 @@ The sample businesses are made fresh for each visitor, so they always match the 
 
 ## Trying it locally
 
-Add `CREWTAVO_DEMO=1` to `.env.instance` and run `npm run instance`. Open http://localhost:8080 and
+Add `CREWTAVO_DEMO=1` and `CREWTAVO_SINGLE_COMPANY=0` to `.env.instance` and run `npm run instance`. Open http://localhost:8080 and
 pick a trade.

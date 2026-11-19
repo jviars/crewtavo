@@ -46,11 +46,13 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the demo switch", () => {
-  it("is off unless CREWTAVO_DEMO is 1, and never on a one-business instance", async () => {
+  it("takes both settings, so CREWTAVO_DEMO set by mistake on a business's own Crewtavo does nothing", async () => {
     expect(isDemo(env)).toBe(false);
     expect(isDemo(demoEnv)).toBe(true);
-    expect(isDemo({ CREWTAVO_DEMO: "1" })).toBe(true);
+    expect(isDemo({ CREWTAVO_DEMO: "1" })).toBe(false);
     expect(isDemo({ CREWTAVO_DEMO: "1", CREWTAVO_SINGLE_COMPANY: "1" })).toBe(false);
+    expect(isDemo({ CREWTAVO_SINGLE_COMPANY: "0" })).toBe(false);
+    expect((await (await app.request("/api/config", {}, { ...env, CREWTAVO_DEMO: "1" })).json()).demo).toBe(false);
     expect((await (await app.request("/api/config", {}, env)).json()).demo).toBe(false);
     expect((await (await app.request("/api/config", {}, demoEnv)).json()).demo).toBe(true);
   });
@@ -107,6 +109,8 @@ describe("what the demo refuses", () => {
     ["POST", "/api/postcards/123/send"],
     ["POST", "/api/receipts/read"],
     ["POST", "/api/paving/detect"],
+    ["POST", "/api/push/subscriptions"],
+    ["POST", "/api/push/test"],
     ["POST", "/api/companies"],
     ["POST", "/api/team/invite"],
     ["POST", "/api/team/abc/invite-link"],
@@ -132,6 +136,17 @@ describe("what the demo refuses", () => {
     ["GET", "/api/config"],
   ])("lets %s %s through", (method, path) => {
     expect(demoBlocks(method, path)).toBe(false);
+  });
+
+  it("counts a visitor's changes in the app too, and holds a website form's post to a size", async () => {
+    const on = await app.request("/api/team/abc/access", { method: "PATCH", headers: { "Content-Type": "application/json", "x-forwarded-for": "203.0.113.9" }, body: "{}" }, demoEnv);
+    expect(on.status).toBe(401); // counted, then on to the route, which wants a sign-in
+    expect(limits.keys.some((k) => k.startsWith("demo-write:"))).toBe(true);
+    limits.allowed = false;
+    expect((await app.request("/api/team/abc/access", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{}" }, demoEnv)).status).toBe(429);
+    limits.allowed = true;
+    const big = await app.request("/f/abcdefgh12", { method: "POST", headers: { "content-length": String(3 * 1024 * 1024) }, body: "x" }, demoEnv);
+    expect(big.status).toBe(413);
   });
 
   it("says so in the demo, and does nothing anywhere else", async () => {
@@ -165,49 +180,67 @@ describe("background tasks in the demo", () => {
 
   it("leaves a normal instance's businesses alone", async () => {
     // Without CREWTAVO_DEMO the task returns before touching the database.
-    expect(await runTask("demo", env)).toEqual({ removed: 0, accounts: 0 });
-    expect(await runTask("demo", { ...env, CREWTAVO_DEMO: "1", CREWTAVO_SINGLE_COMPANY: "1" })).toEqual({ removed: 0, accounts: 0 });
+    expect(await runTask("demo", env)).toEqual({ removed: 0, accounts: 0, failed: 0 });
+    expect(await runTask("demo", { ...env, CREWTAVO_DEMO: "1", CREWTAVO_SINGLE_COMPANY: "1" })).toEqual({ removed: 0, accounts: 0, failed: 0 });
+    expect(await runTask("demo", { ...env, CREWTAVO_DEMO: "1" })).toEqual({ removed: 0, accounts: 0, failed: 0 });
   });
 });
 
 describe("the gateway in the demo", () => {
   const nobody = () => ({ user: null, server: false });
   const visitor = () => ({ user: "user-1", server: false });
+  const outside = "10.0.0.7"; // Railway's edge, or the web server in front
   const req = (method: string, path: string, headers: Record<string, string> = {}) => new Request(`http://127.0.0.1${path}`, { method, headers });
+  const write = (path: string, length = "120") => req("POST", path, { "content-length": length });
 
   it("does nothing anywhere else", async () => {
-    expect(await gatewayRefusal(env, req("POST", "/rest/v1/rpc/graphql"), "203.0.113.9", visitor)).toBeNull();
+    expect(await gatewayRefusal(env, req("POST", "/rest/v1/rpc/graphql"), "203.0.113.9", visitor, outside)).toBeNull();
   });
 
   it("refuses the database's GraphQL", async () => {
-    expect((await gatewayRefusal(demoEnv, req("POST", "/rest/v1/rpc/graphql"), "203.0.113.9", visitor))?.status).toBe(403);
-    expect((await gatewayRefusal(demoEnv, req("POST", "/rest/v1/rpc/%67raphql"), "203.0.113.9", visitor))?.status).toBe(403);
+    expect((await gatewayRefusal(demoEnv, write("/rest/v1/rpc/graphql"), "203.0.113.9", visitor, outside))?.status).toBe(403);
+    expect((await gatewayRefusal(demoEnv, write("/rest/v1/rpc/%67raphql"), "203.0.113.9", visitor, outside))?.status).toBe(403);
   });
 
   it("lets the server set up a visitor's business, and nobody a second one", async () => {
-    expect(await gatewayRefusal(demoEnv, req("POST", "/rest/v1/rpc/create_company"), "127.0.0.1", visitor)).toBeNull();
+    expect(await gatewayRefusal(demoEnv, write("/rest/v1/rpc/create_company"), "127.0.0.1", visitor, "127.0.0.1")).toBeNull();
     members.count = 1;
-    expect((await gatewayRefusal(demoEnv, req("POST", "/rest/v1/rpc/Create_Company"), "203.0.113.9", visitor))?.status).toBe(403);
+    expect((await gatewayRefusal(demoEnv, write("/rest/v1/rpc/Create_Company"), "203.0.113.9", visitor, outside))?.status).toBe(403);
     members.count = 0;
-    expect((await gatewayRefusal(demoEnv, req("POST", "/rest/v1/rpc/create_company"), "203.0.113.9", nobody))?.status).toBe(403);
+    expect((await gatewayRefusal(demoEnv, write("/rest/v1/rpc/create_company"), "203.0.113.9", nobody, outside))?.status).toBe(403);
   });
 
-  it("refuses a file bigger than the demo takes", async () => {
+  it("holds a change to its size, which it has to say", async () => {
+    expect((await gatewayRefusal(demoEnv, write("/rest/v1/clients", String(3 * 1024 * 1024)), "203.0.113.9", visitor, outside))?.status).toBe(413);
+    expect((await gatewayRefusal(demoEnv, req("POST", "/rest/v1/clients"), "203.0.113.9", visitor, outside))?.status).toBe(411);
+    expect(await gatewayRefusal(demoEnv, req("DELETE", "/rest/v1/clients?id=eq.1"), "203.0.113.9", visitor, outside)).toBeNull();
+  });
+
+  it("refuses a file bigger than the demo takes, and too many files", async () => {
     const big = String(DEMO_FILE_BYTES + 1024 * 1024);
-    expect((await gatewayRefusal(demoEnv, req("POST", "/storage/v1/object/files/a/b.jpg", { "content-length": big }), "203.0.113.9", visitor))?.status).toBe(413);
-    expect((await gatewayRefusal(demoEnv, req("POST", "/storage/v1/upload/resumable", { "upload-length": big }), "203.0.113.9", visitor))?.status).toBe(413);
-    expect(await gatewayRefusal(demoEnv, req("POST", "/storage/v1/object/files/a/b.jpg", { "content-length": "200000" }), "203.0.113.9", visitor)).toBeNull();
+    expect((await gatewayRefusal(demoEnv, write("/storage/v1/object/files/a/b.jpg", big), "203.0.113.9", visitor, outside))?.status).toBe(413);
+    expect((await gatewayRefusal(demoEnv, req("POST", "/storage/v1/upload/resumable", { "upload-length": big }), "203.0.113.9", visitor, outside))?.status).toBe(413);
+    expect(await gatewayRefusal(demoEnv, write("/storage/v1/object/files/a/b.jpg", "200000"), "203.0.113.9", visitor, outside)).toBeNull();
+    expect(limits.keys).toContain("demo-upload:203.0.113.9");
+    limits.allowed = false;
+    expect((await gatewayRefusal(demoEnv, write("/storage/v1/object/files/a/c.jpg", "200000"), "203.0.113.9", visitor, outside))?.status).toBe(429);
   });
 
   it("counts a visitor's changes, not reads and not the server's own", async () => {
-    expect(await gatewayRefusal(demoEnv, req("GET", "/rest/v1/clients"), "203.0.113.9", visitor)).toBeNull();
+    expect(await gatewayRefusal(demoEnv, req("GET", "/rest/v1/clients"), "203.0.113.9", visitor, outside)).toBeNull();
     expect(limits.keys).toEqual([]);
-    await gatewayRefusal(demoEnv, req("POST", "/rest/v1/clients"), "127.0.0.1", visitor);
-    await gatewayRefusal(demoEnv, req("POST", "/rest/v1/clients"), "203.0.113.9", () => ({ user: null, server: true }));
+    await gatewayRefusal(demoEnv, write("/rest/v1/clients"), "127.0.0.1", visitor, "127.0.0.1");
+    await gatewayRefusal(demoEnv, write("/rest/v1/clients"), "203.0.113.9", () => ({ user: null, server: true }), outside);
     expect(limits.keys).toEqual([]);
     limits.allowed = false;
-    expect((await gatewayRefusal(demoEnv, req("PATCH", "/rest/v1/clients"), "203.0.113.9", visitor))?.status).toBe(429);
+    expect((await gatewayRefusal(demoEnv, req("PATCH", "/rest/v1/clients", { "content-length": "40" }), "203.0.113.9", visitor, outside))?.status).toBe(429);
     expect(limits.keys).toEqual(["demo-write:203.0.113.9"]);
+  });
+
+  it("never takes a visitor for the server by an address a header gave", async () => {
+    limits.allowed = false;
+    // A forged CF-Connecting-IP of 127.0.0.1 makes the visitor's address look like this machine's; the connection doesn't.
+    expect((await gatewayRefusal(demoEnv, write("/rest/v1/clients"), "127.0.0.1", visitor, outside))?.status).toBe(429);
   });
 
   it("holds every business to the demo's storage, whatever its owner set", async () => {

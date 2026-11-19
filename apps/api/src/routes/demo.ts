@@ -28,8 +28,9 @@ demo.use("/demo/*", async (c, next) => {
  * anything a visitor can do.
  */
 const LIMITS = [
-  { key: (ip: string) => `demo-start:hour:${ip}`, max: 6, seconds: 3600, message: "You've started a lot of demos. Wait a little and try again." },
-  { key: (ip: string) => `demo-start:day:${ip}`, max: 20, seconds: 86_400, message: "You've started a lot of demos today. Try again tomorrow." },
+  // Enough for an office or a phone carrier sharing one address, not for a script.
+  { key: (ip: string) => `demo-start:hour:${ip}`, max: 10, seconds: 3600, message: "You've started a lot of demos. Wait a little and try again." },
+  { key: (ip: string) => `demo-start:day:${ip}`, max: 30, seconds: 86_400, message: "You've started a lot of demos today. Try again tomorrow." },
   { key: () => "demo-start:all:hour", max: 300, seconds: 3600, message: "The demo is very busy right now. Try again in a few minutes." },
   { key: () => "demo-start:all:day", max: 2000, seconds: 86_400, message: "The demo is very busy today. Try again later." },
 ];
