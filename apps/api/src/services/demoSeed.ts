@@ -283,12 +283,13 @@ export class DemoSeeder {
 
   // --- Money -----------------------------------------------------------------------------------
 
-  /** A job's invoice (all of it, or a progress bill), sent on `issued` days from today. */
-  async invoice(jobId: string, fields: { amount?: number; issued?: number; dueIn?: number; status?: string } = {}): Promise<string> {
-    const id = (await this.must(
-      this.db.rpc("create_invoice_for_job", fields.amount == null ? { p_job: jobId } : { p_job: jobId, p_kind: "progress", p_amount: fields.amount }),
-      "invoice",
-    )) as string;
+  /**
+   * A job's invoice, sent on `issued` days from today: all of it, a progress bill (`amount`), or its
+   * finished visits not billed yet (`visits`: a storm's pushes at their price by depth).
+   */
+  async invoice(jobId: string, fields: { amount?: number; visits?: boolean; issued?: number; dueIn?: number; status?: string } = {}): Promise<string> {
+    const args = fields.visits ? { p_job: jobId, p_kind: "visits" } : fields.amount == null ? { p_job: jobId } : { p_job: jobId, p_kind: "progress", p_amount: fields.amount };
+    const id = (await this.must(this.db.rpc("create_invoice_for_job", args), "invoice")) as string;
     const issued = fields.issued ?? 0;
     await this.must(this.db.from("invoices").update({ status: fields.status ?? "sent", issued_on: this.day(issued), due_on: this.day(issued + (fields.dueIn ?? 30)) }).eq("id", id), "send invoice");
     return id;
@@ -439,6 +440,67 @@ export class DemoSeeder {
     await this.must(
       this.admin.from("referrals").insert({ company_id: this.company, referrer_client_id: this.client(referrer), referred_client_id: this.client(referred), request_id: requestId, referred_name: referred }),
       "referral",
+    );
+  }
+
+  /** Installs one of the built-in trade apps, as Apps does (its client messages come with it). */
+  async installApp(app: "snow" | "paving" | "roofing") {
+    await this.must(this.db.rpc("trade_app_set_enabled", { p_company: this.company, p_app: app, p_enabled: true }), `install ${app}`);
+  }
+
+  /**
+   * Snow customers, as the Snow page makes them: each one of the business's jobs (the season's
+   * contract), with the snow that sends the plow out, salting, extra pushes, how early it's
+   * cleared, its priority and a storm's price by depth (empty: each push bills the job's lines).
+   */
+  async snowSites(rows: Array<{ job: string; trigger: number; salt?: number; repeat?: number; clearBy?: string; priority: 1 | 2 | 3; tiers: Array<{ up_to_in: number | null; price: number }>; tellClient?: boolean }>) {
+    await this.must(
+      this.db.from("snow_sites").insert(
+        rows.map((r) => this.c({
+          job_id: r.job,
+          trigger_in: r.trigger,
+          salt_trigger_in: r.salt ?? null,
+          repeat_in: r.repeat ?? null,
+          clear_by: r.clearBy ?? null,
+          priority: r.priority,
+          tiers: r.tiers,
+          tell_client: r.tellClient ?? false,
+        })),
+      ),
+      "snow customers",
+    );
+  }
+
+  /**
+   * A storm `daysAgo` that's been and gone: in the storm log with what was forecast and what fell,
+   * and its pushes done, priced by depth as the Snow page prices them (setting what fell does it).
+   */
+  async pastStorm(daysAgo: number, forecast: number, fell: number, sites: Array<{ job: string; client: string; title: string; pushes: number; crew: string }>) {
+    const date = this.day(-daysAgo);
+    await this.must(
+      this.db.from("snow_events").insert(sites.map((site) => this.c({ job_id: site.job, snow_date: date, kind: "plow", forecast_in: forecast, pushes: site.pushes }))),
+      "storm log",
+    );
+    for (const site of sites) {
+      const pushes = Array.from({ length: site.pushes }, (_, i) => this.c({
+        job_id: site.job,
+        property_id: this.property(site.client),
+        title: site.pushes > 1 ? `${site.title} (push ${i + 1} of ${site.pushes})` : site.title,
+        scheduled_on: date,
+        crew_id: this.crew(site.crew),
+        status: "completed",
+      }));
+      const made = (await this.must(this.db.from("visits").insert(pushes, DEFAULTS).select("id"), "storm visits")) as Array<{ id: string }>;
+      await this.must(this.db.from("snow_visits").insert(made.map((v) => this.c({ visit_id: v.id, job_id: site.job, snow_date: date }))), "storm's visits");
+      await this.must(this.db.from("snow_events").update({ actual_in: fell }).eq("job_id", site.job).eq("snow_date", date), "what fell");
+    }
+  }
+
+  /** A storm coming `inDays` (the forecast's inches), scheduled from the Snow page as the office would. */
+  async scheduleStorm(inDays: number, plan: Array<{ job: string; inches: number; pushes: number }>) {
+    await this.must(
+      this.db.rpc("snow_schedule", { p_company: this.company, p_date: this.day(inDays), p_plan: plan.map((p) => ({ job_id: p.job, inches: p.inches, pushes: p.pushes, kind: "plow" })) }),
+      "storm scheduled",
     );
   }
 

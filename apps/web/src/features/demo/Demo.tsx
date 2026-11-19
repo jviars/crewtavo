@@ -20,9 +20,7 @@ import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import authStyles from "@/features/auth/auth.module.css";
 import styles from "./demo.module.css";
-
-/** Where "Get Crewtavo" goes: the guided setup on the website. */
-const GET_CREWTAVO = "https://crewtavo.com/start/";
+import { DemoTour, GET_CREWTAVO, useDemoTour } from "./Tour";
 /** The Terms as this version has them (the app bundles them too: features/legal/License.tsx). */
 const TERMS = `${SOURCE_URL}/blob/main/TERMS`;
 
@@ -214,6 +212,7 @@ export function DemoBar() {
   const [busy, setBusy] = useState<null | "switch" | "portal" | "over">(null);
   const owner = session.role === "owner";
   const left = useTimeLeft();
+  const tour = useDemoTour();
 
   async function switchTo(as: "owner" | "crew") {
     setBusy("switch");
@@ -274,15 +273,17 @@ export function DemoBar() {
       <span className={styles.actions}>
         {owner ? (
           <>
-            <Button size="sm" variant="ghost" icon="smartphone" aria-label="Crew's phone" title="See it as the crew lead, on their phone" loading={busy === "switch"} disabled={Boolean(busy)} onClick={() => switchTo("crew")}><span className={styles.text}>Crew's phone</span></Button>
-            <Button size="sm" variant="ghost" icon="user" aria-label="Client's view" title="Open a client's portal, as they see it" loading={busy === "portal"} disabled={Boolean(busy)} onClick={openPortal}><span className={styles.text}>Client's view</span></Button>
+            <Button size="sm" variant="ghost" icon="play" aria-label="Tour" title="A one-minute tour of your sample business" onClick={tour.start}><span className={styles.text}>Tour</span></Button>
+            <Button data-tour="crew" size="sm" variant="ghost" icon="smartphone" aria-label="Crew's phone" title="See it as the crew lead, on their phone" loading={busy === "switch"} disabled={Boolean(busy)} onClick={() => switchTo("crew")}><span className={styles.text}>Crew's phone</span></Button>
+            <Button data-tour="client" size="sm" variant="ghost" icon="user" aria-label="Client's view" title="Open a client's portal, as they see it" loading={busy === "portal"} disabled={Boolean(busy)} onClick={openPortal}><span className={styles.text}>Client's view</span></Button>
           </>
         ) : (
           <Button size="sm" variant="ghost" icon="arrowLeft" aria-label="Owner's view" title="Back to the owner" loading={busy === "switch"} disabled={Boolean(busy)} onClick={() => switchTo("owner")}><span className={styles.text}>Owner's view</span></Button>
         )}
         <Button size="sm" variant="ghost" icon="refresh" aria-label="Start over" title="Delete this business and pick a trade again" loading={busy === "over"} disabled={Boolean(busy)} onClick={startOver}><span className={styles.text}>Start over</span></Button>
-        <a className="btn btn-sm btn-primary" href={GET_CREWTAVO}>Get Crewtavo<span className={styles.text}>free</span></a>
+        <a data-tour="get" className="btn btn-sm btn-primary" href={GET_CREWTAVO}>Get Crewtavo<span className={styles.text}>free</span></a>
       </span>
+      {tour.owner && <DemoTour step={tour.step} go={tour.go} />}
     </div>
   );
 }

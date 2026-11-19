@@ -127,11 +127,14 @@ const lawn: DemoStory = {
     await s.recurring("Meadowbrook HOA", "Common areas, weekly mowing", [{ ...(await s.jobLine("Weekly mow", 1)), unit_price: 420, description: "Clubhouse, entrance and common areas" }], { ...mow, minutes: 180, rule: "FREQ=WEEKLY;BYDAY=TU" });
     await s.recurring("Hillside Family Dental", "Weekly mowing", [{ ...(await s.jobLine("Weekly mow", 1)), unit_price: 95 }], { ...mow, minutes: 40, rule: "FREQ=WEEKLY;BYDAY=TH" });
 
-    // --- This week's other work, by the season ----------------------------------------------
+    // --- Snow removal: Crewtavo - Snow installed, four snow customers, last storm in the log ----
     const month = monthNow();
+    await snowSeason(s, month);
+
+    // --- This week's other work, by the season ----------------------------------------------
     const extra: Array<[client: string, title: string, service: string, quantity: number]> =
       month <= 2 || month === 12
-        ? [["Rocky Mount Self Storage", "Snow plowing, drive and lot", "Snow plowing", 1], ["Hillside Family Dental", "Holiday lights takedown", "Holiday light install and takedown", 1]]
+        ? [["Hillside Family Dental", "Holiday lights takedown", "Holiday light install and takedown", 1], ["Elena Marsh", "Gutter cleaning", "Gutter cleaning", 1]]
         : month <= 5
           ? [["Elena Marsh", "Spring cleanup", "Spring cleanup", 1], ["Jordan Rivera", "Core aeration", "Core aeration", 1]]
           : month <= 8
@@ -228,6 +231,51 @@ const lawn: DemoStory = {
     await s.referral("Jordan Rivera", "Priya Shah", requests.get("Weekly mowing quote") ?? null);
   },
 };
+
+/**
+ * Greenway's snow removal (Crewtavo - Snow, installed as Apps installs it): the season's contracts
+ * for four customers, each a snow customer with its triggers, salting and storm prices, and the
+ * last storm in the log with its pushes done and priced. In winter, a storm on the way is scheduled.
+ */
+async function snowSeason(s: DemoSeeder, month: number) {
+  await s.installApp("snow");
+  const year = Number(s.day(0).slice(0, 4));
+  // A contract that carries over from one winter to the next, so last winter's storm is on it too.
+  const season = "Snow and ice contract";
+  // As the Snow page expects a snow customer: a job that runs all season, billed a visit at a time.
+  const contract = async (client: string, lines: Row[]) =>
+    s.job(client, season, lines, { default_crew_id: s.crew("Mow crew"), kind: "recurring", recurrence_rule: "FREQ=YEARLY", billing_mode: "per_visit" });
+  const storage = await contract("Rocky Mount Self Storage", [await s.jobLine("Snow plowing", 1), await s.jobLine("Salt application", 1)]);
+  const dental = await contract("Hillside Family Dental", [await s.jobLine("Snow plowing", 1), await s.jobLine("Salt application", 1)]);
+  const hoa = await contract("Meadowbrook HOA", [{ ...(await s.jobLine("Snow plowing", 1)), unit_price: 180, description: "Entrance, clubhouse drive and lot" }]);
+  const jordan = await contract("Jordan Rivera", [await s.jobLine("Snow plowing", 1)]);
+  await s.snowSites([
+    { job: storage, trigger: 2, salt: 0.5, repeat: 4, clearBy: "06:00", priority: 1, tellClient: true, tiers: [{ up_to_in: 4, price: 120 }, { up_to_in: 8, price: 210 }, { up_to_in: null, price: 300 }] },
+    { job: dental, trigger: 1.5, salt: 0.5, repeat: 4, clearBy: "07:00", priority: 1, tellClient: true, tiers: [{ up_to_in: 4, price: 95 }, { up_to_in: 8, price: 165 }, { up_to_in: null, price: 240 }] },
+    { job: hoa, trigger: 2, repeat: 3, clearBy: "07:00", priority: 2, tellClient: true, tiers: [{ up_to_in: 4, price: 180 }, { up_to_in: 8, price: 300 }, { up_to_in: null, price: 420 }] },
+    // A driveway: plowed once the storm's done, and each push billed at the price list's rate.
+    { job: jordan, trigger: 3, priority: 3, tiers: [] },
+  ]);
+  // The last storm: nine days ago in winter, else the January before.
+  const winter = month <= 2 || month === 12;
+  const lastStorm = winter ? 9 : Math.round((Date.now() - Date.UTC(month >= 2 ? year : year - 1, 0, 22)) / 86_400_000);
+  const stormed: Array<[job: string, client: string, pushes: number]> = [[storage, "Rocky Mount Self Storage", 2], [dental, "Hillside Family Dental", 2], [hoa, "Meadowbrook HOA", 2], [jordan, "Jordan Rivera", 1]];
+  await s.pastStorm(lastStorm, 5, 6.5, stormed.map(([job, client, pushes]) => ({ job, client, title: season, pushes, crew: "Mow crew" })));
+  // Each storm billed a couple of days after, at its price by depth (the driveway at the price list's), and paid once it's been a while.
+  for (const [job, client] of stormed) {
+    const invoice = await s.invoice(job, { visits: true, issued: 2 - lastStorm });
+    if (lastStorm < 30) continue;
+    const { total } = (await s.must(s.db.from("invoices").select("total").eq("id", invoice).single(), "storm invoice")) as { total: number };
+    if (Number(total) > 0) await s.payment(invoice, client, Number(total), client === "Jordan Rivera" ? "card" : "check", { daysAgo: lastStorm - 15 });
+  }
+  if (winter) {
+    await s.scheduleStorm(1, [
+      { job: storage, inches: 5, pushes: 2 },
+      { job: dental, inches: 5, pushes: 2 },
+      { job: hoa, inches: 5, pushes: 2 },
+    ]);
+  }
+}
 
 // =============================================================================================
 // Roofing

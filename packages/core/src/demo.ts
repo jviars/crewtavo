@@ -13,7 +13,7 @@ export const DEMO_HOURS = 24;
  * a business made from their own price list.
  */
 export const DEMO_TRADES = [
-  { preset: "lawn_exterior", label: "Lawn care", blurb: "Weekly mowing routes, fertilizer programs, cleanups and snow." },
+  { preset: "lawn_exterior", label: "Lawn care", blurb: "Weekly mowing routes, fertilizer programs, cleanups and snow removal." },
   { preset: "roofing_exteriors", label: "Roofing", blurb: "Roofs measured on the aerial, insurance claims and crews on site." },
   { preset: "paving", label: "Paving", blurb: "Takeoffs on the aerial, sealcoat and striping, GC work and retainage." },
 ] as const;

@@ -40,9 +40,42 @@
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
 @media (max-width: 760px) {
-  .bar { flex-wrap: nowrap; gap: 8px; padding: 4px max(8px, env(safe-area-inset-right)) 4px max(12px, env(safe-area-inset-left)); }
-  .label { gap: 8px; }
+  /* One line, never wider than the phone (a wider bar would zoom the whole page out). */
+  .bar { flex-wrap: nowrap; gap: 6px; max-width: 100vw; overflow: hidden; padding: 4px max(6px, env(safe-area-inset-right)) 4px max(10px, env(safe-area-inset-left)); }
+  .label { gap: 8px; flex: 0 1 auto; }
   .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .note, .text { display: none; }
   .actions { flex-wrap: nowrap; flex: none; gap: 0; }
+  .actions > :global(.btn-ghost) { padding-inline: 8px; }
+}
+@media (max-width: 430px) {
+  /* Who you are is on the avatar: the tag says it's the demo. */
+  .who { display: none; }
+}
+
+/* The guided tour (Tour.tsx): a card in the corner, and a ring around what it's about */
+.tour {
+  position: fixed; z-index: 900; right: max(24px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); width: min(380px, calc(100vw - 32px));
+  display: grid; gap: 8px; padding: 16px 18px 14px; border-radius: var(--radius-card); background: var(--surface, #fff); color: var(--ink);
+  border: 1px solid var(--border); box-shadow: 0 18px 48px rgba(15, 30, 40, 0.18), 0 2px 6px rgba(15, 30, 40, 0.08);
+  animation: slide-up var(--dur-slow, 240ms) var(--ease-out);
+}
+.tourHead { display: flex; align-items: center; justify-content: space-between; }
+.tourCount { font-size: var(--fs-12); font-weight: 700; color: var(--green-dark); letter-spacing: var(--tracking-caps); text-transform: uppercase; }
+.tourClose { display: grid; place-items: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; border: 0; border-radius: 8px; background: none; color: var(--text-3); cursor: pointer; }
+.tourClose:hover { background: var(--fill); color: var(--ink); }
+.tourClose:focus-visible { outline: none; box-shadow: var(--ring); }
+.tourTitle { margin: 0; font-size: var(--fs-18, 18px); font-weight: 800; letter-spacing: var(--tracking-display); }
+.tourBody { margin: 0; font-size: var(--fs-14); line-height: 1.5; color: var(--text-2, var(--ink)); }
+.tourActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.ring {
+  position: fixed; z-index: 899; pointer-events: none; border-radius: 12px;
+  box-shadow: 0 0 0 3px var(--green-solid), 0 0 0 7px color-mix(in srgb, var(--green-solid) 25%, transparent);
+  animation: ring-pulse 1.6s var(--ease-out) infinite; transition: top 160ms, left 160ms, width 160ms, height 160ms;
+}
+@keyframes ring-pulse { 50% { box-shadow: 0 0 0 3px var(--green-solid), 0 0 0 11px color-mix(in srgb, var(--green-solid) 0%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .ring { animation: none; transition: none; } .tour { animation: none; } }
+@media (max-width: 760px) {
+  /* Above the phone's tab bar. */
+  .tour { left: 12px; right: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
 }

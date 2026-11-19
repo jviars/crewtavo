@@ -14,7 +14,10 @@ because an instance holds one business unless told otherwise.
 
 - **The start screen** (`apps/web/src/features/demo/Demo.tsx`) replaces the sign-in page. Lawn care,
   roofing and paving each have a sample business written for them (`apps/api/src/services/demoStories.ts`):
-  - Greenway Lawn Care: a weekly mowing route, a fertilizer program out for approval, seasonal cleanups.
+  - Greenway Lawn Care: a weekly mowing route, a fertilizer program out for approval, seasonal cleanups,
+    and snow removal. Crewtavo - Snow is installed, with four snow customers (their triggers, salting
+    and storm prices) and last winter's storm in the log, billed by depth. In winter a storm
+    tomorrow is already scheduled.
   - Ridgeline Roofing & Exteriors: a storm claim with the roof measured on the aerial, a builder's new roof on today's schedule.
   - Acme Paving: the `npm run seed:demo` company, with its parking lot takeoff.
 
@@ -24,6 +27,11 @@ because an instance holds one business unless told otherwise.
   requests, quotes (sent, draft, approved), jobs, this week's schedule, invoices (overdue, part paid,
   paid), equipment due for service, guides, a sent campaign and review asks. Dates are counted from
   the day it's made, so the schedule is always this week's.
+- **A guided tour** (`apps/web/src/features/demo/Tour.tsx`) opens the first time the owner arrives.
+  A card in the corner goes a page at a time: Home, requests, the schedule, a quote, then the
+  trade's own part (lawn care's Snow page, roofing's measured roof, paving's takeoff), invoices, the
+  crew's phone and the client's view. It rings what it's talking about. It picks up where it was
+  after a reload, and the bar's **Tour** button starts it again.
 - **The demo bar** above the app:
   - **Crew's phone** signs in as the crew lead (`/field`), and **Owner's view** comes back.
   - **Client's view** opens the client portal for the client with the latest quote.
