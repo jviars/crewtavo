@@ -214,6 +214,8 @@ const ICONS = {
   /** A client's page: a licensed business and an insured one. */
   certificate: "certificate",
   shieldCheck: "shield-check",
+  /** Lawn care, on the demo's start screen. */
+  lawn: "plant",
 } satisfies Record<string, PhosphorName | Own>;
 
 export type IconName = keyof typeof ICONS;

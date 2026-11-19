@@ -15,6 +15,7 @@ import type { Stack } from "./stack";
 import { guardStorage, routedPath, snapshotsFrom, verifiedClaims, type SnapshotSource } from "./storageLimits";
 import { adminClient } from "./supabase";
 import { connectionOf, visitorIp } from "./visitor";
+import { DEMO_OFF, demoSnapshots, gatewayRefusal, isDemo } from "./demoMode";
 
 type Gateway = { Bindings: HttpBindings };
 
@@ -30,6 +31,14 @@ export function gateway(
 ) {
   const routes = new Hono<Gateway>();
   const visitor = (c: Context<Gateway>) => visitorIp(env, c.req.raw.headers, connectionOf(c.env));
+  // The public demo holds each business to a few photos (lib/demoMode.ts).
+  if (isDemo(env)) storage = demoSnapshots(storage);
+  // Whose a request is, by its token as the services check it: for the demo's limits.
+  const who = (request: Request) => {
+    const token = request.headers.get("authorization")?.replace(/^bearer\s+/i, "") ?? null;
+    const claims = verifiedClaims(token, jwtSecret);
+    return { user: claims?.role === "authenticated" && typeof claims.sub === "string" ? claims.sub : null, server: claims?.role === "service_role" };
+  };
   // Auth's discovery documents, fixed for AI assistants' connectors (lib/authMetadata.ts).
   for (const doc of ["oauth-authorization-server", "openid-configuration"]) {
     routes.get(`/auth/v1/.well-known/${doc}`, async (c) => {
@@ -57,13 +66,21 @@ export function gateway(
         // own emails (which would make tokens without one, or replace a link someone is waiting
         // on) are only ever asked for by this server (lib/signInGuard.ts).
         if (route === "/verify") return guardLink(env, request, send);
+        // The public demo connects no AI assistants, so nobody registers one there (lib/demoMode.ts).
+        if (isDemo(env) && route.startsWith("/oauth")) return Response.json({ code: 403, error_code: "demo", msg: DEMO_OFF }, { status: 403 });
         if (sendsAuthMail(route) && !asServer(request, jwtSecret)) return Response.json({ code: 403, error_code: "validation_failed", msg: NO_AUTH_MAIL }, { status: 403 });
         return isGuessable(request.method, url, "/auth/v1") ? guardSignIn(env, request, send) : guardPasswordChange(request, jwtSecret, send);
       }),
     );
   });
-  routes.all("/rest/v1/*", (c) => guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c))));
+  routes.all("/rest/v1/*", async (c) => {
+    const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who);
+    if (refused) return refused;
+    return guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c)));
+  });
   routes.all("/storage/v1/*", async (c) => {
+    const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who);
+    if (refused) return refused;
     // While storage switches between the volume and a bucket, uploads are turned away for a minute
     // or two so none land in the place being left (services/storageBucket.ts). Opening files,
     // signing links to them, listing and deleting carry on.

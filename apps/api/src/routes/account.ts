@@ -9,6 +9,7 @@ import { confirmAdminGrant, confirmPassword, EMAILED_SIGN_INS, emailAuthLink, pa
 import { runInBackground } from "../lib/background";
 import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { renderEmail } from "../lib/email";
+import { isDemo } from "../lib/demoMode";
 import { allow } from "../lib/limit";
 import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
@@ -47,8 +48,8 @@ account.get("/config", async (c) =>
       supabaseUrl: c.env.CREWTAVO_GATEWAY ? "" : c.env.SUPABASE_URL,
       supabaseKey: publishableKey(c.env),
       singleCompany: c.env.CREWTAVO_SINGLE_COMPANY === "1",
-      // The public demo: no sign-in, each visitor gets a sample company (services/demo.ts).
-      demo: c.env.CREWTAVO_DEMO === "1",
+      // The public demo: no sign-in, each visitor gets a sample business in their trade (services/demo.ts).
+      demo: isDemo(c.env),
       // Where the instance runs (railway, compose or server), for setup steps that depend on it.
       platform: platformOf(c.env),
       // The Crewtavo Terms version that setting up a business agrees to (packages/core/src/terms.ts).
@@ -64,8 +65,9 @@ account.get("/config", async (c) =>
           ? { dsn: c.env.CREWTAVO_SENTRY_WEB_DSN || c.env.CREWTAVO_SENTRY_DSN, environment: c.env.CREWTAVO_SENTRY_ENVIRONMENT || "production" }
           : null,
       features: {
-        ai: Boolean(c.env.ANTHROPIC_API_KEY),
-        payments: Boolean(c.env.STRIPE_SECRET_KEY),
+        // The public demo asks no AI and takes no payments, whatever keys the server has (lib/demoMode.ts).
+        ai: Boolean(c.env.ANTHROPIC_API_KEY) && !isDemo(c.env),
+        payments: Boolean(c.env.STRIPE_SECRET_KEY) && !isDemo(c.env),
         email: emailConfigured(c.env),
         sms: smsConfigured(c.env),
         // Whether the sign-in page offers a sub a sign-in code by email (services/signInCodes.ts): the

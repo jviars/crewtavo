@@ -17,6 +17,7 @@
 import { memberPermissions, OFFICE, type Role } from "@crewtavo/core";
 import { methodExpiry, methodLabel, tipsAllowed } from "@crewtavo/core/autopay";
 import type { Env } from "../env";
+import { isDemo } from "../lib/demoMode";
 import { asJson, HttpError } from "../lib/http";
 import type { Db } from "../lib/supabase";
 import {
@@ -96,6 +97,8 @@ export interface StripeAccess {
 }
 
 export async function stripeAccess(env: Env, admin: Db, companyId: string): Promise<StripeAccess | null> {
+  // The public demo takes no payments, whatever keys the server has (lib/demoMode.ts).
+  if (isDemo(env)) return null;
   const secret = await loadSecret(env, admin, companyId, "stripe").catch(() => null);
   if (secret?.api_key) return { key: secret.api_key, own: true, webhookSecret: secret.extra?.webhook_secret, account: secret.extra?.account_id ?? null };
   return env.STRIPE_SECRET_KEY ? { key: env.STRIPE_SECRET_KEY, own: false } : null;

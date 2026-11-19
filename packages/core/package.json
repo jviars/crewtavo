@@ -35,6 +35,7 @@
     "./visitExtras": "./src/visitExtras.ts",
     "./priceChange": "./src/priceChange.ts",
     "./ical": "./src/ical.ts",
+    "./demo": "./src/demo.ts",
     "./automations": "./src/automations.ts",
     "./autopay": "./src/autopay.ts",
     "./backups": "./src/backups.ts",

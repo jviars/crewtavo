@@ -13,6 +13,7 @@
 import { isPersonalMailDomain, isPlaceholderEmail } from "@crewtavo/core/email";
 import type { Env } from "../env";
 import { decryptJson } from "./crypto";
+import { isDemo } from "./demoMode";
 import { reportError } from "./monitoring";
 import { smtpSend, SmtpError, type SmtpSettings } from "./smtp";
 import { adminClient } from "./supabase";
@@ -109,10 +110,16 @@ export async function anyMailbox(env: Env): Promise<boolean | null> {
   return someMailbox.value;
 }
 
-/** Is there a server-wide way to send (Resend for the whole install, or Mailpit in development)? */
-export const emailConfigured = (env: Env) => Boolean((env.RESEND_API_KEY && env.EMAIL_FROM) || env.MAILPIT_URL);
+/**
+ * Is there a server-wide way to send (Resend for the whole install, or Mailpit in development)? In
+ * the public demo there is: everything looks sent and goes nowhere (lib/demoMode.ts).
+ */
+export const emailConfigured = (env: Env) => Boolean((env.RESEND_API_KEY && env.EMAIL_FROM) || env.MAILPIT_URL || isDemo(env));
 /** The same for texts: the server's own Twilio account (or Mailpit in development). A company may have its own: smsReady. */
-export const smsConfigured = (env: Env) => Boolean((env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER) || env.MAILPIT_URL);
+export const smsConfigured = (env: Env) => Boolean((env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER) || env.MAILPIT_URL || isDemo(env));
+
+/** What a send in the public demo returns: it went through, as far as anyone can tell, and nobody got it. */
+const DEMO_SENT: SendResult = { sent: true, id: "demo" };
 
 /** Can this company send email (its own mailbox, or the server's)? */
 export async function emailReady(env: Env, companyId?: string | null): Promise<boolean> {
@@ -137,7 +144,8 @@ const smtpOf = (settings: MailboxSettings, secret: MailboxSecret): SmtpSettings 
 });
 
 /** Send through a mailbox's settings (also used by Settings → Email to test before saving). */
-export async function sendWithMailbox(settings: MailboxSettings, secret: MailboxSecret, message: EmailMessage): Promise<SendResult> {
+export async function sendWithMailbox(settings: MailboxSettings, secret: MailboxSecret, message: EmailMessage, env?: Env): Promise<SendResult> {
+  if (env && isDemo(env)) return DEMO_SENT;
   const fromName = settings.from_name || message.fromName || null;
   if (settings.kind === "resend") {
     return resendSend(secret.api_key ?? "", fromAddress(fromName, settings.from_email), message);
@@ -172,12 +180,13 @@ export async function checkMailbox(env: Env, companyId: string, mailbox: Mailbox
 }
 
 export async function sendEmail(env: Env, message: EmailMessage, companyId?: string | null): Promise<SendResult> {
+  if (isDemo(env)) return DEMO_SENT;
   // A sub's stand-in address (a sign-in without an email of their own) never gets anything.
   if (isPlaceholderEmail(message.to)) return { sent: false, reason: "They have no email address. Text them instead." };
   if (companyId) {
     const mailbox = await loadMailbox(env, companyId).catch(() => null);
     if (mailbox) {
-      const result = await sendWithMailbox(mailbox.settings, mailbox.secret, message);
+      const result = await sendWithMailbox(mailbox.settings, mailbox.secret, message, env);
       await noteMailboxHealth(env, companyId, mailbox, result);
       await noteSending(env, companyId, "email", result);
       return result;
@@ -371,6 +380,7 @@ async function mailpit(env: Env, message: EmailMessage & { from?: string }): Pro
  * also noted, so its owners hear when texts stop going out (noteSending).
  */
 export async function sendSms(env: Env, message: { to: string; body: string; company?: string | null }, companyId?: string | null): Promise<SendResult> {
+  if (isDemo(env)) return DEMO_SENT;
   const whose = companyId ?? message.company ?? null;
   const account = await twilioFor(env, whose);
   const result = await textOut(env, account, message);

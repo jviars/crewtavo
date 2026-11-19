@@ -11,6 +11,7 @@ export * from "./clock";
 export * from "./clientImport";
 export * from "./contracts";
 export * from "./customFields";
+export * from "./demo";
 export * from "./email";
 export * from "./equipment";
 export * from "./estimates";

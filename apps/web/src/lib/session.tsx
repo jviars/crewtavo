@@ -378,6 +378,8 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   }
   if (!me.data) return <ShellSkeleton />;
   if (!membership) {
+    // The public demo deletes businesses after a day: a visitor still signed in to one picks a trade again.
+    if (config.data.demo) return <DemoStart ended />;
     // Someone who only ever signed in as a sub, whose sign-in the office took away: not a business to set up.
     if (requireCompany && me.data.can_create_company === false) {
       return (

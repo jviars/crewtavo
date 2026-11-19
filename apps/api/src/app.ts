@@ -6,6 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import type { AppEnv } from "./env";
 import { bearerToken } from "./lib/auth";
+import { demoGuard } from "./lib/demoMode";
 import { safeEqual } from "./lib/crypto";
 import { HttpError } from "./lib/http";
 import { reportError } from "./lib/monitoring";
@@ -91,6 +92,8 @@ app.use(
   cors({ origin: "*", allowHeaders: ["Authorization", "Content-Type", "Mcp-Protocol-Version"], exposeHeaders: ["WWW-Authenticate"] }),
 );
 app.use("/.well-known/*", cors({ origin: "*" }));
+// The public demo refuses what would reach outside it (lib/demoMode.ts); elsewhere this does nothing.
+app.use(demoGuard);
 
 app.route("/api", account);
 app.route("/api", setup);

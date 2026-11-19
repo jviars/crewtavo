@@ -23,6 +23,7 @@ import { ELIGIBLE, loadPlan, notePlanProblem, notePlanUnsupported, planAccess, P
 import { askWithKey, askWithPlan, checkOpenAiKey, listKeyModels, OpenAiProblem, pickModel, type OpenAiAsk, type OpenAiModel } from "../integrations/openai";
 import { loadSecret } from "../integrations/tokens";
 import { asJson, HttpError } from "../lib/http";
+import { DEMO_OFF, isDemo } from "../lib/demoMode";
 import { allow } from "../lib/limit";
 import { adminClient, type Db } from "../lib/supabase";
 
@@ -206,6 +207,8 @@ export async function complete(env: Env, options: CompleteOptions): Promise<stri
 }
 
 async function answer(env: Env, asker: Asker, ask: Ask): Promise<string> {
+  // The public demo asks no AI, whatever keys the server has: every visitor's question would be paid for (lib/demoMode.ts).
+  if (isDemo(env)) throw new HttpError(403, DEMO_OFF);
   const admin = adminClient(env);
   // The person's own plan first, for what they ask themselves. What it couldn't take goes on to the
   // company's key; with no key to go on to, why the plan couldn't is what they're told.

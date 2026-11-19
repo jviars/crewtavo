@@ -289,7 +289,12 @@ const NOT_SIGNED_IN_ROUTES = [
   "GET /f/:key/check.js", "OPTIONS /f/:key/check", "POST /f/:key/check",
   // The scheduler, with CRON_SECRET.
   "GET /api/cron/:task", "POST /api/cron/:task",
+  // The public demo's start screen (routes/demo.ts): only there, where nobody signs up.
+  "ALL /api/demo/*", "POST /api/demo/start",
 ];
+
+/** The public demo's routes (routes/demo.ts), which an instance doesn't have at all. */
+const DEMO_ROUTES = new Set(["POST /api/demo/switch", "POST /api/demo/end"]);
 
 /** requireCompany's answer to someone whose level a route doesn't take: a sub, for every route not opted in. */
 const SUB_REFUSAL = "You don't have permission to do that. Ask an admin if you need it.";
@@ -338,6 +343,7 @@ describe("the API, for a sub", () => {
       if (SUB_ROUTES.has(route)) continue;
       const [method, path] = route.split(" ") as [string, string];
       const res = await as(AL, fill(path, VISIT).replace(/^\/api/, ""), { method, body: BODIES[route] }, instance);
+      if (DEMO_ROUTES.has(route) && res.status === 404) continue;
       // Refused for being a sub, not by chance (the stand-in world lacking a row): requireCompany's
       // words, or the few routes' own known refusals.
       const error = res.status === 403 ? ((await res.json()) as { error?: string }).error : null;

@@ -7,6 +7,7 @@ import type { Env } from "./env";
 import { OtherBooks, runAccountingJob, SentButUnrecorded } from "./integrations/accounting";
 import { pushNewlyUpcomingVisits, runCalendarJob, syncDueCalendars } from "./integrations/calendars";
 import { reconcileAutopayProcessing, reconcileBankPayments, syncStripeInvoice } from "./integrations/stripe";
+import { isDemo, SKIPPED_TASKS } from "./lib/demoMode";
 import { reportError } from "./lib/monitoring";
 import { emailConfigured, smsConfigured } from "./lib/notify";
 import { adminClient, type Db } from "./lib/supabase";
@@ -41,7 +42,7 @@ import { removeExpiredDemos } from "./services/demo";
 export const TASKS = [
   "automations", "campaigns", "notify", "outbox", "autopay", "calendars", "recurrence", "followups", "weather", "snow", "address",
   "railway", "hosting", "plans", "trash", "storage", "routes", "website", "reviews", "inactive", "review_sync",
-  "social", "backups", "profits", "installments", "postcards", "pins", "review_tidy", "chatgpt_plans", "demo",
+  "social", "backups", "profits", "installments", "postcards", "pins", "review_tidy", "demo", "chatgpt_plans",
 ] as const;
 export type TaskName = (typeof TASKS)[number];
 
@@ -97,6 +98,8 @@ export const CRON_TASKS: Record<string, TaskName[]> = {
 };
 
 export async function runTask(name: TaskName, env: Env): Promise<Record<string, unknown>> {
+  // The public demo reaches nothing outside and has no hosting to look after (lib/demoMode.ts).
+  if (isDemo(env) && SKIPPED_TASKS.has(name)) return { skipped: "demo" };
   switch (name) {
     case "automations":
       return processAutomations(env, { limit: 50 });
