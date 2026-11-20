@@ -4,7 +4,7 @@
  * the person who then signs in; opening in Spanish never hangs on its file; a language that can't
  * be kept doesn't reload the page for ever; and dates follow the language of the screen.
  */
-import { getLocale, setLocale } from "@crewtavo/core/i18n";
+import { getLocale, setLanguageChoice, setLocale } from "@crewtavo/core/i18n";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getToasts } from "../src/lib/toast";
 
@@ -50,11 +50,13 @@ beforeEach(() => {
   vi.stubGlobal("window", { location: page });
   vi.stubGlobal("document", { documentElement: { lang: "en" } });
   setLocale("en");
+  setLanguageChoice(true);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   setLocale("en");
+  setLanguageChoice(false);
 });
 
 /** Their profile's language is saved by the server; here, by the test. */
@@ -62,6 +64,31 @@ const saving = () => {
   const saved: string[] = [];
   return { saved, save: async (locale: string) => void saved.push(locale) };
 };
+
+describe("with no choice of language", () => {
+  beforeEach(() => setLanguageChoice(false));
+
+  it("opens in English, whatever the device kept for whoever is signed in", async () => {
+    device.set(SIGNED_IN, "{}");
+    device.set("crewtavo.locale", "es");
+    const load = vi.fn();
+    await startLocale();
+    expect(getLocale()).toBe("en");
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("stays in English for someone whose profile says Spanish, and keeps nothing of it on the device", async () => {
+    device.set(SIGNED_IN, "{}");
+    device.set("crewtavo.locale", "es");
+    await startLocale();
+    const maria = saving();
+    await followProfile("es", maria.save);
+    expect(reload).not.toHaveBeenCalled();
+    expect(maria.saved).toEqual([]);
+    expect(deviceLocale()).toBeNull();
+    expect(getLocale()).toBe("en");
+  });
+});
 
 describe("a shared device", () => {
   it("is English for the next person: Maria's Spanish leaves with her when she signs out", async () => {

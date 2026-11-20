@@ -18,7 +18,7 @@ import { NotificationSettings } from "./NotificationSettings";
 import { PhotoButtons } from "./ProfilePhoto";
 import { SignatureCard } from "./SignatureCard";
 import { SpareKeysCard } from "./SpareKeysCard";
-import { msg, t } from "@/lib/i18n";
+import { languageChoice, msg, t } from "@/lib/i18n";
 
 const COLORS = ["#0f2a35", "#3b7d23", "#3474d4", "#c9852a", "#d2445c", "#8b5cf6", "#0e7490", "#57534e"];
 
@@ -97,7 +97,7 @@ export function ProfileSettings() {
       {signs && <SignatureCard />}
       <NotificationSettings phone={session.profile.phone} />
       <Appearance />
-      <LanguageCard />
+      {languageChoice() && <LanguageCard />}
       <MapsAppSetting />
       {!sub && <MeasureMapSetting />}
       {!sub && <CalendarFeedCard />}

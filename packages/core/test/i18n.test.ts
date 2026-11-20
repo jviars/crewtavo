@@ -3,9 +3,9 @@
  * es-US formatting, notifications and errors read by their shape, and the catalog check: every
  * t()/msg()/<T> text in the code has its Spanish line, and every Spanish line is still used.
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { catalogProblems, sqlFunction } from "../../../scripts/i18n.mjs";
-import { addCatalog, english, getLocale, intlLocaleOf, LOCALES, msg, setLocale, t, translator } from "../src/i18n";
+import { addCatalog, english, getLocale, intlLocaleOf, LOCALES, msg, setLanguageChoice, setLocale, t, translator } from "../src/i18n";
 import { installSpanish } from "../src/i18n/es";
 import { NOTICES } from "../src/i18n/es/notices";
 import { compilePattern, spanishDate, translateError, translateNotice } from "../src/i18n/patterns";
@@ -16,6 +16,23 @@ addCatalog("es", {
   "Test: {count} visits": { one: "Test: {count} visita", other: "Test: {count} visitas", many: "Test: {count} de visitas" },
   "verb::Test: Open": "Test: Abrir",
   "state::Test: Open": "Test: Abierta",
+});
+
+// These check the Spanish itself, so with people able to choose it.
+beforeAll(() => setLanguageChoice(true));
+afterAll(() => setLanguageChoice(false));
+
+describe("with no choice of language", () => {
+  it("answers everyone in English, whatever their profile holds", () => {
+    installSpanish();
+    setLanguageChoice(false);
+    try {
+      expect(translator("es")("Today")).toBe("Today");
+      expect(translator("es").locale).toBe("en");
+    } finally {
+      setLanguageChoice(true);
+    }
+  });
 });
 
 describe("t", () => {

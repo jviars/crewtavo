@@ -27,6 +27,7 @@ import { accessFor, choiceFor, givesAdmin, patchFor, roleChoices, roleName, useC
 import { limitable, setsAllowances, useStorageOverview, type StoragePerson } from "./storage";
 import { AllowanceDialog } from "./StorageSettings";
 import { PASSWORD_HINT } from "../apps/catalog";
+import { languageChoice } from "@/lib/i18n";
 
 export interface Member { user_id: string; role: Role; role_id: string | null; active: boolean; labor_rate: number | null; profile: { full_name: string; email: string | null; color: string | null; avatar_url: string | null; locale?: string | null } | null }
 /** Someone invited who hasn't set up their account yet, and when their latest link went out. */
@@ -134,7 +135,7 @@ export function TeamSettings() {
                         <span>
                           <strong>{name}</strong>{me && <span className="chip" style={{ marginLeft: 6 }}>You</span>}
                           {/* Their own choice of language (Settings → Profile → Language): their screens and notices are in it. */}
-                          {m.profile?.locale === "es" && <span className="chip" style={{ marginLeft: 6 }} title="Uses Crewtavo in Spanish">Español</span>}
+                          {languageChoice() && m.profile?.locale === "es" && <span className="chip" style={{ marginLeft: 6 }} title="Uses Crewtavo in Spanish">Español</span>}
                           <div className="muted small">{m.profile?.email}</div>
                           {sentAt && (
                             <div className="row" style={{ gap: 6, marginTop: 2 }}>

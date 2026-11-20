@@ -19,7 +19,6 @@ Neither side is secondary; a screen serves whoever does that job.
   invoicing, pay, marketing and reports, mostly at a desk, often on the owner's phone too.
 - **The field:** foremen and crew members on a phone at a property: their day, directions, gate
   codes, checklists, photos, materials and the clock. A foreman runs a crew and never sees prices.
-  Each crew member can use their side in Spanish while the office stays in English.
 - **Subcontractors:** sign in with a link or code, no password, and see only their own jobs, their
   price and their paperwork.
 - **The business's clients:** use the Client Hub with no account to approve quotes, pay, see visits,
@@ -71,8 +70,6 @@ paving takeoffs, roofing packages) plus connections to QuickBooks, Zoho, Claude 
 - Light and dark mode both ship.
 - Each instance is independent: features that need an outside account (texting, payments, AI,
   Google, Meta) work only once that business connects its own.
-- Spanish covers the crew's side (their day, clock, chat, guides, timesheets, notifications), not
-  the office.
 
 ## Brand Commitments
 
@@ -109,6 +106,5 @@ paving takeoffs, roofing packages) plus connections to QuickBooks, Zoho, Claude 
 ## Accessibility & Inclusion
 
 - WCAG 2.1 A and AA, checked with axe-core on each main screen (`e2e/accessibility.spec.ts`).
-- The crew's side works in Spanish; copy written for it must translate cleanly
-  (`packages/core/src/i18n/es/`).
+- Text on the crew's side goes through `t()` and must translate cleanly (`packages/core/src/i18n/es/`).
 - Field screens must work outdoors on a phone, with a thumb or a glove, and with no signal.

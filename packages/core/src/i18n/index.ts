@@ -112,12 +112,24 @@ function plural(locale: Locale, count: number, forms: PluralForms, params?: Para
   return oneOClock(fill(line[form as keyof PluralForms] ?? line.other, values));
 }
 
+let choosing = false;
+/**
+ * Whether people choose their own language (Settings → Profile, My day's question, the sign-in
+ * page). While it's false, everyone has English, whatever their profile holds.
+ */
+export const languageChoice = () => choosing;
+/** Turns the choice on or off (the tests of the Spanish turn it on). */
+export function setLanguageChoice(on: boolean) {
+  choosing = on;
+}
+
 /** A translator for one language, for a server answering a person in theirs. */
 export function translator(locale: Locale | string | null | undefined): Translate {
-  const lang: Locale = isLocale(locale) ? locale : "en";
-  const fn = ((text: string, params?: Params) => translate(lang, text, params)) as Translate;
-  fn.plural = (count, forms, params) => plural(lang, count, forms, params);
-  Object.defineProperty(fn, "locale", { value: lang });
+  const theirs: Locale = isLocale(locale) ? locale : "en";
+  const lang = (): Locale => (choosing ? theirs : "en");
+  const fn = ((text: string, params?: Params) => translate(lang(), text, params)) as Translate;
+  fn.plural = (count, forms, params) => plural(lang(), count, forms, params);
+  Object.defineProperty(fn, "locale", { get: lang });
   return fn;
 }
 

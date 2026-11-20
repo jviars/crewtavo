@@ -33,7 +33,7 @@ import { SpanishOffer } from "./SpanishOffer";
 import { featureOn } from "@/components/shell/nav";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { toast } from "@/lib/toast";
-import { intlLocale, msg, t } from "@/lib/i18n";
+import { intlLocale, languageChoice, msg, t } from "@/lib/i18n";
 
 type Visit = MyDayVisit;
 
@@ -103,7 +103,7 @@ export function FieldTodayPage() {
       </div>
 
       <OfflineNote />
-      <SpanishOffer />
+      {languageChoice() && <SpanishOffer />}
       {!hasRole(session, "admin", "office", "estimator") && <InstallAppCard />}
       {keepsTime(session) && <ClockCard visits={open.filter((v) => v.status === "in_progress").map((v) => ({ id: v.id, title: v.title, job_id: v.job?.id ?? null }))} />}
       {/* The clock at the property, when the company has it on: what the phone asks as they get there and leave. */}

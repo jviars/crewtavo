@@ -8,6 +8,7 @@
  * them, and pushes go to a stand-in for the phone's push service.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setLanguageChoice } from "@crewtavo/core/i18n";
 import type { Env } from "../src/env";
 
 vi.mock("../src/lib/webpush", async (original) => ({
@@ -380,6 +381,17 @@ describe("someone who uses Crewtavo in Spanish (profiles.locale)", () => {
     w.tables.profiles![0]!.locale = "es";
     return w;
   };
+  beforeEach(() => setLanguageChoice(true));
+  afterEach(() => setLanguageChoice(false));
+
+  it("gets them in English while people don't choose their language", async () => {
+    setLanguageChoice(false);
+    const w = inSpanish([notice()]);
+    const sent = serve(w);
+    expect(await deliverNotifications(env)).toMatchObject({ email: 1, sms: 1, push: 1 });
+    expect(sent.emails()[0]!.subject).not.toMatch(/Te pusieron/);
+    expect(sent.texts()[0]!.Body).not.toMatch(/Te pusieron/);
+  });
 
   it("gets the email, the text and the push in Spanish", async () => {
     const w = inSpanish([notice()]);

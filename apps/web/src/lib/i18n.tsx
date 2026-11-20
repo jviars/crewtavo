@@ -23,10 +23,10 @@
  * are still in English, and keep English dates for someone who uses Spanish (screenIntlLocale).
  */
 import { Fragment, type ReactNode } from "react";
-import { getLocale, intlLocaleOf, isLocale, setLocale, t, type Locale } from "@crewtavo/core/i18n";
+import { getLocale, intlLocaleOf, isLocale, languageChoice, setLocale, t, type Locale } from "@crewtavo/core/i18n";
 import { toast } from "./toast";
 
-export { english, getLocale, isLocale, LOCALE_NAMES, msg, t, type Locale } from "@crewtavo/core/i18n";
+export { english, getLocale, isLocale, languageChoice, LOCALE_NAMES, msg, t, type Locale } from "@crewtavo/core/i18n";
 
 const KEY = "crewtavo.locale";
 /** When a language was picked on the sign-in page (a time, in milliseconds): it's for whoever signs in next, soon. */
@@ -148,7 +148,7 @@ export async function startLocale() {
     keepOnDevice(null);
     forgetPick();
   }
-  wanted = CLIENT_FACING.test(window.location.pathname) ? "en" : openingLocale(deviceLocale(), signedIn, picked);
+  wanted = !languageChoice() || CLIENT_FACING.test(window.location.pathname) ? "en" : openingLocale(deviceLocale(), signedIn, picked);
   if (wanted === "es") await loadSpanish();
   showScreenLang(window.location.pathname, window.location.search, signedIn);
 }
@@ -248,6 +248,12 @@ export function languageAtSignIn(profile: string | null | undefined, picked: Loc
 export async function followProfile(profileLocale: string | null | undefined, save: (locale: Locale) => Promise<void>) {
   // A server from before languages (mid-update) says nothing about theirs: left as the app opened, until it does.
   if (profileLocale === undefined) return;
+  if (!languageChoice()) {
+    // English for everyone: nothing of a language is kept on the device.
+    keepOnDevice(null);
+    forgetPick();
+    return;
+  }
   const { locale, save: saves } = languageAtSignIn(profileLocale, pickedAtSignIn());
   if (saves) {
     try {
