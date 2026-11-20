@@ -2,30 +2,7 @@
   justify-self: start; display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px;
   background: var(--green-tint); color: var(--green-dark); font-size: var(--fs-11, 11px); font-weight: 800; letter-spacing: var(--tracking-caps); text-transform: uppercase;
 }
-.points { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-14); }
-.points li { display: flex; gap: 8px; align-items: flex-start; }
-.points li svg { margin-top: 2px; flex: none; color: var(--green-dark); }
 
-/* The four answers to "What kind of work do you do?" */
-.trades { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: 10px; }
-.trade {
-  display: grid; align-content: start; gap: 6px; padding: 16px 14px; text-align: left; font: inherit; color: var(--ink);
-  background: var(--surface, #fff); border: 1px solid var(--border); border-radius: var(--radius-card); cursor: pointer;
-  transition: border-color var(--dur-fast, 120ms) var(--ease-out), transform var(--dur-fast, 120ms) var(--ease-out), box-shadow var(--dur-fast, 120ms) var(--ease-out);
-}
-.trade:hover { border-color: var(--green); transform: translateY(-1px); }
-.trade:focus-visible { outline: none; box-shadow: var(--ring); }
-.trade[data-open] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); background: var(--green-tint); }
-.trade strong { font-size: var(--fs-16, 16px); }
-.trade > span:last-child { font-size: var(--fs-12); color: var(--text-3); line-height: 1.4; }
-.tradeIcon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--green-tint); color: var(--green-dark); margin-bottom: 4px; }
-.other { text-align: left; font: inherit; cursor: pointer; }
-
-/* While the business is being made */
-.building { justify-items: center; text-align: center; padding: 36px 28px !important; }
-.spinner { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--green-tint-2, var(--green-tint)); border-top-color: var(--green-solid); animation: spin 0.8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
 /* The bar above the app */
 .bar {
@@ -80,9 +57,198 @@
   .tour { left: 12px; right: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
 
-/* The bot check by the trade choices, and a trade picked before it was done */
-.check { display: flex; justify-content: center; min-height: 65px; }
+/*
+ * The start screen: one question asked at full size, the trades read down like a menu, and the
+ * business behind the one pointed at. Navy whatever the app's theme, like crewtavo.com's dark bands.
+ */
+.start {
+  --s-bg: #0b2029; --s-bg-2: #0f2a35; --s-panel: #10303c;
+  --s-line: rgba(201, 211, 217, 0.13); --s-line-2: rgba(201, 211, 217, 0.26);
+  --s-text: #f4f7f8; --s-text-2: #c9d3d9; --s-text-3: #9aabb4;
+  --s-go: #8fd16b; --s-amber: #f4b143; --s-alert: #ffb3bf;
+  --s-req: #eeb062; --s-quote: #f58599; --s-job: #8fd16b; --s-invoice: #84b0f5;
+  --s-pad: clamp(20px, 4.2vw, 64px);
+  --brand-ink: var(--s-text);
+  color-scheme: dark;
+  min-height: 100dvh; display: grid; grid-template-rows: auto 1fr auto;
+  background: var(--s-bg); color: var(--s-text);
+}
+.start [hidden] { display: none !important; }
+.start ::selection { background: #3b7d23; color: #fff; }
+.start a { color: var(--s-text); text-decoration-color: rgba(143, 209, 107, 0.6); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.start a:hover { text-decoration-color: var(--s-go); }
+.start :focus-visible { outline: 2px solid var(--s-go); outline-offset: 3px; border-radius: 6px; }
+.start button { font: inherit; color: inherit; }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px var(--s-pad); border-bottom: 1px solid var(--s-line); }
+.lockup { display: inline-flex; align-items: center; gap: 11px; font-weight: 800; font-size: 23px; letter-spacing: -0.025em; text-decoration: none; }
+.topEnd { display: flex; align-items: center; gap: 22px; }
+.langNote { margin: 0; max-width: 34ch; font-size: 12px; line-height: 1.4; color: var(--s-text-3); text-align: right; }
+.live { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--s-text-2); }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--s-amber); }
+.languages { display: flex; align-items: center; gap: 4px; font-size: 14px; }
+.languages strong, .languages button { padding: 6px 9px; border-radius: 8px; }
+.languages strong { font-weight: 700; }
+.languages button { border: 0; background: none; color: var(--s-text-3); cursor: pointer; }
+.languages button:hover { color: var(--s-text); background: rgba(201, 211, 217, 0.08); }
+
+.stage {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: clamp(32px, 5vw, 88px); align-items: start;
+  padding: clamp(26px, 3.8vh, 48px) var(--s-pad) clamp(22px, 3vh, 38px);
+}
+.ask { min-width: 0; display: grid; align-content: start; }
+.question { margin: 0; max-width: 12ch; font-size: clamp(42px, 5.4vw, 80px); line-height: 0.98; font-weight: 800; letter-spacing: -0.035em; text-wrap: balance; }
+.setting { max-width: 15ch; font-size: clamp(38px, 4.6vw, 68px); }
+.sub { margin: 18px 0 0; max-width: 62ch; font-size: clamp(16px, 1.25vw, 18px); line-height: 1.5; color: var(--s-text-2); text-wrap: pretty; }
+
+/* The trades: the name, what the business does, an arrow; a green line draws in under the one pointed at */
+.answers { margin-top: clamp(20px, 3vh, 34px); border-bottom: 1px solid var(--s-line); }
+.answer {
+  position: relative; width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) 30px; align-items: center; gap: 24px 40px;
+  padding: clamp(8px, 1.1vh, 12px) 0; border: 0; border-top: 1px solid var(--s-line); background: none; text-align: left; cursor: pointer;
+}
+.answer::after, .otherTrade::after {
+  content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: 100%; background: var(--s-go);
+  transform: scaleX(0); transform-origin: left; transition: transform 460ms var(--ease-out); pointer-events: none;
+}
+.answer:hover::after, .answer:focus-visible::after, .answer[data-waiting]::after,
+.otherTrade:hover::after, .otherTrade:focus-visible::after, .otherTrade[data-waiting]::after { transform: scaleX(1); }
+.answer:focus-visible, .otherTrade:focus-visible { outline: none; }
+.thumb { display: none; }
+.words { display: contents; }
+.name { font-size: clamp(30px, 3.5vw, 52px); line-height: 1.04; font-weight: 750; letter-spacing: -0.03em; white-space: nowrap; transition: color 180ms var(--ease-out); }
+.blurb { justify-self: end; width: 100%; max-width: 30ch; font-size: 14px; line-height: 1.45; color: var(--s-text-3); transition: color 180ms var(--ease-out); }
+.arrow { justify-self: end; display: grid; color: var(--s-go); opacity: 0; transform: translateX(-10px); transition: opacity 180ms var(--ease-out), transform 320ms var(--ease-out); }
+.answers:is(:hover, :focus-within) .answer:not([data-pointed], [aria-expanded="true"], [data-waiting]) .name,
+.start[data-waiting] .answer:not([data-waiting]) .name { color: var(--s-text-3); }
+.answer[data-pointed] .blurb, .answer:focus-visible .blurb { color: var(--s-text-2); }
+.answer[data-pointed] .arrow, .answer:focus-visible .arrow, .answer[aria-expanded="true"] .arrow, .answer[data-waiting] .arrow { opacity: 1; transform: none; }
+.answer[aria-expanded="true"] .plus { transform: rotate(45deg); }
+
+/* Something else: the other trades in the same voice, smaller */
+.more { margin: 0; padding: 6px 0 22px; border: 0; min-width: 0; animation: unfold 420ms var(--ease-out); }
+@keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
+.search { display: flex; align-items: center; gap: 12px; padding: 10px 0 12px; border-bottom: 1px solid var(--s-line-2); color: var(--s-text-3); }
+.search:focus-within { border-bottom-color: var(--s-go); color: var(--s-go); }
+.search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-size: 20px; color: var(--s-text); caret-color: var(--s-go); padding: 4px 0; }
+.search input::placeholder { color: var(--s-text-3); opacity: 1; }
+/* The underline turning green is the search's focus mark. */
+.search input:focus-visible { outline: none; }
+.others { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 36px; margin-top: 8px; }
+.otherTrade { position: relative; display: grid; align-content: start; gap: 4px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--s-line); background: none; text-align: left; cursor: pointer; }
+.otherTrade strong { font-size: 24px; line-height: 1.1; font-weight: 750; letter-spacing: -0.02em; transition: color 160ms var(--ease-out); }
+.otherTrade span { font-size: 14px; line-height: 1.45; color: var(--s-text-3); transition: color 160ms var(--ease-out); }
+.others:is(:hover, :focus-within) .otherTrade:not([data-pointed]) strong { color: var(--s-text-3); }
+.otherTrade[data-pointed] span { color: var(--s-text-2); }
+.none { margin: 14px 0 0; font-size: 15px; color: var(--s-text-2); }
+
+/* The bot check, with what starting agrees to beside it */
+.gate { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; margin-top: clamp(16px, 2.6vh, 28px); }
+.check { display: flex; min-height: 65px; border-radius: 6px; transition: box-shadow 260ms var(--ease-out); }
 .check:empty { min-height: 0; }
-.waiting { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--green-tint); color: var(--green-dark); font-size: var(--fs-14); font-weight: 600; }
-.trade[data-waiting] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); background: var(--green-tint); }
-.language { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--fill); }
+.start[data-waiting] .check:not(:empty) { box-shadow: 0 0 0 2px var(--s-bg), 0 0 0 4px var(--s-go); }
+.gateSide { flex: 1 1 260px; max-width: 48ch; display: grid; gap: 4px; }
+.waitingNote, .error { display: flex; gap: 10px; align-items: flex-start; margin: 0; font-size: 14px; line-height: 1.35; font-weight: 600; }
+.waitingNote { color: var(--s-go); }
+.error { color: var(--s-alert); }
+.waitingNote svg, .error svg { flex: none; margin-top: 1px; }
+.waitingNote span, .error span { text-wrap: balance; }
+.terms { margin: 0; font-size: 13px; line-height: 1.45; color: var(--s-text-3); text-wrap: pretty; }
+.terms a { color: var(--s-text-2); text-decoration: underline; }
+.terms a.get { color: var(--s-go); font-weight: 700; white-space: nowrap; }
+
+/* Setting up: the question becomes what's happening, and who they'll be */
+.progress { position: relative; height: 4px; margin-top: 30px; max-width: 520px; border-radius: 4px; background: rgba(201, 211, 217, 0.18); overflow: hidden; }
+.progress i { position: absolute; inset: 0 auto 0 0; width: 34%; border-radius: 4px; background: var(--s-go); animation: sweep 1.5s var(--ease-out) infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.roles { list-style: none; margin: 34px 0 0; padding: 0; display: grid; gap: 16px; max-width: 520px; }
+.roles li { display: grid; grid-template-columns: 22px 1fr; gap: 14px; align-items: center; font-size: 16px; line-height: 1.4; color: var(--s-text-2); animation: rise 520ms var(--ease-out) both; }
+.roles li:nth-child(2) { animation-delay: 0.25s; }
+.roles li:nth-child(3) { animation-delay: 0.5s; }
+.roles svg { color: var(--s-go); }
+.roles b { color: var(--s-text); font-weight: 700; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+
+/* The business behind the trade pointed at: its photo, then what's in it. Stays in view while the longer list scrolls. */
+.preview { position: sticky; top: 24px; display: grid; align-content: start; }
+.photos { position: relative; height: clamp(240px, calc(100dvh - 560px), 540px); overflow: hidden; background: var(--s-panel); }
+.photos > img, .pairPhoto, .plate {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transform: scale(1.06);
+  transition: opacity 520ms var(--ease-out), transform 1200ms var(--ease-out);
+}
+.pairPhoto { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: var(--s-panel); }
+.pairPhoto img { width: 100%; height: 100%; object-fit: cover; }
+.plate { display: flex; align-items: flex-end; padding: 24px; background: var(--s-panel); font-size: clamp(34px, 3.2vw, 46px); line-height: 1.02; font-weight: 800; letter-spacing: -0.03em; color: var(--s-text-3); text-wrap: balance; }
+.photos [data-shown] { opacity: 1; transform: none; }
+.start[data-busy] .photos [data-shown] { animation: drift 9s linear forwards; }
+@keyframes drift { to { transform: scale(1.09); } }
+.credit { position: absolute; right: 8px; bottom: 8px; z-index: 1; padding: 3px 7px; border-radius: 4px; background: rgba(11, 32, 41, 0.78); font-size: 11px; color: #e6edf0; }
+.about { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--s-line-2); animation: rise 360ms var(--ease-out); }
+.business { margin: 0; font-size: 26px; line-height: 1.12; font-weight: 800; letter-spacing: -0.025em; text-wrap: balance; }
+.owner { margin: 6px 0 0; font-size: 14px; color: var(--s-text-3); }
+.inside { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 7px; font-size: 14px; line-height: 1.4; color: var(--s-text-2); }
+.inside li { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; }
+.inside li::before, .legend span::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dot, #6c8794); transform: translateY(-1px); }
+[data-stage="req"] { --dot: var(--s-req); }
+[data-stage="quote"] { --dot: var(--s-quote); }
+[data-stage="job"] { --dot: var(--s-job); }
+[data-stage="invoice"] { --dot: var(--s-invoice); }
+.start[data-busy] .inside li { animation: settle 640ms var(--ease-out) both; }
+.start[data-busy] .inside li:nth-child(2) { animation-delay: 0.45s; }
+.start[data-busy] .inside li:nth-child(3) { animation-delay: 0.9s; }
+.start[data-busy] .inside li:nth-child(4) { animation-delay: 1.35s; }
+.start[data-busy] .inside li:nth-child(5) { animation-delay: 1.8s; }
+.start[data-busy] .inside li:nth-child(6) { animation-delay: 2.25s; }
+@keyframes settle { from { opacity: 0.25; } }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--s-line); font-size: 12px; color: var(--s-text-3); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend span::before { width: 7px; height: 7px; transform: none; }
+
+/* The promises, one row along the bottom */
+.band { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 40px; padding: 14px var(--s-pad) 16px; border-top: 1px solid var(--s-line); background: var(--s-bg-2); }
+.promises { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px 32px; font-size: 14px; line-height: 1.4; color: var(--s-text-2); }
+.promises li { display: flex; gap: 9px; align-items: flex-start; flex: 0 1 auto; min-width: 0; }
+.promises svg, .bandNote svg { flex: none; margin-top: 2px; color: var(--s-go); }
+.bandNote { display: none; gap: 10px; margin: 0; font-size: 13px; line-height: 1.45; color: var(--s-text-3); }
+
+/* Narrow desktops (half a screen, a tablet held sideways): each description goes under its trade's name */
+@media (min-width: 881px) and (max-width: 1180px) {
+  .answer { grid-template-columns: minmax(0, 1fr) 30px; gap: 16px; }
+  .words { display: grid; gap: 4px; min-width: 0; }
+  .name { white-space: normal; }
+  .blurb { justify-self: start; max-width: 52ch; }
+}
+
+/* Phones: no pointing, so each trade carries its photo, and the business shows once it's being made */
+@media (max-width: 880px) {
+  .top { padding-block: 14px; }
+  .lockup { font-size: 20px; }
+  .topEnd { gap: 10px; }
+  .live { font-size: 12px; }
+  .languages strong, .langNote { display: none; }
+  .stage { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 26px; }
+  .preview { display: none; position: static; }
+  .start[data-busy] .preview { display: grid; }
+  .photos { height: clamp(220px, 58vw, 320px); }
+  .question { font-size: clamp(38px, 10.6vw, 48px); }
+  .answer { grid-template-columns: 64px minmax(0, 1fr) 22px; gap: 14px; padding-block: 12px; }
+  .answer:hover:not([data-waiting])::after, .otherTrade:hover:not([data-waiting])::after { transform: scaleX(0); }
+  .answer:focus-visible::after, .otherTrade:focus-visible::after { transform: scaleX(1); }
+  .thumb { display: block; width: 64px; height: 64px; border-radius: 12px; object-fit: cover; background: var(--s-panel); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; overflow: hidden; }
+  .pair img { width: 100%; height: 100%; object-fit: cover; }
+  .words { display: grid; gap: 3px; min-width: 0; }
+  .name { font-size: 27px; white-space: normal; }
+  .blurb { justify-self: start; max-width: none; color: var(--s-text-2); }
+  .arrow { opacity: 1; transform: none; }
+  .others { grid-template-columns: minmax(0, 1fr); }
+  .search input { font-size: 17px; }
+  .gate { flex-direction: column; align-items: stretch; }
+  .gateSide { flex: none; max-width: none; }
+  .promises { flex-direction: column; }
+  .bandNote { display: flex; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .start *, .start *::before, .start *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  .progress i { width: 100%; opacity: 0.6; }
+}

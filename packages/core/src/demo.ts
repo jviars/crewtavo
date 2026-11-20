@@ -11,14 +11,47 @@ export const DEMO_HOURS = 24;
 
 /**
  * The trades the start screen asks about first, each with a sample business written for it
- * (apps/api/src/services/demoStories.ts). "Something else" lists the other trade presets, which get
- * a business made from their own price list.
+ * (apps/api/src/services/demoStories.ts makes it under this name, signed in as this owner).
+ * "Something else" lists the other trade presets, which get a business made from their own price
+ * list (demoOtherBusiness).
  */
 export const DEMO_TRADES = [
-  { preset: "lawn_exterior", label: msg("Lawn care"), blurb: msg("Weekly mowing routes, fertilizer programs, cleanups and snow removal.") },
-  { preset: "roofing_exteriors", label: msg("Roofing"), blurb: msg("Roofs measured on the aerial, insurance claims and crews on site.") },
-  { preset: "paving", label: msg("Paving"), blurb: msg("Takeoffs on the aerial, sealcoat and striping, GC work and retainage.") },
+  {
+    preset: "lawn_exterior", label: msg("Lawn care"), blurb: msg("Weekly mowing routes, fertilizer programs, cleanups and snow removal."),
+    business: "Greenway Lawn Care", owner: "Chris Dalton",
+  },
+  {
+    preset: "roofing_exteriors", label: msg("Roofing"), blurb: msg("Roofs measured on the aerial, insurance claims and crews on site."),
+    business: "Ridgeline Roofing & Exteriors", owner: "Sam Whitaker",
+  },
+  {
+    preset: "paving", label: msg("Paving"), blurb: msg("Takeoffs on the aerial, sealcoat and striping, GC work and retainage."),
+    business: "Acme Paving", owner: "Dana Hale",
+  },
 ] as const;
+
+/** Every sample business's crew lead (the crew's phone signs in as them) and the client with a quote out. */
+export const DEMO_CREW_LEAD = "Marcus Reed";
+export const DEMO_CLIENT = "Jordan Rivera";
+/** The owner of a business made from another trade's price list. */
+export const DEMO_OTHER_OWNER = "Jamie Cole";
+
+const OTHER_BUSINESSES: Record<string, string> = {
+  cleaning: "Brightside Cleaning Co.",
+  electrical: "Bright Line Electric",
+  general: "Hale Field Services",
+  handyman: "Fix-It Home Repair",
+  hvac: "Comfort Air Heating & Cooling",
+  landscaping: "Stone & Stem Landscapes",
+  pest_control: "Shield Pest Control",
+  plumbing: "Clearflow Plumbing",
+  pool_service: "Bluewater Pool & Spa",
+};
+
+/** The name of the sample business made from another trade preset's price list. */
+export function demoOtherBusiness(preset: { id: string; name: string }): string {
+  return OTHER_BUSINESSES[preset.id] ?? `Hale ${preset.name.split(/[\s&/,]+/)[0]} Co.`;
+}
 
 export type DemoTrade = (typeof DEMO_TRADES)[number]["preset"];
 

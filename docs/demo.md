@@ -23,6 +23,14 @@ because an instance holds one business unless told otherwise.
 
   **Something else** lists every other trade preset (cleaning, HVAC, plumbing, pest control, pools…).
   Each gets a business made from that trade's own price list.
+
+  The trades are listed large, and pointing at one shows the business it makes: its photo, its name
+  and owner (`packages/core/src/demo.ts`, which the stories use too), and what's in it (`INSIDE` in
+  `Demo.tsx`, written from the stories: change it when a story changes). A trade with no photo of its
+  own shows its name instead. The photos in `apps/web/public/demo-photos/` are the ones crewtavo.com
+  uses, under the Unsplash and Pexels licenses, credited on the picture: lawn by Michael Smith,
+  roofing by Raze Solar, paving by Brian J. Tromp (Unsplash), cleaning by Tima Miroshnichenko and HVAC
+  by Kathleen Austin Kuhn (Pexels).
 - **Every business has** a team (owner, crew lead, crew member, office manager), clients and leads,
   requests, quotes (sent, draft, approved), jobs, this week's schedule, invoices (overdue, part paid,
   paid), equipment due for service, guides, a sent campaign and review asks. Dates are counted from

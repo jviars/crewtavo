@@ -7,7 +7,7 @@
  * Every line names an item on the trade preset's price list exactly (test/demoStories.test.ts checks
  * them), and every date is counted from the day the business is made (services/demoSeed.ts).
  */
-import type { PresetService } from "@crewtavo/core";
+import { DEMO_CLIENT, DEMO_CREW_LEAD, DEMO_OTHER_OWNER, DEMO_TRADES, demoOtherBusiness, type PresetService } from "@crewtavo/core";
 import type { Position } from "@crewtavo/core";
 import type { DemoClient, DemoPlace, DemoSeeder, DemoTeammate, Row } from "./demoSeed";
 
@@ -21,6 +21,12 @@ export interface DemoStory {
   /** The price list names it quotes from, for the tests (the general story's come from the preset). */
   uses?: string[];
   build(s: DemoSeeder): Promise<void>;
+}
+
+/** A featured trade's business name and owner, as the start screen shows them (packages/core/src/demo.ts). */
+function named(preset: (typeof DEMO_TRADES)[number]["preset"]) {
+  const trade = DEMO_TRADES.find((t) => t.preset === preset)!;
+  return { business: trade.business, owner: trade.owner };
 }
 
 const TZ = "America/New_York";
@@ -49,7 +55,7 @@ const PLACES = {
 function person(name: string, email: string, phone: string, status: "active" | "lead", source: string, tags: string[], at: DemoPlace, more: Partial<DemoClient> = {}): DemoClient {
   return { name, email, phone, status, source, tags, place: at, ...more };
 }
-const JORDAN = (at: DemoPlace = PLACES.pell, source = "Website form") => person("Jordan Rivera", "jordan.rivera@example.com", "(540) 555-0187", "active", source, ["Residential"], at);
+const JORDAN = (at: DemoPlace = PLACES.pell, source = "Website form") => person(DEMO_CLIENT, "jordan.rivera@example.com", "(540) 555-0187", "active", source, ["Residential"], at);
 const PRIYA = person("Priya Shah", "priya.shah@example.com", "(540) 555-0163", "lead", "Website form", ["Residential"], PLACES.hillcrest);
 const CARL = person("Carl Benton", "carl.benton@example.com", "(540) 555-0109", "lead", "Phone", ["Residential"], PLACES.franklin);
 const ELENA = person("Elena Marsh", "elena.marsh@example.com", "(540) 555-0134", "active", "Google", ["Residential"], PLACES.chestnut);
@@ -61,7 +67,7 @@ const HOA = (label: string) =>
 
 /** The same three people work for every sample business, under the owner. */
 const TEAM: DemoTeammate[] = [
-  { key: "lead", name: "Marcus Reed", role: "crew_lead", rate: 28 },
+  { key: "lead", name: DEMO_CREW_LEAD, role: "crew_lead", rate: 28 },
   { key: "crew", name: "Luis Ortega", role: "field_crew", rate: 21 },
   { key: "office", name: "Tasha Brooks", role: "office", rate: 23 },
 ];
@@ -76,8 +82,7 @@ const monthNow = () => Number(new Date().toLocaleDateString("en-CA", { timeZone:
 
 const lawn: DemoStory = {
   preset: "lawn_exterior",
-  business: "Greenway Lawn Care",
-  owner: "Chris Dalton",
+  ...named("lawn_exterior"),
   team: TEAM,
   taxRate: 0.053,
   uses: [
@@ -290,8 +295,7 @@ const roofLine = (id: string, edge: string, coordinates: Position[], label: stri
 
 const roofing: DemoStory = {
   preset: "roofing_exteriors",
-  business: "Ridgeline Roofing & Exteriors",
-  owner: "Sam Whitaker",
+  ...named("roofing_exteriors"),
   team: TEAM,
   taxRate: 0.053,
   uses: [
@@ -466,8 +470,7 @@ const shape = (id: string, item: string, type: "Polygon" | "LineString" | "Point
 
 const paving: DemoStory = {
   preset: "paving",
-  business: "Acme Paving",
-  owner: "Dana Hale",
+  ...named("paving"),
   team: TEAM,
   taxRate: 0.053,
   uses: [
@@ -654,17 +657,6 @@ const paving: DemoStory = {
 // Any other trade: a business made from the trade's own price list
 // =============================================================================================
 
-const NAMES: Record<string, string> = {
-  cleaning: "Brightside Cleaning Co.",
-  electrical: "Bright Line Electric",
-  general: "Hale Field Services",
-  handyman: "Fix-It Home Repair",
-  hvac: "Comfort Air Heating & Cooling",
-  landscaping: "Stone & Stem Landscapes",
-  pest_control: "Shield Pest Control",
-  plumbing: "Clearflow Plumbing",
-  pool_service: "Bluewater Pool & Spa",
-};
 
 /** A sensible amount of an item, by its unit: an hour or two of labor, a driveway's square feet. */
 export function quantityFor(unit: string, size: "small" | "big" = "small"): number {
@@ -695,8 +687,8 @@ export function storyItems(list: ReadonlyArray<Pick<PresetService, "name" | "uni
 function general(preset: { id: string; name: string; sop_categories: string[] }): DemoStory {
   return {
     preset: preset.id,
-    business: NAMES[preset.id] ?? `Hale ${preset.name.split(/[\s&/,]+/)[0]} Co.`,
-    owner: "Jamie Cole",
+    business: demoOtherBusiness(preset),
+    owner: DEMO_OTHER_OWNER,
     team: TEAM,
     taxRate: 0.053,
     async build(s) {

@@ -4,22 +4,22 @@
  * business in it, and the bar above the app lets them see it as the crew or as a client, start over,
  * or go get Crewtavo.
  */
-import { DEMO_HOURS, DEMO_TRADES, demoTradeFromLink } from "@crewtavo/core/demo";
+import { DEMO_CLIENT, DEMO_CREW_LEAD, DEMO_HOURS, DEMO_OTHER_OWNER, DEMO_TRADES, demoOtherBusiness, demoTradeFromLink } from "@crewtavo/core/demo";
+import { LOCALES } from "@crewtavo/core/i18n";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { BrandLockup } from "@/components/shell/BrandMark";
+import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { AuthLayout } from "@/features/auth/LoginPage";
 import { searchTrades } from "@/features/auth/OnboardingPage";
 import { SOURCE_URL, TERMS_VERSION } from "@/features/legal/License";
 import { api, supabase } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { getLocale, msg, pickAtSignIn, T, t } from "@/lib/i18n";
+import { getLocale, languageChoice, LOCALE_NAMES, msg, pickAtSignIn, T, t } from "@/lib/i18n";
 import { useTurnstile } from "@/lib/publicApi";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import authStyles from "@/features/auth/auth.module.css";
 import styles from "./demo.module.css";
 import { DemoTour, GET_CREWTAVO, useDemoTour } from "./Tour";
 /** The Terms as this version has them (the app bundles them too: features/legal/License.tsx). */
@@ -50,8 +50,62 @@ export const PRESET_TEXT = [
   msg("Roofing & Exteriors"), msg("Shingle and metal roofing, repairs, gutters, siding, windows and decks, with insurance claim details on quotes and jobs."),
 ];
 
-const TRADE_ICONS: Record<string, IconName> = { lawn_exterior: "lawn", roofing_exteriors: "roofing", paving: "paving" };
-const FEATURED = new Set<string>(DEMO_TRADES.map((t) => t.preset));
+const FEATURED = new Set<string>(DEMO_TRADES.map((d) => d.preset));
+/** "Something else" itself, before a trade in its list is pointed at. */
+const OTHER = "other";
+
+/** The website's photos of these trades (crewtavo.com uses the same), credited on the picture. */
+const photo = (name: string, position: string, credit: string) => ({ src: `/demo-photos/${name}.jpg`, thumb: `/demo-photos/${name}-thumb.jpg`, position, credit });
+export const PHOTOS: Record<string, ReturnType<typeof photo>> = {
+  // i18n-ignore below: photographers' names and where the photos are from.
+  lawn_exterior: photo("lawn", "74% 50%", "Michael Smith / Unsplash"), // i18n-ignore
+  roofing_exteriors: photo("roofing", "50% 40%", "Raze Solar / Unsplash"), // i18n-ignore
+  paving: photo("paving", "64% 50%", "Brian J. Tromp / Unsplash"), // i18n-ignore
+  cleaning: photo("cleaning", "50% 50%", "Tima Miroshnichenko / Pexels"), // i18n-ignore
+  hvac: photo("hvac", "54% 30%", "Kathleen Austin Kuhn / Pexels"), // i18n-ignore
+};
+
+/** A line of what's in a sample business, dotted in its stage's color (requests, quotes, jobs, invoices). */
+type Inside = readonly [stage: "" | "req" | "quote" | "job" | "invoice", text: string];
+/**
+ * What each sample business has in it, as apps/api/src/services/demoStories.ts makes it: change
+ * one when its story changes. Every other trade gets the general story.
+ */
+export const INSIDE: Record<string, readonly Inside[]> = {
+  lawn_exterior: [
+    ["", msg("Mow crew, led by {lead}, and the Enhancements crew")],
+    ["job", msg("Weekly mowing routes, filled in all season")],
+    ["quote", msg("A fertilizer program quote waiting on {client}")],
+    ["req", msg("New requests from the website form and a phone call")],
+    ["", msg("Snow removal installed, with a storm already plowed")],
+    ["invoice", msg("Invoices paid by card, check and bank, one overdue")],
+  ],
+  roofing_exteriors: [
+    ["", msg("Install crew, led by {lead}, and the Repair and gutter crew")],
+    ["quote", msg("A storm claim, measured on the aerial and quoted")],
+    ["job", msg("A new roof for a builder, with 10% retainage")],
+    ["quote", msg("Gutter guards for an HOA clubhouse, still a draft")],
+    ["", msg("Crew guides, like the photos for an insurance claim")],
+    ["invoice", msg("A deposit invoice, overdue")],
+  ],
+  paving: [
+    ["", msg("Paving crew, led by {lead}, and the Sealcoat crew")],
+    ["quote", msg("A driveway replacement quote waiting on {client}")],
+    ["quote", msg("A parking lot taken off on the aerial, for sealcoat")],
+    ["job", msg("Subdivision roads for a builder, with 10% retainage")],
+    ["req", msg("A sealcoat and crack repair request by phone")],
+    ["invoice", msg("A progress invoice for the builder, overdue")],
+  ],
+  general: [
+    ["", msg("Crew 1, led by {lead}, and Crew 2")],
+    ["", msg("Quotes and jobs from your trade's price list")],
+    ["req", msg("An estimate request, with a visit today")],
+    ["quote", msg("A quote waiting on {client}")],
+    ["job", msg("This week's visits on the schedule")],
+    ["invoice", msg("Invoices paid and one overdue")],
+  ],
+};
+const STAGES = [["req", msg("Requests")], ["quote", msg("Quotes")], ["job", msg("Jobs")], ["invoice", msg("Invoices")]] as const;
 
 async function signInAs(session: DemoSession) {
   const { error } = await supabase().auth.setSession(session);
@@ -76,9 +130,26 @@ function forgetLinkedTrade() {
   window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
 }
 
+/** English · Español, as on the sign-in page: the page reloads in it, and the demo's people get it. */
+function Languages() {
+  const current = getLocale();
+  return (
+    <nav className={styles.languages} aria-label={t("Language")}>
+      {LOCALES.map((locale) =>
+        locale === current ? (
+          <strong key={locale} lang={locale} aria-current="true">{LOCALE_NAMES[locale]}</strong>
+        ) : (
+          <button key={locale} type="button" lang={locale} onClick={() => pickAtSignIn(locale)}>{LOCALE_NAMES[locale]}</button>
+        ),
+      )}
+    </nav>
+  );
+}
+
 /**
  * In place of the sign-in page: "What kind of work do you do?" Lawn care, roofing, paving, or
- * something else (any other trade preset). Picking one makes the visitor's business and signs them in.
+ * something else (any other trade preset), set large and read down like a menu. Pointing at one
+ * shows the business it makes; picking one makes it and signs the visitor in.
  * `ended`: they were signed in to a demo that has since been deleted.
  */
 export function DemoStart({ ended = false }: { ended?: boolean }) {
@@ -86,15 +157,23 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [search, setSearch] = useState("");
+  const [pointed, setPointed] = useState<string>(DEMO_TRADES[0].preset);
   const presets = useQuery({ queryKey: ["presets"], queryFn: () => api.get<PresetSummary[]>("/presets"), staleTime: Infinity });
-  // The check's box in the start screen's language, whatever the browser's is.
-  const turnstile = useTurnstile(true, getLocale() === "en" ? undefined : getLocale());
+  // The check's box in the start screen's language, whatever the browser's is, and dark like the page.
+  const turnstile = useTurnstile(true, getLocale() === "en" ? undefined : getLocale(), "dark");
   const started = useRef(false);
   /** A trade picked before the bot check was done: it starts once it is. */
   const [waiting, setWaiting] = useState<string | null>(null);
+  /** Starts that failed: each asks the bot check for a new answer once its box is back on screen. */
+  const [failures, setFailures] = useState(0);
+  /** The website's ?trade= starts once, not again with every new answer from the check. */
+  const linkTried = useRef(false);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   async function start(trade: string) {
     if (started.current) return;
+    setPointed(trade);
     if (turnstile.required && !turnstile.token) {
       setWaiting(trade);
       setError(null);
@@ -113,106 +192,227 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
       setError(errorMessage(err));
       setBusy(null);
       started.current = false;
-      // A check is good once: ask for a new one.
-      turnstile.reset();
+      setFailures((n) => n + 1);
     }
   }
+
+  // A check is good once: after a failed start, ask for a new one, now that its box is showing again,
+  // and put the keyboard on what went wrong rather than back at the top of the page.
+  useEffect(() => {
+    if (!failures) return;
+    turnstile.reset();
+    errorRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failures]);
+  // The search takes the keyboard when the other trades open, not each time the list comes back.
+  useEffect(() => {
+    if (more) searchRef.current?.focus();
+  }, [more]);
 
   // Arriving from a trade's page on the website starts that trade's demo, and a trade picked before
   // the check was done starts as soon as it is.
   const linked = presets.data ? demoTradeFromLink(linkedTrade, presets.data.map((p) => p.id)) : null;
   useEffect(() => {
-    const trade = waiting ?? (ended ? null : linked);
-    if (trade && (!turnstile.required || turnstile.token)) void start(trade);
+    const trade = waiting ?? (ended || linkTried.current ? null : linked);
+    if (!trade || (turnstile.required && !turnstile.token)) return;
+    if (trade === linked && !waiting) linkTried.current = true;
+    void start(trade);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linked, waiting, turnstile.token]);
 
+  const others = (presets.data ?? []).filter((p) => !FEATURED.has(p.id));
+  const shown = search.trim() ? searchTrades(others, search) : others;
+  const isOther = (id: string | null) => id === OTHER || others.some((p) => p.id === id);
   const label = (id: string) => {
     const featured = DEMO_TRADES.find((d) => d.preset === id);
     return (featured ? t(featured.label) : t(presets.data?.find((p) => p.id === id)?.name ?? "")).toLowerCase();
   };
-  const others = (presets.data ?? []).filter((p) => !FEATURED.has(p.id));
-  const shown = search.trim() ? searchTrades(others, search) : others;
+  const point = (id: string) => {
+    if (!busy) setPointed(id);
+  };
+
+  // The business behind what's pointed at: a featured trade's own, another trade's from its price
+  // list, or "Something else" as the cleaning and HVAC businesses its photos show.
+  const shownId = busy ?? pointed;
+  const featured = DEMO_TRADES.find((d) => d.preset === shownId);
+  const preset = others.find((p) => p.id === shownId);
+  const business = featured
+    ? featured.business
+    : preset
+      ? demoOtherBusiness(preset)
+      : t("{first}, {second} and {count} more", {
+          first: demoOtherBusiness({ id: "cleaning", name: "Cleaning" }),
+          second: demoOtherBusiness({ id: "hvac", name: "HVAC" }),
+          count: Math.max(others.length - 2, 0) || 7,
+        });
+  const owner = featured?.owner ?? DEMO_OTHER_OWNER;
+  // A trade with no photo of its own shows its name, never another trade's workers.
+  const picture = featured || preset ? (PHOTOS[shownId] ? shownId : "plate") : "pair";
+  const credit = picture === "pair" ? `${PHOTOS.cleaning!.credit.split(" / ")[0]}, ${PHOTOS.hvac!.credit}` : PHOTOS[picture]?.credit;
+  const inside = INSIDE[featured ? shownId : "general"]!;
+  const people = { lead: DEMO_CREW_LEAD, client: DEMO_CLIENT };
+  const bold = (s: ReactNode) => <b>{s}</b>;
 
   return (
-    <AuthLayout>
-      {busy && (
-        <div className={`card card-pad ${authStyles.card} ${styles.building}`} role="status" aria-live="polite">
-          <span className={styles.spinner} aria-hidden="true" />
-          <h1 className={authStyles.title}>{t("Setting up your {trade} business", { trade: label(busy) })}</h1>
-          <p className="muted" style={{ margin: 0 }}>{t("Clients, quotes, this week's jobs and invoices, ready to click around in. It takes a few seconds.")}</p>
+    <div className={styles.start} data-busy={busy ? "" : undefined} data-waiting={waiting ? "" : undefined}>
+      <header className={styles.top}>
+        <a className={styles.lockup} href="https://crewtavo.com/"><BrandLockup size={30} /></a>
+        <div className={styles.topEnd}>
+          {languageChoice() && getLocale() !== "en" && <p className={styles.langNote}>{t("Your crew's screens are in Spanish; the office's are still in English.")}</p>}
+          <span className={styles.live}><i aria-hidden="true" />{t("Live demo")}</span>
+          {languageChoice() && <Languages />}
         </div>
-      )}
-      {/* Hidden, not gone, while the business is made: the bot check in it keeps its box for a start that fails. */}
-      <div className={`card card-pad ${authStyles.card} ${authStyles.wide}`} style={{ padding: 28, gap: 18 }} hidden={Boolean(busy)}>
-        <span className={styles.tag}>{t("Live demo")}</span>
-        <div style={{ display: "grid", gap: 6 }}>
-          <h1 className={authStyles.title}>{ended ? t("That demo has ended") : t("Try Crewtavo")}</h1>
-          <p style={{ margin: 0 }}>
-            {ended ? `${t("Demos are deleted after a day.")} ` : ""}
-            {t("What kind of work do you do? You'll get your own sample business in that trade, with clients, quotes, a week of jobs and invoices, to change however you like.")}
-          </p>
-        </div>
+      </header>
 
-        <div className={styles.trades} role="group" aria-label={t("Your trade")}>
-          {DEMO_TRADES.map((d) => (
-            <button key={d.preset} type="button" className={styles.trade} data-waiting={waiting === d.preset || undefined} onClick={() => void start(d.preset)}>
-              <span className={styles.tradeIcon}><Icon name={TRADE_ICONS[d.preset] ?? "wrench"} size={24} /></span>
-              <strong>{t(d.label)}</strong>
-              <span>{t(d.blurb)}</span>
-            </button>
-          ))}
-          <button type="button" className={styles.trade} aria-expanded={more} aria-controls="demo-more" data-open={more || undefined} onClick={() => setMore((m) => !m)}>
-            <span className={styles.tradeIcon}><Icon name="apps" size={24} /></span>
-            <strong>{t("Something else")}</strong>
-            <span>{t("Cleaning, HVAC, plumbing, pest control, pools and more.")}</span>
-          </button>
-        </div>
-
-        {more && (
-          <fieldset id="demo-more" className={authStyles.presets}>
-            <legend>{t("Pick your trade")}</legend>
-            <div className={authStyles.presetSearch}>
-              <div className="input-group">
-                <span className="addon"><Icon name="search" size={16} /></span>
-                <input className="input" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("Search trades, like plumbing or pool")} aria-label={t("Search trades")} maxLength={80} autoFocus />
-              </div>
+      <main className={styles.stage} aria-label={t("Try Crewtavo")}>
+        <section className={styles.ask}>
+          {busy ? (
+            <div role="status" aria-live="polite">
+              <h1 className={`${styles.question} ${styles.setting}`}>{t("Setting up your {trade} business", { trade: label(busy) })}</h1>
+              <p className={styles.sub}>{t("Clients, quotes, this week's jobs and invoices, ready to click around in. It takes a few seconds.")}</p>
+              <div className={styles.progress} aria-hidden="true"><i /></div>
+              <ul className={styles.roles}>
+                <li><Icon name="home" size={22} /><span><T text="You start as <b>{name}</b>, the owner." b={bold} name={owner} /></span></li>
+                <li><Icon name="smartphone" size={22} /><span><T text="<b>Crew's phone</b> shows the day as {lead}, the crew lead." b={bold} lead={DEMO_CREW_LEAD} /></span></li>
+                <li><Icon name="user" size={22} /><span><T text="<b>Client's view</b> opens {client}'s portal, with a quote to approve." b={bold} client={DEMO_CLIENT} /></span></li>
+              </ul>
             </div>
-            {presets.isPending && [0, 1, 2, 3].map((i) => <div key={i} className={authStyles.preset}><Skeleton width="60%" height={14} /><Skeleton width="90%" height={10} /></div>)}
-            {shown.map((p) => (
-              <button key={p.id} type="button" className={`${authStyles.preset} ${styles.other}`} data-waiting={waiting === p.id || undefined} onClick={() => void start(p.id)}>
-                <strong>{t(p.name)}</strong>
-                <span className={authStyles.presetText}>{t(p.description)}</span>
-              </button>
+          ) : (
+            <>
+              <h1 id="demo-question" className={styles.question}>{t("What kind of work do you do?")}</h1>
+              <p className={styles.sub}>
+                {ended
+                  ? t("That demo has ended: demos are deleted after a day. Pick a trade and you'll get a fresh sample business to change however you like.")
+                  : t("You'll get your own sample business in that trade, with clients, quotes, a week of jobs and invoices, to change however you like.")}
+              </p>
+
+              <div className={styles.answers} role="group" aria-labelledby="demo-question">
+                {DEMO_TRADES.map((d) => (
+                  <button
+                    key={d.preset}
+                    type="button"
+                    className={styles.answer}
+                    data-pointed={pointed === d.preset || undefined}
+                    data-waiting={waiting === d.preset || undefined}
+                    onPointerEnter={() => point(d.preset)}
+                    onFocus={() => point(d.preset)}
+                    onClick={() => void start(d.preset)}
+                  >
+                    <img className={styles.thumb} src={PHOTOS[d.preset]!.thumb} alt="" />
+                    <span className={styles.words}>
+                      <span className={styles.name}>{t(d.label)}</span>
+                      <span className={styles.blurb}>{t(d.blurb)}</span>
+                    </span>
+                    <span className={styles.arrow}><Icon name="arrowRight" size={28} /></span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={styles.answer}
+                  aria-expanded={more}
+                  aria-controls={more ? "demo-more" : undefined}
+                  data-pointed={isOther(pointed) || undefined}
+                  data-waiting={(waiting !== null && isOther(waiting)) || undefined}
+                  onPointerEnter={() => point(OTHER)}
+                  onFocus={() => point(OTHER)}
+                  onClick={() => setMore((m) => !m)}
+                >
+                  <span className={`${styles.thumb} ${styles.pair}`}><img src={PHOTOS.cleaning!.thumb} alt="" /><img src={PHOTOS.hvac!.thumb} alt="" /></span>
+                  <span className={styles.words}>
+                    <span className={styles.name}>{t("Something else", { context: "Your trade" })}</span>
+                    <span className={styles.blurb}>{t("Cleaning, HVAC, plumbing, pest control, pools and more.")}</span>
+                  </span>
+                  <span className={`${styles.arrow} ${styles.plus}`}><Icon name="plus" size={28} /></span>
+                </button>
+              </div>
+
+              {more && (
+                <fieldset id="demo-more" className={styles.more}>
+                  <legend className="sr-only">{t("Pick your trade")}</legend>
+                  <label className={styles.search}>
+                    <Icon name="search" size={22} />
+                    <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("Search trades, like plumbing or pool")} aria-label={t("Search trades")} maxLength={80} ref={searchRef} />
+                  </label>
+                  <div className={styles.others}>
+                    {presets.isPending && [0, 1, 2, 3].map((i) => <div key={i} className={styles.otherTrade}><Skeleton width="60%" height={18} /><Skeleton width="90%" height={12} /></div>)}
+                    {shown.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={styles.otherTrade}
+                        data-pointed={pointed === p.id || undefined}
+                        data-waiting={waiting === p.id || undefined}
+                        onPointerEnter={() => point(p.id)}
+                        onFocus={() => point(p.id)}
+                        onClick={() => void start(p.id)}
+                      >
+                        <strong>{t(p.name)}</strong>
+                        <span>{t(p.description)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {presets.data && !shown.length && <p className={styles.none}>{t("No trade matches. General / Other works for any business.")}</p>}
+                </fieldset>
+              )}
+            </>
+          )}
+
+          {/* Kept, not unmounted, while the business is made: the bot check keeps its box for a start that fails. */}
+          <div className={styles.gate} hidden={Boolean(busy)}>
+            {turnstile.required && <div ref={turnstile.ref} className={styles.check} />}
+            <div className={styles.gateSide}>
+              {waiting && (
+                <p role="status" className={styles.waitingNote}>
+                  <Icon name="shieldCheck" size={18} />
+                  <span>{t("One more step: tick the box to show you're not a robot, and your {trade} demo starts.", { trade: label(waiting) })}</span>
+                </p>
+              )}
+              {error && <p ref={errorRef} tabIndex={-1} role="alert" className={styles.error}><Icon name="alert" size={18} /><span>{error}</span></p>}
+              <p className={styles.terms}>
+                <T
+                  text="By starting a demo you agree to the <terms>Crewtavo Terms</terms>. Ready for your own? <get>Get Crewtavo free</get>"
+                  terms={(s) => <a href={TERMS} target="_blank" rel="noreferrer">{s}</a>}
+                  get={(s) => <a className={styles.get} href={GET_CREWTAVO}>{s}</a>}
+                />
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <aside className={styles.preview} aria-labelledby="demo-business">
+          <div className={styles.photos}>
+            {Object.entries(PHOTOS).map(([id, p]) => (
+              <img key={id} src={p.src} alt="" loading="lazy" style={{ objectPosition: p.position }} data-shown={picture === id || undefined} />
             ))}
-            {presets.data && !shown.length && <p className="muted small" style={{ gridColumn: "1 / -1", margin: 0 }}>{t("No trade matches. General / Other works for any business.")}</p>}
-          </fieldset>
-        )}
+            <span className={styles.pairPhoto} data-shown={picture === "pair" || undefined}>
+              <img src={PHOTOS.cleaning!.src} alt="" loading="lazy" style={{ objectPosition: "45% 50%" }} />
+              <img src={PHOTOS.hvac!.src} alt="" loading="lazy" style={{ objectPosition: PHOTOS.hvac!.position }} />
+            </span>
+            <span className={styles.plate} data-shown={picture === "plate" || undefined}>{preset ? t(preset.name) : ""}</span>
+            {credit && <span className={styles.credit}>{t("Photo: {credit}", { credit })}</span>}
+          </div>
+          <div className={styles.about} key={shownId}>
+            <h2 id="demo-business" className={styles.business}>{business}</h2>
+            <p className={styles.owner}>{t("Rocky Mount, Virginia · You're {name}, the owner", { name: owner })}</p>
+            <ul className={styles.inside}>
+              {inside.map(([stage, text]) => <li key={text} data-stage={stage || undefined}>{t(text, people)}</li>)}
+            </ul>
+            <p className={styles.legend} aria-hidden="true">
+              {STAGES.map(([stage, name]) => <span key={stage} data-stage={stage}>{t(name)}</span>)}
+            </p>
+          </div>
+        </aside>
+      </main>
 
-        {/* The bot check, right by the choices: a trade picked first starts as soon as it's done. */}
-        {turnstile.required && <div ref={turnstile.ref} className={styles.check} />}
-        {waiting && <p role="status" className={styles.waiting}>{t("One more step: tick the box above to show you're not a robot, and your {trade} demo starts.", { trade: label(waiting) })}</p>}
-        {error && <p role="alert" className="field-error" style={{ margin: 0 }}>{error}</p>}
-
-        {getLocale() !== "en" && (
-          <p className={`muted small ${styles.language}`}>
-            {t("In Spanish, your crew's screens are in Spanish: My day, the schedule, timesheets, chat and guides. Office screens are still in English.")}
-          </p>
-        )}
-        <ul className={styles.points}>
+      <footer className={styles.band}>
+        <ul className={styles.promises}>
           <li><Icon name="check" size={16} />{t("No sign-up. It's yours alone, and deleted after {hours} hours.", { hours: DEMO_HOURS })}</li>
           <li><Icon name="check" size={16} />{t("See it as the owner, as a crew on their phone, and as a client.")}</li>
           <li><Icon name="check" size={16} />{t("Nothing is really emailed or texted, so send away.")}</li>
         </ul>
-        <p className="muted small" style={{ margin: 0 }}>
-          <T
-            text="By starting a demo you agree to the <terms>Crewtavo Terms</terms>. Ready for your own? <get>Get Crewtavo free</get>"
-            terms={(s) => <a href={TERMS} target="_blank" rel="noreferrer">{s}</a>}
-            get={(s) => <a href={GET_CREWTAVO}>{s}</a>}
-          />
-        </p>
-      </div>
-    </AuthLayout>
+        {languageChoice() && getLocale() !== "en" && <p className={styles.bandNote}><Icon name="globe" size={16} />{t("Your crew's screens are in Spanish; the office's are still in English.")}</p>}
+      </footer>
+    </div>
   );
 }
 

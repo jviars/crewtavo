@@ -19,7 +19,7 @@ export async function publicFetch<T>(path: string, body?: unknown): Promise<T> {
 declare global {
   interface Window {
     turnstile?: {
-      render: (el: HTMLElement, opts: { sitekey: string; callback: (token: string) => void; "expired-callback"?: () => void; language?: string }) => string | undefined;
+      render: (el: HTMLElement, opts: { sitekey: string; callback: (token: string) => void; "expired-callback"?: () => void; language?: string; theme?: "light" | "dark" | "auto" }) => string | undefined;
       reset: (widget?: string) => void;
     };
   }
@@ -27,9 +27,10 @@ declare global {
 
 /**
  * Cloudflare Turnstile, only when the deployment configures it. Returns the widget ref and the token.
- * `language` is the box's own ("es"); left out, Cloudflare goes by the browser's.
+ * `language` is the box's own ("es"); left out, Cloudflare goes by the browser's. `theme` is for a
+ * page that's always light or dark (the demo's start screen is dark); left out, it follows the browser.
  */
-export function useTurnstile(ready: boolean, language?: string) {
+export function useTurnstile(ready: boolean, language?: string, theme?: "light" | "dark") {
   const config = useQuery({ queryKey: ["config"], queryFn: loadConfig, staleTime: Infinity });
   const siteKey = config.data?.turnstileSiteKey;
   const ref = useRef<HTMLDivElement>(null);
@@ -38,7 +39,7 @@ export function useTurnstile(ready: boolean, language?: string) {
   useEffect(() => {
     if (!siteKey || !ready || !ref.current) return;
     const render = () => {
-      widget.current = window.turnstile?.render(ref.current!, { sitekey: siteKey, callback: setToken, "expired-callback": () => setToken(""), ...(language ? { language } : {}) });
+      widget.current = window.turnstile?.render(ref.current!, { sitekey: siteKey, callback: setToken, "expired-callback": () => setToken(""), ...(language ? { language } : {}), ...(theme ? { theme } : {}) });
     };
     if (window.turnstile) return render();
     const script = document.createElement("script");

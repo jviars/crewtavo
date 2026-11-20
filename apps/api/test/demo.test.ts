@@ -3,7 +3,7 @@
  * leaves the server, its limits at the gateway, and that each trade's sample business only names
  * what its trade's price list has (the database itself is checked by the demo instance; docs/demo.md).
  */
-import { DEMO_TRADES, demoTradeFromLink, getPreset, presetSummaries } from "@crewtavo/core";
+import { DEMO_OTHER_OWNER, DEMO_TRADES, demoOtherBusiness, demoTradeFromLink, getPreset, presetSummaries } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
@@ -258,8 +258,18 @@ describe("the gateway in the demo", () => {
 });
 
 describe("the sample businesses", () => {
-  it("has one written for each trade the start screen asks about", () => {
-    for (const trade of DEMO_TRADES) expect(FEATURED_STORIES[trade.preset]?.preset).toBe(trade.preset);
+  it("has one written for each trade the start screen asks about, under the name and owner it shows", () => {
+    for (const trade of DEMO_TRADES) {
+      expect(FEATURED_STORIES[trade.preset]?.preset).toBe(trade.preset);
+      expect(FEATURED_STORIES[trade.preset]?.business).toBe(trade.business);
+      expect(FEATURED_STORIES[trade.preset]?.owner).toBe(trade.owner);
+    }
+  });
+
+  it("names another trade's business as the start screen does", () => {
+    expect(storyFor(getPreset("plumbing")).business).toBe(demoOtherBusiness({ id: "plumbing", name: "Plumbing" }));
+    expect(storyFor(getPreset("plumbing")).owner).toBe(DEMO_OTHER_OWNER);
+    expect(demoOtherBusiness({ id: "glazing", name: "Glass & Glazing" })).toBe("Hale Glass Co.");
   });
 
   it.each(Object.values(FEATURED_STORIES).map((s) => [s.preset, s] as const))("names only items on %s's price list", (preset, story) => {
