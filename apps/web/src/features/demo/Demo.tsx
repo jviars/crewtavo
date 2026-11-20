@@ -87,7 +87,8 @@ export function DemoStart({ ended = false }: { ended?: boolean }) {
   const [more, setMore] = useState(false);
   const [search, setSearch] = useState("");
   const presets = useQuery({ queryKey: ["presets"], queryFn: () => api.get<PresetSummary[]>("/presets"), staleTime: Infinity });
-  const turnstile = useTurnstile(true);
+  // The check's box in the start screen's language, whatever the browser's is.
+  const turnstile = useTurnstile(true, getLocale() === "en" ? undefined : getLocale());
   const started = useRef(false);
   /** A trade picked before the bot check was done: it starts once it is. */
   const [waiting, setWaiting] = useState<string | null>(null);
