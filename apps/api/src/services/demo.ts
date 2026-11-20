@@ -39,8 +39,12 @@ export interface DemoSession {
   refresh_token: string;
 }
 
-/** Make a visitor's sample business in `trade` (a trade preset's id) and sign them in as its owner. */
-export async function startDemo(env: Env, trade: string): Promise<DemoSession> {
+/**
+ * Make a visitor's sample business in `trade` (a trade preset's id) and sign them in as its owner.
+ * `locale`, the language the start screen was in, is every account's, so the crew's phone a visitor
+ * switches to speaks it too (a language is a person's own: profiles.locale).
+ */
+export async function startDemo(env: Env, trade: string, locale: "en" | "es" = "en"): Promise<DemoSession> {
   let preset: TradePreset;
   try {
     preset = getPreset(trade);
@@ -69,6 +73,10 @@ export async function startDemo(env: Env, trade: string): Promise<DemoSession> {
     const owner = await account(story.owner);
     const team: Record<string, string> = {};
     for (const p of story.team) team[p.key] = (await account(p.name)).id;
+    if (locale !== "en") {
+      const spoken = await admin.from("profiles").update({ locale }).in("user_id", made);
+      if (spoken.error) throw new Error(`Demo accounts' language: ${spoken.error.message}`);
+    }
     const session = await signIn(env, owner.email, owner.password);
     const db = userClient(env, session.access_token);
     const { data: company, error } = await db.rpc("create_company", { p_name: story.business, p_trade_preset: preset.id, p_timezone: DEMO_TIME_ZONE });

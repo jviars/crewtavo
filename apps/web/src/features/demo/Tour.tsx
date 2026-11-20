@@ -10,6 +10,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { supabase } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import styles from "./demo.module.css";
 
@@ -42,59 +43,59 @@ const schedule = async () => (window.matchMedia?.("(max-width: 760px)").matches 
 export function tourSteps(business: string): Step[] {
   return [
     {
-      title: `Welcome to ${business}`,
-      body: "This is your own sample business, with clients, this week's work, quotes and invoices. Take a one-minute tour, or click around on your own. Nothing you do here reaches anyone.",
+      title: t("Welcome to {business}", { business }),
+      body: t("This is your own sample business, with clients, this week's work, quotes and invoices. Take a one-minute tour, or click around on your own. Nothing you do here reaches anyone."),
     },
     {
       to: "/",
       target: link("/"),
-      title: "Your day at a glance",
-      body: "Home shows today's visits, and every request, quote, job and invoice in one row, with what needs you first.",
+      title: t("Your day at a glance"),
+      body: t("Home shows today's visits, and every request, quote, job and invoice in one row, with what needs you first."),
     },
     {
       to: "/requests",
       target: link("/requests"),
-      title: "Work coming in",
-      body: "Requests arrive from your website's booking form, a phone call or a client's portal, and turn into an estimate visit or a quote.",
+      title: t("Work coming in"),
+      body: t("Requests arrive from your website's booking form, a phone call or a client's portal, and turn into an estimate visit or a quote."),
     },
     {
       to: schedule,
       target: link("/schedule"),
-      title: "The week's work",
-      body: "Every visit by crew, with recurring work filled in by itself. Drag a visit to move it, and Map lays out the day's route.",
+      title: t("The week's work"),
+      body: t("Every visit by crew, with recurring work filled in by itself. Drag a visit to move it, and Map lays out the day's route."),
     },
     {
       to: quote("sent"),
       target: link("/quotes"),
-      title: "A quote waiting on Jordan",
-      body: "Jordan approves it from a link, picks any optional lines, and it becomes a job with its visits. Measure a yard, roof or lot on the aerial and a quote fills itself in.",
+      title: t("A quote waiting on Jordan"),
+      body: t("Jordan approves it from a link, picks any optional lines, and it becomes a job with its visits. Measure a yard, roof or lot on the aerial and a quote fills itself in."),
     },
     {
       to: "/invoices",
       target: link("/invoices"),
-      title: "Getting paid",
-      body: "Overdue invoices stand out, and Crewtavo can remind clients by itself. Payments come by card, bank or check.",
+      title: t("Getting paid"),
+      body: t("Overdue invoices stand out, and Crewtavo can remind clients by itself. Payments come by card, bank or check."),
     },
     {
       to: "/apps",
       target: link("/apps"),
-      title: "Apps for your trade",
-      body: "What your trade needs turns on here: snow removal, paving takeoffs, roofing, a website, team chat and more, along with payments, texting, accounting and calendars. In the demo, the ones that connect outside accounts are off.",
+      title: t("Apps for your trade"),
+      body: t("What your trade needs turns on here: snow removal, paving takeoffs, roofing, a website, team chat and more, along with payments, texting, accounting and calendars. In the demo, the ones that connect outside accounts are off."),
     },
     {
       target: '[data-tour="crew"]',
-      title: "Your crew's phone",
-      body: "Press Crew's phone to see today as Marcus, the crew lead: clock in, the day's stops with directions, checklists and photos. Owner's view brings you back here.",
+      title: t("Your crew's phone"),
+      body: t("Press Crew's phone to see today as Marcus, the crew lead: clock in, the day's stops with directions, checklists and photos. Owner's view brings you back here."),
     },
     {
       target: '[data-tour="client"]',
-      title: "What your clients see",
-      body: "Client's view opens a client's portal: a quote to approve, the next visit, invoices to pay by card or bank, and a button to ask for more work.",
+      title: t("What your clients see"),
+      body: t("Client's view opens a client's portal: a quote to approve, the next visit, invoices to pay by card or bank, and a button to ask for more work."),
     },
     {
       target: '[data-tour="get"]',
-      title: "That's the tour",
-      body: "Now change anything: add a client, send a quote, move a visit, take a payment. It's yours for 24 hours. When you're ready, Crewtavo is free for your own business.",
+      title: t("That's the tour"),
+      body: t("Now change anything: add a client, send a quote, move a visit, take a payment. It's yours for 24 hours. When you're ready, Crewtavo is free for your own business."),
     },
   ];
 }
@@ -202,8 +203,8 @@ export function DemoTour({ step, go }: { step: number | null; go: (step: number 
       {ringStyle && <div className={styles.ring} style={ringStyle} aria-hidden="true" />}
       <section className={styles.tour} role="dialog" aria-modal="false" aria-labelledby="demo-tour-title" aria-describedby="demo-tour-body">
         <div className={styles.tourHead}>
-          <span className={styles.tourCount}>{first ? "Guided tour" : `${step} of ${all.length - 1}`}</span>
-          <button type="button" className={styles.tourClose} onClick={() => go(null)} aria-label="End the tour" title="End the tour">
+          <span className={styles.tourCount}>{first ? t("Guided tour") : t("{step} of {steps}", { step, steps: all.length - 1 })}</span>
+          <button type="button" className={styles.tourClose} onClick={() => go(null)} aria-label={t("End the tour")} title={t("End the tour")}>
             <Icon name="x" size={16} />
           </button>
         </div>
@@ -212,18 +213,18 @@ export function DemoTour({ step, go }: { step: number | null; go: (step: number 
         <div className={styles.tourActions}>
           {first ? (
             <>
-              <Button size="sm" variant="ghost" onClick={() => go(null)}>I'll look around myself</Button>
-              <Button ref={primary} size="sm" variant="primary" icon="play" onClick={() => go(1)}>Show me around</Button>
+              <Button size="sm" variant="ghost" onClick={() => go(null)}>{t("I'll look around myself")}</Button>
+              <Button ref={primary} size="sm" variant="primary" icon="play" onClick={() => go(1)}>{t("Show me around")}</Button>
             </>
           ) : last ? (
             <>
-              <Button size="sm" variant="ghost" onClick={() => go(null)}>Keep exploring</Button>
-              <a className="btn btn-sm btn-primary" href={GET_CREWTAVO} onClick={() => go(null)}>Get Crewtavo free</a>
+              <Button size="sm" variant="ghost" onClick={() => go(null)}>{t("Keep exploring")}</Button>
+              <a className="btn btn-sm btn-primary" href={GET_CREWTAVO} onClick={() => go(null)}>{t("Get Crewtavo free")}</a>
             </>
           ) : (
             <>
-              <Button size="sm" variant="ghost" icon="arrowLeft" onClick={() => go(step - 1)}>Back</Button>
-              <Button ref={primary} size="sm" variant="primary" onClick={() => go(step + 1)}>Next<Icon name="arrowRight" size={14} /></Button>
+              <Button size="sm" variant="ghost" icon="arrowLeft" onClick={() => go(step - 1)}>{t("Back")}</Button>
+              <Button ref={primary} size="sm" variant="primary" onClick={() => go(step + 1)}>{t("Next")}<Icon name="arrowRight" size={14} /></Button>
             </>
           )}
         </div>

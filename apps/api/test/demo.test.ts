@@ -76,6 +76,11 @@ describe("starting a demo", () => {
     expect((await app.request("/api/demo/start", json({ trade: "paving", terms_version: "1900-01-01" }), demoEnv)).status).toBe(409);
   });
 
+  it("takes the start screen's language, only one Crewtavo speaks", async () => {
+    const { TERMS_VERSION } = await import("@crewtavo/core");
+    expect((await app.request("/api/demo/start", json({ trade: "paving", terms_version: TERMS_VERSION, locale: "fr" }), demoEnv)).status).toBe(400);
+  });
+
   it("is limited per address and overall, refusing when it can't count", async () => {
     limits.allowed = false;
     const { TERMS_VERSION } = await import("@crewtavo/core");

@@ -26,3 +26,26 @@ describe("the demo's tour", () => {
     expect(targets).toContain('[data-tour="client"]');
   });
 });
+
+describe("the demo in Spanish", () => {
+  it("knows every trade the start screen lists, by the server's own words", async () => {
+    const { presetSummaries } = await import("@crewtavo/core");
+    const { PRESET_TEXT } = await import("../src/features/demo/Demo");
+    expect([...PRESET_TEXT].sort()).toEqual(presetSummaries().flatMap((p) => [p.name, p.description]).sort());
+  });
+
+  it("speaks Spanish on its start screen, bar and tour", async () => {
+    const { installSpanish } = await import("@crewtavo/core/i18n/es");
+    const { setLocale, t } = await import("@crewtavo/core/i18n");
+    installSpanish();
+    setLocale("es");
+    try {
+      expect(t("Try Crewtavo")).toBe("Prueba Crewtavo");
+      expect(t("Lawn care")).toBe("Cuidado de césped");
+      expect(t("Setting up your {trade} business", { trade: t("Lawn care").toLowerCase() })).toBe("Preparando tu negocio de cuidado de césped");
+      expect(tourSteps("Greenway Lawn Care")[0]!.title).toBe("Bienvenido a Greenway Lawn Care");
+    } finally {
+      setLocale("en");
+    }
+  });
+});

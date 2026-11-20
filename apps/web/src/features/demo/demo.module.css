@@ -79,3 +79,10 @@
   /* Above the phone's tab bar. */
   .tour { left: 12px; right: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
+
+/* The bot check by the trade choices, and a trade picked before it was done */
+.check { display: flex; justify-content: center; min-height: 65px; }
+.check:empty { min-height: 0; }
+.waiting { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--green-tint); color: var(--green-dark); font-size: var(--fs-14); font-weight: 600; }
+.trade[data-waiting] { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); background: var(--green-tint); }
+.language { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--fill); }

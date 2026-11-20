@@ -1,3 +1,5 @@
+import { msg } from "./i18n";
+
 /**
  * The public demo (CREWTAVO_DEMO=1, docs/demo.md): what the start screen offers and the server
  * makes. Every visitor answers what trade they're in and gets their own sample business in it,
@@ -13,9 +15,9 @@ export const DEMO_HOURS = 24;
  * a business made from their own price list.
  */
 export const DEMO_TRADES = [
-  { preset: "lawn_exterior", label: "Lawn care", blurb: "Weekly mowing routes, fertilizer programs, cleanups and snow removal." },
-  { preset: "roofing_exteriors", label: "Roofing", blurb: "Roofs measured on the aerial, insurance claims and crews on site." },
-  { preset: "paving", label: "Paving", blurb: "Takeoffs on the aerial, sealcoat and striping, GC work and retainage." },
+  { preset: "lawn_exterior", label: msg("Lawn care"), blurb: msg("Weekly mowing routes, fertilizer programs, cleanups and snow removal.") },
+  { preset: "roofing_exteriors", label: msg("Roofing"), blurb: msg("Roofs measured on the aerial, insurance claims and crews on site.") },
+  { preset: "paving", label: msg("Paving"), blurb: msg("Takeoffs on the aerial, sealcoat and striping, GC work and retainage.") },
 ] as const;
 
 export type DemoTrade = (typeof DEMO_TRADES)[number]["preset"];

@@ -1,10 +1,11 @@
 /**
  * The public demo (services/demo.ts), only when CREWTAVO_DEMO=1 (lib/demoMode.ts):
- *   POST /api/demo/start   { trade, terms_version, turnstile_token? }  a sample business in that trade, signed in as its owner
+ *   POST /api/demo/start   { trade, terms_version, turnstile_token?, locale? }  a sample business in that trade, signed in as its owner
  *   POST /api/demo/switch  { as: "owner" | "crew" }  be someone else in your business
  *   POST /api/demo/end     delete your business now ("Start over")
  */
 import { TERMS_VERSION } from "@crewtavo/core";
+import { LOCALES } from "@crewtavo/core/i18n";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -38,7 +39,13 @@ const LIMITS = [
 demo.post("/demo/start", async (c) => {
   const body = await readJson(
     c,
-    z.object({ trade: z.string().trim().min(1).max(60), terms_version: z.string().max(40).optional(), turnstile_token: z.string().max(4000).optional() }),
+    z.object({
+      trade: z.string().trim().min(1).max(60),
+      terms_version: z.string().max(40).optional(),
+      turnstile_token: z.string().max(4000).optional(),
+      // The language the start screen was in: every person in the business gets it.
+      locale: z.enum(LOCALES).optional(),
+    }),
   );
   if (!body.terms_version) throw new HttpError(400, "Agree to the Crewtavo Terms to start the demo.");
   if (body.terms_version !== TERMS_VERSION) throw new HttpError(409, "The Crewtavo Terms changed since this page opened. Reload the page and try again.");
@@ -48,7 +55,7 @@ demo.post("/demo/start", async (c) => {
     if (!(await allowStrict(c.env, limit.key(ip), limit.max, limit.seconds))) throw new HttpError(429, limit.message);
   }
   try {
-    return c.json(await startDemo(c.env, body.trade), 201);
+    return c.json(await startDemo(c.env, body.trade, body.locale), 201);
   } catch (error) {
     if (error instanceof HttpError) throw error;
     console.error("Demo start failed", error);

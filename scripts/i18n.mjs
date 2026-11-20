@@ -31,6 +31,8 @@ export const COVERED = [
   "apps/web/src/features/auth/LoginPage.tsx",
   "apps/web/src/features/auth/textCode.ts",
   "apps/web/src/features/settings/Language.tsx",
+  // The public demo's own screens: its start screen (beside the sign-in page's Español), bar and tour.
+  "apps/web/src/features/demo",
   // Team chat, and reading guides.
   ...["ChatPage.tsx", "MessageItem.tsx", "Composer.tsx", "Members.tsx", "ui.tsx", "data.ts"].map((f) => `apps/web/src/features/chat/${f}`),
   ...["KnowledgeBasePage.tsx", "SopPage.tsx", "GuideContents.tsx", "QuizDialog.tsx", "GuideFeedback.tsx", "PictureViewer.tsx", "GuideCover.tsx", "kbData.ts", "finder.ts", "quiz.ts"].map((f) => `apps/web/src/features/kb/${f}`),
